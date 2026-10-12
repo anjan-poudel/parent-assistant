@@ -1,43 +1,42 @@
 # Implementation Tasks
 
+Task breakdown for the feature `call-dialer-primary-secondary` (call dialer primary/secondary channel selection). The tree continues the cumulative project convention: group files live at this level, named `TG-NN-<slug>.md`, each holding the group's unit table and one `## T-NNN:` section per unit.
+
 | Group | Title | Tasks | Total Effort | Status |
 |-------|-------|-------|-------------|--------|
-| [TG-24](TG-24-dialogue-frame-foundations/index.md) | Dialogue Frame Foundations | 5 tasks | ~6.5 days | PENDING |
-| [TG-25](TG-25-answer-classification-and-merge/index.md) | Answer Classification and Merge | 3 tasks | ~7.5 days | PENDING |
-| [TG-26](TG-26-router-interception-and-window-state/index.md) | Router Interception and Window State | 4 tasks | ~14.5 days | PENDING |
-| [TG-27](TG-27-observability-release-gate-and-security-evidence/index.md) | Observability, Release Gate and Security Evidence | 4 tasks | ~7.5 days | PENDING |
-| [TG-28](TG-28-acceptance-evidence-and-device-protocol/index.md) | Acceptance, Evidence and Device Protocol | 3 tasks | ~5 days | PENDING |
+| [TG-29](TG-29-chain-core-and-record-corrections.md) | Chain Core and Design-Record Corrections | 4 units (T-144..T-147) | ~5 days | PENDING |
+| [TG-30](TG-30-voice-confirmation-and-launch-fail-hop.md) | Voice Confirmation and Launch-Fail Hop | 3 units (T-148..T-150) | ~4 days | PENDING |
+| [TG-31](TG-31-tap-paths-dial-back-and-settings.md) | Tap Paths, Dial-Back and Settings | 4 units (T-151..T-154) | ~4 days | PENDING |
+| [TG-32](TG-32-localisation-gates-and-evidence.md) | Localisation, Log-Safety Gate and Release Evidence | 3 units (T-155..T-157) | ~1.5 days | PENDING |
 
-**Totals:** 5 groups, 19 tasks (0 subtasks), ~41 developer-days nominal.
-**Critical path:** T-130 → T-131 → T-133 → T-136 → T-139 → T-141 → T-142 (23 days).
-Full plan with the wave table and requirement map: [plan.md](../plan.md).
+Totals: 4 groups, 14 units, ~13.5 dev-days of effort; critical path ~10 dev-days.
+
+## Critical path
+T-144 → T-145 → T-146 → T-147 → T-148 → T-149 → T-150 → T-152 → T-153 → T-157 (about 10 dev-days). The coordinator file serializes T-147 through T-153 behind T-146; the final unit is the barrier.
 
 ## Wave order (file-disjoint)
+Computed with the installed runtime's wave planner against the declared dependencies plus file ownership (10 waves, max width 2, no cycles, group order TG-29 → TG-30 → TG-31 → TG-32):
 
-- W1: T-125, T-126, T-127, T-128, T-129, T-130, T-135, T-137
-- W2: T-131, T-132
-- W3: T-133, T-138
-- W4: T-134, T-136
-- W5: T-139, T-140, T-143
-- W6: T-141
-- W7: T-142
+1. W1: T-144, T-155
+2. W2: T-145
+3. W3: T-146, T-156
+4. W4: T-147, T-154
+5. W5: T-148
+6. W6: T-149
+7. W7: T-150
+8. W8: T-151, T-152
+9. W9: T-153
+10. W10: T-157 (final barrier; nothing runs after it)
+
+The coordinator file is the dominant serialization resource: units T-146, T-147, T-148, T-149, T-150, T-152 and T-153 each own it and can never share a wave. The resolution suite file serializes T-145, T-146, T-149, T-150 and T-151 by the same mechanism. Parallel slots exist in W1, W3, W4 and W8.
 
 ## ID numbering convention
-
-This tree accumulates across features: group folders and task files from earlier
-features remain on disk, and a new feature continues at the global maxima. Previously
-delivered groups visible in this directory: TG-01..TG-10 (T-001..T-030,
-live-camera-translation), TG-14..TG-17 (T-090..T-105, profile-interview) and
-TG-18..TG-23 (T-106..T-124, spotify-music-integration). This feature uses
-**TG-24..TG-28 and T-125..T-143**; the next feature continues at **TG-29 / T-144**.
-
-Dependencies point at lower task IDs only, so ascending ID order is a valid topological
-order for the `implement` workflow's wave sort.
+Groups TG-01 through TG-28 and units T-001 through T-143 belong to earlier features and remain in place (live-camera-translation T-001..T-030, profile-interview T-090..T-105, spotify-music-integration T-106..T-124, multi-turn-conversation T-125..T-143). This feature continues at TG-29 / T-144 (reserved by multi-turn-conversation's index). The next feature continues at TG-33 / T-158. Do not renumber or reuse ids: discovery spans the whole tree and duplicate ids hard-fail the unit planner.
 
 ## Requirement ID resolution
+Requirement files live at `specs/define-requirements/FR/` and `specs/define-requirements/NFR/`. From unit sections in this folder, relative links climb two levels to reach them (target example: `specs/define-requirements/FR/FR-CDP-007-chain-preferred-secondary-phone.md`). Unit ids are plain (T-NNN) in every Depends on value; markdown links are used only for requirement links.
 
-Requirement links in task files climb four directory levels to
-`define-requirements/FR/...` and `define-requirements/NFR/...`, which resolve to
-`specs/define-requirements/` in this worktree. All 20 FR-MTC and 12 NFR-MTC documents
-are linked from at least one task; the per-requirement map is in
-[plan.md](../plan.md).
+## Gates at a glance
+- Scoped suites are the honest per-unit gate (the full bundle carries a known pre-existing red baseline and is not the gate). Every scoped run through the build script also executes the source privacy guard.
+- The implement stage runs unit by unit in dependency waves with a paired challenger reviewer and a confidence threshold of 0.85, rework bound 5.
+- Security conditions M-1, M-2 and V-1..V-6 are applied in T-144 before any affected unit runs; SA-1..SA-9 evidence lands per the mapping in the plan summary.

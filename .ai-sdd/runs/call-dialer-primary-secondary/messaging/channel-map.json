@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "provider": "slack",
+  "workspace_id": "T0C78DE0QF2",
+  "session": "call-dialer-primary-secondary",
+  "channel": {
+    "id": "C0C88BWFGMT",
+    "name": "ai-sdd-call-dialer-primary-secondary"
+  },
+  "control_message_ts": null,
+  "created_at": "2026-10-11T15:50:32.358Z",
+  "last_verified_at": "2026-10-11T15:56:25.007Z"
+}

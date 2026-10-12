@@ -1,4 +1,4 @@
-# Requirements lock — Multi-Turn Conversation (v1)
+# Requirements lock — Call Dialer Primary/Secondary (feature)
 #
 # Contract: requirements_lock (ai-sdd task define-requirements).
 # Snapshot of the feature requirements set produced from
@@ -10,403 +10,233 @@
 # lock.
 #
 # Status: submitted for owner HIL approval (risk tier T1). Re-lock after any
-# sign-off change; the hashes below are the drift-detection baseline. The open
-# decisions OD-M1..M4 (owner) are carried unresolved by design — the
-# requirements bind bounded behaviour around each.
+# sign-off change; the hashes below are the drift-detection baseline.
 #
 # Note on scope: the FR/ and NFR/ folders also still contain the previously
-# shipped live-camera-translation files (FR-LCT-NNN-*, NFR-LCT-NNN-*),
-# profile-interview files (FR-PI-NNN-*, NFR-PI-NNN-*) and
-# spotify-music-integration files (FR-SP-NNN-*, NFR-SP-NNN-*); they are left
-# in place and are NOT part of this lock. This lock covers the
-# multi-turn-conversation set only (FR-MTC-* / NFR-MTC-*).
+# shipped live-camera-translation (FR-LCT-*), multi-turn-conversation
+# (FR-MTC-*), profile-interview (FR-PI-*) and spotify-music-integration
+# (FR-SP-*) files; they are left in place and are NOT part of this lock. This
+# lock covers the call-dialer-primary-secondary set only (FR-CDP-* /
+# NFR-CDP-*).
 
 version: "1"
 task: define-requirements
-feature: multi-turn-conversation
+feature: call-dialer-primary-secondary
 agent: ba
 contract: requirements_lock
-locked_at: "2026-10-10T01:37:40Z"
+locked_at: "2026-10-11T16:08:08Z"
 snapshot_of: "specs/define-requirements.md"
-snapshot_sha256: e4f1362101cb7861dc96b1afb90f8954c46644c48186e5b7c5c72bf7a9f12eac
+snapshot_sha256: e0075c30b3eef9f193e0f8f0c3fc3434d564049a58e770c79fd533d5276916b7
 index: "specs/define-requirements/index.md"
 counts:
-  functional_requirements: 20
-  non_functional_requirements: 12
+  functional_requirements: 19
+  non_functional_requirements: 10
 
 requirements:
-  - id: FR-MTC-001
-    title: "Dialogue frame lifecycle and one-deep state"
+  - id: FR-CDP
+    title: "Primary dialer setting — four channels, persisted"
     kind: FR
-    area: "Dialogue Frame / Core"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-001-dialogue-frame-lifecycle.md
-    sha256: 2852c3262c1d11d120a9f70f4ce54998e8d0bba4acfd56d410c601511fc78442
-    acceptance_scenarios: 3
-  - id: FR-MTC-002
-    title: "Degenerate music-query detection before playback"
+    file: specs/define-requirements/FR/FR-CDP-001-primary-dialer-setting.md
+    sha256: 1198e2b4a116f365b7e595fbeada49d5d6471f3715214d2f8074816d26996261
+  - id: FR-CDP
+    title: "Fallback dialer setting — four channels, equal picks legal"
     kind: FR
-    area: "Music Path / Probe Trigger"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-002-degenerate-music-query-detection.md
-    sha256: af3c371bce617f22022cdb2328b7ab4cf3aad2f6d82251d6649c074424090d46
-    acceptance_scenarios: 3
-  - id: FR-MTC-003
-    title: "`.slotFill` probe — a short kind-of-request question with options and a default"
+    file: specs/define-requirements/FR/FR-CDP-002-fallback-dialer-setting.md
+    sha256: c572c642eb3bb8de6dfe7dcb4ee790082a8b7fe8b06b7f168109ac6a0758c7f6
+  - id: FR-CDP
+    title: "`secondaryCallApp` persistence seam with GSM default"
     kind: FR
-    area: "Probes / Slot-Fill"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-003-slot-fill-probe.md
-    sha256: f26da507a56486d339eb2c84ee0277644b0d0edfb31b81a8331a490418e0599e
-    acceptance_scenarios: 3
-  - id: FR-MTC-004
-    title: "`.candidateChoice` (didYouMean) probe — honest not-understood line plus narrowing candidates"
+    file: specs/define-requirements/FR/FR-CDP-003-secondary-call-app-persistence.md
+    sha256: 40dd8a78ef48a781a7cb1ef7d267b191497ce6d03055a1fa56cfac50198f9323
+  - id: FR-CDP
+    title: "Messenger feasibility — handle on file only"
     kind: FR
-    area: "Probes / Did-You-Mean"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-004-candidate-choice-did-you-mean-probe.md
-    sha256: 41a5c5889ca24baf04e5cb36a1ae04caf4e53832d724741e78853061bb3c9a68
-    acceptance_scenarios: 3
-  - id: FR-MTC-005
-    title: "Voice answer capture — name, index word, repetition, free-form"
+    file: specs/define-requirements/FR/FR-CDP-004-messenger-feasibility-handle-on-file.md
+    sha256: 1ce56de620b2c089f97b63207cb531d3a2f671939749f86a4ba32a927427de3e
+  - id: FR-CDP
+    title: "WhatsApp feasibility — local installed-app probe via injected closure"
     kind: FR
-    area: "Answer Capture"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-005-voice-answer-capture.md
-    sha256: 18306b51b3c9a0d39b0cd8cf10d26e625ed76189eacee10073f1b6070c95f929
-    acceptance_scenarios: 4
-  - id: FR-MTC-006
-    title: "Deterministic frame merge and execution"
+    file: specs/define-requirements/FR/FR-CDP-005-whatsapp-feasibility-installed-probe.md
+    sha256: 82cb045334f82dac07a189055dc28044ee0047d942cd7942bd85187ce6a17939
+  - id: FR-CDP
+    title: "FaceTime and phone are always feasible — phone is the GSM hard floor"
     kind: FR
-    area: "Answer Merge / Execution"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-006-deterministic-frame-merge-and-execution.md
-    sha256: b69347dd31d8d2148dd9721e784ce5f7c101aab7cffd7a434af9738627b4ba3f
-    acceptance_scenarios: 4
-  - id: FR-MTC-007
-    title: "Probe budget — bounded probes, then execute with defaults"
+    file: specs/define-requirements/FR/FR-CDP-006-facetime-and-phone-always-feasible.md
+    sha256: c5504744d37e5d966da344ddc52aefdc48ff433655bdeb4678ef44acb2b6af46
+  - id: FR-CDP
+    title: "Chain resolver — preferred → secondary → phone, dedupe, at-most-once, never dead-ends"
     kind: FR
-    area: "Probe Policy"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-007-probe-budget-two-then-defaults.md
-    sha256: bcf3094a8748c7d1cf8a5237d8fa691e1a645ce2c8dc9afad4d37ab0b6c02e9f
-    acceptance_scenarios: 3
-  - id: FR-MTC-008
-    title: "\"No — let me say it again\" escape re-arms a fresh capture"
+    file: specs/define-requirements/FR/FR-CDP-007-chain-preferred-secondary-phone.md
+    sha256: 570b2ffea72c0e639945be8f63b65136570689af3c55f69b2a0b72946af7da8b
+  - id: FR-CDP
+    title: "`fellBackFrom` carries skipped channels in attempt order"
     kind: FR
-    area: "Answer Capture / Escape"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-008-say-it-again-escape.md
-    sha256: d363577a19be93beaea79ed5bad77e6198c2aa1b1eeac19eb6d634f34ae9e895
-    acceptance_scenarios: 3
-  - id: FR-MTC-009
-    title: "Pre-ladder answer interception"
+    file: specs/define-requirements/FR/FR-CDP-008-fellbackfrom-attempt-order.md
+    sha256: 322d2fde5e501fa0669d170fe50c4a4f4914fe52100e2f469beeba164269fbdb
+  - id: FR-CDP
+    title: "Preferred input — an explicit per-contact/family pick wins as the chain's preferred"
     kind: FR
-    area: "Interception / Routing"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-009-pre-ladder-answer-interception.md
-    sha256: cfca9ad3500a8a2d555f780623e58c48c787bc35cbd147820cf457e64d040df1
-    acceptance_scenarios: 3
-  - id: FR-MTC-010
-    title: "Cancel words drop the frame with an honest line"
+    file: specs/define-requirements/FR/FR-CDP-009-explicit-pick-wins-as-preferred.md
+    sha256: 71f84e4693db7811ec2cfaf78dd2eb45343355b7798f91c826e6a2594619e277
+  - id: FR-CDP
+    title: "Address-book and family-contact call buttons route the chain"
     kind: FR
-    area: "Interception / Cancel"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-010-cancel-drops-the-frame.md
-    sha256: 6423753f27a379117d9019ff8a976de02f8ee6f28a122b6f69670be1cfd583ae
-    acceptance_scenarios: 3
-  - id: FR-MTC-011
-    title: "Emergency precedence is absolute mid-frame"
+    file: specs/define-requirements/FR/FR-CDP-010-tap-buttons-route-the-chain.md
+    sha256: a75fb80db980d042829d185a1cef635dbac78e7d37d5b1e7de070fb446c335f1
+  - id: FR-CDP
+    title: "Missed-call dial-back routes the chain"
     kind: FR
-    area: "Safety / Emergency"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-011-emergency-precedence-mid-frame.md
-    sha256: 37028bc7edc5e707897f326e058770929f077f5502d67ec6cc4d65040840fe3b
-    acceptance_scenarios: 3
-  - id: FR-MTC-012
-    title: "Barge-in — a strong new command drops the frame"
+    file: specs/define-requirements/FR/FR-CDP-011-missed-call-dial-back-routes-the-chain.md
+    sha256: 2eeb9eff3b96fba505a2c258b6513680c5fca47638f83a4e4bb90058b2dbd5de
+  - id: FR-CDP
+    title: "Voice path — MethodResolver global default becomes the settings primary, mapped by call type"
     kind: FR
-    area: "Interception / Barge-in"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-012-barge-in-strong-new-command.md
-    sha256: 9186d6d72fc10205d4d13353356b16c940f91ae66dadd01700a274c3e52b09cb
-    acceptance_scenarios: 3
-  - id: FR-MTC-013
-    title: "45 s timeout — silent drop and re-arm"
+    file: specs/define-requirements/FR/FR-CDP-012-voice-global-default-settings-primary.md
+    sha256: 206c9398ce0586e0a3c015e8acf1dc6a33b23c6d56f0dbb4c69a8a52a4d92e42
+  - id: FR-CDP
+    title: "Fallback resolves before the spoken confirmation; the prompt names the routed channel"
     kind: FR
-    area: "Timeout / Recovery"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-013-timeout-silent-rearm.md
-    sha256: b938efd91fefe25498499aae53b7878ff0317f582bb2db4a22065e3f8df83464
-    acceptance_scenarios: 3
-  - id: FR-MTC-014
-    title: "`awaitingSlotAnswer` session state with the 45 s timer reuse"
+    file: specs/define-requirements/FR/FR-CDP-013-fallback-before-spoken-confirmation.md
+    sha256: fe2fdcc83545c7dfb01a73f437906001393be6ab28dd5538fa0caf219b0cc036
+  - id: FR-CDP
+    title: "Override protocol and near-miss disclosure preserved unchanged"
     kind: FR
-    area: "Session State"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-014-awaiting-slot-answer-state.md
-    sha256: 065b23a94c19a020a47870681e446baadfe89f86a29b3ea0c3249502138714cb
-    acceptance_scenarios: 3
-  - id: FR-MTC-015
-    title: "Curated on-device option catalog"
+    file: specs/define-requirements/FR/FR-CDP-014-override-protocol-preserved.md
+    sha256: b3b7bcb12ae4f127fc77a891b0570d98cb8243589ab5dea15f3c77bbbd3b5cfb
+  - id: FR-CDP
+    title: "Launch-fail fallback (best-effort), announced via the existing spoken-outcome lane"
     kind: FR
-    area: "Option Catalog"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-015-curated-on-device-catalog.md
-    sha256: c088e8fbe225178a2e91488642654a6bcea1af01d2644bdf867eb89d6e77f412
-    acceptance_scenarios: 3
-  - id: FR-MTC-016
-    title: "Template-generated probes, localized ne/en — never model-generated"
+    file: specs/define-requirements/FR/FR-CDP-015-launch-fail-fallback-announced.md
+    sha256: c4dcabca3bd4d8c6241a4da2a64abfde539c9cbccdf430e63644d089c33fdbc5
+  - id: FR-CDP
+    title: "Automatic routing with a spoken announcement — no ask-before-fallback"
     kind: FR
-    area: "Probe Generation / Localisation"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-016-template-generated-probes.md
-    sha256: e48818e2f24fd6b93c227c7c8e3b8d2ff1ebc59285b98b8b25af163ef9255237
-    acceptance_scenarios: 3
-  - id: FR-MTC-017
-    title: "Transcript-cache bypass during answer capture"
+    file: specs/define-requirements/FR/FR-CDP-016-automatic-routing-with-announcement.md
+    sha256: fb93ad5bb5aed56e12a5eec79a082c9a2f03c983f72a176ce121df942f9a4624
+  - id: FR-CDP
+    title: "Localisation — new ne/en strings; spoken language matches the session"
     kind: FR
-    area: "Cache Discipline"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-017-transcript-cache-bypass.md
-    sha256: 725a082b02795f8b8d626eb19a7284a8d415bb3b4294f33e4c3bf15ade0633f4
-    acceptance_scenarios: 3
-  - id: FR-MTC-018
-    title: "Phase 2 — follow-up NLU fine-tune v17 with the frame clause"
+    file: specs/define-requirements/FR/FR-CDP-017-localisation-new-strings.md
+    sha256: 312af2cdde6f89c70de4b8be01d9bf4151258b93ff926f5b8069da12315bb9ef
+  - id: FR-CDP
+    title: "Preserved behaviours — no new dialogue flow, emergency semantics untouched, no silent failures"
     kind: FR
-    area: "NLU Training (Phase 2)"
-    priority: SHOULD
-    file: specs/define-requirements/FR/FR-MTC-018-follow-up-nlu-fine-tune-v17.md
-    sha256: c139cb866a17a598297ace8f00350ceed5618f53788728fc1387bfcba95e114f
-    acceptance_scenarios: 4
-  - id: FR-MTC-019
-    title: "Phase 3 — reminder/calendar missing-slot re-prompts on the frame path"
+    file: specs/define-requirements/FR/FR-CDP-018-preserved-behaviours.md
+    sha256: cbcd72d07e92243eb9d9c74f326dc0ab469b954a127a8847784de39cbed8f933
+  - id: FR-CDP
+    title: "DV-1..7 device validation recorded and passed (completion gate)"
     kind: FR
-    area: "Rollout (Phase 3)"
-    priority: SHOULD
-    file: specs/define-requirements/FR/FR-MTC-019-reminder-calendar-frame-rollover.md
-    sha256: d0b0042b08bad67beb66918fc3bf9f91b902d992641564812fa5ed52422646e9
-    acceptance_scenarios: 3
-  - id: FR-MTC-020
-    title: "DV-* device validation recorded and passed (completion gate)"
-    kind: FR
-    area: "Validation / Completion Gate"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MTC-020-device-validation-completion-gate.md
-    sha256: 71af203543735e28823f1f6dff3c2b8d3c855f0cc6d0c52cead4224424ec7c5e
-    acceptance_scenarios: 3
-  - id: NFR-MTC-001
-    title: "Probe and answer turns stay within the existing turn envelope"
+    file: specs/define-requirements/FR/FR-CDP-019-device-validation-completion-gate.md
+    sha256: f0d3f5d7a735508efb819af671fc9452f690afbcdb4b228725771ceaf3685629
+  - id: NFR-CDP
+    title: "The chain never dead-ends — zero dead ends across the exhaustive configuration matrix"
     kind: NFR
-    area: "Performance"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-MTC-001-probe-turn-latency.md
-    sha256: 2cb4432715f4a8ef2b4838e02f1d1ce0ab25266f449c844bfb7011f3b04175ea
-    acceptance_scenarios: 3
-  - id: NFR-MTC-002
-    title: "1024-token ceiling and the pinned prompt budget are preserved"
+    file: specs/define-requirements/NFR/NFR-CDP-001-chain-never-dead-ends.md
+    sha256: 1da51c386be46371832eba4639e8f556cacbb2c95b72314724daabcbe2b8c3a7
+  - id: NFR-CDP
+    title: "Feasibility probes are local — no new network, data, identity or privacy surface"
     kind: NFR
-    area: "Reliability / Maintainability"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-MTC-002-prompt-budget-and-token-ceiling.md
-    sha256: 20ed118f7c61a30f6c63c85d4954a2e005b3047afe7df750df663bd3812fdd7f
-    acceptance_scenarios: 3
-  - id: NFR-MTC-003
-    title: "No new network egress — probes and answers stay on-device"
+    file: specs/define-requirements/NFR/NFR-CDP-002-local-probes-no-new-egress.md
+    sha256: 78e2712712b7a35f4e07743cf95f6866aa5ff97eec33e3fb93cc1999c1e5b509
+  - id: NFR-CDP
+    title: "Log safety — numbers, handles and announcement content never reach logs beyond the existing policy"
     kind: NFR
-    area: "Privacy"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-MTC-003-no-new-network-egress.md
-    sha256: 5afee0d53cdcc6290848d13d6ba7df7f98ec9649ed85df68ab2daf4ea0738b62
-    acceptance_scenarios: 2
-  - id: NFR-MTC-004
-    title: "Log safety — probe and answer text never reach logs"
+    file: specs/define-requirements/NFR/NFR-CDP-003-log-safety.md
+    sha256: 0266a8bc67ae92b14285c440e5afb292e0cc02222e2fe1ce6d168ca5996368f4
+  - id: NFR-CDP
+    title: "Fallback-resolution latency budget — local probes at call time, user-paced"
     kind: NFR
-    area: "Privacy / Security"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-MTC-004-log-safety.md
-    sha256: fbba2f8adad0c39f8626c1e24fc375cde689472e5a09b71c87534b285840f35a
-    acceptance_scenarios: 3
-  - id: NFR-MTC-005
-    title: "The frame survives a degraded or absent brain — deterministic path"
+    file: specs/define-requirements/NFR/NFR-CDP-004-fallback-resolution-latency.md
+    sha256: 412dd5857053a684d73052649323f42f1e807f7471539b71beeaa6667d53e770
+  - id: NFR-CDP
+    title: "`secondaryCallApp` persistence round-trip reliability"
     kind: NFR
-    area: "Reliability"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-MTC-005-degraded-brain-deterministic-path.md
-    sha256: 9128ca1c21fcaac576a3b2629a6615021bb97132c32cf73e94c5648eeb6fc787
-    acceptance_scenarios: 3
-  - id: NFR-MTC-006
-    title: "Localisation of every dialogue string (ne/en)"
+    file: specs/define-requirements/NFR/NFR-CDP-005-persistence-round-trip.md
+    sha256: 1ee64d1870a50c822913282be5a83f21daa32d77cc92193f18203dc557e7c5e8
+  - id: NFR-CDP
+    title: "Accessibility of the Primary and Fallback dialer pickers"
     kind: NFR
-    area: "Localisation"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-MTC-006-localisation.md
-    sha256: 4f319790f141826427e3a6a234a1e75eebb316861c44afd775a13f4f1e175ef3
-    acceptance_scenarios: 3
-  - id: NFR-MTC-007
-    title: "Sustained multi-turn stability on 6 GB devices — no jetsam"
+    file: specs/define-requirements/NFR/NFR-CDP-006-picker-accessibility.md
+    sha256: 356f8d6e06273d3c4980dcbe931b690c75982f06c0adf2c63c7a1ca3b0bdb680
+  - id: NFR-CDP
+    title: "Localisation completeness — 100% ne/en parity for every new string"
     kind: NFR
-    area: "Reliability / Performance"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-MTC-007-sustained-multi-turn-stability.md
-    sha256: 24ce7e34b6af85a9320d735f87671d8aa9ef22329aa468dddb69be6fb1292505
-    acceptance_scenarios: 2
-  - id: NFR-MTC-008
-    title: "Answer-path sanitisation and injection safety"
+    file: specs/define-requirements/NFR/NFR-CDP-007-localisation-completeness.md
+    sha256: 04f24a8243bb48400f8e612d723b29f2809948c940146004f0963ea0d11471a8
+  - id: NFR-CDP
+    title: "Deterministic testability under the scoped-suite gate"
     kind: NFR
-    area: "Security"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-MTC-008-answer-sanitisation-and-injection-safety.md
-    sha256: 0ee121edd8a940744f276ddfb1a40e986b6bdbcf207db4d7ee608c3625abe9b3
-    acceptance_scenarios: 3
-  - id: NFR-MTC-009
-    title: "Voice-only accessibility of probes and answer capture"
+    file: specs/define-requirements/NFR/NFR-CDP-008-deterministic-testability.md
+    sha256: 36db74afca2501126aa0ab50130b1241d0ac08ead09e6be824eb5943865317f4
+  - id: NFR-CDP
+    title: "No regression to the shipped voice pipeline, emergency and dial-back paths"
     kind: NFR
-    area: "Accessibility"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-MTC-009-voice-only-accessibility.md
-    sha256: 38acf0055f058b3af8bb95878e7e2c8e1c3b5d97b68121a24449e75cc4e74493
-    acceptance_scenarios: 3
-  - id: NFR-MTC-010
-    title: "Frame-trap resistance — zero stuck states"
+    file: specs/define-requirements/NFR/NFR-CDP-009-no-regression-shipped-call-paths.md
+    sha256: d7c51e6242b367771b451884aa0fe9cf7d73bfe0c62f9f3f800c934eb8cce760
+  - id: NFR-CDP
+    title: "Compliance, review and release gates; DV-1..7 acceptance"
     kind: NFR
-    area: "Reliability / Safety"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-MTC-010-frame-trap-resistance.md
-    sha256: 42317bdfc148afe7bee1f4e09a951fc38b47dd75a488216bf113544390ee7126
-    acceptance_scenarios: 3
-  - id: NFR-MTC-011
-    title: "KV-prefix stability — the frame clause never mutates the template prefix"
-    kind: NFR
-    area: "Performance / Reliability"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-MTC-011-kv-prefix-stability.md
-    sha256: 30047addfb9931b81b1e594692b8843b3d2d0e3735f77605a1448fecf631e8fd
-    acceptance_scenarios: 3
-  - id: NFR-MTC-012
-    title: "Compliance, no-regression and release gates"
-    kind: NFR
-    area: "Compliance"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-MTC-012-compliance-and-release-gates.md
-    sha256: 601704b664cb8f50e0660e2af0315a230761ee29edc03a26a947fc9ff87b1d9f
-    acceptance_scenarios: 3
-
-assumptions:
-  - id: A1
-    statement: "The integration surfaces exist as named in the feature constitution; the cited anchors were spot-verified against the worktree source at requirements time (CommandRouter.route at 740, the confirmation hook at 785-886, the keyword-ladder music arm at 1223-1234, routeKeywordRemainder at 1968-2030, selectMusicOutcome/fireMusicRequest/runMusicTurn at 2614/2667/2684, the interpreted .music path at 3336-3355, KeywordIntentRule.musicQuery at 752-779, VoiceSessionStateMachine states/timer at 9-17/93-96/183-203, the 60 s voice watchdog, the IntentPromptTests 3,000-character pin, maxTokenCount: 1024). Remaining feasibility-study §10 line references not cited above are study-derived."
-  - id: A2
-    statement: "Exact user-facing copy (probe wording, default-play phrase, cancel/escape lines, honest lines) is OD-M1/OD-M2/design-dependent; the Nepali/English examples in this set are illustrative and localization-bound — the L10n keys must exist in both languages (NFR-MTC-006)."
-  - id: A3
-    statement: "The curated catalog's exact contents (e.g. the bhajan deity list) are data refined at design time; the requirement binds the catalog's existence, on-device sourcing, localisability and canonicalisation behaviour (FR-MTC-015)."
-  - id: A4
-    statement: "v16 and v17 are the study's and constitution's iteration labels for the existing slot-canonical fine-tune and the Phase 2 follow-up fine-tune; the actual artifacts land via the Phase 2 training iteration (FR-MTC-018) — nothing in Phase 1 depends on a training run."
-  - id: A5
-    statement: "The project's known pre-existing test failures (unrelated to this feature) remain the baseline for NFR-MTC-012; the feature's own suites and touched suites must pass, with baseline failures recorded rather than silently included or excluded."
-  - id: A6
-    statement: "The 45 s deadline is the existing confirmation timer value (VoiceSessionStateMachine.confirmationTimeoutSeconds = 45); reuse mechanics are design's to fix, the value is binding."
-  - id: A7
-    statement: "DialogueManager, DialogueFrame, awaitingSlotAnswer, probeKind and the curated catalog were confirmed absent from the worktree source at requirements time — they are genuinely new surfaces."
-
-constraints:
-  - id: C1
-    statement: "Emergency precedence is absolute: emergency keywords always win mid-dialogue; the override is checked before any frame merge; emergency dispatch and medication re-fire are frame-independent and behave exactly as today; a hostile or corrupted answer cannot bypass the emergency precedence rule."
-    source: "feature constitution Safety-Relevant Constraint 1 (verified: worktree emergency handling precedes the ladder)"
-  - id: C2
-    statement: "Frames must never trap the user: cancel words drop the frame with an honest line; a strong new-command barge-in drops the frame and executes the new command; ambiguous utterances are treated as answers; a 45 s timeout silently drops and re-arms. Zero stuck states; no persistence across sessions."
-    source: "feature constitution Safety-Relevant Constraint 2"
-  - id: C3
-    statement: "Privacy & log-safety stance unchanged: no new network egress; no new compliance regime; the on-device stance and existing encrypted stores are unchanged; free-text answers are sanitised through the existing input seam (InputSanitiser discipline) before any use; no raw transcripts may reach logs (B2/T-050 precedent) and ios/tools/check-release-log-safety.sh must keep passing."
-    source: "feature constitution Safety-Relevant Constraint 3"
-  - id: C4
-    statement: "Security-review focus — the answer-capture path: STRIDE must treat it as a focus area; no new injection surface into routing; no log-safety regressions; a hostile or corrupted answer cannot bypass the emergency precedence rule; existing sanitisation discipline applies before the answer enters any routing or prompt context."
-    source: "feature constitution Safety-Relevant Constraint 4"
-  - id: C5
-    statement: "1024-token ceiling: the brain context is a measured memory ceiling (2048 crashed 6 GB devices); dialogue state lives in the app, never as transcript history in prompts; any prompt clause must fit the ~300-token headroom inside the pinned IntentPromptTests budget."
-    source: "feature constitution Feature Constraint 1; feasibility study §5.1"
-  - id: C6
-    statement: "Template-generated probes only (localized ne/en). Never model-generated. The model never writes probe text."
-    source: "feature constitution Feature Constraint 2"
-  - id: C7
-    statement: "Probe budget: max 2 probes then execute with defaults; 3-4 spoken options with a default always offered (slotFill), 2-3 for candidateChoice; free-text answers always accepted."
-    source: "feature constitution Feature Constraint 3"
-  - id: C8
-    statement: "Deterministic merge works with the brain absent or degraded — Phase 1's core guarantee: the frame survives a degraded or skipped brain turn and executes via the deterministic merge; the PR #156 hardening stays intact (per-turn STT release, pressure-tiered brain pick); brain-assisted merge is Phase 2 only."
-    source: "feature constitution Feature Constraint 4"
-  - id: C9
-    statement: "The Phase 2 frame clause ships only together with the v17 training iteration; the clause stays inside the pinned prompt budget, is mirrored byte-identically in tools/train-intent/seeds/prompt_template.txt in the same change, and must not alter the .raw framing; no clause without training data."
-    source: "feature constitution Feature Constraint 5"
-  - id: C10
-    statement: "KV-prefix stability: the frame clause must not mutate the byte-stable template prefix (the vendored LLM prefix-reuse path depends on it)."
-    source: "feature constitution Feature Constraint 6; feasibility study §5.3"
-  - id: C11
-    statement: "Cache bypass: during awaitingSlotAnswer, the transcript cache (IntentCommandCache) is bypassed — answers are never cacheable inputs; only confirmed merged commands are recorded."
-    source: "feature constitution Feature Constraint 7"
-  - id: C12
-    statement: "Delivery gates: focused tests + typecheck per unit; full suite once at the end; device validation is the DV-* checklist on Anzaan (reference device)."
-    source: "feature constitution Feature Constraint 8"
-  - id: C13
-    statement: "Phase 0 prerequisite: PR #156 voice-OOM hardening is merged (437631e, 2026-10-10); its device smoke (conversation → no jetsam → pull JetsamEvent logs) is outstanding — that outstanding smoke is the Phase 0 prerequisite for this feature."
-    source: "feature constitution Feature Constraint 9"
-  - id: C14
-    statement: "iOS only. No platform scope beyond the existing iOS app."
-    source: "feature constitution Feature Constraint 10"
-
-open_decisions:
-  - id: OD-M1
-    statement: "Probe policy: 1 probe vs up-to-2 before executing with defaults, and the default-play wording ('जे पनि बजाऊ'). Study recommendation: 2 probes max, default offered on the first probe. The requirements bind a bounded probe budget, the always-present default and execution-with-defaults on exhaustion (FR-MTC-007, FR-MTC-003); the exact cap and default copy stay open."
-    resolves_at: "owner; recorded in design-l1"
-    owner: "owner"
-  - id: OD-M2
-    statement: "Probe option source: curated on-device catalog (recommended for MVP: zero latency, on-device stance) vs live Spotify playlist search (richer; needs a SpotifyTool extension + network per probe). The requirements bind the curated on-device catalog for Phase 1 (FR-MTC-015) and no new egress (NFR-MTC-003); a later live-search enrichment resolves here."
-    resolves_at: "owner + design-l1"
-    owner: "owner / architect"
-  - id: OD-M3
-    statement: "Sequencing: ship Phase 1 deterministic-only first vs run Phase 2 + v17 in parallel. Study recommendation: Phase 1 first (it covers the bhajan example), v17 data authoring in parallel. The requirements mark Phase 2 (FR-MTC-018) as SHOULD pending this resolution; Phase 1 is complete and shippable alone."
-    resolves_at: "owner"
-    owner: "owner"
-  - id: OD-M4
-    statement: "Scope: whether Phase 3's reminder/calendar answer-capture (fixing today's stateless re-prompts) rides the same release as the music probe. The requirements keep reminder/calendar unchanged in Phase 1 (FR-MTC-019 Phase 1 guard; NFR-MTC-012) and carry the Phase 3 target as SHOULD."
-    resolves_at: "owner"
-    owner: "owner"
-
-out_of_scope:
-  - "Open-ended conversation/chat (the fine-tunes have no conversational mode; probes are the only new dialogue; the stakeholder brief's FR-008 conversational-response clause is not delivered or superseded by this feature)"
-  - "Raw transcript history in prompts (the 1024-token ceiling is a measured memory limit; dialogue state lives in the app)"
-  - "Model-generated probe text (probes are template-generated, localized ne/en; the model's only multi-turn job is classifying the answer)"
-  - "Cloud / BYO-LLM anything (no new network egress; the on-device stance is unchanged)"
-  - "Persistent dialogue state across sessions (frames are in-memory only; a cold start has no frame)"
-  - "Reminder/calendar changes in Phase 1 (those turns are unchanged until Phase 3 and the OD-M4 resolution)"
-  - "Android (no platform scope beyond the existing iOS app)"
-  - "Emergency/medication behaviour changes of any kind (emergency precedence preserved absolutely)"
-  - "Any new compliance regime, permission, data store or egress host (existing disclosures and gates unchanged)"
+    file: specs/define-requirements/NFR/NFR-CDP-010-compliance-and-release-gates.md
+    sha256: e360a957eb0b207466d0ea4663a5780a4fa42ed2284531d373eda975acbe3006
 
 security_surfaces:
-  - surface: "Emergency precedence mid-dialogue: emergency keywords win mid-frame; a hostile or corrupted answer cannot bypass the override"
-    requirements: ["FR-MTC-011", "NFR-MTC-010"]
-  - surface: "Free-text answer injection: answers enter routing mid-frame; the interception must open no new injection surface into routing or prompt context"
-    requirements: ["NFR-MTC-008", "FR-MTC-009", "FR-MTC-017"]
-  - surface: "Frame-trap resistance: cancel, barge-in and the 45 s timeout must always recover; zero stuck states"
-    requirements: ["FR-MTC-010", "FR-MTC-012", "FR-MTC-013", "NFR-MTC-010"]
-  - surface: "Log sanitisation: probe texts and captured answers must not reach logs (B2/T-050 precedent); check-release-log-safety.sh coverage"
-    requirements: ["NFR-MTC-004", "NFR-MTC-012"]
-  - surface: "No new egress: probes and answers stay on-device (no cloud/BYO-LLM path)"
-    requirements: ["NFR-MTC-003"]
-  - surface: "Degraded-brain path: the deterministic merge must not weaken the emergency/safety gates"
-    requirements: ["NFR-MTC-005", "FR-MTC-011"]
+  - surface: "Chain dead-end: any (primary, secondary, feasibility) combination must resolve to
+      an attemptable channel — GSM is the hard floor; the exhaustive configuration matrix
+      (including equal picks) must show zero dead ends"
+    requirements: ["NFR-CDP-001", "FR-CDP-006", "FR-CDP-007"]
+  - surface: "Emergency precedence: emergency-contact semantics are untouched; missed-call
+      dial-back and voice-initiated calls must never delay or divert an emergency escalation"
+    requirements: ["FR-CDP-018", "FR-CDP-011", "FR-CDP-012"]
+  - surface: "Announcement honesty: the spoken confirmation and the launch-fail announcement
+      always name the actually-routed channel (fellBackFrom); no silent route changes"
+    requirements: ["FR-CDP-013", "FR-CDP-015", "FR-CDP-016"]
+  - surface: "Override protocol preserved: \"होइन, फोन नै गर\" still switches to a phone
+      call pre-confirmation — a fallback hop must not bypass or weaken it"
+    requirements: ["FR-CDP-014"]
+  - surface: "PII exposure: numbers/handles (address-book + Messenger handles) must not reach
+      logs beyond the existing transcript policy (B2/T-050); check-release-log-safety.sh must
+      cover the new fallback/announcement paths"
+    requirements: ["NFR-CDP-003", "NFR-CDP-010"]
+  - surface: "No new egress: feasibility probes are local-only (canOpenURL + address-book
+      handle check) — no new network, data, identity or privacy surface"
+    requirements: ["NFR-CDP-002"]
 
 traceability:
   - gate: "design-l1"
-    checks: "Resolve/design with OD-M1..M4 (the study's recommendations are inputs): DialogueFrame shape + probeKind enum; the interception seam in CommandRouter.route (generalize the confirmation hook ~785-886) and its ordering vs emergency keywords; awaitingSlotAnswer + 45 s timer reuse; degenerate-query detection in the music path (KeywordIntentRule.musicQuery); the curated catalog format (localizable ne/en); how the frame survives the degradation ladder (PR #156 pressure-tiered picks); the Phase 2 frame-clause budget within the pinned prompt and the v17 training-mirror requirement."
+    checks: "Resolve the frozen design into L1 architecture: pure-static chain resolver
+      placement + Feasibility/Result shapes (fellBackFrom attempt order); the
+      resolvedCallChannel / resolvedMissedCallChannel seam changes; MethodResolver's
+      global-default step made the settings primary (CallApp→CallMethod mapped by call type,
+      injected); secondaryCallApp persistence (default .phone); fallback resolved before the
+      spoken confirmation; launch-fail hop via the existing spoken-outcome lane; ne/en key
+      catalog. The assumptions recorded at requirements time (copy wording, tap-announcement
+      trigger point, launch-fail observation point, resolver placement) resolve here — none
+      re-opens the frozen design."
   - gate: "design-l2"
-    checks: "Component design against this set; interface contracts for DialogueManager/DialogueFrame, the interception seam, the catalog, the probe templates and the session state."
+    checks: "Component design against this set: interface contracts for the chain resolver
+      (pure-static, closure-injected feasibility), the AppCoordinator seams, the MethodResolver
+      injection, the settings sections/pickers, and announcement composition from fellBackFrom."
   - gate: "review-l2"
     checks: "review.decision == GO against the component design and this set."
   - gate: "security-design-review"
-    checks: "STRIDE with the answer-capture path as a named focus: emergency precedence mid-dialogue (FR-MTC-011, NFR-MTC-010); free-text answer injection (NFR-MTC-008, FR-MTC-009, FR-MTC-017); frame-trap resistance (FR-MTC-010/012/013); log sanitisation of probe/answer text (NFR-MTC-004); no new egress (NFR-MTC-003); degraded-brain deterministic path must not weaken safety gates (NFR-MTC-005, FR-MTC-011); SECURITY-GO required."
+    checks: "STRIDE with the named focus: the GSM hard floor can never be configured away (no
+      dead-end chain, including secondary == primary) (FR-CDP-006/007, NFR-CDP-001);
+      emergency-contact semantics and the override protocol unchanged — dial-back never delays
+      escalation (FR-CDP-014/018); feasibility probes local-only, handles/numbers are PII
+      (NFR-CDP-002/003); the spoken confirmation always names the actually-routed channel
+      (FR-CDP-013/015/016); SECURITY-GO required."
   - gate: "plan-tasks / implement"
-    checks: "Units trace back to FR-MTC-* / NFR-MTC-* ids; paired review and the 0.85 confidence threshold on implementation output; rework bound 5; unit-based dependency waves."
+    checks: "Units trace back to FR-CDP-* / NFR-CDP-* ids; paired review and the 0.85
+      confidence threshold on implementation output; rework bound 5; unit-based dependency
+      waves; no CallRouter service and no per-contact primary/secondary storage (FR-CDP-018)."
   - gate: "security-test"
-    checks: "Evidence: emergency precedence verified mid-frame (FR-MTC-011); probe/answer text never reaches logs and check-release-log-safety.sh covers the new paths (NFR-MTC-004, NFR-MTC-012); cancel/timeout/barge-in recovery (FR-MTC-010/012/013, NFR-MTC-010); degraded-brain fallback honored (NFR-MTC-005); the didYouMean candidate list cannot be induced to bypass the ladder (FR-MTC-004, NFR-MTC-008); SECURITY-GO required."
+    checks: "Evidence: the chain never dead-ends for any (primary, secondary) pair including
+      equal values (dedupe) and uninstalled apps (NFR-CDP-001, FR-CDP-007); the GSM floor is
+      reachable with every other channel infeasible (FR-CDP-006); the confirmation wording
+      names the routed channel (FR-CDP-013); emergency/dial-back escalation unaffected
+      (FR-CDP-018); number/handle PII is absent from logs and check-release-log-safety.sh
+      covers the new paths (NFR-CDP-003, NFR-CDP-010); no new egress from the probes
+      (NFR-CDP-002); SECURITY-GO required."
   - gate: "final-sign-off"
-    checks: "T2 + HIL; ios/tools/check-release-log-safety.sh exits 0 (NFR-MTC-004, NFR-MTC-012); the DV-* checklist is recorded and passed on the reference device incl. the Phase 0 PR #156 smoke (FR-MTC-020, NFR-MTC-007)."
+    checks: "T2 + HIL; DV-1..7 recorded and passed on the reference device (Anzaan)
+      (FR-CDP-019); ios/tools/check-release-log-safety.sh exits 0 (NFR-CDP-003, NFR-CDP-010)."

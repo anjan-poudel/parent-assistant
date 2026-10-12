@@ -21,6 +21,13 @@ import XCTest
 /// (so the "one value removed fails naming the key" scenario can run
 /// against a fixture), the **resolution** half goes through `L10n.str` in
 /// both shipped languages.
+///
+/// T-155 extends the suite again with the call-dialer calling family
+/// (design-l2 §12; C7): exactly five keys — the two settings section
+/// titles, the confirmation disclosure and the two announcements — with
+/// the same split (a pure coverage function over the parsed catalog,
+/// fixtures for the fails-naming-the-key scenario, and resolution through
+/// `L10n.str`).
 final class L10nCatalogCoverageTests: XCTestCase {
 
     private let english = Locale(identifier: "en-US")
@@ -162,13 +169,15 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// af69135 (RAM-tier owner override) added its two settings keys,
     /// to 1,369 when the call-deterministic-fallback (PR #161) and
     /// correction-revive merges added five further non-dialogue keys,
-    /// and to 1,370 when the call-nearmiss merge (PR #166) added
-    /// `router.call.didYouMeanPrefix`. The dialogue family is 19 keys
-    /// (the 18 design-l2 §16 entries plus `dialogue.correction.ask`,
-    /// moved into the family block at this rebase); the family adds
-    /// exactly its keys and removes none, so the total is pinned (the
-    /// Spotify-localisation suite's count discipline).
-    private static let dialogueBaselineKeyCount = 1_370
+    /// to 1,370 when the call-nearmiss merge (PR #166) added
+    /// `router.call.didYouMeanPrefix`, and to 1,375 when the call-dialer
+    /// primary/secondary family (T-155) added its five calling keys (the
+    /// calling half's own pin reads 1,389 as its branch point). The
+    /// dialogue family is 19 keys (the 18 design-l2 §16 entries plus
+    /// `dialogue.correction.ask`, moved into the family block at this
+    /// rebase); the family adds exactly its keys and removes none, so the
+    /// total is pinned (the Spotify-localisation suite's count discipline).
+    private static let dialogueBaselineKeyCount = 1_375
 
     /// The design-l2 §16 draft copy, verbatim, both languages. The owner
     /// copy review is a later step recorded in the plan; this pin makes
@@ -423,6 +432,307 @@ final class L10nCatalogCoverageTests: XCTestCase {
                            "\(key): the en and ne copies disagree on how many "
                            + "arguments the format string takes")
         }
+    }
+
+    // MARK: T-155 — the call-dialer calling family (design-l2 §12)
+
+    /// The five frozen keys of the calling feature (design-l2 §12,
+    /// FR-CDP-017 / NFR-CDP-007): exactly these and no sixth user-visible
+    /// string (SA-8). The keys and their parameter contracts are the
+    /// frozen part; the copy itself is catalog-time work inside C7
+    /// (design-l2 §31).
+    private static let callingKeys: [String] = [
+        "call.announce.fallbackRouted",
+        "call.announce.launchFailedFallback",
+        "router.call.fallbackDisclosure",
+        "settings.calling.primaryTitle",
+        "settings.calling.secondaryTitle",
+    ]
+
+    /// The catalog total at this unit's branch point — the dialogue pin's
+    /// expected total (1,370 + 19). The calling family adds exactly its
+    /// five keys and removes none, so the total is pinned at 1,394; the
+    /// dialogue pin is rebased to 1,375 in the same change (one rebase
+    /// point per merge, both families accounted).
+    private static let callingBaselineKeyCount = 1_389
+
+    /// The authored copy, both languages. The design freezes the keys and
+    /// the parameter contracts, not the wording (catalog-time copy), so
+    /// this pin makes every wording change — including an "improvement" —
+    /// a deliberate one rather than a drift.
+    private static let callingCopy: [(key: String, en: String, ne: String)] = [
+        ("call.announce.fallbackRouted",
+         "%1$@ isn't available — calling %2$@ via %3$@.",
+         "%1$@ उपलब्ध छैन — %2$@ लाई %3$@ बाट कल गर्दैछु।"),
+        ("call.announce.launchFailedFallback",
+         "%1$@ didn't open for %2$@ — trying %3$@.",
+         "%2$@ को %1$@ खुलेन — %3$@ मार्फत प्रयास गर्दैछु।"),
+        ("router.call.fallbackDisclosure",
+         "%1$@ isn't available, so I'll call %2$@ via %3$@.",
+         "%1$@ उपलब्ध छैन, त्यसैले %2$@ लाई %3$@ बाट कल गर्नेछु।"),
+        ("settings.calling.primaryTitle",
+         "Primary dialer",
+         "मुख्य डायलर"),
+        ("settings.calling.secondaryTitle",
+         "Fallback dialer",
+         "वैकल्पिक डायलर"),
+    ]
+
+    /// Scenario: All five keys resolve in both languages — the
+    /// behavioural half. Each key resolves through the shipped lproj
+    /// bundles in both languages, the Nepali resolution is Devanagari and
+    /// the two resolutions differ (no English copy pasted into `ne`).
+    func testEveryCallingKeyResolvesInBothLanguages() {
+        for key in Self.callingKeys {
+            let en = L10n.str(key, locale: english)
+            let ne = L10n.str(key, locale: nepali)
+            XCTAssertNotEqual(en, key,
+                              "\(key) does not resolve in en — the catalog "
+                              + "entry is missing")
+            XCTAssertNotEqual(ne, key,
+                              "\(key) does not resolve in ne — the catalog "
+                              + "entry is missing")
+            XCTAssertFalse(en.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "\(key) resolves to empty en copy")
+            XCTAssertFalse(ne.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "\(key) resolves to empty ne copy")
+            XCTAssertNotEqual(en, ne,
+                              "\(key) resolves to the SAME string in en and ne "
+                              + "— the Nepali copy is missing (or the key was "
+                              + "forgotten in one language)")
+            XCTAssertTrue(Self.containsDevanagari(ne),
+                          "\(key) resolves to non-Devanagari Nepali copy: \(ne)")
+        }
+    }
+
+    /// The binding parameter contract (design-l2 §12): the three template
+    /// keys take three placeholders in BOTH languages; the two section
+    /// titles take none. A translator dropping or duplicating a
+    /// placeholder would make `L10n.fmt` mis-place an argument or crash.
+    func testTheCallingPlaceholdersMatchBetweenLanguages() {
+        let catalog = sourceCatalog()
+        let contractCounts: [String: Int] = [
+            "call.announce.fallbackRouted": 3,
+            "call.announce.launchFailedFallback": 3,
+            "router.call.fallbackDisclosure": 3,
+            "settings.calling.primaryTitle": 0,
+            "settings.calling.secondaryTitle": 0,
+        ]
+        for key in Self.callingKeys {
+            guard let entry = catalog[key] as? [String: Any],
+                  let localizations = entry["localizations"] as? [String: Any],
+                  let en = ((localizations["en"] as? [String: Any])?["stringUnit"]
+                              as? [String: Any])?["value"] as? String,
+                  let ne = ((localizations["ne"] as? [String: Any])?["stringUnit"]
+                              as? [String: Any])?["value"] as? String else {
+                XCTFail("\(key) is missing an en or ne value")
+                continue
+            }
+            let enCount = Self.placeholderCount(in: en)
+            let neCount = Self.placeholderCount(in: ne)
+            XCTAssertEqual(enCount, neCount,
+                           "\(key): the en and ne copies disagree on how many "
+                           + "arguments the format string takes")
+            XCTAssertEqual(enCount, contractCounts[key],
+                           "\(key): the copy does not bind the design's "
+                           + "parameter contract")
+        }
+    }
+
+    /// Scenario: The parity check names a missing value. The pure
+    /// coverage check fails naming the offending key — the dialogue
+    /// half's fixture discipline, applied to the calling family.
+    func testTheCallingCoverageCheckFailsNamingTheMissingValue() {
+        // Fixture 1: the ne value removed (the scenario's exact case).
+        let key = "call.announce.launchFailedFallback"
+        var missingNE = sourceCatalog()
+        if var entry = missingNE[key] as? [String: Any],
+           var localizations = entry["localizations"] as? [String: Any] {
+            localizations.removeValue(forKey: "ne")
+            entry["localizations"] = localizations
+            missingNE[key] = entry
+        }
+        assertCallingCoverageFails(missingNE, naming: key)
+
+        // Fixture 2: the whole entry removed.
+        var missingEntry = sourceCatalog()
+        missingEntry.removeValue(forKey: "settings.calling.secondaryTitle")
+        assertCallingCoverageFails(missingEntry,
+                                   naming: "settings.calling.secondaryTitle")
+
+        // Fixture 3: a plausible sixth key in the family namespace.
+        var stray = sourceCatalog()
+        stray["router.call.fallbackNotice"] = Self.sampleEntry(en: "Stray",
+                                                               ne: "थप")
+        assertCallingCoverageFails(stray, naming: "router.call.fallbackNotice")
+    }
+
+    /// The explicit named assertion: the family is exactly the five
+    /// pinned keys — present, `manual`, both units `translated`, Nepali
+    /// Devanagari — and the catalog total is pinned, so no sixth
+    /// user-visible string can slip in (SA-8).
+    func testTheCallingFamilyPassesTheCoverageCheck() {
+        let catalog = sourceCatalog()
+
+        XCTAssertEqual(catalog.count,
+                       Self.callingBaselineKeyCount + Self.callingKeys.count,
+                       "the calling feature adds exactly "
+                       + "\(Self.callingKeys.count) keys and removes none "
+                       + "(baseline \(Self.callingBaselineKeyCount))")
+
+        let failures = Self.callingCoverageFailures(in: catalog)
+        XCTAssertTrue(failures.isEmpty,
+                      "the calling coverage check failed:\n"
+                      + failures.joined(separator: "\n"))
+    }
+
+    /// DoD evidence: the pinned copy, verbatim, both languages — a
+    /// translation dropped or an English copy pasted into the `ne` slot
+    /// fails here.
+    func testTheCallingCopyIsPinnedVerbatim() {
+        XCTAssertEqual(Self.callingCopy.map { $0.key }, Self.callingKeys,
+                       "the copy table and the pinned inventory must agree")
+        for (key, expectedEN, expectedNE) in Self.callingCopy {
+            assertCatalogValue(key, en: expectedEN, ne: expectedNE)
+        }
+    }
+
+    /// Implementation note: the inserted entries sit at their
+    /// alphabetical positions inside the shipped families (the dialogue
+    /// block's contiguity discipline, extended to intra-family
+    /// insertions). The predecessor/successor pins catch a textual
+    /// insertion that clobbered an entry.
+    func testTheCallingKeysSitAlphabeticallyInTheFile() {
+        let url = FeatureSourceScan.iosDirectory()
+            .appendingPathComponent("ElderlyAssistant/Resources/Localizable.xcstrings")
+        guard let raw = try? String(contentsOf: url, encoding: .utf8) else {
+            XCTFail("could not read the String Catalog at \(url.path)")
+            return
+        }
+        let keyLines = raw.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0) }
+            .filter { ($0.hasSuffix(" : {") || $0.hasSuffix(": {"))
+                && $0.hasPrefix("    \"") }
+            .map { line in
+                let suffixWidth = line.hasSuffix(" : {") ? 5 : 4
+                return String(line.dropFirst(5).dropLast(suffixWidth))
+            }
+        XCTAssertGreaterThan(keyLines.count, 1_000,
+                             "the key-line scan found too few entries — the "
+                             + "catalog layout changed and this pin is blind")
+
+        var positions: [String: Int] = [:]
+        for (offset, key) in keyLines.enumerated() where positions[key] == nil {
+            positions[key] = offset
+        }
+        func neighbour(_ key: String, _ offset: Int) -> String? {
+            guard let index = positions[key],
+                  keyLines.indices.contains(index + offset) else { return nil }
+            return keyLines[index + offset]
+        }
+
+        for key in Self.callingKeys {
+            XCTAssertNotNil(positions[key],
+                            "\(key) does not sit in the catalog file as a "
+                            + "top-level entry")
+        }
+        XCTAssertEqual(neighbour("call.announce.fallbackRouted", -1),
+                       "call.announce.faceTimeVideo",
+                       "the alphabetical predecessor of fallbackRouted moved")
+        XCTAssertEqual(neighbour("call.announce.fallbackRouted", 1),
+                       "call.announce.launchFailedFallback",
+                       "the announcing pair must sit contiguously")
+        XCTAssertEqual(neighbour("call.announce.launchFailedFallback", 1),
+                       "call.announce.messenger",
+                       "the alphabetical successor of launchFailedFallback moved")
+        XCTAssertEqual(neighbour("router.call.fallbackDisclosure", -1),
+                       "router.call.facetimeUnavailable",
+                       "the alphabetical predecessor of fallbackDisclosure moved")
+        XCTAssertEqual(neighbour("router.call.fallbackDisclosure", 1),
+                       "router.call.messengerNoHandle",
+                       "the alphabetical successor of fallbackDisclosure moved")
+        XCTAssertEqual(neighbour("settings.calling.primaryTitle", -1),
+                       "settings.calendarSharing",
+                       "the alphabetical predecessor of primaryTitle moved")
+        XCTAssertEqual(neighbour("settings.calling.primaryTitle", 1),
+                       "settings.calling.secondaryTitle",
+                       "the two section titles must sit contiguously")
+        XCTAssertEqual(neighbour("settings.calling.secondaryTitle", 1),
+                       "settings.calling.title",
+                       "the two section titles must precede settings.calling.title")
+    }
+
+    // MARK: T-155 helpers
+
+    /// The calling coverage check as a pure function over a parsed
+    /// catalog, so the gate's rules can be exercised against fixtures.
+    /// Every failure names the offending key and the rule it broke. The
+    /// family is membership in the calling namespaces — a key shaped like
+    /// a calling key but outside the pinned inventory is a sixth
+    /// user-visible string (SA-8).
+    static func callingCoverageFailures(in catalog: [String: Any]) -> [String] {
+        var failures: [String] = []
+        let inventory = Set(callingKeys)
+        let familyShaped = catalog.keys.filter { key in
+            key.hasPrefix("call.announce.fallback")
+                || key.hasPrefix("call.announce.launchFailed")
+                || key.hasPrefix("router.call.fallback")
+                || (key.hasPrefix("settings.calling.") && key.hasSuffix("Title"))
+        }
+
+        for key in familyShaped.sorted() where !inventory.contains(key) {
+            failures.append("\(key): in the calling family but not in the "
+                            + "pinned inventory (exactly \(callingKeys.count) "
+                            + "keys)")
+        }
+        for key in callingKeys where catalog[key] == nil {
+            failures.append("\(key): missing from the catalog")
+        }
+        for key in callingKeys {
+            guard let entry = catalog[key] as? [String: Any] else { continue }
+            if entry["extractionState"] as? String != "manual" {
+                failures.append("\(key): extractionState is not `manual`")
+            }
+            guard let localizations = entry["localizations"] as? [String: Any] else {
+                failures.append("\(key): no localizations")
+                continue
+            }
+            for language in ["en", "ne"] {
+                guard let unit = ((localizations[language] as? [String: Any])?["stringUnit"]
+                                    as? [String: Any]),
+                      let value = unit["value"] as? String,
+                      !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    failures.append("\(key): missing or empty \(language) value")
+                    continue
+                }
+                if unit["state"] as? String != "translated" {
+                    failures.append("\(key): \(language) is not marked `translated`")
+                }
+                if language == "ne" {
+                    if containsASCIILetters(value) {
+                        failures.append("\(key): Nepali value carries ASCII "
+                                        + "letters — \(value)")
+                    }
+                    if !containsDevanagari(value) {
+                        failures.append("\(key): Nepali value is not Devanagari "
+                                        + "— \(value)")
+                    }
+                }
+            }
+        }
+        return failures
+    }
+
+    /// Asserts the calling check fails naming `key`, with a message that
+    /// shows every failure it produced.
+    private func assertCallingCoverageFails(_ catalog: [String: Any],
+                                            naming key: String,
+                                            file: StaticString = #filePath,
+                                            line: UInt = #line) {
+        let failures = Self.callingCoverageFailures(in: catalog)
+        XCTAssertTrue(failures.contains { $0.contains(key) },
+                      "the coverage check must fail naming \(key); it produced: "
+                      + "\(failures)", file: file, line: line)
     }
 
     // MARK: T-129 helpers
