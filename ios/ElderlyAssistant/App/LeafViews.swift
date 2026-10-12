@@ -1151,14 +1151,15 @@ struct CallView: View {
     /// the family list, a tile — is a memory hit).
     private func resolveResultPhotos() async -> [String: UIImage] {
         guard isSearching, let entries else { return [:] }
-        // Rebuilt inline from the published roster until the coordinator
-        // republishes its own index (T-156; design-l2 §3.6). Cheap by
-        // construction: one normalize per name/nickname (NFR-FCU-001).
-        let index = FamilyContactIndex(family: coordinator.familyContacts)
+        // The coordinator's PUBLISHED index and verified-link snapshot
+        // (T-156; design-l2 §3.6) — the same pair `resultsArea` renders
+        // from, so the faces resolved here can never come from a roster
+        // or a link set the rows do not see.
         let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                   family: coordinator.familyContacts,
-                                                  index: index,
+                                                  index: coordinator.familyIndex,
                                                   in: entries,
+                                                  verifiedLinks: coordinator.verifiedLinks,
                                                   recency: recency)
         var resolved: [String: UIImage] = [:]
         for row in outcome.entries {
@@ -1358,11 +1359,28 @@ struct CallView: View {
     private var searchArea: some View {
         HStack(spacing: 10) {
             searchExitButton
-            if access == .allowed {
+            if access?.allowsReading == true {
                 searchField
             }
         }
-        if access == .allowed {
+        if access?.allowsReading == true {
+            // `.limited` (iOS 18 "Select Contacts") is a granted,
+            // READABLE subset — it takes today's `.allowed` display
+            // path, led by the honest caption (design-l2 §3.5): the
+            // FIRST line of the readable block, directly under the
+            // field row and above the mic caption, so a search over a
+            // partial book never silently pretends to search
+            // everything. `.denied` stays the only blocked arm;
+            // `.limited` never re-prompts (it can never render the
+            // empty dead area `allowsReading` exists to prevent).
+            if access == .limited {
+                Text(L10n.str("call.search.accessLimited", locale: coordinator.activeLocale))
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 6)
+            }
             micCaption
             if entries == nil {
                 if loadFailed {
@@ -1385,7 +1403,7 @@ struct CallView: View {
     private func refreshDirectory() {
         let status = AddressBookDirectory.access()
         access = status
-        guard status == .allowed else { return }
+        guard status.allowsReading else { return }
         recency = coordinator.contactCallRecency
         if entries == nil || loadFailed {
             loadEntries()
@@ -1393,12 +1411,16 @@ struct CallView: View {
     }
 
     /// The user tapped Allow on the access card — the ONE place the
-    /// permission prompt may fire (point of use, constitution).
+    /// permission prompt may fire (point of use, constitution). The
+    /// system sheet may yield `.limited` (iOS 18 Select Contacts), so
+    /// the load decision reads the RE-READ status, never the binary
+    /// request result (design-l2 §3.5): a limited selection still
+    /// loads its granted set.
     private func grantAccess() {
         Task {
-            let granted = await directory.requestAccess()
+            _ = await directory.requestAccess()
             access = AddressBookDirectory.access()
-            if granted {
+            if access?.allowsReading == true {
                 recency = coordinator.contactCallRecency
                 loadEntries()
             }
@@ -1428,7 +1450,7 @@ struct CallView: View {
     /// as visible — the ask happens at the tap (point of use); a denial
     /// flips `micHidden` for the rest of this visit.
     private var micButtonVisible: Bool {
-        guard !micHidden, access == .allowed else { return false }
+        guard !micHidden, access?.allowsReading == true else { return false }
         switch SFSpeechRecognizer.authorizationStatus() {
         case .authorized, .notDetermined: break
         case .denied, .restricted: return false
@@ -1534,19 +1556,19 @@ struct CallView: View {
     private func announceVoiceResultIfReady() {
         guard let voice = voiceRequest,
               announcedVoiceSearchID != voice.id,
-              access == .allowed,
+              access?.allowsReading == true,
               let entries,
               !loadFailed,
               trimmedQuery == voice.query else { return }
         announcedVoiceSearchID = voice.id
-        // Rebuilt inline from the published roster until the coordinator
-        // republishes its own index (T-156; design-l2 §3.6). Cheap by
-        // construction: one normalize per name/nickname (NFR-FCU-001).
-        let index = FamilyContactIndex(family: coordinator.familyContacts)
+        // The coordinator's published index + verified-link snapshot
+        // (T-156; design-l2 §3.6) — the announced first row is the
+        // rendered first row by construction.
         let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                   family: coordinator.familyContacts,
-                                                  index: index,
+                                                  index: coordinator.familyIndex,
                                                   in: entries,
+                                                  verifiedLinks: coordinator.verifiedLinks,
                                                   recency: recency)
         let locale = coordinator.activeLocale
         if let name = outcome.entries.first?.name {
@@ -1750,15 +1772,15 @@ struct CallView: View {
     @ViewBuilder
     private var resultsArea: some View {
         if let entries {
-            // Rebuilt inline from the published roster until the
-            // coordinator republishes its own index (T-156; design-l2
-            // §3.6). Cheap: one normalize per name/nickname
-            // (NFR-FCU-001).
-            let index = FamilyContactIndex(family: coordinator.familyContacts)
+            // The coordinator's published index + verified-link
+            // snapshot (T-156; design-l2 §3.6) — one consistent
+            // snapshot per pass, never an inline rebuild that could
+            // disagree with the link state the faces resolved under.
             let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                       family: coordinator.familyContacts,
-                                                      index: index,
+                                                      index: coordinator.familyIndex,
                                                       in: entries,
+                                                      verifiedLinks: coordinator.verifiedLinks,
                                                       recency: recency)
             if outcome.moreAvailable {
                 Text("call.search.moreAvailable")
@@ -1799,6 +1821,9 @@ struct CallView: View {
                     ForEach(outcome.entries) { result in
                         UnifiedContactResultRow(result: result,
                                                 photo: resultPhotos[result.id],
+                                                caption: CallResultRowText.linkedBookCaption(
+                                                    for: result, in: outcome,
+                                                    locale: coordinator.activeLocale),
                                                 channelState: channelStates[result.id]
                                                     ?? rowChannelState(for: result),
                                                 dial: { dialChannel(result) },
@@ -2384,6 +2409,15 @@ private struct UnifiedContactResultRow: View {
     /// like everything else in the row; the row never touches the photo
     /// resolver itself.
     let photo: UIImage?
+    /// The synthesized-row alt caption — "Also in your phone book as …"
+    /// (design-l1 §7.2; family-contacts-unify T-161): composed by
+    /// `CallView` through `CallResultRowText` from the outcome's
+    /// `linkedBookNames` map, which holds SYNTHESIZED rows only. nil
+    /// for every other row — no extra line, today's layout exactly.
+    /// `var` with a default so the memberwise initializer keeps every
+    /// existing construction compiling (the house defaulted-field
+    /// pattern, e.g. `RowChannelState.fellBackFrom`).
+    var caption: String? = nil
     /// The leaf-resolved channel truth for this row (see `RowChannelState`).
     let channelState: RowChannelState
     /// Dial the RESOLVED channel (`CallView.dialChannel`) — the circle
@@ -2441,6 +2475,18 @@ private struct UnifiedContactResultRow: View {
                             .font(.system(size: appearance.typography.captionPointSize))
                             .foregroundStyle(appearance.colors.textSecondary)
                             .lineLimit(2)
+                    }
+                    if let caption {
+                        // The synthesized-row explanation (design-l1
+                        // §7.2): why a name the user did not type into
+                        // the family record surfaces this row — its
+                        // own caption line under the number line, same
+                        // caption token.
+                        Text(caption)
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
                     }
                 }
                 Spacer(minLength: 8)
@@ -2642,6 +2688,30 @@ private struct UnifiedContactResultRow: View {
         case .whatsApp: return "app.name.whatsapp"
         case .messenger: return "app.name.messenger"
         }
+    }
+}
+
+/// The call-surface search rows' composed text (family-contacts-unify
+/// T-161; the house `<Surface>RowText` seam — mirror of
+/// `ActivityRowText` in HistoryView.swift): the synthesized family
+/// row's alt caption composed OUTSIDE the view, so the caption-parity
+/// claim (one frozen key, one wording, on every search surface) is
+/// pinnable without a view instance.
+enum CallResultRowText {
+    /// The extra caption line for a row the link merge SYNTHESIZED
+    /// (design-l1 §7.2): the person is also stored in the phone book
+    /// under `linkedBookNames[result.id]`, so the row explains why a
+    /// name the user did not type into the family record appears.
+    /// nil for every other row — the map holds synthesized rows only —
+    /// and an empty stored name is suppressed rather than rendered as
+    /// a dangling "…as " (never a fabricated identity).
+    static func linkedBookCaption(for result: UnifiedContactSearch.Result,
+                                  in outcome: UnifiedContactSearch.Outcome,
+                                  locale: Locale) -> String? {
+        guard let bookName = outcome.linkedBookNames[result.id], !bookName.isEmpty else {
+            return nil
+        }
+        return L10n.fmt("call.search.linkedBookName", locale: locale, bookName)
     }
 }
 
