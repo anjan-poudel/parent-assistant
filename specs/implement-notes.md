@@ -243,3 +243,14 @@ guard. Gates: log-safety exit 0, prompt-mirror green, L10n pins held
 (1396/1410/1415), no-egress pins green. Perf all within 20ms ceilings
 (index <=1.6ms, voice <=10.3ms, search 2.78ms). Evidence in
 specs/T-163-acceptance-notes.md. DV-1..6 is T-164, outstanding.
+
+## T-165 — Security evidence and feasibility honesty — DONE
+
+Commit 6e86ebd9. FCU-security-evidence-index.md (F1-F8 closure with verifier
+commands, 21-row STRIDE index, residuals + gaps) + feasibility-honesty report
+(all three asks delivered as specified; device verdicts OUTSTANDING pending
+T-164). F4 comment aligned in design-l2 §2.6 and design-l1 §10.2 step 3; F6
+§3.5 footnote with the post-T-144 verified anchor. F1/F2/F3/F5 CLOSED via the
+T-163 sweep pins; F7 no-action recorded; F8 accepted residual recorded for
+the DV session. 35/35 cited test tokens verified; log gate re-run exit 0.
+No production code touched.
