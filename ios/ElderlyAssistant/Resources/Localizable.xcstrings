@@ -3049,6 +3049,40 @@
         }
       }
     },
+    "call.announce.fallbackRouted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ isn't available — calling %2$@ via %3$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ उपलब्ध छैन — %2$@ लाई %3$@ बाट कल गर्दैछु।"
+          }
+        }
+      }
+    },
+    "call.announce.launchFailedFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ didn't open for %2$@ — trying %3$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%2$@ को %1$@ खुलेन — %3$@ मार्फत प्रयास गर्दैछु।"
+          }
+        }
+      }
+    },
     "call.announce.messenger": {
       "extractionState": "manual",
       "localizations": {
@@ -13694,6 +13728,23 @@
         }
       }
     },
+    "router.call.fallbackDisclosure": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ isn't available, so I'll call %2$@ via %3$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ उपलब्ध छैन, त्यसैले %2$@ लाई %3$@ बाट कल गर्नेछु।"
+          }
+        }
+      }
+    },
     "router.call.messengerNoHandle": {
       "extractionState": "manual",
       "localizations": {
@@ -14914,6 +14965,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "क्यालेन्डर साझा"
+          }
+        }
+      }
+    },
+    "settings.calling.primaryTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Primary dialer"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मुख्य डायलर"
+          }
+        }
+      }
+    },
+    "settings.calling.secondaryTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fallback dialer"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वैकल्पिक डायलर"
           }
         }
       }

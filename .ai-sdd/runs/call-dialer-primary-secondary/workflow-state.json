@@ -1,0 +1,147 @@
+{
+  "schema_version": "1",
+  "workflow": "call-dialer-primary-secondary",
+  "project": "/Users/anjan/workspace/projects/elderly-ai-assistant-call-dialer-primary-secondary",
+  "started_at": "2026-10-11T16:06:15.080Z",
+  "updated_at": "2026-10-11T21:48:58.644Z",
+  "tasks": {
+    "define-requirements": {
+      "status": "COMPLETED",
+      "started_at": null,
+      "completed_at": "2026-10-11T16:06:15.086Z",
+      "outputs": [
+        {
+          "path": "specs/define-requirements.md"
+        },
+        {
+          "path": "specs/define-requirements.lock.yaml"
+        }
+      ],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "design-l1": {
+      "status": "COMPLETED",
+      "started_at": null,
+      "completed_at": "2026-10-11T16:24:54.397Z",
+      "outputs": [
+        {
+          "path": "specs/design-l1.md",
+          "contract": "architecture_l1"
+        }
+      ],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "design-l2": {
+      "status": "COMPLETED",
+      "started_at": null,
+      "completed_at": "2026-10-11T16:40:12.051Z",
+      "outputs": [
+        {
+          "path": "specs/design-l2.md",
+          "contract": "component_design_l2"
+        }
+      ],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "review-l2": {
+      "status": "COMPLETED",
+      "started_at": null,
+      "completed_at": "2026-10-11T16:48:44.936Z",
+      "outputs": [
+        {
+          "path": "specs/review-l2.md",
+          "contract": "review_report"
+        }
+      ],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "security-design-review": {
+      "status": "COMPLETED",
+      "started_at": null,
+      "completed_at": "2026-10-11T16:59:25.303Z",
+      "outputs": [
+        {
+          "path": "specs/security-design-review.md",
+          "contract": "review_report"
+        }
+      ],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "plan-tasks": {
+      "status": "COMPLETED",
+      "started_at": null,
+      "completed_at": "2026-10-11T17:24:00.262Z",
+      "outputs": [
+        {
+          "path": "specs/plan-tasks/plan.md",
+          "contract": "task_breakdown_l3"
+        },
+        {
+          "path": "specs/plan-tasks/tasks/index.md"
+        }
+      ],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "implement": {
+      "status": "COMPLETED",
+      "started_at": null,
+      "completed_at": "2026-10-11T21:14:56.335Z",
+      "outputs": [
+        {
+          "path": "specs/implement-notes.md"
+        }
+      ],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T21:14:25.784Z"
+    },
+    "review-implementation": {
+      "status": "COMPLETED",
+      "started_at": null,
+      "completed_at": "2026-10-11T21:40:08.295Z",
+      "outputs": [
+        {
+          "path": "specs/review-implementation.md"
+        }
+      ],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "security-test": {
+      "status": "COMPLETED",
+      "started_at": null,
+      "completed_at": "2026-10-11T21:48:58.644Z",
+      "outputs": [
+        {
+          "path": "specs/security-test.md"
+        }
+      ],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "final-sign-off": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    }
+  },
+  "phase": "RUNNING"
+}

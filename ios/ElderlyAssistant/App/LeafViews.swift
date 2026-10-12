@@ -1172,10 +1172,13 @@ struct CallView: View {
     /// INTO WhatsApp, so with the app absent the whole card hides
     /// (there is nothing to guide to). Probed live on the main thread
     /// (body evaluation); the `whatsapp` scheme sits in
-    /// LSApplicationQueriesSchemes so the probe is honest.
+    /// LSApplicationQueriesSchemes so the probe is honest. The probe
+    /// itself delegates to the ONE chain implementation (T-151,
+    /// NFR-CDP-002): `CallChannelChain.whatsAppInstalled(canOpen:)` over
+    /// the shipped `canOpenURL` — the row adds no second probe, no new
+    /// URL literal and no coordinator dependency.
     private var whatsAppInstalled: Bool {
-        guard let url = URL(string: "whatsapp://") else { return false }
-        return UIApplication.shared.canOpenURL(url)
+        CallChannelChain.whatsAppInstalled(canOpen: { UIApplication.shared.canOpenURL($0) })
     }
 
     /// Big search pill (≥44pt, body-size text, warm card). Search runs as
@@ -1552,9 +1555,15 @@ struct CallView: View {
     }
 
     /// The row's WhatsApp pill — a chat surface, not a call, so no
-    /// recency entry (channel opens are not dials).
-    private func whatsApp(_ result: UnifiedContactSearch.Result) {
-        coordinator.performSystemContactWhatsApp(name: result.name, phone: result.phone)
+    /// recency entry (channel opens are not dials). The `hop` parameter
+    /// (call-dialer-primary-secondary, T-151) is the launch-failure
+    /// recovery the dial zone's `.whatsApp` route threads in; the pill's
+    /// own tap passes none — the pill is a chat surface, not a
+    /// chain-routed dial.
+    private func whatsApp(_ result: UnifiedContactSearch.Result,
+                          hop: AppCoordinator.LaunchHop? = nil) {
+        coordinator.performSystemContactWhatsApp(name: result.name, phone: result.phone,
+                                                 hop: hop)
     }
 
     /// Primary-circle dial of a search row (channel-chooser task,
@@ -1571,14 +1580,41 @@ struct CallView: View {
     /// family tiles dial with, so every open — and every honest
     /// fallback — is announced exactly as it is. GSM keeps the local
     /// recency bump the old dial gave it.
+    ///
+    /// The chain announcement and the hop (call-dialer-primary-secondary,
+    /// T-151; FR-CDP-016/015): when the resolution skipped a channel, the
+    /// tap names the routed channel at resolution, BEFORE the opener runs
+    /// (ADR-CDP-07 — a successful open may background the app before
+    /// post-open speech could be heard). Every routed opener carries the
+    /// row's pre-built `LaunchHop` so a failed open recovers through the
+    /// remaining candidates; the `.phone` floor does not hop (RES-10) and
+    /// the WhatsApp pill's own tap stays hop-less (a chat surface, not a
+    /// chain-routed dial).
     private func dialChannel(_ result: UnifiedContactSearch.Result) {
-        switch rowChannelState(for: result).resolvedChannel {
+        let state = rowChannelState(for: result)
+        let locale = coordinator.activeLocale
+        if let skipped = state.fellBackFrom.first {
+            // ADR-CDP-07: at resolution, BEFORE the open — a successful
+            // open may background the app before post-open speech could
+            // be heard. Nothing is spoken when nothing fell back.
+            coordinator.speak(text: L10n.fmt("call.announce.fallbackRouted",
+                                             locale: locale,
+                                             CallChannelChain.label(skipped, locale: locale),
+                                             result.name,
+                                             CallChannelChain.label(state.resolvedChannel,
+                                                                    locale: locale)))
+        }
+        let hop = AppCoordinator.LaunchHop(candidates: state.hopCandidates,
+                                           handle: resolvedMessengerHandle(for: result),
+                                           phone: result.phone)
+        switch state.resolvedChannel {
         case .phone:
-            dial(result)
+            dial(result)                                   // floor: no hop
         case .faceTime:
-            coordinator.performFaceTimeCall(name: result.name, phone: result.phone, video: false)
+            coordinator.performFaceTimeCall(name: result.name, phone: result.phone,
+                                            video: false, hop: hop)
         case .whatsApp:
-            whatsApp(result)
+            whatsApp(result, hop: hop)
         case .messenger:
             guard let handle = resolvedMessengerHandle(for: result) else {
                 // Stale state only — resolution forces a handle-less row
@@ -1589,7 +1625,8 @@ struct CallView: View {
                                                  locale: locale, result.name))
                 return
             }
-            coordinator.performSystemContactMessenger(name: result.name, handle: handle)
+            coordinator.performSystemContactMessenger(name: result.name, handle: handle,
+                                                      hop: hop)
         }
     }
 
@@ -1607,11 +1644,17 @@ struct CallView: View {
     }
 
     /// One result row's channel truth for the CURRENT outcome
-    /// (channel-chooser task, 2026-09-07): stored preference, resolved
-    /// dial channel, handle availability, and the store key they live
-    /// under. Computed once per outcome in the results area — never per
-    /// row body evaluation — and re-computed there after a chooser pick
-    /// or a saved handle (the `channelStateVersion` bump above).
+    /// (channel-chooser task, 2026-09-07; chain-routed by T-151): stored
+    /// preference, the RESOLVED dial channel plus the provenance that
+    /// routed it (the skipped channels) and the launch-failure candidates
+    /// for the routed channel — all from one snapshot, so the circle, the
+    /// announcement and the hop can never disagree (L2-D10). The probe
+    /// input is the ONE shipped WhatsApp probe (`whatsAppInstalledNow` →
+    /// the chain static); the vocabulary argument takes its default
+    /// (`.anyChannel`, the row surface). Computed once per outcome in the
+    /// results area — never per row body evaluation — and re-computed
+    /// there after a chooser pick or a saved handle (the
+    /// `channelStateVersion` bump above).
     private func rowChannelState(for result: UnifiedContactSearch.Result) -> RowChannelState {
         _ = channelStateVersion
         let storeKey = ContactNumberKey.normalized(result.phone)
@@ -1619,14 +1662,22 @@ struct CallView: View {
             ? nil
             : coordinator.storedChannelPreference(forNormalizedPhone: storeKey)
         let hasHandle = resolvedMessengerHandle(for: result) != nil
-        let resolvedChannel = AppCoordinator.resolvedCallChannel(
+        let preferred = storedPreference ?? coordinator.defaultCallApp
+        let route = AppCoordinator.resolvedCallChannel(
             explicit: storedPreference,
             defaultApp: coordinator.defaultCallApp,
-            messengerHandleAvailable: hasHandle)
+            secondaryApp: coordinator.secondaryCallApp,
+            messengerHandleAvailable: hasHandle,
+            whatsAppInstalled: coordinator.whatsAppInstalledNow)
         return RowChannelState(storedPreference: storedPreference,
-                               resolvedChannel: resolvedChannel,
+                               resolvedChannel: route.channel,
                                hasHandle: hasHandle,
-                               storeKey: storeKey)
+                               storeKey: storeKey,
+                               fellBackFrom: route.fellBackFrom,
+                               hopCandidates: CallChannelChain.hopCandidates(
+                                   preferred: preferred,
+                                   secondary: coordinator.secondaryCallApp,
+                                   routed: route.channel))
     }
 
     /// The usable Messenger handle behind a row's messenger channel —
@@ -2279,6 +2330,17 @@ private struct RowChannelState {
     /// family contact may be configured loosely) — then nothing can be
     /// stored for the row, and the add-handle button is hidden.
     let storeKey: String
+    /// The channels the resolution skipped on the way to
+    /// `resolvedChannel`, in attempt order (empty when the preferred
+    /// channel routed). The tap's announcement names its first entry
+    /// (`call.announce.fallbackRouted`; L2-D10). `var … = []` so the
+    /// synthesized memberwise initializer keeps a DEFAULTED parameter
+    /// (L2-D3) — the construction site above passes both explicitly.
+    var fellBackFrom: [CallApp] = []
+    /// The launch-failure candidates for `resolvedChannel` (L2-D1/D2) —
+    /// the hop the tap threads into the opener it opens, so a failed
+    /// open recovers through the remaining channels.
+    var hopCandidates: [CallApp] = []
 }
 
 /// One unified search result — a family member or a system address-book

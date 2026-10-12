@@ -192,6 +192,16 @@ FEATURE_ROOTS = [
     "Services/Contacts/SystemContactLinkService.swift",
     "Services/Contacts/SystemContactPhotoWriter.swift",
     "Services/Contacts/FamilyContactIndex.swift",
+    # [CALL-DIALER-PRIMARY-SECONDARY T-156 / design-l2 §13 L2-D12] The
+    # primary/secondary call-dialer feature's own root: the chain file
+    # routes between the household's call apps, and the hop metadata and
+    # the announcement channel labels are closed tokens on the existing
+    # bus (no new metadata key — `metadata: [:]` stays). The file writes
+    # no console and builds no event field, but it is graded regardless:
+    # a Release console write, a content-bearing console write or event
+    # field in any configuration, or an unlisted metadata key in this
+    # file fails the gate — numbers and handles never reach a log sink.
+    "Services/Calls",
 ]
 
 # The shipped allow-list the feature's metadata keys must be declared in.
