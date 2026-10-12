@@ -229,3 +229,17 @@ Legacy contactPhoto(for:) deletion CONFIRMED: 0 code references across the
 391-file production module (both scan patterns). New suite
 FamilyListLinkChipTests incl. the named deletion pin. Whole-module build
 green, 0 errors (195 warnings, one fewer than baseline). Scoped run deferred.
+
+## T-163 — Acceptance and release gates — DONE
+
+Commit e46c3ed1. Scoped sweep 32/32 suites green (five first-run failures
+were test-side bugs, fixed with in-code markers; ZERO production changes).
+Full unit bundle once on the final tree: 7062 total, 7030 passed, 22 failed,
+10 skipped — zero FCU suites failed; all 22 attributed category (b)
+pre-existing at baseline 81de796a with per-suite baseline evidence; zero (a),
+zero (c). Attempt 1 hung in the pre-existing Piper simulator-audio wedge
+(aborted, recorded); completing run used a disclosed 120s per-test timeout
+guard. Gates: log-safety exit 0, prompt-mirror green, L10n pins held
+(1396/1410/1415), no-egress pins green. Perf all within 20ms ceilings
+(index <=1.6ms, voice <=10.3ms, search 2.78ms). Evidence in
+specs/T-163-acceptance-notes.md. DV-1..6 is T-164, outstanding.
