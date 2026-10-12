@@ -1,0 +1,27 @@
+{
+  "id": "87276f83-f560-480e-89b5-0902c5805260",
+  "task_id": "final-sign-off",
+  "workflow_id": "call-dialer-primary-secondary",
+  "status": "RESOLVED",
+  "reason": "T2 human sign-off — final sign-off pack for call-dialer-primary-secondary. The full stage chain is complete: define-requirements (19 FR-CDP + 10 NFR-CDP, 83 Gherkin scenarios, locked drift baseline); design-l1/l2 on the owner-frozen design; review-l2 GO with findings F-1..F-7 absorbed; security-design-review (SA-1..SA-9 obligations); plan-tasks (14 units T-144..T-157); implement waves W1-W10 (all 14 units committed fe0a7576..ec3ce651, evidence chain seqs 109-122); review-implementation GO (0 BLOCKER / 0 MAJOR / 2 MINOR / 4 NOTE); security-test SECURITY-GO (SA-1..SA-9 discharged, all six workflow focus areas PASS). Release gates verified: family sweep of record Passed 136/136/0/0 (bundle 2026.10.12_08-10-43, seven scoped suites, the first execution of every wave-8/9-authored test); release log-safety privacy guard exit 0 with 24 fixtures over 12 rules, wired into ios/build.sh ahead of every test scope; four negative controls expected==observed with byte-identical md5-verified restores; preservation audits (SA-4/SA-7) zero drift; five-key ne/en catalogue parity proven. DV-1..7 device validation on Anzaan is the tracked completion gate — prepared as a checklist with pass criteria in specs/T-157-notes.md and specs/define-requirements/FR/FR-CDP-019-device-validation-completion-gate.md, NOT yet executed. Per the run convention the merge decision and the completion claim are separable: the owner is asked to approve the T2 sign-off and the PR to master, with the DV-1..7 record remaining the outstanding completion gate. Carried non-blocking items: review MINOR F-1 (T-152 DoD wording record edit) and F-2 (split the W9-A negative control at the next touch of MissedCallDialBackTests); the errata roll-up (W2 N-3, W4 N-6, W6 N-1, W6 N-4); and the stale baseline spec files superseded at specs/review-implementation.md, specs/security-test.md and specs/final-sign-off.md (other features' records) — integration must resolve those filenames deliberately rather than letting the merge pick silently.",
+  "context": {
+    "task_description": "Final sign-off (T2 human gate) for call-dialer-primary-secondary: the consolidated decision pack for owner approval — change summary, requirements traceability (19 FR-CDP + 10 NFR-CDP to implementation and test evidence), security posture (security-design-review SA-1..SA-9 plus security-test SECURITY-GO), device-validation status (DV-1..7 prepared, outstanding as the tracked completion gate), carried open items, rollback plan and compliance checklist.",
+    "risk_tier": "T2",
+    "agent": "reviewer",
+    "artifacts": [
+      "specs/final-sign-off.md"
+    ],
+    "branch": "feat/call-dialer-primary-secondary",
+    "branch_tip": "67a85676",
+    "artifacts_uncommitted": true,
+    "open_decisions": [
+      "Approve the T2 final sign-off and the PR to master (DV-1..7 outstanding as the tracked completion gate)",
+      "Filename-collision resolution for the superseded baseline spec files at integration",
+      "Acknowledgement of the carried review MINORs and errata (non-blocking)"
+    ],
+    "note": "Item created by the dispatching session per the run's direct-dispatch convention (the task is driven without the ai-sdd run command, which is the path that normally creates it). Left PENDING for the human; resolved in the same session once the relayed owner approval was recorded."
+  },
+  "created_at": "2026-10-12T05:21:52.000Z",
+  "notes": "Owner-approved (T2 final sign-off). Decision relayed via the coordinator conversation 2026-10-12, recorded per the run's relay convention. (1) The feature stage chain result is approved as delivered: implement phase closed with review-implementation GO (0 BLOCKER / 0 MAJOR / 2 MINOR / 4 NOTE) and security-test SECURITY-GO; evidence chain seqs 109-122 hash-verified; sweep of record Passed 136/136/0/0; privacy guard exit 0 with 24 fixtures over 12 rules; four negative controls expected==observed with byte-identical restores; preservation audits zero drift. (2) Merge decision approved with the DV-1..7 device-validation record remaining the outstanding completion gate — merge and completion are separable per the house convention; the PR is raised against master with the DV-1..7 checklist as the merge gate in its body, and is not merged by the workflow session (merge review happens from the main checkout). (3) Carried non-blocking items acknowledged: review MINORs F-1 and F-2, the errata roll-up (W2 N-3, W4 N-6, W6 N-1, W6 N-4), and the superseded baseline spec filenames to be resolved deliberately at integration. (4) No pending decisions beyond the acknowledgement of the above; no amendments requested to the delivered bytes.",
+  "resolved_at": "2026-10-12T05:22:00.887Z"
+}
