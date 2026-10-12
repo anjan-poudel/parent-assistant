@@ -153,3 +153,15 @@ ContactResolver reads the published index. Foreground hook appended after
 syncCalendarShare; call-dialer chain untouched (no secondaryCallApp symbols in
 the diff). New suite: 9 tests. Log-safety gate exit 0 (24/24 fixtures);
 whole-module build green, 0 errors. Scoped run deferred.
+
+## T-157 — Coordinator face identity — DONE
+
+Commit a8bc3986 (+ notes 995e6ddb). faceIdentity/faceImage/faceThumbnail async
+accessors; 16-hex sha256 system-photo tokens written only inside the @MainActor
+face path; §10.1 precedence (system > app-local > nil/initials); sysphoto:/contact:
+content-addressed cache families + ViewCaches invalidation-contract doc note; all
+four sync contactPhoto(for:) call sites migrated to .task(id:) with post-await
+identity guards; the sync resolver DELETED per §8.1 (scan: 0 code refs remain).
+New suite: 8 tests incl. format pins, precedence, no-stale-serve, source pins.
+Whole-module build green, 0 errors. Notes use a disambiguated filename
+(T-157-notes.md is call-dialer's merged record). Scoped run deferred.
