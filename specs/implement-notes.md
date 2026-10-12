@@ -203,3 +203,17 @@ caption; draftLink passed through Save. New suite FamilyWizardFindStepTests
 (pure seams, engine-integrated Gherkin paths, drift pin, source pins).
 Whole-module build green, 0 errors. CallingSettingsView untouched. 7
 decisions/deviations recorded in the notes. Scoped run deferred.
+
+## T-160 — Wizard photo step and save — DONE
+
+Commit 3294a397. Photo step per §2.4 (source caption pure rule; write-access
+cards for verified-link editing only — shared askCard reusing grantAccess,
+denied line with Settings door; state line with the F4 label mapping); save
+flow per §2.6/§10.2 (store write first, photo Task via syncSystemPhoto, §10.4
+remove recheck through the same resolver, non-nil state stays open with
+common.close footer, nil dismisses); nickname step per §2.5 (enumerated rows,
+≥44pt labeled remove, 8-entry cap, F5 cappedNickname, full list through the
+coordinator seam — interim loss window closed). One production deviation:
+faceImageWithSource coordinator seam (recorded). New suite:
+FamilyWizardPhotoSaveTests. Whole-module build green, 0 errors. Scoped run
+deferred.
