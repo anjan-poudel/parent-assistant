@@ -387,6 +387,7 @@
 		78E6DFBEC089A62FCF7ED351 /* NepaliTimeParserExtensionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5815D91DCCFA18BD943482A /* NepaliTimeParserExtensionTests.swift */; };
 		793688206E4EA4FAD936B6EC /* GoldenCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0552385B96E9EBFF3A73BE8 /* GoldenCorpusTests.swift */; };
 		796B0F7425A7D0115B2C0775 /* LiveTranslateSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 837752F567981930B76F36F8 /* LiveTranslateSettings.swift */; };
+		7970EC52EAB27AF899419C89 /* LocalBrainChainJudgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28FA828917D50A4B45C158F9 /* LocalBrainChainJudgeTests.swift */; };
 		797E5EE0E22E9731987C19CB /* CloudActivityIndicatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A476A3B24E6D9D79552817B /* CloudActivityIndicatorView.swift */; };
 		79A7AE4AB430B9EAAC91A56B /* CameraPermissionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21DC38CB5F39A8E1CD343D1 /* CameraPermissionView.swift */; };
 		7A3A7A583B941770E75D9CEB /* GoogleAccountSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A70AECC1284CE15DF46D4FF /* GoogleAccountSession.swift */; };
@@ -988,6 +989,7 @@
 		2810DA7E5ACE83DFB878D66C /* PhotoVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoVerifier.swift; sourceTree = "<group>"; };
 		283BC658443BCD5297628888 /* MigratingEncryptedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigratingEncryptedStorage.swift; sourceTree = "<group>"; };
 		28DAB637439F6EFA817297B8 /* AppSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSurface.swift; sourceTree = "<group>"; };
+		28FA828917D50A4B45C158F9 /* LocalBrainChainJudgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBrainChainJudgeTests.swift; sourceTree = "<group>"; };
 		294C3C06D13B504B8E1A7E1A /* DialogueOptionCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialogueOptionCatalog.swift; sourceTree = "<group>"; };
 		2A427CB657EDC4CEA8F4CC86 /* RoutineAlarmScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineAlarmScheduler.swift; sourceTree = "<group>"; };
 		2AF852E1C49E53682ACF2342 /* PlatformAlarmScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformAlarmScheduler.swift; sourceTree = "<group>"; };
@@ -3084,6 +3086,7 @@
 				833715340EDFD4A91232D759 /* IntentTranscriptPreparationTests.swift */,
 				71BF5F0F0883DAAE13CE18B2 /* InterpreterAvailabilityTests.swift */,
 				7A1A8F4202C570AB8F399728 /* InterpreterSelectorTests.swift */,
+				28FA828917D50A4B45C158F9 /* LocalBrainChainJudgeTests.swift */,
 				B5A00D2F8F62F1792BC2784F /* LocalBrainChainTests.swift */,
 				7928143A68E80A065194EB01 /* LocalIntentInterpreterTests.swift */,
 				B341C38BF8987E2068992D93 /* MapsLinksTests.swift */,
@@ -3898,6 +3901,7 @@
 				8AA076C728743BC9F6BD8070 /* LiveTranslationPipelineTests.swift in Sources */,
 				3F9A3AB41810B96D00D61D73 /* LlamaCommandInterpreterTests.swift in Sources */,
 				CAD8CB5DC38BEF43F42A6598 /* LlamaSemanticJudgeTests.swift in Sources */,
+				7970EC52EAB27AF899419C89 /* LocalBrainChainJudgeTests.swift in Sources */,
 				7C420642E0B121247B8853EB /* LocalBrainChainTests.swift in Sources */,
 				D96A80671E2C681B82C8E287 /* LocalBrainTranslationTierTests.swift in Sources */,
 				733E83057A36BFFB551D809C /* LocalGoogleEventMappingStoreTests.swift in Sources */,

@@ -1252,21 +1252,32 @@ struct CorrectionLexicon: Sendable {
     /// §5.3's three generators, unioned, deduplicated and bounded at
     /// generation (C-5).
     ///
-    /// The tiers are ordered by the strength of their evidence — prefix
-    /// completion (an exact anchor), then bounded edit distance (increasing
-    /// cost), then the phonetic key — and the pool is capped at three tiers'
-    /// worth of `maxCandidates`, so a pathological token cannot hand the
-    /// scorer an unbounded list. Ordering is by Unicode scalar, matching the
-    /// order the fit used (`sorted` over Python code points), so the same token
-    /// produces the same pool in the same order on two hosts (NFR-029).
+    /// [POOL-BALANCE] EACH TIER carries its own cap before the union —
+    /// the measured defect the balanced caps fix: with one global cap
+    /// after a full prefix tier, a short token's prefix completions
+    /// flooded all 24 slots and the edit/key tiers never contributed, so
+    /// the TRUE word (usually a same-length near-neighbour, not a
+    /// completion) was cut from the pool for ~97% of the corpus's error
+    /// instances — starving the judge of its input regardless of its
+    /// 79.5% ranking. Tier caps: prefix 6, edit 8, key 6, symspell 8 —
+    /// a balanced 28-slot union whose pool order stays deterministic
+    /// (each tier scalar-sorted, tiers in evidence order).
+    ///
+    /// Ordering is by Unicode scalar, matching the order the fit used
+    /// (`sorted` over Python code points), so the same token produces
+    /// the same pool in the same order on two hosts (NFR-029).
     func candidates(for token: String) -> [String] {
         let scalars = Array(token.unicodeScalars)
         let tokenLength = scalars.count
         guard tokenLength > 0 else { return [] }
         let window = scoring.lengthWindow
         let slack = scoring.maxPrefixSlack
-        let cap = 3 * scoring.maxCandidates
         let allowed = min(scoring.levenshteinBound, tokenLength / 3)
+        // [POOL-BALANCE] The per-tier caps (see the doc above).
+        let prefixCap = 6
+        let editCap = 8
+        let keyCap = 6
+        let symSpellCap = 8
 
         var pool: [String] = []
         var seen: Set<String> = []
@@ -1279,7 +1290,7 @@ struct CorrectionLexicon: Sendable {
             }
         }
         prefixTier.sort { $0.0 == $1.0 ? Self.scalarLess($0.1, $1.1) : $0.0 < $1.0 }
-        for (_, candidate) in prefixTier where !seen.contains(candidate) {
+        for (_, candidate) in prefixTier.prefix(prefixCap) where !seen.contains(candidate) {
             seen.insert(candidate)
             pool.append(candidate)
         }
@@ -1298,7 +1309,7 @@ struct CorrectionLexicon: Sendable {
                 }
             }
             editTier.sort { $0.0 == $1.0 ? Self.scalarLess($0.1, $1.1) : $0.0 < $1.0 }
-            for (_, candidate) in editTier where !seen.contains(candidate) {
+            for (_, candidate) in editTier.prefix(editCap) where !seen.contains(candidate) {
                 seen.insert(candidate)
                 pool.append(candidate)
             }
@@ -1313,7 +1324,7 @@ struct CorrectionLexicon: Sendable {
             }
         }
         keyTier.sort(by: Self.scalarLess)
-        for candidate in keyTier where !seen.contains(candidate) {
+        for candidate in keyTier.prefix(keyCap) where !seen.contains(candidate) {
             seen.insert(candidate)
             pool.append(candidate)
         }
@@ -1332,13 +1343,13 @@ struct CorrectionLexicon: Sendable {
                 return STTCorrector.withinBound(
                     scalars, Array(candidate.unicodeScalars), allowed)
             }
-            for candidate in verified {
+            for candidate in verified.prefix(symSpellCap) {
                 seen.insert(candidate)
                 pool.append(candidate)
             }
         }
 
-        return Array(pool.prefix(cap))
+        return pool
     }
 
     /// Scalars, not Characters — `String.hasPrefix` is the wrong relation here.

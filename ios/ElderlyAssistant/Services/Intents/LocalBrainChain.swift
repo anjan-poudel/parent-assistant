@@ -184,6 +184,22 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting,
     /// persisted, gone with the process.
     private(set) var lastCorrection: CorrectionResult?
 
+    /// [JUDGE-PRE-INTERPRET] The pluggable semantic judge the chain
+    /// consults BEFORE the brain interprets, when the banded gate marked
+    /// a token judge-eligible. Nil (the default, and every test
+    /// construction) keeps the pre-judge path off; the shipped
+    /// coordinator wires the resident-4B judge here. The judge contract
+    /// still holds: `isReady` means the brain is ALREADY resident — the
+    /// chain never loads a model to judge.
+    var semanticJudge: SemanticJudge?
+
+    /// [JUDGE-PRE-INTERPRET] True once the judge ran for THIS turn (a
+    /// decisive pick or an abstention) — the router's failure path reads
+    /// it so a turn that was already judged is never judged twice: it
+    /// goes straight to the spoken clarification. Reset with each
+    /// `turnInput`.
+    private(set) var lastCorrectionJudged = false
+
     var isAvailable: Bool {
         preferred.isAvailable || standIn.isAvailable
     }
@@ -305,6 +321,7 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting,
     private func turnInput(for transcript: String) -> TurnInput {
         let preparation = IntentTranscriptPreparation.prepare(transcript,
                                                              seam: inputSeam)
+        lastCorrectionJudged = false
         guard let pair = preparation.pair else {
             lastCorrection = nil
             return TurnInput(pair: nil, plainText: preparation.prepared)
@@ -336,9 +353,63 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting,
         pair.pickerBrainInput == pair.original ? raw : pair.pickerBrainInput
     }
 
+    /// [JUDGE-PRE-INTERPRET] The turn entry point the two public
+    /// `interpret`/`respondToChat` paths share: when the banded gate
+    /// marked a token judge-eligible AND a judge is wired and READY, the
+    /// judge runs FIRST — measured on the error corpus to pick the true
+    /// reading 79.5% of the time where the lexicographical scorer picks
+    /// it 2.1%. A confident pick (≥ the shipped floor) re-writes the
+    /// text the brain will read; anything less leaves the text untouched
+    /// and the failure path owns the spoken clarification.
     private func interpret(turn: TurnInput,
                            context: InterpreterContext,
                            completion: @escaping (InterpretedCommand?) -> Void) {
+        if let judge = semanticJudge, judge.isReady,
+           !lastCorrectionJudged,
+           let correction = lastCorrection,
+           correction.mode == .apply,
+           let item = correction.judgeItems.first {
+            lastCorrectionJudged = true
+            let batch = JudgeBatch(source: correction.original,
+                                   items: [item])
+            judge.judge(batch) { [weak self] verdicts in
+                guard let self else {
+                    completion(nil)
+                    return
+                }
+                let reranked = STTCorrector.reRank(correction, judge: verdicts,
+                                                   lexicon: CorrectionLexicon.bundled)
+                if reranked.corrected != correction.original {
+                    // The judge's pick was applied — the brain reads the
+                    // corrected text, and the item is consumed so the
+                    // failure path can never judge it twice.
+                    var consumed = reranked
+                    consumed.judgeItems = []
+                    self.lastCorrection = consumed
+                    self.serve(turn: TurnInput(pair: turn.pair,
+                                               plainText: reranked.corrected),
+                               context: context, completion: completion)
+                } else {
+                    // Abstention or veto — the text is untouched, the
+                    // item is consumed, and the failure path asks the
+                    // spoken clarification instead of re-judging.
+                    var consumed = correction
+                    consumed.judgeItems = []
+                    self.lastCorrection = consumed
+                    self.serve(turn: turn, context: context,
+                               completion: completion)
+                }
+            }
+            return
+        }
+        serve(turn: turn, context: context, completion: completion)
+    }
+
+    /// The dispatch body the pre-interpret hook and the plain path
+    /// share — byte-identical to the pre-hook implementation.
+    private func serve(turn: TurnInput,
+                       context: InterpreterContext,
+                       completion: @escaping (InterpretedCommand?) -> Void) {
         guard preferred.isAvailable else {
             // Availability-only substitution — the rule in every mode.
             // [PIPELINE-TRACE] The cascade stage did not run: this turn

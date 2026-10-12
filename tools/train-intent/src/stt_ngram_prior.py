@@ -75,6 +75,7 @@ NGRAM_COUNT_FLOOR = 2
 
 DEFAULT_MIN_ROWS = 20000
 DEFAULT_MIN_LEXICON = 3000
+DEFAULT_MIN_OCCURRENCES = 2
 
 
 class GuardError(Exception):
@@ -118,6 +119,20 @@ def load_rows(paths: list[Path]) -> list[str]:
     return rows
 
 
+def load_plain_rows(paths: list[Path]) -> list[str]:
+    """Plain-text corpus lines (one sentence per line — the OSCAR / wiki
+    shape). Used to GROW the vocabulary beyond the template corpus; the
+    revision covers these bytes too, so a bank built with extra text is a
+    different measurement than one built without it."""
+    rows: list[str] = []
+    for path in paths:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            text = line.strip()
+            if text:
+                rows.append(text)
+    return rows
+
+
 def symmetric_deletes(token: str) -> set[str]:
     """All delete-1 forms of the token over Unicode SCALARS (code points),
     which is the space the Swift runtime addresses (`SttErrorCorrector`
@@ -140,19 +155,26 @@ def count_ngrams(rows: list[str]) -> tuple[Counter, Counter, Counter, Counter]:
             continue
         unigram.update(keys)
         token_total.update(keys)
+        # The separator is U+0001 — the SAME control character the Swift
+        # loader looks up (`SttErrorCorrector.NgramPrior.priorScore` keys
+        # `prev\u{1}cur`). A human-typed separator (the earlier `||`)
+        # (a) never matched at runtime — the priors silently zeroed — and
+        # (b) collides with wiki/table markup in web-scale corpora. Pinned
+        # by a fixture test: a separator change fails loudly.
         for pair in zip(keys, keys[1:]):
-            bigram["||".join(pair)] += 1
+            bigram["\u0001".join(pair)] += 1
         for triple in zip(keys, keys[1:], keys[2:]):
-            trigram["||".join(triple)] += 1
+            trigram["\u0001".join(triple)] += 1
     return unigram, bigram, trigram, token_total
 
 
-def build_bank(rows: list[str], revision: str) -> dict:
+def build_bank(rows: list[str], revision: str,
+               min_occurrences: int = DEFAULT_MIN_OCCURRENCES) -> dict:
     unigram, bigram, trigram, _ = count_ngrams(rows)
 
     lexicon = [{"token": token, "occurrences": count}
                for token, count in sorted(unigram.items())
-               if count >= 1]
+               if count >= min_occurrences]
     # Sorted by token (Unicode code-point order) so the ordinal space is
     # deterministic for a given corpus — the runtime's `ngram-lex-<n>` ids
     # name positions in THIS array and must not drift between hosts.
@@ -229,15 +251,22 @@ def check_invariants(bank: dict) -> list[str]:
                 problems.append(
                     f"delete-form {form!r} is not a delete-1 form of {token!r}")
     for key, count in bank["bigrams"].items():
-        parts = key.split("||")
+        parts = key.split("\u0001")
         if len(parts) != 2 or not all(parts):
             problems.append(f"bigram key {key!r} is malformed")
+        if "||" in key:
+            problems.append(f"bigram key {key!r} carries the HUMAN separator "
+                            f"the runtime never reads — the shipped-bank "
+                            f"silent-zero defect, refused here")
         if count < NGRAM_COUNT_FLOOR:
             problems.append(f"bigram {key!r} below the count floor")
     for key, count in bank["trigrams"].items():
-        parts = key.split("||")
+        parts = key.split("\u0001")
         if len(parts) != 3 or not all(parts):
             problems.append(f"trigram key {key!r} is malformed")
+        if "||" in key:
+            problems.append(f"trigram key {key!r} carries the HUMAN separator "
+                            f"the runtime never reads — refused here")
         if count < NGRAM_COUNT_FLOOR:
             problems.append(f"trigram {key!r} below the count floor")
     bands = bank["bands"]
@@ -252,6 +281,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", nargs="+", type=Path, required=True,
                         help="training-corpus jsonl files (utterance rows)")
+    parser.add_argument("--corpus-extra", nargs="*", type=Path, default=[],
+                        help="plain-text corpus lines (OSCAR/wiki shape) — "
+                             "GROWS the vocabulary and n-gram counts; the "
+                             "revision covers these bytes too")
     parser.add_argument("--out", type=Path,
                         help="where to write stt-ngram-prior.json "
                              "(required unless --check)")
@@ -260,13 +293,19 @@ def main() -> int:
                              "invariants; write nothing")
     parser.add_argument("--min-rows", type=int, default=DEFAULT_MIN_ROWS)
     parser.add_argument("--min-lexicon", type=int, default=DEFAULT_MIN_LEXICON)
+    parser.add_argument("--min-occurrences", type=int,
+                        default=DEFAULT_MIN_OCCURRENCES,
+                        help="lexicon floor: tokens seen fewer times than "
+                             "this are not admitted (keeps web-scale corpora "
+                             "from flooding the bank with single-use noise)")
     parser.add_argument("--bank", type=Path,
                         help="with --check: an existing bank to validate "
                              "against the corpus's re-count")
     args = parser.parse_args()
 
     try:
-        missing = [str(p) for p in args.corpus if not p.is_file()]
+        missing = [str(p) for p in args.corpus + args.corpus_extra
+                   if not p.is_file()]
         if missing:
             raise GuardError(f"corpus file(s) missing: {', '.join(missing)}")
         rows = load_rows(args.corpus)
@@ -275,8 +314,10 @@ def main() -> int:
                   f"{args.min_rows} — an n-gram prior from this corpus is "
                   f"not a measurement", file=sys.stderr)
             return EXIT_FLOOR
-        revision = corpus_revision(args.corpus)
-        bank = build_bank(rows, revision)
+        rows = rows + load_plain_rows(args.corpus_extra)
+        revision = corpus_revision(args.corpus + args.corpus_extra)
+        bank = build_bank(rows, revision,
+                          min_occurrences=args.min_occurrences)
         if len(bank["lexicon"]) < args.min_lexicon:
             print(f"floor refused: {len(bank['lexicon'])} lexicon tokens < "
                   f"--min-lexicon {args.min_lexicon}", file=sys.stderr)

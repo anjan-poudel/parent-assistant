@@ -1864,6 +1864,15 @@ final class AppCoordinator: ObservableObject {
             onEscalated: { [weak self] reason in
                 self?.emitEncoderEscalatedToPickerBrain(reason)
             })
+        // [JUDGE-PRE-INTERPRET] The semantic judge rides the chain it
+        // judges for: the resident 4B brain, consulted BEFORE the
+        // interpreter runs whenever the banded gate marked a token
+        // judge-eligible (measured 79.5% top-1 on the error corpus vs
+        // the lexicographical scorer's 2.1%). `LlamaSemanticJudge.isReady`
+        // gates on the lifecycle's CURRENT residency — never a load.
+        (router.localBrain as? LocalBrainChain)?.semanticJudge =
+            LlamaSemanticJudge(brain: llamaCommandInterpreter,
+                               lifecycle: ModelLifecycleManager.shared)
     }
 
     /// [ENCODER-RUNTIME-CASCADE] The A/B evidence for a cascade turn: the
@@ -11073,6 +11082,14 @@ extension AppCoordinator: VoiceCommandCoordinating {
     /// the interpret that ran the seam.
     var lastTurnCorrection: CorrectionResult? {
         (intentRouter?.localBrain as? LocalBrainChain)?.lastCorrection
+    }
+
+    /// [JUDGE-PRE-INTERPRET] Whether the semantic judge already ran for
+    /// this turn — the failure path reads it to skip the second judge
+    /// and go straight to the spoken clarification.
+    var lastTurnCorrectionJudged: Bool {
+        (intentRouter?.localBrain as? LocalBrainChain)?.lastCorrectionJudged
+            ?? false
     }
 
     /// [CORRECTION-REVIVE] The pluggable semantic judge, wired over the

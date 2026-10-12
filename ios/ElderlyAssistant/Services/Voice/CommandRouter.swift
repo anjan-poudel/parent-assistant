@@ -163,6 +163,12 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// logged, never persisted.
     var lastTurnCorrection: CorrectionResult? { get }
 
+    /// [JUDGE-PRE-INTERPRET] True when the semantic judge ALREADY ran
+    /// for this turn (before the interpreter). The failure path reads
+    /// it so a judged turn is never judged twice: it goes straight to
+    /// the spoken clarification.
+    var lastTurnCorrectionJudged: Bool { get }
+
     /// The pluggable semantic judge (constitution: engines stay
     /// selectable). The shipped implementation judges on the RESIDENT 4B
     /// brain only; `isReady == false` (brain not resident, fine-tuned
@@ -491,6 +497,7 @@ extension VoiceCommandCoordinating {
     // judge, so the unrecognised path falls through to its existing
     // did-you-mean/reprompt behavior byte-identically.
     var lastTurnCorrection: CorrectionResult? { nil }
+    var lastTurnCorrectionJudged: Bool { false }
     var correctionJudge: SemanticJudge { NoSemanticJudge() }
     var isOnDeviceStack: Bool { false }
     // [DIRECTIONS] (2026-09-07) Navigation defaults — see the requirement
@@ -2290,6 +2297,15 @@ final class CommandRouter {
               let correction = coordinator?.lastTurnCorrection,
               correction.mode == .apply,
               !correction.judgeItems.isEmpty else { return false }
+
+        // [JUDGE-PRE-INTERPRET] A turn the pre-interpret judge already
+        // answered is never judged twice — the spoken clarification is
+        // the next step, whatever the judge decided.
+        if coordinator?.lastTurnCorrectionJudged == true {
+            armCorrectionClarification(correction,
+                                       reason: .judgeRejected, raw: raw)
+            return true
+        }
 
         let judge = coordinator?.correctionJudge ?? NoSemanticJudge()
         guard judge.isReady else {
