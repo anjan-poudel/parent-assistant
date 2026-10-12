@@ -1526,6 +1526,25 @@ struct WakeWordSettingsView: View {
 // through `AppCoordinator`, which owns the photo store and the record
 // store; this view owns neither.
 
+// MARK: - Family list presentation (T-162; design-l2 §2.7)
+
+/// The pure decisions behind `FamilyContactsSettingsView`'s rows, split
+/// out of the view so the harness can pin them without a view instance
+/// (the find/photo presentation seams' pattern).
+enum FamilyListPresentation {
+
+    /// The `family.link.chip` capsule's visibility (design-l2 §2.7):
+    /// exactly the contact whose link the snapshot VERIFIES. A stored
+    /// claim the snapshot does not verify (a stale link, FR-FCU-006) is
+    /// ABSENT from `links`, so it shows NOTHING here — the editor's
+    /// link area owns the honest stale line; the list never claims
+    /// "Linked" for an unverified reference.
+    static func showsLinkChip(_ contact: FamilyContact,
+                              verifiedLinks: VerifiedLinksSnapshot) -> Bool {
+        verifiedLinks.links[contact.id] != nil
+    }
+}
+
 struct FamilyContactsSettingsView: View {
     @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
@@ -1664,6 +1683,12 @@ struct FamilyContactsSettingsView: View {
                     Text(contact.relationship)
                         .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
+                    // The link chip (T-162, design-l2 §2.7) — appended
+                    // to the role-chip row, VERIFIED links only.
+                    if FamilyListPresentation.showsLinkChip(
+                        contact, verifiedLinks: coordinator.verifiedLinks) {
+                        linkChip(contact)
+                    }
                 }
                 Text(contact.phone)
                     .font(.system(size: appearance.typography.captionPointSize))
@@ -1721,6 +1746,35 @@ struct FamilyContactsSettingsView: View {
             .accessibilityHidden(true)
     }
 
+    /// The `family.link.chip` capsule (T-162, design-l2 §2.7) — shown
+    /// on the role-chip row for a contact whose link the snapshot
+    /// VERIFIES (see `FamilyListPresentation.showsLinkChip`). It is the
+    /// row's affordance INTO the link/unlink flow: tapping it opens
+    /// this contact's editor, whose link area owns the link's state
+    /// and its unlink — committed through the ONE copy-preserving path
+    /// (`setFamilyContactLink` with the §1.9 mode rule; T-158). The
+    /// visual capsule stays chip-sized; the frame + `contentShape`
+    /// carry the ≥44 pt tap floor. Unlike the decorative role chips it
+    /// is NOT hidden from VoiceOver — it is interactive, so its label
+    /// is the frozen `family.link.chip` copy (no inline strings).
+    private func linkChip(_ contact: FamilyContact) -> some View {
+        Button {
+            editorTarget = .edit(contact)
+        } label: {
+            Text(L10n.str("family.link.chip", locale: coordinator.activeLocale))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.accentForeground)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3)
+                .background(appearance.colors.accentForeground.opacity(0.12))
+                .clipShape(Capsule())
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(L10n.str("family.link.chip", locale: coordinator.activeLocale)))
+    }
+
     /// True when the stored relationship is the wizard's doctor option
     /// (the GP kind chip's condition). Records store the option's
     /// LABEL in the save-time language, and en+ne are the only two
@@ -1738,8 +1792,8 @@ struct FamilyContactsSettingsView: View {
 
     /// The row's 44pt visual: the stored photo when one is on file,
     /// else the initials avatar. Photos are best-effort — a missing or
-    /// unreadable file resolves to nil (see `contactPhotoKey`'s task)
-    /// and falls through to initials.
+    /// unreadable file resolves to nil (the `faceIdentities` batch
+    /// pass's outcome above, T-157) and falls through to initials.
     @ViewBuilder
     private func contactPhotoThumb(_ contact: FamilyContact) -> some View {
         let diameter = DesignTokens.iconBadgeDiameter
