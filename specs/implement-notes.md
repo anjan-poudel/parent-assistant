@@ -165,3 +165,15 @@ identity guards; the sync resolver DELETED per §8.1 (scan: 0 code refs remain).
 New suite: 8 tests incl. format pins, precedence, no-stale-serve, source pins.
 Whole-module build green, 0 errors. Notes use a disambiguated filename
 (T-157-notes.md is call-dialer's merged record). Scoped run deferred.
+
+## T-161 — CallView faces and caption — DONE
+
+Commit 44846df3. UnifiedContactResultRow caption seam (defaulted var) + pure
+composer on the frozen key; all six §3.5 gate sites moved to allowsReading
+(.denied only blocked arm, grantAccess re-reads status); accessLimited caption
+leads the readable block; three search sites read coordinator.familyIndex +
+verifiedLinks (interim hoists gone); call-dialer dial layer untouched (pinned).
+New suite: 10 tests (33 source pins pre-verified via a Python mirror).
+Whole-module build green, 0 errors; concurrent T-158 compiled clean too.
+Deviations recorded (suite naming, dial-back tests untouched). Scoped run
+deferred.
