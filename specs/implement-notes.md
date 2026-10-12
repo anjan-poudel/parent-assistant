@@ -177,3 +177,17 @@ New suite: 10 tests (33 source pins pre-verified via a Python mirror).
 Whole-module build green, 0 errors; concurrent T-158 compiled clean too.
 Deviations recorded (suite naming, dial-back tests untouched). Scoped run
 deferred.
+
+## T-158 — Link/unlink seam and missed-call names — DONE
+
+Commit b23f190b. SystemContactUnlinkMode + pure unlinkMode rule +
+setFamilyContactLink (the only unlink path; F3 copy-before-clear with
+never-lose refusal; one atomic record write; no write-seam symbols in the
+unlink body — source-pinned); lazy injected photo-writer seam +
+syncSystemPhoto outcome mapping (byte-identical payload; .written invalidates
++ bumps; recordGone/identityMismatch refresh); link-aware
+familyContact(matchingPhone:) (own phone first, snapshot only); R4 gate shape
+in refreshNativeMissedCallNames (post-prompt re-read, allowsReading, real
+access + snapshot passthrough). New suite: 16 tests. Whole-module build green,
+0 errors (contention handled by waiting for T-161's build). Scoped run
+deferred.
