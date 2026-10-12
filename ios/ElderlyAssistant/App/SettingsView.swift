@@ -1583,7 +1583,15 @@ struct FamilyContactsSettingsView: View {
             }
         }
         .sheet(item: $editorTarget) { target in
-            FamilyContactWizardSheet(target: target)
+            FamilyContactWizardSheet(target: target) { other in
+                // Steering (family-contacts-unify T-159, design-l2 §2.3
+                // step 3): the parent swaps the sheet's item to the OTHER
+                // contact's editor in place — the item id changes, so
+                // SwiftUI replaces the content; no dismiss/re-present
+                // race. The first contact's draft was never committed
+                // and is discarded by design.
+                editorTarget = .edit(other)
+            }
         }
         .task(id: faceIdentities) {
             var resolved: [UUID: UIImage] = [:]
@@ -1783,6 +1791,19 @@ struct FamilyContactsSettingsView: View {
 /// system prompt may appear), and a denial shows the honest blocked
 /// line with the search hidden — the manual-entry path stays fully
 /// usable with or without contacts access.
+///
+/// T-159 (family-contacts-unify, 2026-10-12; design-l2 §2.2/§2.3) adds
+/// the phone-contact LINK to the find step: the results now come from
+/// `UnifiedContactSearch` (the same engine the Phone leaf runs — the
+/// family's own lives and the book's names in one ranked list), a
+/// tapped book row records an uncommitted `draftLink` (no link is
+/// stored until Save), the link area offers linked-to / stale / pick-
+/// hint states with an unlink control, and a result whose person
+/// another family contact already links to STEERS to that contact
+/// (through `onSteerTo`, which the parent turns into an in-place sheet
+/// swap) instead of silently re-linking. `.limited` contacts access is
+/// READABLE here: the granted set loads and an honest caption sits
+/// under the field (the T-148b wizard obligation, design-l2 §3.5).
 private struct FamilyContactWizardSheet: View {
     @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
@@ -1790,6 +1811,12 @@ private struct FamilyContactWizardSheet: View {
     @Environment(\.scenePhase) private var scenePhase
 
     let target: FamilyContactsSettingsView.FamilyContactEditorTarget
+
+    /// Steering callback (family-contacts-unify T-159, design-l2 §2.1/
+    /// §2.3): the wizard never edits ANOTHER contact itself — tapping an
+    /// already-linked result hands the other contact here, and the
+    /// PARENT swaps the sheet's item to that contact's editor in place.
+    let onSteerTo: (FamilyContact) -> Void
 
     /// The wizard's five steps, in order; `position` is the 1-based
     /// "Step N of 5" the indicator prints.
@@ -1880,10 +1907,28 @@ private struct FamilyContactWizardSheet: View {
     /// must never make the form vanish from under the user.
     @State private var showManualEntry = false
 
+    /// The picked-but-uncommitted link (family-contacts-unify T-159,
+    /// design-l2 §2.1): recorded by `prefill` when the tapped row
+    /// carries a live record identifier, cleared by the draft's unlink
+    /// control, passed through Save. NO link is stored until Save.
+    @State private var draftLink: SystemContactLink?
+    /// The picked record's display name AT PICK TIME (design-l2 §2.1) —
+    /// the `family.link.linkedTo` line's name, kept even if the sweep
+    /// later moves under the open sheet.
+    @State private var draftLinkBookName: String?
+    /// The other contact a tap on an already-linked result points at
+    /// (design-l2 §2.1/§2.3): the tap itself is a pure selection —
+    /// nothing is picked, no field changes, no store write — and the
+    /// intent is dropped by any new search keystroke or a successful
+    /// pick.
+    @State private var steerTarget: FamilyContact?
+
     private let directory = AddressBookDirectory()
 
-    init(target: FamilyContactsSettingsView.FamilyContactEditorTarget) {
+    init(target: FamilyContactsSettingsView.FamilyContactEditorTarget,
+         onSteerTo: @escaping (FamilyContact) -> Void) {
         self.target = target
+        self.onSteerTo = onSteerTo
         // An edit opens on the relationship step (data pre-filled by
         // `loadDraft`); "Back" from there reaches the search, so
         // re-searching stays one step away.
@@ -1895,6 +1940,18 @@ private struct FamilyContactWizardSheet: View {
     private var editingContact: FamilyContact? {
         if case .edit(let contact) = target { return contact }
         return nil
+    }
+
+    /// The editing contact's CURRENT roster row (family-contacts-unify
+    /// T-159). `target` is a snapshot from open time, and the link area
+    /// must read live state: the unlink button commits mid-sheet, and
+    /// the captured value would keep claiming the cleared link and
+    /// render a phantom `family.link.stale` line after a SUCCESSFUL
+    /// unlink. nil for a fresh add (and, defensively, for a contact
+    /// deleted elsewhere while the sheet is up).
+    private var liveEditingContact: FamilyContact? {
+        guard let id = editingContact?.id else { return nil }
+        return coordinator.familyContacts.first { $0.id == id }
     }
 
     private var trimmedName: String {
@@ -1993,14 +2050,24 @@ private struct FamilyContactWizardSheet: View {
         .onChange(of: photoPickerItem) { item in
             loadPickedPhoto(item)
         }
+        // A new keystroke supersedes any steering intent (T-159,
+        // design-l2 §2.3 step 5): the row the user pointed at may not
+        // even render in the next result list.
+        .onChange(of: searchText) { _ in
+            steerTarget = nil
+        }
         // The stored face, resolved through the coordinator's async
         // precedence resolver (T-157, design-l2 §4.4) — system photo
         // where the contact is verified-linked and one is readable,
         // the app-local file otherwise, nil for the initials avatar.
         // Keyed on the face identity, so a link/photo/epoch change
         // re-resolves. A fresh add has no identity: nothing to resolve.
+        // T-159: the LIVE roster row (see `liveEditingContact`) — the
+        // unlink's copy-first consequence must reach this preview, and
+        // the captured target would key the task to the pre-unlink
+        // identity and clear the photo the never-lose rule just saved.
         .task(id: storedFaceIdentity) {
-            guard let contact = editingContact else { return }
+            guard let contact = liveEditingContact else { return }
             let identity = coordinator.faceIdentity(for: contact)
             let face = await coordinator.faceImage(for: contact)
             // Post-await identity re-check (design-l2 §4.4): abandon the
@@ -2012,9 +2079,10 @@ private struct FamilyContactWizardSheet: View {
     }
 
     /// The editing contact's face identity — nil for a fresh add (no
-    /// stored face). The sheet's `.task(id:)` key above.
+    /// stored face). The sheet's `.task(id:)` key above. Reads the
+    /// LIVE roster row (T-159; see `liveEditingContact`).
     private var storedFaceIdentity: String? {
-        editingContact.map { coordinator.faceIdentity(for: $0) }
+        liveEditingContact.map { coordinator.faceIdentity(for: $0) }
     }
 
     // MARK: Sheet chrome
@@ -2089,6 +2157,11 @@ private struct FamilyContactWizardSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             stepTitle("family.step.find")
             searchSection
+            // The link area renders INSIDE the find step, in add AND
+            // edit (T-159, design-l1 §11.1, design-l2 §2.2).
+            if showsLinkSection {
+                linkSection
+            }
             if showManualEntry {
                 manualEntryFields
             } else {
@@ -2145,12 +2218,20 @@ private struct FamilyContactWizardSheet: View {
         VStack(spacing: 10) {
             switch access {
             case .allowed, .limited:
-                // T-148a mechanical compile fix: `.limited` shares the
-                // `.allowed` body so the switch stays exhaustive. The
-                // honest `.limited` caption + affordances are T-148b
-                // (design-l2 §2.2) — this arm is that unit's starting
-                // point, not the finished treatment.
+                // `.limited` is READABLE (design-l2 §3.5): it shares the
+                // search body, and the honest limited caption renders
+                // directly under the field (T-159, the T-148b wizard
+                // obligation — the decided placement).
                 searchField
+                if access == .limited {
+                    Text(L10n.str("call.search.accessLimited",
+                                  locale: coordinator.activeLocale))
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 4)
+                }
                 if entries == nil {
                     if loadFailed {
                         loadFailedRow
@@ -2190,16 +2271,30 @@ private struct FamilyContactWizardSheet: View {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// The matched address-book rows, most-recently-called first — the
-    /// same pure search the Phone leaf runs over the same fetched book.
-    /// Tapping a row SELECTS the person (see `prefill`).
+    /// The unified matched rows, most-recently-called first — the SAME
+    /// pure search the Phone leaf runs (T-159, design-l2 §2.2): the
+    /// family roster (nickname tiers included) and the fetched book in
+    /// one engine, with the coordinator's PUBLISHED index and verified
+    /// links. Each row renders per its kind: a book row another roster
+    /// contact already claims becomes a steering card instead of a
+    /// selection, the editing contact's own row is skipped, and every
+    /// other selectable row prefills (which also records the draft
+    /// link). The rows ARE the engine's list, in the engine's order —
+    /// there is no parallel tier table here to drift from it.
     @ViewBuilder
     private var searchResults: some View {
         if let entries {
-            let outcome = SystemContactSearch.search(query: trimmedSearch,
-                                                     in: entries,
-                                                     recency: coordinator.contactCallRecency)
-            if outcome.entries.isEmpty {
+            let outcome = UnifiedContactSearch.search(
+                query: trimmedSearch,
+                family: coordinator.familyContacts,
+                index: coordinator.familyIndex,
+                in: entries,
+                verifiedLinks: coordinator.verifiedLinks,
+                recency: coordinator.contactCallRecency)
+            let rows = FamilyWizardFindPresentation.rows(for: outcome,
+                                                         roster: coordinator.familyContacts,
+                                                         editing: editingContact)
+            if rows.isEmpty {
                 Text("call.search.noResults")
                     .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
@@ -2207,30 +2302,13 @@ private struct FamilyContactWizardSheet: View {
                     .padding(.horizontal, 4)
             } else {
                 VStack(spacing: 8) {
-                    ForEach(outcome.entries) { entry in
-                        Button {
-                            prefill(entry)
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "person.crop.circle.badge.plus")
-                                    .font(.system(size: 18)).foregroundStyle(appearance.colors.accentForeground)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(entry.name)
-                                        .font(.system(size: appearance.typography.bodyPointSize,
-                                                      weight: .semibold))
-                                        .foregroundStyle(appearance.colors.textPrimary)
-                                    Text(entry.caption)
-                                        .font(.system(size: appearance.typography.captionPointSize))
-                                        .foregroundStyle(appearance.colors.textSecondary)
-                                        .lineLimit(2)
-                                }
-                                Spacer(minLength: 8)
-                            }
-                            .padding(.horizontal, 12)
-                            .frame(minHeight: DesignTokens.minTapTargetSize)
-                            .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+                    ForEach(rows) { row in
+                        switch row {
+                        case .selectable(let entry):
+                            selectableResultRow(entry)
+                        case .steering(let other):
+                            steeringResultRow(other)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
                 if outcome.moreAvailable {
@@ -2244,15 +2322,95 @@ private struct FamilyContactWizardSheet: View {
         }
     }
 
+    /// A selectable row — today's shape exactly. Tapping it SELECTS the
+    /// person (`prefill`).
+    private func selectableResultRow(_ entry: AddressBookEntry) -> some View {
+        Button {
+            prefill(entry)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .font(.system(size: 18)).foregroundStyle(appearance.colors.accentForeground)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.name)
+                        .font(.system(size: appearance.typography.bodyPointSize,
+                                      weight: .semibold))
+                        .foregroundStyle(appearance.colors.textPrimary)
+                    Text(entry.caption)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The steering card for an already-linked person (T-159, design-l2
+    /// §2.2/§2.3): the honest sentence says WHO this result is — an
+    /// existing family contact — and the ≥44 pt button (a11y
+    /// `settings.family.edit`) hands the steer to the parent. A tap
+    /// anywhere on the card records the intent (`steerTarget`) WITHOUT
+    /// selecting anything — no field changes, no store write; VoiceOver
+    /// reads the sentence, then the button.
+    private func steeringResultRow(_ other: FamilyContact) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.fmt("family.link.alreadyLinked",
+                          locale: coordinator.activeLocale, other.name))
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                onSteerTo(other)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "person.crop.circle")
+                        .font(.system(size: 18))
+                        .foregroundStyle(appearance.colors.accentForeground)
+                    Text(other.name)
+                        .font(.system(size: appearance.typography.bodyPointSize,
+                                      weight: .semibold))
+                        .foregroundStyle(appearance.colors.textPrimary)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 14)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("settings.family.edit"))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // The WHOLE card is a ≥44 pt target (design-l2 §2.2) — tapping
+        // the sentence records the steer intent without committing it.
+        .frame(minHeight: DesignTokens.minTapTargetSize)
+        .contentShape(Rectangle())
+        .onTapGesture { steerTarget = other }
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
+    }
+
     /// A tapped result SELECTS the person: the name + number prefill
     /// the manual fields (which appear for confirmation — the fields
-    /// stay editable), and the query clears so the results collapse
-    /// and the chosen person is what is on screen.
+    /// stay editable), the query clears so the results collapse, and —
+    /// T-159, design-l2 §2.2 — the row's record is recorded as the
+    /// draft link through the pure seam's non-empty-identifier guard
+    /// (an empty identifier is "no linkable record", §3.5). Any
+    /// steering intent is dropped: the pick superseded it (§2.3
+    /// step 5).
     private func prefill(_ entry: AddressBookEntry) {
         name = entry.name
         phone = entry.phone
         showManualEntry = true
         searchText = ""
+        steerTarget = nil
+        guard let link = FamilyWizardFindPresentation.draftLink(for: entry) else { return }
+        draftLink = link
+        draftLinkBookName = entry.name
     }
 
     private var loadingRow: some View {
@@ -2353,10 +2511,180 @@ private struct FamilyContactWizardSheet: View {
         .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
+    // MARK: Step 1 — the link area (T-159; design-l2 §2.2, design-l1 §6.4)
+
+    /// The link area's CURRENT state — the pure precedence rule from
+    /// `FamilyWizardFindPresentation`, fed with the LIVE roster row
+    /// (see `liveEditingContact`: the unlink button commits mid-sheet).
+    private var linkState: FamilyWizardFindPresentation.LinkState {
+        FamilyWizardFindPresentation.linkState(
+            draftLink: draftLink,
+            editing: liveEditingContact,
+            verifiedLinks: coordinator.verifiedLinks)
+    }
+
+    /// Whether the link area renders at all. The readable arm always
+    /// shows it (the pick hint IS the affordance's label, and the area
+    /// is present in add AND edit — design-l2 §2.2); the unreadable
+    /// arms show it ONLY when there is a link to show — a denied /
+    /// undetermined search renders the honest access card and never an
+    /// empty-but-enabled link section (the unit's failure path), while
+    /// a stored link's unlink remedy stays reachable even after access
+    /// was revoked (FR-FCU-006; design-l1 §6.4 "works for unverified/
+    /// stale links").
+    private var showsLinkSection: Bool {
+        access?.allowsReading == true || linkState != .noPick
+    }
+
+    /// The link area (design-l2 §2.2). The `family.link.sectionTitle`
+    /// heading shows in all four states; the states are exclusive and
+    /// total:
+    ///   1. a DRAFT pick — the name recorded at pick time, and an
+    ///      unlink control that clears ONLY the draft (nothing was
+    ///      stored);
+    ///   2. the editing contact's VERIFIED stored link — the linked-to
+    ///      line (the book name resolved from the current sweep, or
+    ///      nameless in the narrow window) and an unlink control that
+    ///      commits immediately (`setFamilyContactLink`);
+    ///   3. the editing contact's STALE stored link — the honest stale
+    ///      line and the same committing unlink;
+    ///   4. no link — the pick hint only.
+    /// No link is ever STORED from this area (the save path writes the
+    /// draft); the only write here is the stored link's unlink.
+    private var linkSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            stepTitle("family.link.sectionTitle")
+            switch linkState {
+            case .draftLinked:
+                linkedToLine(draftLinkBookName)
+                unlinkButton { clearDraftLink() }
+            case .storedLinked:
+                linkedToLine(resolvedBookName)
+                unlinkButton { commitUnlink() }
+            case .storedStale:
+                staleLinkLine
+                unlinkButton { commitUnlink() }
+            case .noPick:
+                Text("family.link.pickHint")
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+            }
+        }
+    }
+
+    /// The `family.link.linkedTo` line — the frozen sentence formatted
+    /// with the linked record's name. A nil name (design-l2 §2.2's
+    /// narrow window: the record left the sweep while the snapshot
+    /// still verifies it) renders the design's "-" placeholder rather
+    /// than a fabricated identity.
+    private func linkedToLine(_ name: String?) -> some View {
+        Text(L10n.fmt("family.link.linkedTo", locale: coordinator.activeLocale, name ?? "-"))
+            .font(.system(size: appearance.typography.bodyPointSize))
+            .foregroundStyle(appearance.colors.textPrimary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The stale-link line: the snapshot no longer verifies the stored
+    /// claim (FR-FCU-006) — the link is ignored and the honest sentence
+    /// says so; the unlink control below still works.
+    private var staleLinkLine: some View {
+        Text(L10n.str("family.link.stale", locale: coordinator.activeLocale))
+            .font(.system(size: appearance.typography.captionPointSize))
+            .foregroundStyle(appearance.colors.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The name on the linked-to line for the editing contact's
+    /// VERIFIED link — resolved from the CURRENT sweep by the record's
+    /// identifier (the snapshot's link is authoritative; the sweep only
+    /// supplies the display name, design-l2 §2.2).
+    private var resolvedBookName: String? {
+        guard let identifier = liveEditingContact
+            .flatMap({ coordinator.verifiedLinks.links[$0.id]?.identifier }) else {
+            return nil
+        }
+        return FamilyWizardFindPresentation.bookName(for: identifier, in: entries)
+    }
+
+    /// The unlink control (design-l2 §2.2, §1.9): ≥44 pt, a11y label
+    /// `family.link.unlink` and hint `family.link.unlinkHint`, with the
+    /// hint ALSO visible as a caption under the button — the
+    /// plain-language reassurance the owner needs before touching a
+    /// link. `action` is the state's consequence: the draft clears
+    /// locally; a STORED link commits through the coordinator.
+    private func unlinkButton(_ action: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button(action: action) {
+                Text("family.link.unlink")
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
+                    .padding(.horizontal, 18)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
+                    .appSurface(role: .control, cornerRadius: 999)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("family.link.unlink"))
+            .accessibilityHint(Text("family.link.unlinkHint"))
+            Text("family.link.unlinkHint")
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Clears the uncommitted DRAFT link only (design-l2 §2.2 state 1)
+    /// — nothing was stored, so there is nothing to commit.
+    private func clearDraftLink() {
+        draftLink = nil
+        draftLinkBookName = nil
+    }
+
+    /// Commits the STORED link's removal through the ONE unlink path
+    /// (T-158, design-l2 §2.6/§1.9): the mode comes from the
+    /// coordinator's pure rule fed with the CURRENT state — whether an
+    /// app-local photo file exists, and whether the editor is showing
+    /// the linked record's SYSTEM photo. On `false` nothing changed
+    /// (e.g. the never-lose copy was refused): the line stays, never a
+    /// false success.
+    private func commitUnlink() {
+        guard let contact = liveEditingContact else { return }
+        let mode = unlinkModeForEditingContact(contact)
+        Task {
+            _ = await coordinator.setFamilyContactLink(id: contact.id, mode: mode)
+        }
+    }
+
+    /// The unlink mode for the editing contact's current state (T-159,
+    /// design-l2 §2.6/§1.9): `AppCoordinator.unlinkMode` fed with
+    /// (a) whether an app-local photo file exists (`photoFilename`), and
+    /// (b) whether what the editor DISPLAYS is the linked record's
+    /// system photo — a VERIFIED link whose stored photo actually
+    /// resolved (`storedPhoto` non-nil with no app-local file is
+    /// exactly "system bytes present", the same derivation the photo
+    /// step's source caption will use, §2.4). A linked record with no
+    /// readable photo is NOT "displaying" one, so its unlink takes the
+    /// plain clear instead of a copy that could never be made.
+    private func unlinkModeForEditingContact(
+        _ contact: FamilyContact) -> AppCoordinator.SystemContactUnlinkMode {
+        AppCoordinator.unlinkMode(
+            appLocalFileExists: contact.photoFilename != nil,
+            displayedPhotoIsSystem: coordinator.verifiedLinks.links[contact.id] != nil
+                && storedPhoto != nil)
+    }
+
     private func refreshSearchAccess() {
         let status = AddressBookDirectory.access()
         access = status
-        guard status == .allowed else { return }
+        // T-159 (the T-148b wizard obligation; design-l2 §3.5, §8.2):
+        // `.limited` is READABLE — the granted set loads; only `.denied`
+        // and `.notDetermined` skip the load. Without this, relaunching
+        // with an already-granted limited selection renders the search
+        // UI over an unloaded book.
+        guard status.allowsReading else { return }
         if entries == nil || loadFailed {
             loadEntries()
         }
@@ -2364,9 +2692,12 @@ private struct FamilyContactWizardSheet: View {
 
     private func grantAccess() {
         Task {
-            let granted = await directory.requestAccess()
+            // The binary request result is NEVER the load decision
+            // (design-l2 §3.5): re-read the status — the system sheet
+            // may yield `.limited`, which is readable.
+            _ = await directory.requestAccess()
             access = AddressBookDirectory.access()
-            if granted {
+            if access?.allowsReading == true {
                 loadEntries()
             }
         }
@@ -2814,7 +3145,11 @@ private struct FamilyContactWizardSheet: View {
                 photo: pickedPhoto, removingPhoto: removingStoredPhoto,
                 nicknames: nick.map { [$0] } ?? [],
                 address: homeAddress, email: contactEmail,
-                isEmergencyContact: isEmergencyContact)
+                isEmergencyContact: isEmergencyContact,
+                // T-159 (design-l2 §2.6): the draft link is the ONLY
+                // link write this flow makes; nil leaves any stored
+                // claim unchanged (clearing is the unlink path only).
+                link: draftLink)
         } else {
             succeeded = coordinator.addFamilyContact(
                 name: trimmedName, phone: phone,
@@ -2822,7 +3157,8 @@ private struct FamilyContactWizardSheet: View {
                 photo: pickedPhoto,
                 nicknames: nick.map { [$0] } ?? [],
                 address: homeAddress, email: contactEmail,
-                isEmergencyContact: isEmergencyContact)
+                isEmergencyContact: isEmergencyContact,
+                link: draftLink)
         }
         if succeeded { dismiss() }
         // A failed store write keeps the draft on screen — Save again to
@@ -2832,6 +3168,145 @@ private struct FamilyContactWizardSheet: View {
     private func trimmedOrNil(_ text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+// MARK: - Find step presentation (T-159; design-l2 §2.2/§2.3)
+//
+// The wizard find step's PURE derivations, split out of the sheet so
+// the unit harness can pin them without a view instance: which result
+// rows render as selectable vs steering (and which are skipped), the
+// stored-claimant rule behind steering, the draft-link record, the
+// link area's state precedence, and the book-name resolution. The
+// sheet is then a thin renderer of these values, and its row list is
+// by construction a function of the engine's
+// `UnifiedContactSearch.Outcome` — no parallel tier table exists to
+// drift from it (the design-l2 §6.4 drift pin tests this seam AND the
+// call site).
+
+/// The pure derivations behind `FamilyContactWizardSheet`'s find step.
+enum FamilyWizardFindPresentation {
+
+    /// One rendered row of the find step's result list (design-l2 §2.2).
+    enum Row: Equatable, Identifiable {
+        /// A phone-book row the user can select: tap = `prefill` (name
+        /// + number + the draft link record).
+        case selectable(AddressBookEntry)
+
+        /// The steering card for `other`, shown in place of the matched
+        /// row: the person is already a family contact (their own row,
+        /// a synthesized linked row, or the claimant of the matched
+        /// book row's record) — the row is never selectable.
+        case steering(FamilyContact)
+
+        /// Stable identity within one result list: book rows keep the
+        /// engine's number key, steering rows key on the person —
+        /// prefixed so the two families can never collide.
+        var id: String {
+            switch self {
+            case .selectable(let entry): return "pick-\(entry.normalized)"
+            case .steering(let contact): return "steer-\(contact.id.uuidString)"
+            }
+        }
+    }
+
+    /// The link area's state (design-l2 §2.2), exclusive and total: the
+    /// precedence is draft → stored-verified → stored-stale → no pick.
+    /// The section heading renders in all four; the DISPLAY names are
+    /// the view's business (`draftLinkBookName`, `resolvedBookName`).
+    enum LinkState: Equatable {
+        /// A picked-but-uncommitted link: the name recorded at pick
+        /// time and an unlink control that clears ONLY the draft.
+        case draftLinked
+        /// The editing contact's stored link, verified by the snapshot.
+        case storedLinked
+        /// The editing contact's stored link, NOT verified — the
+        /// honest `family.link.stale` line; the unlink still works
+        /// (FR-FCU-006).
+        case storedStale
+        /// No link at all — the `family.link.pickHint` caption only.
+        case noPick
+    }
+
+    /// The result rows to render, in the ENGINE's order (design-l2
+    /// §2.2): each `.addressBook` row whose record is already claimed
+    /// by another roster contact becomes a steering row instead of a
+    /// selectable one; each `.family` row is a steering row — except
+    /// the contact being edited, whose own row is skipped entirely
+    /// (its link is the link area's subject). One row per person: the
+    /// engine's Pass-3 merge already drops a VERIFIED link's book twin,
+    /// but a STALE claimant's book row can still ride beside the
+    /// claimant's own family row, and SwiftUI's `ForEach` demands
+    /// unique ids — the first occurrence (the engine's ranking
+    /// position) is kept.
+    static func rows(for outcome: UnifiedContactSearch.Outcome,
+                     roster: [FamilyContact],
+                     editing: FamilyContact?) -> [Row] {
+        let mapped: [Row] = outcome.entries.compactMap { result in
+            switch result {
+            case .addressBook(let entry):
+                if let claimant = storedClaimant(entry.identifier, in: roster,
+                                                 editing: editing) {
+                    return .steering(claimant)
+                }
+                return .selectable(entry)
+            case .family(let contact):
+                if let editing, contact.id == editing.id { return nil }
+                return .steering(contact)
+            }
+        }
+        var seen: Set<String> = []
+        return mapped.filter { seen.insert($0.id).inserted }
+    }
+
+    /// The roster contact whose STORED link claims `identifier` — the
+    /// steering guard (design-l2 §2.2): verified or stale, the
+    /// SUPERSET, so a number already linked to one family contact can
+    /// never be silently re-linked to a second. The editing contact is
+    /// excluded (re-picking one's own record stays the editor's own
+    /// link area's business), roster order decides between several
+    /// claimants, and an empty identifier is "no linkable record"
+    /// (§3.5) — never a claim.
+    static func storedClaimant(_ identifier: String,
+                               in roster: [FamilyContact],
+                               editing: FamilyContact?) -> FamilyContact? {
+        guard !identifier.isEmpty else { return nil }
+        return roster.first { contact in
+            contact.id != editing?.id && contact.systemContact?.identifier == identifier
+        }
+    }
+
+    /// The draft-link record a picked row carries (design-l2 §2.2's
+    /// `prefill` guard): a live record's identifier plus the row's
+    /// normalized number key as the fingerprint; nil for an empty
+    /// identifier — "no linkable record", never a link target (§3.5).
+    static func draftLink(for entry: AddressBookEntry) -> SystemContactLink? {
+        guard !entry.identifier.isEmpty else { return nil }
+        return SystemContactLink(identifier: entry.identifier, numberKey: entry.normalized)
+    }
+
+    /// The link area's state (design-l2 §2.2). `editing` must be the
+    /// LIVE roster row — the unlink button commits mid-sheet, and a
+    /// cleared claim must leave the area at `.noPick`, never at a
+    /// phantom stale line.
+    static func linkState(draftLink: SystemContactLink?,
+                          editing: FamilyContact?,
+                          verifiedLinks: VerifiedLinksSnapshot) -> LinkState {
+        if draftLink != nil { return .draftLinked }
+        guard let editing, editing.systemContact != nil else { return .noPick }
+        return verifiedLinks.links[editing.id] != nil ? .storedLinked : .storedStale
+    }
+
+    /// The name shown on the `family.link.linkedTo` line for the
+    /// editing contact's VERIFIED link: the sweep row carrying the
+    /// linked record's identifier, when the sweep has one. nil — the
+    /// narrow window where the record left the sweep while the
+    /// snapshot still verifies it — renders the line without a name;
+    /// the stale decision is the snapshot's, never the sweep's
+    /// (design-l2 §2.2).
+    static func bookName(for identifier: String, in entries: [AddressBookEntry]?) -> String? {
+        guard !identifier.isEmpty else { return nil }
+        return entries?.first { $0.identifier == identifier }?.name
     }
 }
 
