@@ -696,7 +696,7 @@ private func save() {
             photoSaveState = state
             step = .photo                              // show the honest label where it lives
         } else {
-            dismiss()                                  // .written or .skippedNoLink → today's UX
+            dismiss()                                  // .skippedNoLink or nil outcome → today's UX (F4, T-165: .written → .updatedInSystem, shown)
         }
     }
 }
@@ -893,6 +893,16 @@ required change):
   `ContactsAccessGateTests` (new, source-scan) extracts each enumerated expression/function
   body above and asserts `allowsReading` is present and a `== .allowed` gate is ABSENT — a
   reverted gate fails the suite. (§6.4, §8.3, §9 R2.)
+- **Footnote — the one adjacent `allEntries()` consumer outside this enumeration (security
+  review F6)**: `AppCoordinator.makeDialectBiasProfileProvider` also reads
+  `AddressBookDirectory().allEntries()` — definition at `AppCoordinator.swift:2660` (the
+  `allEntries()` call at `:2664`; its two recognizer call sites at `:1337` and `:1377`), the
+  line position verified against the merged tree at `4d4d1e28` (the review-time anchor was
+  `:2529` at `f6ba251b`; the line moved with the implementation units that followed). It is NOT
+  an `AddressBookDirectory.access()` consumer and its behavior is unchanged by this feature:
+  it never gates, never prompts and never nags — a denied/absent book yields an honest empty
+  contact-name list — so no enumeration change, gate change or new pin is required. Recorded at
+  T-165 with the F6 closure evidence in `specs/FCU-security-evidence-index.md`.
 
 ### 3.6 Snapshot / index lifecycle
 

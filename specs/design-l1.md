@@ -556,10 +556,12 @@ system one — the only surface that needs the label (FR-FCU-007 honest display)
 2. If the store write succeeded AND a NEW/CHANGED photo exists AND the contact is linked
    (verified) → attempt in a `Task`: notDetermined/denied → `.skippedNoAuthorization`
    (fallback state, no prompt); else `writePhoto(jpeg, to:)` with the same processed bytes.
-3. `.written` → bump `faceEpoch`, invalidate the identifier's photo cache, dismiss (today's
-   UX). Any other outcome → set the outcome state (§10.3), KEEP the sheet open, and switch the
-   primary button to Done (auto-dismiss only on success). The owner sees exactly what
-   happened; nothing is claimed that did not happen.
+3. `.written` → bump `faceEpoch`, invalidate the identifier's photo cache, show the honest
+   label (§10.3: `.updatedInSystem`; the sheet stays open — the F4 wording alignment applied
+   at T-165, matching §10.3's own table and design-l2 §1.5). Any other outcome → set the
+   outcome state (§10.3), KEEP the sheet open, and switch the primary button to Done
+   (auto-dismiss only when no post-save state is shown — `.skippedNoLink` or no photo change).
+   The owner sees exactly what happened; nothing is claimed that did not happen.
 4. No photo changed → dismiss as today; no write attempted.
 
 ### 10.3 Fallback / degradation state machine
