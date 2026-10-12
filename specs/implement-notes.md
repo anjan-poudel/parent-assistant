@@ -254,3 +254,15 @@ T-164). F4 comment aligned in design-l2 §2.6 and design-l1 §10.2 step 3; F6
 T-163 sweep pins; F7 no-action recorded; F8 accepted residual recorded for
 the DV session. 35/35 cited test tokens verified; log gate re-run exit 0.
 No production code touched.
+
+## T-164 — Device validation DV-1..6 protocol — DONE (execution PENDING)
+
+Commit 32e2382f. FCU-device-validation-protocol.md: the six DV items verbatim
+from the constitution with preconditions, shipped-copy steps, expected
+outcomes, pass/fail criteria, a11y spot-checks, evidence slots, record
+templates, build/install pointers (device-install.sh artifact-derived bundle
+id). HONEST STATUS: protocol written, execution PENDING — no Anzaan session;
+every item recorded BLOCKED with its named dependency; no PASS claimed; final
+sign-off gated until a device session executes all six (FR-FCU-017). Owner
+actions OA-1..OA-6 + the pre-release device console check are named in the
+protocol.
