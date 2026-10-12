@@ -191,3 +191,15 @@ in refreshNativeMissedCallNames (post-prompt re-read, allowsReading, real
 access + snapshot passthrough). New suite: 16 tests. Whole-module build green,
 0 errors (contention handled by waiting for T-161's build). Scoped run
 deferred.
+
+## T-159 — Wizard find and link steps — DONE
+
+Commit 2bc3817a. Find step converted to UnifiedContactSearch with the
+published roster/index/verified links; pure seam FamilyWizardFindPresentation
+(rows/storedClaimant/draftLink/linkState/bookName); draft link + 4-state link
+section with unlink through setFamilyContactLink; steering micro-flow
+(onSteerTo + parent in-place sheet swap); allowsReading gates + limited
+caption; draftLink passed through Save. New suite FamilyWizardFindStepTests
+(pure seams, engine-integrated Gherkin paths, drift pin, source pins).
+Whole-module build green, 0 errors. CallingSettingsView untouched. 7
+decisions/deviations recorded in the notes. Scoped run deferred.
