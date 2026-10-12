@@ -217,3 +217,15 @@ coordinator seam — interim loss window closed). One production deviation:
 faceImageWithSource coordinator seam (recorded). New suite:
 FamilyWizardPhotoSaveTests. Whole-module build green, 0 errors. Scoped run
 deferred.
+
+## T-162 — Family list chip + legacy deletion — DONE
+
+Commit d8f6fed9. Link chip via pure seam (verified links only) appended to the
+role-chip row; ≥44pt tap floor, VoiceOver label, opens the editor (the
+copy-preserving unlink flow). T-157 face migration verified complete (one
+batch .task(id:) pass, post-await re-check, single publication) + one stale
+doc comment fixed. loadDraft preview confirmed on the T-160 async path.
+Legacy contactPhoto(for:) deletion CONFIRMED: 0 code references across the
+391-file production module (both scan patterns). New suite
+FamilyListLinkChipTests incl. the named deletion pin. Whole-module build
+green, 0 errors (195 warnings, one fewer than baseline). Scoped run deferred.
