@@ -2684,9 +2684,15 @@ final class AppCoordinator: ObservableObject {
     ///     = the real `SystemContactLinkService` actor, built at FIRST
     ///     USE, not here; the coordinator suites inject a scripted fake
     ///     through this seam so no `CNContactStore` ever enters a test.
+    ///   - systemContactPhotoWriter: the system-photo write seam
+    ///     `syncSystemPhoto` delegates to (T-158). nil (the app's own
+    ///     construction) = the real `SystemContactPhotoWriter` actor,
+    ///     built at FIRST USE, not here; the coordinator suites inject
+    ///     the T-154 `FakeSystemContactPhotoWriter` through this seam.
     init(profileStorage: ProfilePayloadStorage? = nil,
          wireProfilePersonalization: Bool = true,
-         systemContactLinkService: SystemContactLinkReading? = nil) {
+         systemContactLinkService: SystemContactLinkReading? = nil,
+         systemContactPhotoWriter: SystemContactPhotoWriting? = nil) {
         // [BOOT-REVIEW P0 item 1] `bootstrap-init` — the composition root's
         // own cost, measured separately from every other startup metric:
         // this is what runs before the app exists at all (the App struct's
@@ -2798,6 +2804,9 @@ final class AppCoordinator: ObservableObject {
         // before touching the service, so no address-book handle is ever
         // built here).
         self.injectedLinkService = systemContactLinkService
+        // T-158: the write-seam injection, same pattern — armed before the
+        // roster's first assignment. The lazy writer is never built here.
+        self.injectedSystemContactPhotoWriter = systemContactPhotoWriter
         self.familyContacts = []
         self.familyNotifier = APNsFamilyNotifier(
             contacts: [],
@@ -6859,6 +6868,272 @@ self.noteTalkContractChanged()
         ))
     }
 
+    // MARK: - Link / unlink seam (T-158; design-l2 §1.9, design-l1 §6.4)
+
+    /// The photo consequence an unlink books (design-l2 §1.9, design-l1
+    /// §6.4; FR-FCU-005). Every mode leaves BOTH records intact — an
+    /// unlink only ever clears this coordinator's own stored claim and
+    /// NEVER writes to the system record (the system contact is not
+    /// edited, not deleted, not touched).
+    enum SystemContactUnlinkMode: Equatable {
+        /// Default: the stored link is cleared; the app-local photo file
+        /// is untouched.
+        case unlinkKeepingLocalAsIs
+        /// The displayed photo IS the linked record's system photo and no
+        /// app-local file exists: copy those bytes into the app-local
+        /// store FIRST, assign the copied file to `photoFilename`, and
+        /// clear the link only after that assignment persisted. A copy
+        /// that produced no file does NOT clear (F3; the never-lose rule
+        /// wins over the unlink).
+        case unlinkKeepingDisplayedPhotoLocally
+        /// Explicit "remove everything": the link and the app-local photo
+        /// file are both cleared (the system record is still untouched).
+        case unlinkAndClearAppLocalPhoto
+    }
+
+    /// The pure mode rule the wizard applies BEFORE calling
+    /// `setFamilyContactLink` (design-l2 §1.9): an app-local file exists →
+    /// keep it as is; otherwise, when the displayed photo is the linked
+    /// system one, copy it locally first; else nothing displayed would be
+    /// lost → keep as is. Static and total so the wizard's choice and the
+    /// suites judge by the SAME expression.
+    static func unlinkMode(appLocalFileExists: Bool,
+                           displayedPhotoIsSystem: Bool) -> SystemContactUnlinkMode {
+        if appLocalFileExists { return .unlinkKeepingLocalAsIs }
+        return displayedPhotoIsSystem ? .unlinkKeepingDisplayedPhotoLocally
+                                      : .unlinkKeepingLocalAsIs
+    }
+
+    /// The ONLY unlink path (design-l2 §1.9, design-l1 §6.4; FR-FCU-005,
+    /// FR-FCU-006). Clears the stored link, books the photo consequence
+    /// per `mode`, bumps the face epoch and republishes the roster (whose
+    /// `didSet` triggers the verified-link refresh). Never writes to the
+    /// system record.
+    ///
+    /// `true` = cleared, or already absent (no stored link to clear);
+    /// `false` = no such contact, or a consequence that could not be
+    /// booked — in which case the link is NOT cleared (the never-lose
+    /// rule wins over the unlink) and the refusal is reason-coded on the
+    /// bus, never silent.
+    ///
+    /// F3 (security advisory): `.unlinkKeepingDisplayedPhotoLocally`
+    /// copies the displayed system bytes BEFORE any record write, then
+    /// assigns the copied file to `photoFilename` in the SAME store write
+    /// that clears the link — so the displayed photo survives the unlink,
+    /// both records stay intact, and a failure leaves neither a dangling
+    /// `photoFilename` nor an orphaned copy.
+    @discardableResult
+    @MainActor
+    func setFamilyContactLink(id: UUID, mode: SystemContactUnlinkMode) async -> Bool {
+        guard let contact = familyContacts.first(where: { $0.id == id }) else { return false }
+
+        let oldFilename = contact.photoFilename
+        var newFilename = oldFilename
+
+        // (1) Book the photo consequence — the COPY runs first, before any
+        // record write, so a failure can refuse the unlink without having
+        // touched the stored record.
+        switch mode {
+        case .unlinkKeepingLocalAsIs:
+            break   // app-local file untouched
+        case .unlinkKeepingDisplayedPhotoLocally:
+            guard let link = contact.systemContact, !link.identifier.isEmpty else {
+                // No stored link = nothing is displayed from the system
+                // record: nothing to copy, and the unlink is a plain
+                // clear (design-l2 §1.9: `true` = "already absent").
+                break
+            }
+            newFilename = await copyDisplayedSystemPhotoLocally(forIdentifier: link.identifier)
+            if newFilename == nil {
+                emitUnlinkRefusal(reasonCode: "copy_failed")
+                return false   // never-lose: the link is NOT cleared
+            }
+        case .unlinkAndClearAppLocalPhoto:
+            newFilename = nil
+        }
+
+        // (2) ONE record write: the photoFilename consequence and the
+        // cleared link land together, so no window exists where a cleared
+        // link sits next to a stale filename (or the reverse). From a
+        // fresh store read — the roster snapshot may be a beat older.
+        var all = familyContactStore.load()
+        guard let index = all.firstIndex(where: { $0.id == id }) else {
+            if let newFilename, newFilename != oldFilename {
+                contactPhotoStore.delete(named: newFilename)   // never orphan a file
+            }
+            emitUnlinkRefusal(reasonCode: "save_failed")
+            return false
+        }
+        all[index].photoFilename = newFilename
+        all[index].systemContact = nil
+        guard familyContactStore.save(all) else {
+            if let newFilename, newFilename != oldFilename {
+                contactPhotoStore.delete(named: newFilename)   // never orphan a file
+            }
+            emitUnlinkRefusal(reasonCode: "save_failed")
+            return false
+        }
+
+        // (3) The commit point passed — the replaced/cleared app-local
+        // file can go now (the `updateFamilyContact` sequencing: the
+        // record is the commit point, the old file only follows it).
+        if let oldFilename, oldFilename != newFilename {
+            contactPhotoStore.delete(named: oldFilename)
+        }
+
+        // (4) Republish (didSet: wholesale index rebuild + link refresh —
+        // the stale claim disappears from the next snapshot, FR-FCU-006)
+        // and bump the epoch (design-l2 §4.4: an unlink is an identity
+        // change). The system record was never touched.
+        familyContacts = familyContactStore.load()
+        familyNotifier.updateContacts(Self.emergencyContacts(from: familyContacts,
+                               defaultCallApp: defaultCallApp))
+        faceEpoch += 1
+        emitUnlinkEvent(mode)
+        return true
+    }
+
+    /// The displayed system photo bytes copied into the app-local store as
+    /// the processed JPEG the app holds everywhere (design-l1 §6.4: "one
+    /// encode via `processedJPEG`") — the copied file's name, or nil when
+    /// nothing could be copied (no bytes, undecodable bytes, or a rejected
+    /// store write), which the unlink reads as "refuse to clear".
+    ///
+    /// Reads through the one link-reading seam: the same readable-access
+    /// gate the face resolver uses, so no byte ever comes back through an
+    /// unreadable door.
+    @MainActor
+    private func copyDisplayedSystemPhotoLocally(forIdentifier identifier: String) async -> String? {
+        let service = linkService
+        guard let data = await service.photoImageData(forIdentifier: identifier),
+              let image = UIImage(data: data) else { return nil }
+        return contactPhotoStore.save(image)
+    }
+
+    /// The §5.2 unlink row: `contacts_link` / `unlink`, outcome = the
+    /// booked mode consequence, no error code on success. Reason-code
+    /// only — no name, number, identifier, filename or byte anywhere in a
+    /// field (NFR-FCU-002).
+    private func emitUnlinkEvent(_ mode: SystemContactUnlinkMode) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "contacts_link",
+            eventType: "unlink",
+            durationMs: nil,
+            outcome: Self.unlinkOutcomeToken(mode),
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+
+    /// The closed §5.2 outcome vocabulary of the unlink event.
+    static func unlinkOutcomeToken(_ mode: SystemContactUnlinkMode) -> String {
+        switch mode {
+        case .unlinkKeepingLocalAsIs: return "keeping_local_as_is"
+        case .unlinkKeepingDisplayedPhotoLocally: return "keeping_displayed_photo_locally"
+        case .unlinkAndClearAppLocalPhoto: return "clear_app_local_photo"
+        }
+    }
+
+    /// One reason-coded event for an unlink REFUSED by the never-lose
+    /// rule — the §5.2 `claim_refused` row's shape (component
+    /// `contacts_link`, outcome `refused`, a specific fixed error code)
+    /// for the class of failure that row does not cover: the promise the
+    /// mode booked could not be kept, so the link stayed. The codes are
+    /// fixed strings — `copy_failed` (the displayed-photo copy produced
+    /// no local file) and `save_failed` (the record write could not
+    /// persist the consequence) — and the metadata is empty, so no name,
+    /// number, identifier, filename or byte can reach an event field
+    /// (NFR-FCU-002; F7).
+    private func emitUnlinkRefusal(reasonCode: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "contacts_link",
+            eventType: "unlink_refused",
+            durationMs: nil,
+            outcome: "refused",
+            errorCode: reasonCode,
+            metadata: [:]
+        ))
+    }
+
+    // MARK: - Post-save system photo step (T-158; design-l2 §1.9, §2.6, §4.4, §4.5)
+
+    /// The verified-link write seam `syncSystemPhoto` delegates to (T-154;
+    /// the ONE place that can write a system record — this coordinator
+    /// never writes one itself). `lazy` for the same reason as
+    /// `linkService` ([BOOT-REVIEW P0-1] first use, not `init()`: building
+    /// it constructs a `CNContactStore`, and a launch whose contacts never
+    /// save a linked photo must never need an address-book handle).
+    private lazy var systemContactPhotoWriter: SystemContactPhotoWriting =
+        injectedSystemContactPhotoWriter ?? SystemContactPhotoWriter(observabilityBus: observabilityBus)
+
+    /// Test seam (T-158), the `injectedLinkService` pattern: the scripted
+    /// writer this coordinator hands out in place of the real actor. nil —
+    /// the app's own construction — builds the real one at first use. Set
+    /// once in `init`.
+    private var injectedSystemContactPhotoWriter: SystemContactPhotoWriting? = nil
+
+    /// The wizard's post-save system-photo step (design-l2 §1.9/§2.6;
+    /// L1 §10.2 steps 2-3) — a THIN delegation to the T-154 write seam.
+    /// The payload is the app-local processed JPEG the record already
+    /// holds (`loadData` — the bytes the system record receives are
+    /// byte-identical to the bytes the app stored), and the outcome
+    /// vocabulary is the writer's own.
+    ///
+    /// `nil` when no family contact carries `id` (the wizard's only caller
+    /// passes the id it just saved; nil means the record left the roster).
+    /// `.skippedNoLink` when the contact has no VERIFIED link — no
+    /// attempt, and the writer seam is never even built — plus
+    /// `.skippedNoAuthorization(access)` when the write access refuses the
+    /// attempt (no store call; the honest fallback label).
+    ///
+    /// Consequences (design-l2 §4.4/§4.5): `.written` — invalidate the
+    /// identifier's photo cache and bump `faceEpoch` (the resolved system
+    /// bytes may differ); `.recordGone`/`.identityMismatch` — refresh the
+    /// verified links (the stored claim may now degrade, FR-FCU-006). No
+    /// other outcome triggers anything.
+    @MainActor
+    func syncSystemPhoto(forContactID id: UUID,
+                         clearing: Bool) async -> SystemContactPhotoWriteOutcome? {
+        guard let contact = familyContacts.first(where: { $0.id == id }) else { return nil }
+        guard let link = verifiedLinks.links[id], !link.identifier.isEmpty else {
+            // No verified link → no attempt (today's unlinked UX exactly).
+            // Short-circuited BEFORE the writer seam is resolved, so a
+            // contact with no link never constructs a `CNContactStore` —
+            // the same first-use rule the lazy seam above exists for.
+            return .skippedNoLink
+        }
+        // Resolve the seam on the caller's (main) context, before any await.
+        let writer = systemContactPhotoWriter
+        let access = await writer.writeAccess()
+        if let preAttempt = SystemContactWriteDecision.preAttemptOutcome(hasVerifiedLink: true,
+                                                                         access: access) {
+            return preAttempt   // .skippedNoAuthorization(access) — no store call
+        }
+        let outcome: SystemContactPhotoWriteOutcome
+        if clearing {
+            outcome = await writer.clearPhoto(from: link)
+        } else if let jpeg = contactPhotoStore.loadData(named: contact.photoFilename) {
+            outcome = await writer.writePhoto(jpeg, to: link)
+        } else {
+            // The payload IS the app-local photo; without it there is
+            // nothing to write to the system (reachable when the record
+            // save kept an older/no file). No attempt, no false success —
+            // the honest kept-on-phone state.
+            outcome = .failed(.fetchFailed)
+        }
+        switch outcome {
+        case .written:
+            let service = linkService
+            await service.invalidate(identifier: link.identifier)
+            faceEpoch += 1
+        case .recordGone, .identityMismatch:
+            refreshVerifiedLinks()
+        case .skippedNoLink, .skippedNoAuthorization, .failed:
+            break   // no consequence (the writer's own event records the outcome)
+        }
+        return outcome
+    }
+
     /// Adds a curated contact (spec §4.4.2). `photo`, when given, is
     /// persisted to `ContactPhotoStore` FIRST and its file name stored
     /// on the contact — and if the store rejects the contact (list full)
@@ -9008,16 +9283,24 @@ self.noteTalkContractChanged()
             $0.channel == .unanswered && !$0.phone.isEmpty
         }
         let family = familyContacts
+        let snapshot = verifiedLinks
         var names: [UUID: String] = [:]
         for row in rows {
-            if let contact = MissedCallContactResolver.familyMatch(phone: row.phone, in: family) {
+            // The LINK-AWARE family correlation (T-158, design-l2 §8.2):
+            // the SAME lookup the dial-back identity uses, so the list and
+            // the tap can never disagree about who a number reaches
+            // (FR-FCU-004 — one person on every surface).
+            if let contact = familyContact(matchingPhone: row.phone) {
                 names[row.id] = contact.name
             }
         }
         missedCallDisplayNames = names
         let needNative = rows.filter { names[$0.id] == nil }
         guard !needNative.isEmpty else { return }
+        // The verified snapshot travels BY VALUE with the captured roster
+        // (this method is main-confined; the native pass runs detached).
         refreshNativeMissedCallNames(needNative, family: family,
+                                     snapshot: snapshot,
                                      promptIfNeeded: promptIfNeeded)
     }
 
@@ -9025,8 +9308,8 @@ self.noteTalkContractChanged()
     /// second source, after the family contacts (the task's order). The
     /// CNContact search runs off-main (`AddressBookDirectory` enumerates
     /// the whole book) and its result publishes back on main. `family`
-    /// is captured BY VALUE here — the published array stays main-queue
-    /// confined and the task reads its own snapshot.
+    /// and `snapshot` are captured BY VALUE here — the published state
+    /// stays main-queue confined and the task reads its own snapshot.
     ///
     /// POINT-OF-USE PERMISSION: Contacts access is asked for HERE — when
     /// a numbered missed-call row needs a name the family list cannot
@@ -9038,16 +9321,24 @@ self.noteTalkContractChanged()
     /// and the app never asks again.
     private func refreshNativeMissedCallNames(_ rows: [AppActivityEntry],
                                               family: [FamilyContact],
+                                              snapshot: VerifiedLinksSnapshot,
                                               promptIfNeeded: Bool) {
         let phoneRows = rows.map { (id: $0.id, phone: $0.phone) }
         Task.detached(priority: .utility) { [weak self] in
             let directory = AddressBookDirectory()
             var access = AddressBookDirectory.access()
             if access == .notDetermined, promptIfNeeded {
-                let granted = await directory.requestAccess()
-                access = granted ? .allowed : .denied
+                _ = await directory.requestAccess()
+                // Post-prompt RE-READ (design-l2 §3.5, review-iter-2 R4):
+                // the sheet may grant full authorization OR a limited
+                // selection — the status is the truth, and collapsing a
+                // limited grant into `.allowed` would claim access that
+                // was never given (and vice versa).
+                access = AddressBookDirectory.access()
             }
-            guard access == .allowed,
+            // `.limited` is READABLE: the granted set enumerates. Only a
+            // genuinely unreadable state skips the pass.
+            guard access.allowsReading,
                   let entries = try? directory.allEntries() else { return }
             var names: [UUID: String] = [:]
             for row in phoneRows {
@@ -9055,7 +9346,8 @@ self.noteTalkContractChanged()
                     phone: row.phone,
                     family: family,
                     native: entries,
-                    access: .allowed)
+                    access: access,
+                    snapshot: snapshot)
                 if case .name(let name) = resolution {
                     names[row.id] = name
                 }
@@ -9076,8 +9368,19 @@ self.noteTalkContractChanged()
     /// number). Also the dial-back's identity source: a matched contact
     /// makes the tap resolve EXACTLY like that contact's audio call
     /// button (`resolvedMissedCallChannel`).
+    ///
+    /// LINK-AWARE (T-158, design-l2 §1.8/§8.2; FR-FCU-004): after the
+    /// contact's OWN phone, the VERIFIED linked records' numbers are
+    /// consulted (`linkedFamilyMatch`), so a call from the number of the
+    /// system record a family contact is linked to resolves to that
+    /// FAMILY person. The published snapshot is the only link source — an
+    /// unverified or stale claim is absent from it and falls through to
+    /// today's behaviour exactly (FR-FCU-006: never the wrong person).
     func familyContact(matchingPhone phone: String) -> FamilyContact? {
         MissedCallContactResolver.familyMatch(phone: phone, in: familyContacts)
+            ?? MissedCallContactResolver.linkedFamilyMatch(phone: phone,
+                                                          in: familyContacts,
+                                                          snapshot: verifiedLinks)
     }
 
     /// The route a missed-call row's dial-back opens (missed-calls fix,
