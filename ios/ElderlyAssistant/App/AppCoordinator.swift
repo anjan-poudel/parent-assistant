@@ -6685,12 +6685,22 @@ self.noteTalkContractChanged()
         return "\(contact.id.uuidString):\(token):\(contact.photoFilename ?? "-"):\(faceEpoch)"
     }
 
-    /// The contact's face at its stored size — the ONE precedence
-    /// resolver (design-l1 §10.1, FR-FCU-007): (1) a VERIFIED link whose
-    /// record holds readable photo bytes → the SYSTEM photo; (2) the
-    /// app-local `photoFilename` file; (3) nil — the caller draws the
-    /// existing initials avatar. Any failure at a step degrades to the
-    /// next; never throws (a tile is never blank and never crashes).
+    /// The contact's face at its stored size TOGETHER WITH its source —
+    /// the ONE precedence resolver (design-l1 §10.1, FR-FCU-007) plus
+    /// the attribution the editor's `family.photo.sourceSystem` caption
+    /// needs (family-contacts-unify T-160, design-l2 §2.4: rendered
+    /// exactly when the displayed photo is the resolved SYSTEM one).
+    /// The pair comes out of ONE pass, so the image and its source can
+    /// never disagree — and `faceImage` is this same call with the
+    /// source dropped, never a second precedence expression to drift
+    /// from (design-l2 §8.1's two-paths hazard).
+    ///
+    /// Order: (1) a VERIFIED link whose record holds readable photo
+    /// bytes → the SYSTEM photo, `isSystemPhoto` true; (2) the app-local
+    /// `photoFilename` file, false; (3) `(nil, false)` — the caller
+    /// draws the existing initials avatar. Any failure at a step
+    /// degrades to the next; never throws (a tile is never blank and
+    /// never crashes).
     ///
     /// "Readable access" is the link service's own gate: its
     /// `photoImageData` answers nil without touching the store when
@@ -6700,9 +6710,18 @@ self.noteTalkContractChanged()
     /// 512px envelope a stored family thumbnail lives in — so a
     /// phone-book full-size photo cannot round into the UI unbounded.
     @MainActor
+    func faceImageWithSource(for contact: FamilyContact) async
+        -> (image: UIImage?, isSystemPhoto: Bool) {
+        if let system = await resolvedSystemPhoto(for: contact) { return (system, true) }
+        return (contactPhotoStore.load(named: contact.photoFilename), false)
+    }
+
+    /// The contact's face at its stored size — `faceImageWithSource`
+    /// with the source dropped (the two are the same resolution, by
+    /// construction).
+    @MainActor
     func faceImage(for contact: FamilyContact) async -> UIImage? {
-        if let system = await resolvedSystemPhoto(for: contact) { return system }
-        return contactPhotoStore.load(named: contact.photoFilename)
+        await faceImageWithSource(for: contact).image
     }
 
     /// The contact's face thumbnail at `diameter`, through the shared

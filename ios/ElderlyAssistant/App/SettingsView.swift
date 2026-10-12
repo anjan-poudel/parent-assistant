@@ -1865,7 +1865,12 @@ private struct FamilyContactWizardSheet: View {
     @State private var phone = ""
     @State private var relationshipOption: RelationshipOption?
     @State private var messengerHandle = ""
-    @State private var nickname = ""
+    // The nickname list draft (T-160, design-l2 §2.1/§2.5): committed
+    // entries only — `nicknameDraft` is the add field's text. Removes
+    // and adds are save-time edits like every other field; the stored
+    // list round-trips through `normalizedNicknames` at the coordinator.
+    @State private var nicknames: [String] = []
+    @State private var nicknameDraft = ""
     // Home address for voice navigation (directions task, 2026-09-07) —
     // free-form text; blank saves as nil (no address = not a navigation
     // target).
@@ -1884,12 +1889,20 @@ private struct FamilyContactWizardSheet: View {
     @State private var isEmergencyContact = false
 
     // Photo draft state: a just-picked image, whether the user asked to
-    // remove the stored one, and the stored one itself (loaded once on
-    // appear for an edit).
+    // remove the stored one, and the stored one itself (resolved once per
+    // face identity for an edit).
     @State private var pickedPhoto: UIImage?
     @State private var removingStoredPhoto = false
     @State private var storedPhoto: UIImage?
     @State private var photoPickerItem: PhotosPickerItem?
+
+    /// Whether the resolved `storedPhoto` face came from the linked
+    /// SYSTEM record — the `family.photo.sourceSystem` caption's
+    /// attribution (T-160, design-l2 §2.4). Assigned by the SAME face
+    /// task as `storedPhoto` from one precedence pass, so the caption
+    /// and the displayed bytes can never disagree (an app-local fallback
+    /// never claims to come from the phone book).
+    @State private var storedPhotoIsSystem = false
 
     // Address-book search state — CallView's shape: access read on
     // appear, entries fetched on a background task, honest failure card.
@@ -1922,6 +1935,21 @@ private struct FamilyContactWizardSheet: View {
     /// intent is dropped by any new search keystroke or a successful
     /// pick.
     @State private var steerTarget: FamilyContact?
+
+    /// The post-save system-photo outcome to render (T-160, design-l2
+    /// §2.1/§2.6): nil before a save with a photo change. Non-nil keeps
+    /// the sheet open AT the photo step with the honest label under the
+    /// preview and the footer offering Close — the owner sees exactly
+    /// what happened (L1 §10.2 step 3; F4: `.written` shows
+    /// `family.photo.state.updatedInSystem` rather than auto-dismiss).
+    @State private var photoSaveState: FamilyPhotoEditorState?
+
+    /// The add-case identity, known BEFORE the store write (T-160,
+    /// design-l2 §2.6): the post-save photo step needs the saved
+    /// contact's id, and the store write runs first. `@State` keeps one
+    /// value for this sheet presentation, so re-saving an add updates
+    /// the SAME contact instead of minting a second one.
+    @State private var newDraftID = UUID()
 
     private let directory = AddressBookDirectory()
 
@@ -2069,12 +2097,16 @@ private struct FamilyContactWizardSheet: View {
         .task(id: storedFaceIdentity) {
             guard let contact = liveEditingContact else { return }
             let identity = coordinator.faceIdentity(for: contact)
-            let face = await coordinator.faceImage(for: contact)
+            // T-160: the pair resolves in ONE precedence pass — the image
+            // and whether it came from the linked system record (the
+            // source caption's attribution, §2.4).
+            let face = await coordinator.faceImageWithSource(for: contact)
             // Post-await identity re-check (design-l2 §4.4): abandon the
             // assignment when the identity moved while awaiting — the
             // re-keyed task resolves the fresh face anyway.
             guard coordinator.faceIdentity(for: contact) == identity else { return }
-            storedPhoto = face
+            storedPhoto = face.image
+            storedPhotoIsSystem = face.isSystemPhoto
         }
     }
 
@@ -2453,12 +2485,22 @@ private struct FamilyContactWizardSheet: View {
     /// prompt only after the user taps Allow (constitution; mirror of
     /// CallView's access card).
     private var askAccessCard: some View {
+        askCard(titleKey: "family.addSearch.allowTitle",
+                bodyKey: "family.addSearch.allowBody")
+    }
+
+    /// The shared ask-card shape (T-160, design-l2 §2.4 — "reusing the
+    /// wizard's existing ask-card pattern"): title + body + Allow, where
+    /// Allow runs the SAME `grantAccess()` — the photo step's card and
+    /// the find step's card can never diverge. Only the two keys vary;
+    /// every string is a frozen catalog key, never inline copy.
+    private func askCard(titleKey: String, bodyKey: String) -> some View {
         VStack(spacing: 12) {
-            Text("family.addSearch.allowTitle")
+            Text(LocalizedStringKey(titleKey))
                 .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
-            Text("family.addSearch.allowBody")
+            Text(LocalizedStringKey(bodyKey))
                 .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
@@ -2479,6 +2521,25 @@ private struct FamilyContactWizardSheet: View {
         .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
+    /// The system-Settings link — the only remedy for a denied
+    /// authorization (design-l2 §2.4's "existing system-settings link
+    /// pattern"). Shared by the find step's blocked card and the photo
+    /// step's denied line, so both doors lead to the same screen.
+    private var openSettingsButton: some View {
+        Button {
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(url)
+        } label: {
+            Text("call.search.openSettings")
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 20)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
+        }
+        .buttonStyle(.plain)
+    }
+
     /// Denied/restricted: the honest blocked line with the search
     /// hidden — only the system Settings screen can lift it, so the
     /// card points there. The "Add manually" path below never depended
@@ -2493,18 +2554,7 @@ private struct FamilyContactWizardSheet: View {
                 .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
-            Button {
-                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-                UIApplication.shared.open(url)
-            } label: {
-                Text("call.search.openSettings")
-                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 20)
-                    .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
-            }
-            .buttonStyle(.plain)
+            openSettingsButton
         }
         .padding(16)
         .frame(maxWidth: .infinity)
@@ -2811,14 +2861,111 @@ private struct FamilyContactWizardSheet: View {
 
     // MARK: Step 3 — photo (optional)
 
+    /// The photo step (T-160, design-l2 §2.4): preview, the system-source
+    /// caption, the pick/remove controls, the write-access cards (linked
+    /// edits only) and — after a save with a photo change — the honest
+    /// outcome line. The order IS the design's subview breakdown.
     private var photoStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             stepTitle("family.step.photo")
             photoPreview
                 .frame(maxWidth: .infinity)
+            sourceCaption
             photoControls
+            writeAccessCards
+            photoStateLine
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// `family.photo.sourceSystem` (design-l2 §2.4, FR-FCU-007 honest
+    /// display): renders exactly when the preview shows the stored face
+    /// AND that face resolved from the linked system record. A fresh
+    /// pick or an explicit remove replaces the preview, and the caption
+    /// falls away with it — as does an app-local fallback, which must
+    /// never claim to come from the phone book.
+    @ViewBuilder
+    private var sourceCaption: some View {
+        if FamilyWizardPhotoPresentation.showsSourceSystemCaption(
+            displayingStoredPhoto: pickedPhoto == nil && !removingStoredPhoto,
+            storedPhotoIsSystem: storedPhotoIsSystem) {
+            Text("family.photo.sourceSystem")
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    /// The write-authorization cards (design-l2 §2.4; FR-FCU-009 honest
+    /// states): rendered only while EDITING a contact whose link the
+    /// snapshot VERIFIES — the only state in which Save can actually
+    /// write to the record (`syncSystemPhoto` answers `.skippedNoLink`
+    /// otherwise, so an ask would be a dead end). `.notDetermined`
+    /// offers the point-of-use ask card (Allow reuses the wizard's
+    /// existing `grantAccess`, which re-reads the status — the sheet may
+    /// yield `.limited`); `.denied` states the honest consequence with
+    /// the system-Settings link (no nag); `.limited` renders NO card
+    /// (readable — the write proceeds attempt-and-detect); `.allowed`
+    /// likewise; nil (still reading) renders nothing, so no card can
+    /// flash before the status resolves.
+    @ViewBuilder
+    private var writeAccessCards: some View {
+        if let contact = liveEditingContact,
+           coordinator.verifiedLinks.links[contact.id] != nil {
+            switch access {
+            case .notDetermined:
+                askCard(titleKey: "family.photo.accessTitle",
+                        bodyKey: "family.photo.accessBody")
+            case .denied:
+                photoAccessDeniedLine
+            case .allowed, .limited, nil:
+                EmptyView()
+            }
+        }
+    }
+
+    /// The `.denied` line (design-l2 §2.4): the frozen honest sentence
+    /// plus the Open Settings button — the write cannot happen, the
+    /// photo stays in the app only, and nothing here re-prompts.
+    private var photoAccessDeniedLine: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("family.photo.accessDeniedBody")
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            openSettingsButton
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
+    }
+
+    /// The post-save outcome line (design-l2 §2.4/§1.5): the honest
+    /// state rendered under the preview once the system-photo step
+    /// answered — caption token, secondary color — with the access
+    /// explanation alongside `.keptOnPhoneAccessDenied`. Nothing renders
+    /// before a save (`photoSaveState` nil).
+    @ViewBuilder
+    private var photoStateLine: some View {
+        if let state = photoSaveState {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(LocalizedStringKey(FamilyWizardPhotoPresentation.stateLabelKey(state)))
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if FamilyWizardPhotoPresentation.showsAccessDeniedBody(state) {
+                    Text("family.photo.accessDeniedBody")
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+        }
     }
 
     /// What the preview shows right now: a just-picked image wins over
@@ -2940,12 +3087,9 @@ private struct FamilyContactWizardSheet: View {
     private var nicknameStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             stepTitle("family.step.nickname")
-            TextField("", text: $nickname)
-                .font(.system(size: appearance.typography.bodyPointSize))
-                .padding(14)
-                .frame(minHeight: 56)
-                .fixedSize(horizontal: false, vertical: true)
-                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+            nicknameList
+            nicknameAddRow
+            nicknameHint
             Text(L10n.str("settings.family.address", locale: coordinator.activeLocale))
                 .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textSecondary)
@@ -2991,6 +3135,103 @@ private struct FamilyContactWizardSheet: View {
         }
     }
 
+    /// The committed nickname entries (T-160, design-l2 §2.5) — one row
+    /// per OCCURRENCE, so duplicates are preserved (the editor is a
+    /// faithful editor of the stored list; "sanu" and "सानु" are always
+    /// distinct entries). The stored spelling renders verbatim — no
+    /// transliteration, no case folding.
+    @ViewBuilder
+    private var nicknameList: some View {
+        if !nicknames.isEmpty {
+            VStack(spacing: 8) {
+                ForEach(Array(nicknames.enumerated()), id: \.offset) { index, entry in
+                    nicknameRow(entry, index: index)
+                }
+            }
+        }
+    }
+
+    /// One entry's row: the verbatim spelling plus a ≥44 pt remove
+    /// control whose a11y label names the entry it removes
+    /// (`family.nickname.removeLabel`, formatted). Removal is a
+    /// save-time edit like every other field — nothing touches the
+    /// store until Save.
+    private func nicknameRow(_ entry: String, index: Int) -> some View {
+        HStack(spacing: 12) {
+            Text(entry)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button {
+                // Defensive bounds: the ForEach index and the array are
+                // the same draft, so this can only trip on a stale row.
+                guard nicknames.indices.contains(index) else { return }
+                nicknames.remove(at: index)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(L10n.fmt("family.nickname.removeLabel",
+                                              locale: coordinator.activeLocale, entry)))
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: DesignTokens.minTapTargetSize)
+        .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+    }
+
+    /// The add control (design-l2 §2.5): hidden at the 8-entry envelope
+    /// (`FamilyWizardNicknamePresentation.entryLimit`; nothing already
+    /// stored is ever dropped — the control simply stops offering), the
+    /// ≥44 pt Add button commits the draft through the F5 seam (trimmed;
+    /// whitespace-only rejected AT ENTRY; a whole-grapheme 64-character
+    /// cap), stored as entered within that bound.
+    @ViewBuilder
+    private var nicknameAddRow: some View {
+        if FamilyWizardNicknamePresentation.canAdd(entries: nicknames) {
+            HStack(spacing: 8) {
+                TextField("", text: $nicknameDraft,
+                          prompt: Text(LocalizedStringKey("family.nickname.entryPlaceholder")))
+                    .font(.system(size: appearance.typography.bodyPointSize))
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+                Button {
+                    guard let entry = FamilyWizardNicknamePresentation.newEntry(from: nicknameDraft)
+                    else { return }
+                    nicknames.append(entry)
+                    nicknameDraft = ""
+                } label: {
+                    Text("family.nickname.add")
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
+                        .appSurface(role: .accent, cornerRadius: 999)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("family.nickname.add"))
+            }
+        }
+    }
+
+    /// The store-as-entered reassurance caption (design-l2 §2.5): any of
+    /// these names finds the person — typed or spoken — and the entries
+    /// are kept exactly as entered.
+    private var nicknameHint: some View {
+        Text("family.nickname.hint")
+            .font(.system(size: appearance.typography.captionPointSize))
+            .foregroundStyle(appearance.colors.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 4)
+    }
+
     // MARK: Footer — Back / Next (Save on the last step)
 
     private var footerButtons: some View {
@@ -3016,17 +3257,37 @@ private struct FamilyContactWizardSheet: View {
 
             Spacer()
 
-            primaryButton(titleKey: step == .nickname ? "onboarding.stepFamily.save"
-                                                      : "family.step.next",
-                          isEnabled: step == .nickname ? canSave : canContinue) {
-                if step == .nickname {
-                    save()
-                } else {
-                    step = Step(rawValue: step.rawValue + 1) ?? .nickname
-                }
-            }
+            primaryButton(titleKey: primaryTitleKey,
+                          isEnabled: primaryEnabled,
+                          action: primaryAction)
         }
         .padding(.top, 4)
+    }
+
+    /// The footer's primary label (T-160, design-l2 §2.6): while a
+    /// post-save photo state is on screen the sheet stays open EXACTLY
+    /// so the owner sees what happened — the primary button becomes
+    /// `common.close`. Otherwise it is Next, or Save on the last step.
+    private var primaryTitleKey: String {
+        if photoSaveState != nil { return "common.close" }
+        return step == .nickname ? "onboarding.stepFamily.save" : "family.step.next"
+    }
+
+    /// Close is always available (the save already happened); the flow's
+    /// gates are unchanged otherwise.
+    private var primaryEnabled: Bool {
+        if photoSaveState != nil { return true }
+        return step == .nickname ? canSave : canContinue
+    }
+
+    private func primaryAction() {
+        if photoSaveState != nil {
+            dismiss()
+        } else if step == .nickname {
+            save()
+        } else {
+            step = Step(rawValue: step.rawValue + 1) ?? .nickname
+        }
     }
 
     private func primaryButton(titleKey: String, isEnabled: Bool,
@@ -3052,13 +3313,12 @@ private struct FamilyContactWizardSheet: View {
         name = contact.name
         phone = contact.phone
         messengerHandle = contact.messengerHandle ?? ""
-        // The stored value is a list; this single-field draft shows the
-        // FIRST entry until T-160 replaces it with the §2.5 list editor.
-        // The coordinator seam now round-trips the full list (T-156),
-        // so the interim loss window is exactly this wizard: a save here
-        // writes the one draft value and drops the entries beyond the
-        // first — T-160's list editor closes it (see the T-156 notes).
-        nickname = contact.nicknames.first ?? ""
+        // The FULL stored list loads into the list editor (T-160,
+        // design-l2 §2.5): the interim single-field draft that showed
+        // only the first entry — and dropped the rest on save — is gone;
+        // the complete draft list round-trips through the coordinator's
+        // widened `nicknames:` seam.
+        nicknames = contact.nicknames
         address = contact.address ?? ""
         // The stored invitation address, so re-opening the editor shows
         // what the family will actually be invited at (calendar & family
@@ -3110,18 +3370,32 @@ private struct FamilyContactWizardSheet: View {
         return RelationshipOption.allCases.first { $0.anchorWord == storedAnchor }
     }
 
+    /// The Save flow (T-160, design-l2 §2.6; L1 §10.2 sequencing):
+    ///
+    ///  1. the existing store write runs FIRST — the app-local photo, the
+    ///     full nickname list and the draft link commit together, and a
+    ///     failed write keeps the draft (today's semantics);
+    ///  2. with NO photo change the sheet dismisses (today's UX) — no
+    ///     system write is ever attempted;
+    ///  3. with a photo change the post-save system-photo step runs in a
+    ///     `Task`: every mapped state (`.written` included — F4) KEEPS
+    ///     the sheet open at the photo step with the honest label under
+    ///     the preview and the footer offering Close; only the nil state
+    ///     (unlinked — today's behavior — or the contact having left the
+    ///     roster) dismisses.
     private func save() {
+        // The saved contact's id, known BEFORE the store write (design-l2
+        // §2.6): the edit case's id, or the draft id minted for this
+        // sheet presentation — so the post-save photo step can address
+        // the contact whatever the store did with the write.
+        let savedID = editingContact?.id ?? newDraftID
+        let removingPhoto = removingStoredPhoto
         let messenger = trimmedOrNil(messengerHandle)
-        // T-156 (family-contacts-unify, 2026-10-12) — the coordinator
-        // seam is now `nicknames: [String]` (the interim single-value
-        // shim is gone). This wizard still keeps its single free-text
-        // draft until T-160 builds the §2.5 list editor, so the draft's
-        // one value passes as a one-entry list; the family list and the
-        // T-100 kin-designation pass carry/round-trip the full list.
-        // The value still passes through the editor/submission seam's
-        // length bound (security advisory F5: 64 chars, blank becomes
-        // nil) so nothing over-long is stored.
-        let nick = FamilyContact.cappedNickname(nickname)
+        // The full nickname list (T-160, design-l2 §2.5) goes to the
+        // coordinator's widened `nicknames:` seam, which re-applies
+        // `normalizedNicknames` at its own boundary (defense in depth);
+        // the entry-level rules (trim, blank rejection, the F5 64-char
+        // cap) already ran at the Add control.
         // Blank address saves as nil — no address = not a navigation
         // target (directions task, 2026-09-07).
         let homeAddress = trimmedOrNil(address)
@@ -3142,8 +3416,8 @@ private struct FamilyContactWizardSheet: View {
             succeeded = coordinator.updateFamilyContact(
                 id: contact.id, name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
-                photo: pickedPhoto, removingPhoto: removingStoredPhoto,
-                nicknames: nick.map { [$0] } ?? [],
+                photo: pickedPhoto, removingPhoto: removingPhoto,
+                nicknames: nicknames,
                 address: homeAddress, email: contactEmail,
                 isEmergencyContact: isEmergencyContact,
                 // T-159 (design-l2 §2.6): the draft link is the ONLY
@@ -3152,17 +3426,51 @@ private struct FamilyContactWizardSheet: View {
                 link: draftLink)
         } else {
             succeeded = coordinator.addFamilyContact(
-                name: trimmedName, phone: phone,
+                id: savedID, name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
                 photo: pickedPhoto,
-                nicknames: nick.map { [$0] } ?? [],
+                nicknames: nicknames,
                 address: homeAddress, email: contactEmail,
                 isEmergencyContact: isEmergencyContact,
                 link: draftLink)
         }
-        if succeeded { dismiss() }
         // A failed store write keeps the draft on screen — Save again to
-        // retry; nothing was claimed that didn't happen.
+        // retry; nothing was claimed that didn't happen, and no system
+        // write is ever attempted for a failed store write (step 1
+        // first).
+        guard succeeded else { return }
+        let photoIntent = pickedPhoto != nil || removingPhoto
+        guard photoIntent else {
+            // No photo changed → dismiss as today; no write attempted.
+            dismiss()
+            return
+        }
+        Task { @MainActor in
+            let outcome = await coordinator.syncSystemPhoto(forContactID: savedID,
+                                                            clearing: removingPhoto)
+            // The remove path's display-precedence recheck (design-l2
+            // §2.6/§10.4): a VERIFIED clear that still leaves a
+            // resolvable system photo standing maps to
+            // `.systemPhotoRemains` instead of the generic label —
+            // checked through the SAME resolver the preview uses, after
+            // the clear invalidated its cache.
+            var systemPhotoStillPresent = false
+            if FamilyWizardPhotoPresentation.rechecksRemoval(outcome: outcome,
+                                                             removing: removingPhoto),
+               let contact = coordinator.familyContacts.first(where: { $0.id == savedID }) {
+                systemPhotoStillPresent = await coordinator
+                    .faceImageWithSource(for: contact).isSystemPhoto
+            }
+            if let state = FamilyWizardPhotoPresentation.saveState(
+                outcome: outcome,
+                removing: removingPhoto,
+                systemPhotoStillPresent: systemPhotoStillPresent) {
+                photoSaveState = state
+                step = .photo   // the honest label lives on the photo step
+            } else {
+                dismiss()       // unlinked, or the contact left the roster
+            }
+        }
     }
 
     private func trimmedOrNil(_ text: String) -> String? {
@@ -3307,6 +3615,119 @@ enum FamilyWizardFindPresentation {
     static func bookName(for identifier: String, in entries: [AddressBookEntry]?) -> String? {
         guard !identifier.isEmpty else { return nil }
         return entries?.first { $0.identifier == identifier }?.name
+    }
+}
+
+// MARK: - Photo step + save-flow presentation (T-160; design-l2 §2.4, §2.6, §10.4)
+
+/// The pure decisions behind `FamilyContactWizardSheet`'s photo step and
+/// save flow, split out of the sheet so the harness can pin them without
+/// a view instance: the source caption's attribution rule, the post-save
+/// state mapping (the §1.5 table plus the §10.4 remove path), the
+/// state→label keys, and the remove-path recheck trigger. The sheet is a
+/// thin renderer of these values.
+enum FamilyWizardPhotoPresentation {
+
+    /// The `family.photo.sourceSystem` caption shows exactly when the
+    /// preview is displaying the STORED face AND that face came from the
+    /// linked system record (design-l2 §2.4): a just-picked photo or an
+    /// explicit remove replaces the preview, and an app-local fallback —
+    /// or an unresolvable system photo — never claims to come from the
+    /// phone book (FR-FCU-007 honest display).
+    static func showsSourceSystemCaption(displayingStoredPhoto: Bool,
+                                         storedPhotoIsSystem: Bool) -> Bool {
+        displayingStoredPhoto && storedPhotoIsSystem
+    }
+
+    /// The post-save state to render, or nil for "today's UX" (dismiss).
+    ///
+    /// - nil outcome: the contact left the roster between the store write
+    ///   and the photo step — nothing to describe.
+    /// - the REMOVE path with a VERIFIED clear (`.written`) that still
+    ///   leaves a resolvable system photo (`systemPhotoStillPresent`,
+    ///   design-l2 §2.6/§10.4): `.systemPhotoRemains` — the honest,
+    ///   actionable-in-Contacts sentence.
+    /// - everything else maps through the TOTAL `FamilyPhotoEditorState`
+    ///   table (§1.5): `.written` → `.updatedInSystem`, and every other
+    ///   attempt outcome is the kept-on-phone family — never a false
+    ///   success.
+    static func saveState(outcome: SystemContactPhotoWriteOutcome?,
+                          removing: Bool,
+                          systemPhotoStillPresent: Bool = false) -> FamilyPhotoEditorState? {
+        guard let outcome else { return nil }
+        if rechecksRemoval(outcome: outcome, removing: removing), systemPhotoStillPresent {
+            return .systemPhotoRemains
+        }
+        return FamilyPhotoEditorState.from(outcome)
+    }
+
+    /// Whether the remove path's display-precedence recheck applies —
+    /// exactly a VERIFIED clear (design-l2 §2.6): any other outcome
+    /// already maps through the §1.5 table, and the write path never
+    /// rechecks (a write that read-back-verified its bytes has nothing
+    /// left to check).
+    static func rechecksRemoval(outcome: SystemContactPhotoWriteOutcome?,
+                                removing: Bool) -> Bool {
+        removing && outcome == .written
+    }
+
+    /// The label KEY for a post-save state — exhaustive, no default: a
+    /// new `FamilyPhotoEditorState` case must decide its label at
+    /// compile time. `.keptOnPhoneAccessDenied` renders the kept-on-
+    /// phone sentence (the denied EXPLANATION is the sibling
+    /// `showsAccessDeniedBody`).
+    ///
+    /// F4 (unit index, T-160): `.updatedInSystem` is the DELIBERATE
+    /// label the owner's decision binds for a byte-verified `.written`
+    /// write — `family.photo.state.updatedInSystem`, one string only.
+    /// The design-document wording alignment (design-l1 §10.2 step 3's
+    /// auto-dismiss phrasing) is deferred to T-165; do not invent a
+    /// second string for it.
+    static func stateLabelKey(_ state: FamilyPhotoEditorState) -> String {
+        switch state {
+        case .updatedInSystem:
+            return "family.photo.state.updatedInSystem"
+        case .keptOnPhone, .keptOnPhoneAccessDenied:
+            return "family.photo.state.keptOnPhone"
+        case .systemPhotoRemains:
+            return "family.photo.state.systemPhotoRemains"
+        }
+    }
+
+    /// The access-denied body renders ONLY beside the denied state
+    /// (design-l2 §2.4/§1.5): access is off, the photo stays in the app,
+    /// and only iPhone Settings can change that.
+    static func showsAccessDeniedBody(_ state: FamilyPhotoEditorState) -> Bool {
+        state == .keptOnPhoneAccessDenied
+    }
+}
+
+// MARK: - Nickname step presentation (T-160; design-l2 §2.5, design-l1 §8.4)
+
+/// The pure decisions behind the nickname step's list editor: the
+/// 8-entry envelope (the add control stops offering at the cap — nothing
+/// already stored is ever dropped) and the entry rule, routed through
+/// the F5 editor/submission seam so the length bound is enforced in
+/// exactly ONE place.
+enum FamilyWizardNicknamePresentation {
+
+    /// The editor's budget envelope (design-l1 §8.4 — the 12 × 8
+    /// measurement envelope): the add row hides at eight entries.
+    static let entryLimit = 8
+
+    /// Whether the add row is offered for the current draft list.
+    static func canAdd(entries: [String]) -> Bool {
+        entries.count < entryLimit
+    }
+
+    /// The committed form of the add-field draft — `FamilyContact
+    /// .cappedNickname` (F5): trimmed, whitespace-only rejected, an
+    /// over-long value capped at 64 CHARACTERS as a whole-grapheme
+    /// prefix (a Devanagari cluster is never split). nil = nothing to
+    /// add; otherwise the entry is stored as entered within the bound —
+    /// no transliteration, no case folding.
+    static func newEntry(from draft: String) -> String? {
+        FamilyContact.cappedNickname(draft)
     }
 }
 
