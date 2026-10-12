@@ -141,3 +141,15 @@ files + call-dialer's Services/Calls). Merged-tree build-for-testing GREEN
 (exit 0). Frozen call-dialer suites deferred to T-163 per speed mode.
 Line-anchor drift: L10nCatalogCoverageTests + check-release-log-safety.py are
 the union points; downstream units read current file state, not old anchors.
+
+## T-156 — Coordinator identity and link refresh — DONE
+
+Commit 6751cc50. familyContacts.didSet = single roster choke point (index
+rebuild + refreshVerifiedLinks); published familyIndex/verifiedLinks/faceEpoch;
+lazy link-service seam (first use, never init); generation-guarded publish;
+duplicate-claim guard refuses before any write (reason-coded PII-free event);
+add/update widened to nicknames: [String] + link: (interim shims removed);
+ContactResolver reads the published index. Foreground hook appended after
+syncCalendarShare; call-dialer chain untouched (no secondaryCallApp symbols in
+the diff). New suite: 9 tests. Log-safety gate exit 0 (24/24 fixtures);
+whole-module build green, 0 errors. Scoped run deferred.
