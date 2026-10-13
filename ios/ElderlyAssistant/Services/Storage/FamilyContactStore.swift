@@ -99,6 +99,12 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     /// `.phone` (GSM `tel:`) — works for every contact, no app
     /// assumptions.
     var preferredCallApp: CallApp
+    /// [PER-CONTACT-OVERRIDE] (2026-10-14) The contact's explicit
+    /// voice-dialer override — the chain's PREFERRED slot for
+    /// audio-class calls. `nil` = follow the global primary/secondary.
+    /// When the override IS the global secondary, the chain's fallback
+    /// is the PRIMARY, never a repeat of the override.
+    var dialerOverride: CallApp?
 
     /// The system address-book record this family contact IS (the same
     /// person on both surfaces), with the fingerprint needed to prove
@@ -112,6 +118,7 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     init(id: UUID = UUID(), name: String, phone: String, relationship: String,
          messengerHandle: String? = nil,
          preferredVideoApp: CallApp = .faceTime, preferredCallApp: CallApp = .phone,
+         dialerOverride: CallApp? = nil,
          photoFilename: String? = nil, nicknames: [String] = [],
          address: String? = nil, email: String? = nil,
          isEmergencyContact: Bool = false, systemContact: SystemContactLink? = nil) {
@@ -122,6 +129,7 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         self.messengerHandle = messengerHandle
         self.preferredVideoApp = preferredVideoApp
         self.preferredCallApp = preferredCallApp
+        self.dialerOverride = dialerOverride
         self.photoFilename = photoFilename
         self.nicknames = nicknames
         self.address = address
@@ -152,6 +160,10 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         // `try?` turns both into the default.
         preferredVideoApp = (try? container.decode(CallApp.self, forKey: .preferredVideoApp)) ?? .faceTime
         preferredCallApp = (try? container.decode(CallApp.self, forKey: .preferredCallApp)) ?? .phone
+        // [PER-CONTACT-OVERRIDE] (2026-10-14) Optional on purpose: nil
+        // means "follow the global primary/secondary", so a pre-field
+        // payload and a contact without a preference behave identically.
+        dialerOverride = (try? container.decodeIfPresent(CallApp.self, forKey: .dialerOverride)) ?? nil
         // Same missing-key rule for the photo: a payload written before
         // the field existed loads photo-less instead of failing the read.
         photoFilename = (try? container.decodeIfPresent(String.self, forKey: .photoFilename)) ?? nil

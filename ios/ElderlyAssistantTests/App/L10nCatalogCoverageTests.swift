@@ -178,7 +178,7 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// into the family block at this rebase). The dialogue family adds
     /// exactly its keys and removes none, so the total is pinned (the
     /// Spotify-localisation suite's count discipline).
-    private static let dialogueBaselineKeyCount = 1_396
+    private static let dialogueBaselineKeyCount = 1_398
 
     /// The design-l2 §16 draft copy, verbatim, both languages. The owner
     /// copy review is a later step recorded in the plan; this pin makes
@@ -463,7 +463,7 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// and removes none, so the total is pinned at 1,415; the dialogue and
     /// family pins are rebased in the same merge (one rebase point per
     /// merge, all three families accounted).
-    private static let callingBaselineKeyCount = 1_410
+    private static let callingBaselineKeyCount = 1_412
 
     /// The authored copy, both languages. The design freezes the keys and
     /// the parameter contracts, not the wording (catalog-time copy), so
@@ -878,6 +878,8 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// inventory: the contiguity pin names them at their in-place
     /// alphabetical positions instead (span entries 16-18).
     private static let familyContactsKeys: [String] = [
+        "family.dialerOverride.default",
+        "family.dialerOverride.title",
         "family.link.chip",
         "family.link.linkedTo",
         "family.link.unlink",
@@ -906,6 +908,9 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// unit, so any wording change — including an "improvement" — must be a
     /// deliberate one rather than a drift.
     private static let familyContactsCopy: [(key: String, en: String, ne: String)] = [
+        ("family.dialerOverride.default", "Default", "पहिलेजस्तै"),
+        ("family.dialerOverride.title", "Call app for this person",
+         "यो व्यक्तिलाई कुन एपले फोन गर्ने?"),
         ("family.link.chip", "Linked",
          "जोडिएको"),
         ("family.link.linkedTo", "Linked to %@",
@@ -975,6 +980,8 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// positions 16-18 (19 new + 3 existing = 22).
     private static let familyContactsSpan: [String] = [
         "family.link.alreadyLinked",
+        "family.dialerOverride.default",
+        "family.dialerOverride.title",
         "family.link.chip",
         "family.link.linkedTo",
         "family.link.pickHint",

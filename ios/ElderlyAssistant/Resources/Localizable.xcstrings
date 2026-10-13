@@ -5973,6 +5973,40 @@
         }
       }
     },
+    "family.dialerOverride.default": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पहिलेजस्तै"
+          }
+        }
+      }
+    },
+    "family.dialerOverride.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Call app for this person"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो व्यक्तिलाई कुन एपले फोन गर्ने?"
+          }
+        }
+      }
+    },
     "family.link.chip": {
       "extractionState": "manual",
       "localizations": {
@@ -6347,7 +6381,8 @@
         }
       }
     },
-    "family.relationship.daughter": {
+        
+"family.relationship.daughter": {
       "extractionState": "manual",
       "localizations": {
         "en": {
