@@ -14,6 +14,11 @@ struct SettingsView: View {
     /// re-renders when a capability fails or (via recovery) comes back.
     @EnvironmentObject private var boot: StartupBoot
     @Environment(\.locale) private var locale
+    /// [AX-VIEWPORT] The hub root does not scroll, so the diagnostics
+    /// block and the TabView below it have to share the screen by
+    /// agreement at accessibility text sizes — this is the switch that
+    /// bounds the block (see `degradationDiagnosticsSection`).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var selectedTab: SettingsSection = .voice
 
@@ -76,6 +81,14 @@ struct SettingsView: View {
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
+                // [AX-VIEWPORT] A page-style TabView is a flexible child,
+                // so an unbounded sibling above it could (and did) shrink
+                // it to zero height at accessibility sizes — every tab
+                // page unreachable. The diagnostics block above is bounded
+                // at AX; this floor keeps a workable page viewport even on
+                // the smallest phone. 0 (no constraint) at standard sizes,
+                // so today's layout is untouched.
+                .frame(minHeight: dynamicTypeSize.isAccessibilitySize ? 200 : 0)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -192,40 +205,65 @@ struct SettingsView: View {
                     .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
-                ForEach(degradations) { degradation in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 10) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: appearance.typography.captionPointSize,
-                                              weight: .bold)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
-                            Text(L10n.str(degradation.titleKey, locale: locale))
-                                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
-                                                           weight: .semibold))
-                                .foregroundStyle(appearance.colors.textPrimary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Button {
-                                StartupDegradationRecoverySeam.perform(degradation.capability)
-                            } label: {
-                                Text(L10n.str(degradation.recoveryKey, locale: locale))
-                                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
-                                                               weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
-                                    .frame(minHeight: DesignTokens.minTapTargetSize)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        Text(L10n.str(degradation.diagnosticKey, locale: locale))
-                            .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
-                                                       weight: .regular))
-                            .foregroundStyle(appearance.colors.textSecondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                // [AX-VIEWPORT] At accessibility text sizes a couple of
+                // failure cards are taller than the phone, and this hub
+                // root does NOT scroll — the unbounded cards pushed the
+                // TabView below them (the only way to reach a tab's rows)
+                // to zero height. Bounding the cards and scrolling them
+                // internally keeps every card reachable while leaving the
+                // TabView a workable viewport. Standard sizes keep the
+                // unbounded block: every card is visible, nothing scrolls
+                // inside it.
+                if dynamicTypeSize.isAccessibilitySize {
+                    ScrollView {
+                        diagnosticCards(degradations)
                     }
-                    .padding(14)
-                    .frame(maxWidth: .infinity)
-                    .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
+                    .frame(maxHeight: 220)
+                } else {
+                    diagnosticCards(degradations)
                 }
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 4)
+        }
+    }
+
+    /// The failure cards themselves — one implementation shared by the
+    /// standard (unbounded) and accessibility (scroll-bounded) arms above,
+    /// so the two can never drift apart.
+    private func diagnosticCards(_ degradations: [StartupDegradation]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(degradations) { degradation in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: appearance.typography.captionPointSize,
+                                          weight: .bold)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
+                        Text(L10n.str(degradation.titleKey, locale: locale))
+                            .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
+                                                       weight: .semibold))
+                            .foregroundStyle(appearance.colors.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button {
+                            StartupDegradationRecoverySeam.perform(degradation.capability)
+                        } label: {
+                            Text(L10n.str(degradation.recoveryKey, locale: locale))
+                                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
+                                                           weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
+                                .frame(minHeight: DesignTokens.minTapTargetSize)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Text(L10n.str(degradation.diagnosticKey, locale: locale))
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
+                                                   weight: .regular))
+                        .foregroundStyle(appearance.colors.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity)
+                .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
+            }
         }
     }
 }
@@ -1863,6 +1901,9 @@ private struct FamilyContactWizardSheet: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    /// [AX-VIEWPORT] Gates the accessibility-size layout switches in the
+    /// search rows, the consent caption and the photo controls.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let target: FamilyContactsSettingsView.FamilyContactEditorTarget
 
@@ -2317,7 +2358,11 @@ private struct FamilyContactWizardSheet: View {
                                   locale: coordinator.activeLocale))
                         .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
-                        .lineLimit(1)
+                        // [AX-VIEWPORT] Essential consent text ("searching
+                        // only a part of your contacts") — it wraps at
+                        // accessibility sizes instead of truncating.
+                        // Standard sizes keep the one-line caption.
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 4)
                 }
@@ -2428,7 +2473,11 @@ private struct FamilyContactWizardSheet: View {
                     Text(entry.caption)
                         .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
-                        .lineLimit(2)
+                        // [AX-VIEWPORT] The caption ("Also in your phone
+                        // book as …" / the number line) wraps at
+                        // accessibility sizes instead of truncating at
+                        // two lines. Standard sizes keep the 2-line cap.
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 }
                 Spacer(minLength: 8)
             }
@@ -2464,7 +2513,13 @@ private struct FamilyContactWizardSheet: View {
                         .font(.system(size: appearance.typography.bodyPointSize,
                                       weight: .semibold))
                         .foregroundStyle(appearance.colors.textPrimary)
-                        .lineLimit(1)
+                        // [AX-VIEWPORT] The contact name wraps at
+                        // accessibility sizes — a truncated name on the
+                        // steer button would hide from the elder exactly
+                        // WHOSE card they are being offered. Standard
+                        // sizes keep the one-line name.
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 14)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -3050,31 +3105,53 @@ private struct FamilyContactWizardSheet: View {
     /// system Photos picker; Remove photo only for a stored photo being
     /// edited (a fresh pick on an add is simply discarded by closing).
     private var photoControls: some View {
-        HStack(spacing: 12) {
-            PhotosPicker(selection: $photoPickerItem, matching: .images) {
-                Text(displayedPhoto == nil ? "family.photo.add" : "family.photo.change")
-                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18)
-                    .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .appSurface(role: .accent, cornerRadius: 999)
-            }
-            if editingContact != nil, displayedPhoto != nil {
-                Button {
-                    pickedPhoto = nil
-                    removingStoredPhoto = true
-                } label: {
-                    Text("family.photo.remove")
-                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                        .foregroundStyle(appearance.colors.textPrimary)
-                        .padding(.horizontal, 18)
-                        .frame(minHeight: DesignTokens.minTapTargetSize)
-                        .appSurface(role: .control, cornerRadius: 999)
+        // [AX-VIEWPORT] Two word-pills cannot share one line at
+        // accessibility text sizes (the Remove pill pushed the picker
+        // off the card edge). They stack at accessibility sizes.
+        // Standard sizes keep today's side-by-side row exactly.
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 10) {
+                    addPhotoPicker
+                    removePhotoButton
                 }
-                .buttonStyle(.plain)
+            } else {
+                HStack(spacing: 12) {
+                    addPhotoPicker
+                    removePhotoButton
+                }
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var addPhotoPicker: some View {
+        PhotosPicker(selection: $photoPickerItem, matching: .images) {
+            Text(displayedPhoto == nil ? "family.photo.add" : "family.photo.change")
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .appSurface(role: .accent, cornerRadius: 999)
+        }
+    }
+
+    @ViewBuilder
+    private var removePhotoButton: some View {
+        if editingContact != nil, displayedPhoto != nil {
+            Button {
+                pickedPhoto = nil
+                removingStoredPhoto = true
+            } label: {
+                Text("family.photo.remove")
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
+                    .padding(.horizontal, 18)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
+                    .appSurface(role: .control, cornerRadius: 999)
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private func loadPickedPhoto(_ item: PhotosPickerItem?) {
@@ -4247,6 +4324,8 @@ private struct PlacesEditorSheet: View {
 struct MedicationScheduleSettingsView: View {
     @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
+    /// [AX-VIEWPORT] Gates the dose-time row's stacked layout.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// The whole form as a value ([MED-OCR], 2026-09-18): the name, the
     /// printed strength, the dose-time rows and the purpose step. The view
@@ -4534,29 +4613,28 @@ struct MedicationScheduleSettingsView: View {
     private var timeRows: some View {
         VStack(spacing: 10) {
             ForEach(draft.times.indices, id: \.self) { index in
-                HStack(spacing: 12) {
-                    Text("settings.meds.time")
-                        .font(.system(size: appearance.typography.bodyPointSize))
-                        .foregroundStyle(appearance.colors.textPrimary)
-                    Spacer()
-                    DatePicker("", selection: timeBinding(at: index),
-                               displayedComponents: .hourAndMinute)
-                        .labelsHidden()
-                        .environment(\.locale, coordinator.activeLocale)
-                    // The last row cannot be removed: a medication with no
-                    // dose time is not a schedule, and `addMedication`
-                    // rejects one.
-                    if draft.times.count > 1 {
-                        Button {
-                            draft.removeTime(at: index)
-                        } label: {
-                            Image(systemName: "minus.circle.fill")
-                                .font(.system(size: 22)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
-                                .frame(minWidth: DesignTokens.minTapTargetSize,
-                                       minHeight: DesignTokens.minTapTargetSize)
+                // [AX-VIEWPORT] At accessibility text sizes the label,
+                // the time picker and the remove button do not fit one
+                // line on any phone width — the row overflowed its card.
+                // The label takes its own line above the controls there;
+                // standard sizes keep today's single-line row exactly.
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 8) {
+                            timeLabel
+                            HStack(spacing: 12) {
+                                timePicker(at: index)
+                                Spacer(minLength: 0)
+                                removeTimeButton(at: index)
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(Text("meds.removeTime"))
+                    } else {
+                        HStack(spacing: 12) {
+                            timeLabel
+                            Spacer()
+                            timePicker(at: index)
+                            removeTimeButton(at: index)
+                        }
                     }
                 }
                 .padding(14)
@@ -4578,6 +4656,40 @@ struct MedicationScheduleSettingsView: View {
                 .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    /// The "Time" label of a dose-time row — one implementation for both
+    /// layout arms of `timeRows`.
+    private var timeLabel: some View {
+        Text("settings.meds.time")
+            .font(.system(size: appearance.typography.bodyPointSize))
+            .foregroundStyle(appearance.colors.textPrimary)
+    }
+
+    private func timePicker(at index: Int) -> some View {
+        DatePicker("", selection: timeBinding(at: index),
+                   displayedComponents: .hourAndMinute)
+            .labelsHidden()
+            .environment(\.locale, coordinator.activeLocale)
+    }
+
+    /// The row's remove control. The last row cannot be removed: a
+    /// medication with no dose time is not a schedule, and `addMedication`
+    /// rejects one.
+    @ViewBuilder
+    private func removeTimeButton(at index: Int) -> some View {
+        if draft.times.count > 1 {
+            Button {
+                draft.removeTime(at: index)
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .font(.system(size: 22)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("meds.removeTime"))
         }
     }
 

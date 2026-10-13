@@ -139,14 +139,25 @@ enum DesignTokens {
     /// ring completion and the reset stay in sync automatically.
     static let talkResetHoldSeconds: TimeInterval = 2.0
     /// [HERO-LAYOUT] (2026-10-13) The sub-hero region's FIXED height —
-    /// the hint carousel and the settings-recovery button share one
-    /// constant slot so the hero never moves or resizes between states
-    /// (owner: "the button size and positions are different for
-    /// different states"). Fits the carousel's two caption lines + pill
-    /// + page dots with headroom for wrapped Nepali copy.
+    /// the hint carousel, the settings-recovery button, the steady-state
+    /// status line and (at accessibility sizes) the state caption all
+    /// share one constant slot so the hero never moves or resizes
+    /// between states (owner: "the button size and positions are
+    /// different for different states"). [HERO-SIZE] (2026-10-14) this
+    /// is now the ACCESSIBILITY-size value — the slot also hosts the
+    /// state caption there. Fits the carousel's two caption lines +
+    /// pill + page dots with headroom for wrapped Nepali copy.
     static let talkSubHeroSlotHeight: CGFloat = 128
+    /// [HERO-SIZE] (2026-10-14) The slot's ordinary-type height. The
+    /// carousel is ~81–99pt at default type, so 104 keeps its headroom
+    /// while returning 24pt to the viewport — the point budget that
+    /// keeps the dock visible without scrolling at normal size.
+    static let talkSubHeroSlotHeightCompact: CGFloat = 104
     static let chipHeight: CGFloat = 60
-    /// Two-row Home dock: two 56pt rows, divider and vertical padding.
-    static let dockHeight: CGFloat = 152
+    /// [DOCK-FIT] (2026-10-14) Two-row Home dock budget after the
+    /// tightened paddings (owner: "too much space at the bottom"):
+    /// ~56pt action row + ~72pt rail + 6pt gap, documented for the
+    /// DesignTokens pin test — the dock itself is intrinsic-height.
+    static let dockHeight: CGFloat = 134
     static let iconBadgeDiameter: CGFloat = 44
 }

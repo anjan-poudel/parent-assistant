@@ -17,6 +17,8 @@ import AVKit
 struct FeedsView: View {
     @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
+    /// [AX-VIEWPORT] Gates the summary's line cap below.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// The item whose play sheet is open (audio or video), nil = closed.
     @State private var playingItem: FeedItem?
@@ -216,7 +218,11 @@ struct FeedsView: View {
                 Text(summary)
                     .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
-                    .lineLimit(4)
+                    // [AX-VIEWPORT] Four lines of caption text at
+                    // accessibility sizes is a fraction of the article —
+                    // the summary wraps fully there instead of stopping
+                    // mid-sentence. Standard sizes keep the 4-line cap.
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 4)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             captionRow(item)

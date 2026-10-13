@@ -17,6 +17,8 @@ import SwiftUI
 struct QuickAccessAppsView: View {
     @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
+    /// [AX-VIEWPORT] Gates the control-below-name stacking in the rows.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var searchText = ""
     /// app.id → installed snapshot from the scheme probe, filled once per
@@ -128,13 +130,31 @@ struct QuickAccessAppsView: View {
     /// (removal is still offered — the tile on Home launches through the
     /// coordinator, which re-probes and speaks honestly on tap).
     private func favouriteRow(_ app: AppLauncher.App) -> some View {
-        HStack(spacing: 14) {
-            AppGlyph(app: app, diameter: 48)
-            // `== false` (not `!= true`) so a not-yet-probed row shows no
-            // caption for the one frame before `.task` fills `installed`.
-            rowLabel(app, captionKey: installed[app.id] == false ? "apps.notInstalled" : nil)
-            Spacer(minLength: 0)
-            removeButton(app)
+        // [AX-VIEWPORT] The "Remove <app>" pill is a full localized
+        // sentence; at accessibility text sizes it cannot share a line
+        // with the app name without crushing the name to slivers. The
+        // control drops to its own row under the name. Standard sizes
+        // keep today's one-line row exactly.
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 14) {
+                        AppGlyph(app: app, diameter: 48)
+                        rowLabel(app, captionKey: installed[app.id] == false ? "apps.notInstalled" : nil)
+                        Spacer(minLength: 0)
+                    }
+                    removeButton(app)
+                }
+            } else {
+                HStack(spacing: 14) {
+                    AppGlyph(app: app, diameter: 48)
+                    // `== false` (not `!= true`) so a not-yet-probed row shows no
+                    // caption for the one frame before `.task` fills `installed`.
+                    rowLabel(app, captionKey: installed[app.id] == false ? "apps.notInstalled" : nil)
+                    Spacer(minLength: 0)
+                    removeButton(app)
+                }
+            }
         }
         .rowCard()
     }
@@ -146,19 +166,42 @@ struct QuickAccessAppsView: View {
     private func catalogRow(_ app: AppLauncher.App) -> some View {
         let isFavourite = coordinator.favoriteAppIDs.contains(app.id)
         let isInstalledHere = installed[app.id] == true
-        return HStack(spacing: 14) {
-            AppGlyph(app: app, diameter: 48)
-            rowLabel(app, captionKey: isInstalledHere ? "quickApps.installed" : nil)
-            Spacer(minLength: 0)
-            if isFavourite {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
-                    .accessibilityLabel(Text("quickApps.added"))
-            } else if isInstalledHere && !atCap {
-                addButton(app)
+        // [AX-VIEWPORT] The Add pill drops to its own row under the name
+        // at accessibility text sizes — beside the name it crushed the
+        // name to zero width. The checkmark is a fixed-size glyph and
+        // stays inline. Standard sizes keep today's one-line row exactly.
+        return Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 14) {
+                        AppGlyph(app: app, diameter: 48)
+                        rowLabel(app, captionKey: isInstalledHere ? "quickApps.installed" : nil)
+                        Spacer(minLength: 0)
+                        if isFavourite { checkmark }
+                    }
+                    if !isFavourite, isInstalledHere, !atCap {
+                        addButton(app)
+                    }
+                }
+            } else {
+                HStack(spacing: 14) {
+                    AppGlyph(app: app, diameter: 48)
+                    rowLabel(app, captionKey: isInstalledHere ? "quickApps.installed" : nil)
+                    Spacer(minLength: 0)
+                    if isFavourite { checkmark } else if isInstalledHere && !atCap {
+                        addButton(app)
+                    }
+                }
             }
         }
         .rowCard()
+    }
+
+    /// The "already added" glyph — one implementation for both row arms.
+    private var checkmark: some View {
+        Image(systemName: "checkmark.circle.fill")
+            .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
+            .accessibilityLabel(Text("quickApps.added"))
     }
 
     private func rowLabel(_ app: AppLauncher.App, captionKey: String?) -> some View {

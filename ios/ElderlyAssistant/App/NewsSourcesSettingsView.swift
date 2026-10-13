@@ -9,6 +9,8 @@ import SwiftUI
 /// what the voice digest reads.
 struct NewsSourcesSettingsView: View {
     @Environment(\.appAppearance) private var appearance
+    /// [AX-VIEWPORT] Gates the source-URL caption's line cap below.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject var store: NewsSourceStore
 
     @State private var nameDraft = ""
@@ -35,7 +37,11 @@ struct NewsSourcesSettingsView: View {
                                 Text(source.urlString)
                                     .font(.system(size: appearance.typography.captionPointSize))
                                     .foregroundStyle(appearance.colors.textSecondary)
-                                    .lineLimit(2)
+                                    // [AX-VIEWPORT] The source URL wraps
+                                    // at accessibility sizes instead of
+                                    // truncating mid-host. Standard sizes
+                                    // keep the 2-line cap.
+                                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                             }
                             Spacer()
                             Button(role: .destructive) {

@@ -245,6 +245,7 @@ struct EmergencyIconButton: View {
 struct HintCarousel: View {
     @Environment(\.appAppearance) private var appearance
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private static let phraseKeys = [
         "home.hint.medAck", "home.hint.reminder", "home.hint.call", "home.hint.query"
     ]
@@ -254,14 +255,20 @@ struct HintCarousel: View {
         // Warm rounded catalog microcopy + a page-dot in the REST state's
         // blue (visual-polish 2026-09-08: the carousel only shows under
         // the idle hero, so its accent follows the hero's blue instead of
-        // the old fixed amber glow).
-        VStack(spacing: 12) {
-            Text("home.hint.label")
-                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .bold))
-                .foregroundStyle(appearance.colors.textSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("home.hint.prompt")
+        // the old fixed amber glow). [HERO-SIZE] (2026-10-14) at
+        // accessibility sizes the fixed sub-hero slot already hosts the
+        // state caption above the carousel, so the label row stands down
+        // and the spacing tightens — keeps caption + carousel inside the
+        // slot's fixed height.
+        VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 8 : 12) {
+            if !dynamicTypeSize.isAccessibilitySize {
+                Text("home.hint.label")
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("home.hint.prompt")
+            }
             Text(LocalizedStringKey(Self.phraseKeys[index]))
                 // Static/rotating text under the speak button is caption-
                 // sized (home-redesign v3, 2026-09-08): this rotating

@@ -170,6 +170,8 @@ struct EventsView: View {
 /// happen.
 struct EventFormView: View {
     @Environment(\.appAppearance) private var appearance
+    /// [AX-VIEWPORT] Gates the choice chips' wrapping room.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// nil = add a new event; non-nil = edit that one.
     let event: FreeFormEvent?
 
@@ -442,8 +444,20 @@ struct EventFormView: View {
                             .font(.system(size: appearance.typography.bodyPointSize,
                                           weight: .semibold))
                             .foregroundStyle(isSelected ? .white : appearance.colors.textPrimary)
-                            .lineLimit(1)
+                            .multilineTextAlignment(.center)
+                            // [AX-VIEWPORT] At accessibility text sizes
+                            // the single-line pill's words touch the
+                            // capsule's edges. The label may wrap (the
+                            // width cap gives the horizontal scroll a
+                            // line to wrap AT — an unbounded line never
+                            // wraps), and the capsule gets vertical room
+                            // that scales with the type. Standard sizes
+                            // keep the one-line chip byte-for-byte.
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                            .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? 200 : nil)
                             .padding(.horizontal, 18)
+                            .padding(.vertical, dynamicTypeSize.isAccessibilitySize
+                                     ? appearance.typography.captionPointSize * 0.4 : 0)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
                             .background(isSelected ? appearance.colors.accent
                                                    : appearance.colors.background)

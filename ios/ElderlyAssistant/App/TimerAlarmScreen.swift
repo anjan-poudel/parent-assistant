@@ -6,6 +6,8 @@ import SwiftUI
 /// path can dismiss the alert while leaving its bell running.
 struct TimerAlarmScreen: View {
     @Environment(\.appAppearance) private var appearance
+    /// [AX-VIEWPORT] Gates the pinned STOP button's padding below.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let timer: TimerItem
     let onStop: () -> Void
 
@@ -53,17 +55,13 @@ struct TimerAlarmScreen: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
                 Spacer()
-                Button(action: onStop) {
-                    Text("timerAlarm.stop")
-                        .font(.system(size: appearance.typography.bodyPointSize + 4,
-                                      weight: .bold))
-                        .foregroundColor(appearance.statusForeground(DesignTokens.stateError))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 24)
-                        .background(appearance.colors.card)
-                        .clipShape(RoundedRectangle(cornerRadius: 24))
-                }
-                .padding(.horizontal, 36)
+                // [AX-VIEWPORT] STOP used to sit HERE, at the end of a
+                // scrollable column: at accessibility text sizes the
+                // column is taller than the screen, and STOP — the only
+                // way to silence a ringing alarm — fell below the fold.
+                // It is pinned as the ScrollView's bottom safe-area inset
+                // now (see `stopButton`), always on screen whatever the
+                // type size.
                 // The honest foreground/background contract, on the one
                 // screen where it matters most.
                 Text("timerAlarm.backgroundNote")
@@ -74,7 +72,28 @@ struct TimerAlarmScreen: View {
                     .padding(.bottom, 40)
             }
             }
+            .safeAreaInset(edge: .bottom) { stopButton }
         }
+    }
+
+    /// The STOP action, pinned to the bottom safe area (see `body`): the
+    /// one exit from a ringing alarm must be visible without scrolling,
+    /// at every text size. Its padding tightens at accessibility sizes —
+    /// the pin owns visibility and the scaling label carries the size —
+    /// so the pinned bar cannot eat the viewport it sits over. Standard
+    /// sizes keep the 24pt padding exactly.
+    private var stopButton: some View {
+        Button(action: onStop) {
+            Text("timerAlarm.stop")
+                .font(.system(size: appearance.typography.bodyPointSize + 4,
+                              weight: .bold))
+                .foregroundColor(appearance.statusForeground(DesignTokens.stateError))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 14 : 24)
+                .background(appearance.colors.card)
+                .clipShape(RoundedRectangle(cornerRadius: 24))
+        }
+        .padding(.horizontal, 36)
     }
 }
 

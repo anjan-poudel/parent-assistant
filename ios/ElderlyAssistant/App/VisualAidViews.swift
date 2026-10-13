@@ -107,6 +107,9 @@ struct VisualAidPhotoPicker: UIViewControllerRepresentable {
 /// them fixes both the walk reminder and the medicine reminder.
 struct ReminderVisualAidScreen<Footer: View>: View {
     @Environment(\.appAppearance) private var appearance
+    /// [AX-VIEWPORT] Gates the scrolling column and the pager's bounded
+    /// height below (see `body`).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let entryId: UUID
     let title: String
     let aids: [VisualAid]
@@ -154,61 +157,81 @@ struct ReminderVisualAidScreen<Footer: View>: View {
     var body: some View {
         ZStack {
             appearance.colors.background.ignoresSafeArea()
-            VStack(spacing: 16) {
-                HStack {
-                    Button(action: onClose) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 26, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(minWidth: DesignTokens.minTapTargetSize,
-                                   minHeight: DesignTokens.minTapTargetSize)
-                            .appSurface(role: .accent, cornerRadius: 999)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text("common.close"))
-                    Spacer()
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-
-                if display.showsImage, currentImage != nil {
-                    imagePager
-                }
-
-                VStack(spacing: 10) {
-                    Text(title)
-                        .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
-                        .foregroundStyle(appearance.colors.textPrimary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
-
-                    if let caption = display.currentCaption {
-                        Text(caption)
-                            .font(.system(size: appearance.typography.bodyPointSize))
-                            .foregroundStyle(appearance.colors.textSecondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
-                    }
-
-                    // "Photo 2 of 3" — hidden for a lone photo ("1 of 1" is
-                    // noise). Rendered as real text rather than the page
-                    // dots' default style: at caption size it is legible to
-                    // the person this screen is for.
-                    if let indicator = display.indicatorText(locale: locale),
-                       currentImage != nil {
-                        Text(indicator)
-                            .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                            .foregroundStyle(appearance.colors.textSecondary)
-                            .accessibilityLabel(Text(indicator))
-                    }
-
-                    // The caller's own content — nothing at all for a
-                    // routine reminder, the dose line and the elder's
-                    // acknowledge action for a medication dose.
-                    footer
-                }
-                .padding(.bottom, 24)
+            // [AX-VIEWPORT] At accessibility text sizes this column (the
+            // photo pager, the title, the caption and the caller's
+            // footer) is taller than the screen, and the bare VStack
+            // clipped whatever fell past the edge — on a fired medication
+            // dose that is the "I took it" button, the elder's ONLY
+            // acknowledge action (the medication screen renders its dose
+            // footer through this shared screen). Scrolling the column at
+            // accessibility sizes keeps every element reachable past the
+            // fold; standard sizes keep today's fixed layout, unscrolled:
+            // the pager fills the space and nothing moves.
+            if dynamicTypeSize.isAccessibilitySize {
+                ScrollView { screenContent }
+            } else {
+                screenContent
             }
+        }
+    }
+
+    /// The screen's one column — shared by both size arms in `body`, so
+    /// the two layouts can never drift apart.
+    private var screenContent: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Button(action: onClose) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(minWidth: DesignTokens.minTapTargetSize,
+                               minHeight: DesignTokens.minTapTargetSize)
+                        .appSurface(role: .accent, cornerRadius: 999)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("common.close"))
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+
+            if display.showsImage, currentImage != nil {
+                imagePager
+            }
+
+            VStack(spacing: 10) {
+                Text(title)
+                    .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
+                    .foregroundStyle(appearance.colors.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+
+                if let caption = display.currentCaption {
+                    Text(caption)
+                        .font(.system(size: appearance.typography.bodyPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
+
+                // "Photo 2 of 3" — hidden for a lone photo ("1 of 1" is
+                // noise). Rendered as real text rather than the page
+                // dots' default style: at caption size it is legible to
+                // the person this screen is for.
+                if let indicator = display.indicatorText(locale: locale),
+                   currentImage != nil {
+                    Text(indicator)
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                        .foregroundStyle(appearance.colors.textSecondary)
+                        .accessibilityLabel(Text(indicator))
+                }
+
+                // The caller's own content — nothing at all for a
+                // routine reminder, the dose line and the elder's
+                // acknowledge action for a medication dose.
+                footer
+            }
+            .padding(.bottom, 24)
         }
     }
 
@@ -238,7 +261,13 @@ struct ReminderVisualAidScreen<Footer: View>: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        .frame(maxHeight: .infinity)
+        // [AX-VIEWPORT] Inside the accessibility-size ScrollView the
+        // pager cannot "fill the remaining space" (there is none to
+        // measure): an unbounded page TabView sizes to chance. A bounded
+        // box keeps the photo prominent and its fixed size keeps the
+        // text and the acknowledge action scrolling predictably below
+        // it. Standard sizes keep the fill-the-screen behaviour.
+        .frame(maxHeight: dynamicTypeSize.isAccessibilitySize ? 280 : .infinity)
         .task(id: entryId) {
             var loaded: [UUID: UIImage] = [:]
             for aid in aids {
