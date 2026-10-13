@@ -333,7 +333,15 @@ final class AckFastLanePlayer: NSObject, PreAckPlaying, AVAudioPlayerDelegate {
             // (depth-counted — nests with the result utterance's own
             // begin/end).
             ResponsePlaybackModeSeam.begin()
-            newPlayer.play()
+            if !newPlayer.play() {
+                // play() can return false (broken file, session race):
+                // no delegate callback ever fires, so settle here — the
+                // fast lane must not hang the turn, and the seam must
+                // not stay open (that would strand the session in the
+                // loud playback category with no mic).
+                settle()
+                return false
+            }
             emit("ack_cache_hit", outcome: "success",
                  durationMs: setupMs, spec: spec)
             return true

@@ -34,23 +34,59 @@ final class SpeakerTests: XCTestCase {
         XCTAssertTrue(bus.emittedEvents.isEmpty)
     }
 
+    func testPiperSpeakerCancelDoesNotEndASeamItNeverBegan() throws {
+        // [LOUD-TTS-CATEGORY] Seam balance: the ack fast lane may hold an
+        // open playback seam while Piper is still synthesizing. A cancel()
+        // during that window must NOT consume the ack's begin — the
+        // shared depth accounting would restore the capture preset under
+        // the ack's tail (audible loudness flip-flop).
+        var begins = 0
+        var ends = 0
+        ResponsePlaybackModeSeam.begin = { begins += 1 }
+        ResponsePlaybackModeSeam.end = { ends += 1 }
+        defer {
+            ResponsePlaybackModeSeam.begin = {}
+            ResponsePlaybackModeSeam.end = {}
+        }
+
+        let bus = MockObservabilityBus()
+        let system = SystemSpeechSpeaker(observabilityBus: bus)
+        let store = try ModelStore(
+            observabilityBus: bus,
+            rootDirectoryOverride: FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-tests-\(UUID().uuidString)")
+        )
+        let piper = PiperVoiceSpeaker(fallback: system,
+                                      observabilityBus: bus,
+                                      modelStore: store)
+
+        piper.cancel()
+        XCTAssertEqual(begins, 0)
+        XCTAssertEqual(ends, 0,
+                       "a cancel that never began playback must not end a "
+                       + "concurrent ack's seam")
+    }
+
     // MARK: - [VOLUME-BOOST] Gain math (percent → linear factor)
 
     func testGainFactorMapsPercentToLinearAndClampsFirst() {
         XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 100), 1.0, accuracy: 0.0001)
         XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 150), 1.5, accuracy: 0.0001)
+        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 200), 2.0, accuracy: 0.0001)
         XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 50), 0.5, accuracy: 0.0001)
-        // Out-of-range percentages clamp BEFORE the math: the limiter can
+        // Out-of-range percentages clamp BEFORE the math: the transfer can
         // never see a gain the UI cannot produce.
-        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 1000), 1.5, accuracy: 0.0001)
+        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 1000), 2.0, accuracy: 0.0001)
         XCTAssertEqual(VoiceOutputGain.linearFactor(percent: -20), 0.5, accuracy: 0.0001)
     }
 
     func testGainDecibelFormMatchesTheLinearFactor() {
         // 100 % = 0 dB (the shipped loudness), 150 % ≈ +3.52 dB,
-        // 50 % ≈ −6.02 dB — the honest "how much louder" numbers.
+        // 200 % ≈ +6.02 dB, 50 % ≈ −6.02 dB — the honest "how much
+        // louder" numbers.
         XCTAssertEqual(VoiceOutputGain.decibels(percent: 100), 0, accuracy: 0.001)
         XCTAssertEqual(VoiceOutputGain.decibels(percent: 150), 3.5218, accuracy: 0.01)
+        XCTAssertEqual(VoiceOutputGain.decibels(percent: 200), 6.0206, accuracy: 0.01)
         XCTAssertEqual(VoiceOutputGain.decibels(percent: 50), -6.0206, accuracy: 0.01)
     }
 
@@ -59,25 +95,54 @@ final class SpeakerTests: XCTestCase {
         XCTAssertEqual(VoiceOutputGain.ceilingLinear, 0.8913, accuracy: 0.001)
     }
 
-    // MARK: - [VOLUME-BOOST] Limiter behavior
-
-    func testLimiterAttenuatesAHotBufferInsteadOfClipping() {
-        // 0.95 × 1.5 = 1.425 would hard-clip; the limiter pulls the WHOLE
-        // buffer down to the ceiling instead (no sample is squared off).
-        var samples: [Float] = [0.95, -0.5, 0.25]
-        let result = VoiceOutputGain.apply(gain: 1.5, to: &samples)
-
-        XCTAssertTrue(result.didLimit, "the requested gain crossed the ceiling")
-        XCTAssertEqual(result.appliedGain, VoiceOutputGain.ceilingLinear / 0.95,
-                       accuracy: 0.0001)
-        XCTAssertEqual(samples[0], VoiceOutputGain.ceilingLinear, accuracy: 0.0001)
-        // Everything kept its relationship to everything else — a smaller
-        // gain, not a distorted waveform.
-        XCTAssertEqual(samples[1] / samples[0], -0.5 / 0.95, accuracy: 0.001)
-        XCTAssertEqual(samples[2] / samples[0], 0.25 / 0.95, accuracy: 0.001)
+    func testSoftKneeIsMinusTwelveDBFS() {
+        XCTAssertEqual(VoiceOutputGain.kneeDBFS, -12)
+        XCTAssertEqual(VoiceOutputGain.kneeLinear, 0.2512, accuracy: 0.001)
     }
 
-    func testLimiterNeverExceedsTheCeilingAtAnySetting() {
+    // MARK: - [VOLUME-BOOST] Transfer behavior (boost side)
+
+    func testBoostRaisesTheBodyEvenWhenPeaksAreAtFullScale() {
+        // The regression this transfer exists for: Piper speech peaks
+        // near full scale, and the original whole-buffer limiter applied
+        // ≈ ceiling/peak ≈ 1.0× to EVERYTHING — the 150 % setting bought
+        // nothing on real replies. The knee gives the body of the speech
+        // the full gain while the peaks compress.
+        var samples: [Float] = [1.0, -1.0, 0.1, -0.05, 0.0]
+        let result = VoiceOutputGain.apply(gain: 2.0, to: &samples)
+
+        XCTAssertEqual(result.appliedGain, 2.0, accuracy: 0.0001)
+        XCTAssertTrue(result.didLimit, "full-scale peaks enter the knee")
+        // The body keeps the FULL requested gain — exactly what the old
+        // limiter refused to do.
+        XCTAssertEqual(samples[2], 0.2, accuracy: 0.0001)
+        XCTAssertEqual(samples[3], -0.1, accuracy: 0.0001)
+        // The peaks compress toward — and never cross — the ceiling.
+        XCTAssertGreaterThan(samples[0], 0.6, "compressed, not flattened")
+        XCTAssertLessThan(samples[0], VoiceOutputGain.ceilingLinear)
+        XCTAssertLessThanOrEqual(VoiceOutputGain.peak(of: samples),
+                                 VoiceOutputGain.ceilingLinear + 0.0001)
+    }
+
+    func testBoostCompressesLoudSamplesInsteadOfPullingTheBufferDown() {
+        // 0.95 × 1.5 = 1.425 would hard-clip; the knee compresses it
+        // toward the ceiling instead of squaring it off — and unlike the
+        // original limiter it does NOT pull the quieter samples down with
+        // it.
+        var samples: [Float] = [0.95, 0.1]
+        let result = VoiceOutputGain.apply(gain: 1.5, to: &samples)
+
+        XCTAssertTrue(result.didLimit, "the requested gain crossed the knee")
+        XCTAssertEqual(result.appliedGain, 1.5, accuracy: 0.0001)
+        // The quiet sample keeps the full gain (the old whole-buffer
+        // limiter would have given it ≈ 0.938×).
+        XCTAssertEqual(samples[1], 0.15, accuracy: 0.0001)
+        XCTAssertGreaterThan(samples[0], VoiceOutputGain.kneeLinear,
+                             "compressed, not flattened")
+        XCTAssertLessThanOrEqual(samples[0], VoiceOutputGain.ceilingLinear + 0.0001)
+    }
+
+    func testTransferNeverExceedsTheCeilingAtAnySetting() {
         // Every reachable percentage, against a file that is already at
         // full scale — the worst case a boost can meet.
         for percent in stride(from: VoiceOutputVolume.minimumPercent,
@@ -94,14 +159,25 @@ final class SpeakerTests: XCTestCase {
         }
     }
 
-    func testQuietBufferKeepsTheFullRequestedGain() {
-        // The honest half of the trade: below the ceiling the boost is
-        // real, with no limiting and no compression.
-        var samples: [Float] = [0.2, -0.1]
+    func testBelowKneeSamplesKeepTheFullRequestedGain() {
+        // The honest half of the trade: below the knee the boost is
+        // exact, with no limiting and no compression.
+        var samples: [Float] = [0.1, -0.05]
         let result = VoiceOutputGain.apply(gain: 1.5, to: &samples)
         XCTAssertFalse(result.didLimit)
         XCTAssertEqual(result.appliedGain, 1.5, accuracy: 0.0001)
-        XCTAssertEqual(samples[0], 0.3, accuracy: 0.0001)
+        XCTAssertEqual(samples[0], 0.15, accuracy: 0.0001)
+        XCTAssertEqual(samples[1], -0.075, accuracy: 0.0001)
+    }
+
+    func testAttenuationIsPureLinearAndNeverCompresses() {
+        // The quiet-room half of the range: 50 % halves the file's own
+        // amplitude exactly — no knee, no compression, no distortion.
+        var samples: [Float] = [0.95, -0.5, 0.25, 0.1]
+        let result = VoiceOutputGain.apply(gain: 0.5, to: &samples)
+        XCTAssertFalse(result.didLimit)
+        XCTAssertEqual(result.appliedGain, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(samples, [0.475, -0.25, 0.125, 0.05])
     }
 
     func testDigitalSilenceStaysSilent() {
@@ -114,14 +190,18 @@ final class SpeakerTests: XCTestCase {
         XCTAssertFalse(result.didLimit)
     }
 
-    func testMultiChannelBufferUsesOneSharedFactor() {
-        // Loud left, quiet right: both get the same factor, so the stereo
-        // image cannot shift under the boost.
+    func testMultiChannelBufferUsesOneSharedTransfer() {
+        // Loud left, quiet right: both go through the SAME transfer, so
+        // the stereo image cannot shift under the boost — and the quiet
+        // channel's below-knee samples keep the exact full gain.
         var channels: [[Float]] = [[0.95, 0.5], [0.1, 0.05]]
         let result = VoiceOutputGain.apply(gain: 1.5, toChannels: &channels)
-        let expected = VoiceOutputGain.ceilingLinear / 0.95
-        XCTAssertEqual(result.appliedGain, expected, accuracy: 0.0001)
-        XCTAssertEqual(channels[1][0], 0.1 * expected, accuracy: 0.0001)
+        XCTAssertEqual(result.appliedGain, 1.5, accuracy: 0.0001)
+        XCTAssertTrue(result.didLimit)
+        XCTAssertEqual(channels[1][0], 0.15, accuracy: 0.0001)
+        XCTAssertEqual(channels[1][1], 0.075, accuracy: 0.0001)
+        XCTAssertGreaterThan(channels[0][0], VoiceOutputGain.kneeLinear)
+        XCTAssertLessThanOrEqual(channels[0][0], VoiceOutputGain.ceilingLinear + 0.0001)
     }
 
     func testNonFiniteSamplesBecomeSilenceNeverNaN() {
