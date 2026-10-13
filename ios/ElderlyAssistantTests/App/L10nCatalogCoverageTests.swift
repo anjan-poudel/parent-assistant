@@ -193,7 +193,6 @@ final class L10nCatalogCoverageTests: XCTestCase {
         ("dialogue.correction.or", "Did you mean %@ or %@?",
          "तपाईंले %@ वा %@ भन्नुभएको हो?"),
         ("dialogue.didYouMean", "Did you mean %@?", "तपाईंले %@ भन्नुभएको हो?"),
-        ("dialogue.option.conjunction", " or ", " वा "),
         ("dialogue.escape", "OK, tell me again.", "ठीक छ, फेरि भन्नुहोस्।"),
         ("dialogue.exhausted", "I didn't understand. Try again later.",
          "मैले बुझिन। पछि फेरि भन्नुहोस्।"),
