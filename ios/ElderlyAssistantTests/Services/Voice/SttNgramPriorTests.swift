@@ -166,6 +166,10 @@ final class SttNgramPriorTests: XCTestCase {
                              "the corpus bank's expanded vocabulary")
         XCTAssertTrue(bank.revision.hasPrefix("correction-banks/v4#"))
         XCTAssertFalse(bank.corpusRevision.isEmpty)
+        // [BANK-SEPARATOR] The pipeline's invariant refuses `||` keys
+        // (the shipped v4#dc97a707 defect: keys the runtime's U+0001
+        // lookups never matched). A bank that decodes is therefore
+        // separator-clean by construction — pinned pipeline-side.
     }
 
     // MARK: - Delete-one forms (the runtime twin of the pipeline's index)

@@ -290,7 +290,7 @@ final class ChatResponseShapeTests: XCTestCase {
                                                    maxTokens: 128,
                                                    timeoutSeconds: 10,
                                                    chatConfidenceFloor: 0.9,
-                                                   judgeTimeoutSeconds: 1.5))
+                                                   judgeTimeoutSeconds: 8.0))
         interp.generateOverride = { _, _ in
             #"{"intent":"chat","reply":"होला।","confidence":0.7}"#
         }

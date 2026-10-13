@@ -473,11 +473,13 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         /// it "beside the brain's other thresholds"), and it is only
         /// meaningful where the brain's decoded confidences are read.
         let chatConfidenceFloor: Double
-        /// [CORRECTION-REVIVE] The judge's own inference budget. Shorter
-        /// than the turn's 10 s: the judge runs on the FALLBACK path after
-        /// a failed interpret, and its answer only decides between "silent
-        /// re-route" and "ask the user" — a hung judge must never block
-        /// the reprompt speech for the turn's full timeout.
+        /// [CORRECTION-REVIVE] The judge's own inference budget. The
+        /// device field report (2026-10-12) measured `judge_timeout` at
+        /// 1.5 s on-device — the 4B needs longer for the judge prompt
+        /// (the pipelined judge call + 40-token decode), and a timed-out
+        /// judge silently degrades the whole layer to "ask the user".
+        /// 4.0 s keeps the judge bounded (a hung call never blocks the
+        /// turn forever) while giving the on-device 4B its real budget.
         let judgeTimeoutSeconds: Double
         // [NO-GIBBERISH] (2026-09-07): sampling temperature/seed are NOT
         // configurable — determinism is a correctness invariant here, so
@@ -487,7 +489,7 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                                       maxTokens: 128,
                                       timeoutSeconds: 10,
                                       chatConfidenceFloor: 0.6,
-                                      judgeTimeoutSeconds: 1.5)
+                                      judgeTimeoutSeconds: 8.0)
     }
 
     private let modelStore: ModelStore

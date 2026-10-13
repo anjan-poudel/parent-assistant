@@ -41,6 +41,7 @@ def run_prior(corpus: Path, *extra: str):
     return subprocess.run(
         [sys.executable, str(SRC / "stt_ngram_prior.py"),
          "--corpus", str(corpus), "--min-rows", "0", "--min-lexicon", "0",
+         "--min-occurrences", "1",
          *extra],
         cwd=ROOT, capture_output=True, text=True)
 
@@ -67,16 +68,19 @@ class SymSpellTests(unittest.TestCase):
 
 
 class CountTests(unittest.TestCase):
-    def test_bigram_keys_are_joined_with_double_pipe(self):
+    def test_bigram_keys_use_the_swift_separator(self):
+        # The separator is U+0001 — pinned against the Swift loader's
+        # `prev\u{1}cur` lookups. A drift here would silently zero every
+        # n-gram prior on device (the shipped-bank defect this test pins).
         unigram, bigram, trigram, _ = N.count_ngrams(["एक दुई तीन"])
-        self.assertIn("एक||दुई", bigram)
-        self.assertIn("दुई||तीन", bigram)
-        self.assertIn("एक||दुई||तीन", trigram)
+        self.assertIn("एक\u0001दुई", bigram)
+        self.assertIn("दुई\u0001तीन", bigram)
+        self.assertIn("एक\u0001दुई\u0001तीन", trigram)
 
     def test_core_normalisation_strips_punctuation_from_keys(self):
         unigram, bigram, _, _ = N.count_ngrams(["खाना! खानुहोस्।"])
         self.assertIn("खाना", unigram)
-        self.assertIn("खाना||खानुहोस्", bigram)
+        self.assertIn("खाना\u0001खानुहोस्", bigram)
 
 
 class BandTests(unittest.TestCase):

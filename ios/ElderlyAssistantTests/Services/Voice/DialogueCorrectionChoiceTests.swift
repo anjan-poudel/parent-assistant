@@ -40,21 +40,26 @@ final class DialogueCorrectionChoiceTests: XCTestCase {
         XCTAssertTrue(frame.candidates.isEmpty)
     }
 
-    // MARK: - Probe text (string equality — never model text)
+    // MARK: - Probe text (owner copy spec: "did you mean X / X or Y")
 
-    func testTheProbeComposesTheHeardSurfaceAndTheReadingsConversationally() {
-        // The numbered "१) X, २) Y" form was retired in the
-        // conversational-copy passes (2026-10-11/13): readings join with
-        // the conjunction, never a text-menu numbering.
+    func testTheProbeIsExactlyTheOwnersCopy() {
+        // Owner spec 2026-10-12: "did you mean X", "did you mean X or Y"
+        // — no lead, no quoting of the heard word, no numbering, nothing
+        // appended. String equality against the shipped templates.
         let text = DialogueProbeComposer.probeText(for: frame(),
                                                    catalog: nil,
                                                    retry: false,
                                                    locale: ne)
-        XCTAssertTrue(text.hasPrefix("मैले बुझिन।"),
-                      "the honest lead opens the question")
-        XCTAssertTrue(text.contains("«गइ»"), "the heard surface is quoted")
-        XCTAssertTrue(text.contains("गइए वा गर"), "the readings join with the conjunction")
-        XCTAssertFalse(text.contains(")"), "no numbered menu markers")
+        XCTAssertEqual(text, "तपाईंले गइए वा गर भन्नुभयो?")
+        let single = DialogueProbeComposer.probeText(
+            for: DialogueFrame.correctionChoice(
+                readings: [CorrectionClarification.Reading(tokenRange: 0..<2,
+                                                           surface: "गइ",
+                                                           options: ["गइए"])],
+                original: "गइ",
+                sourceTranscript: "गइ"),
+            catalog: nil, retry: false, locale: ne)
+        XCTAssertEqual(single, "तपाईंले गइए भन्नुभयो?")
     }
 
     func testTheRetryProbePrefixesTheRetryLine() {

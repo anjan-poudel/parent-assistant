@@ -360,7 +360,7 @@ enum DialogueProbeComposer {
         static let anyPlay = "dialogue.option.anyPlay"
         static let understoodNo = "dialogue.understood.no"
         static let didYouMean = "dialogue.didYouMean"
-        static let correctionAsk = "dialogue.correction.ask"
+        static let correctionOr = "dialogue.correction.or"
         static let conjunction = "dialogue.option.conjunction"
     }
 
@@ -433,27 +433,29 @@ enum DialogueProbeComposer {
             String(format: L10n.str(Key.didYouMean, locale: locale), labels)
     }
 
-    /// [CORRECTION-REVIVE] The correction question: the honest lead, then
-    /// the heard surface and the readings joined conversationally, the
-    /// same ", " list the other probes use — the numbered "१) «X», २)
-    /// «Y»" form read like a text-based menu on the phone (owner
-    /// feedback 2026-10-11: "use conversational language, not choose
-    /// 1,2,3,4"). The elder answers by repeating a reading or with the
-    /// index words the answer path already understands ("पहिलो" /
-    /// "दोस्रो" / "तेस्रो" — S2's indexWord capture works without any
-    /// printed number). The readings are the user's own words; never
-    /// model text.
+    /// [CORRECTION-REVIVE] The correction question — the OWNER'S copy
+    /// spec (2026-10-12): "did you mean X" / "did you mean X or Y" and
+    /// NOTHING else. No lead line, no heard-surface quoting, no
+    /// numbered list, no appendix. One reading → the existing
+    /// `dialogue.didYouMean` template; two → the X-or-Y template with
+    /// the top two readings; beyond two the rest are simply not offered.
+    /// Answer "हो" for the first, echo the second, "होइन" to close.
+    /// (Supersedes the 2026-10-11 ", "-joined lead form on master.)
     private static func correctionChoiceProbe(for frame: DialogueFrame,
                                               locale: Locale) -> String {
-        guard let reading = frame.correctionReadings.first else {
+        guard let reading = frame.correctionReadings.first,
+              let top = reading.options.first else {
             return L10n.str(Key.understoodNo, locale: locale)
         }
+        // [CORRECTION-REVIVE] The owner's copy spec (2026-10-12): "did
+        // you mean X / X or Y", NO lead line, NO heard-word echo —
+        // joined with the [CASUAL-COPY] naturalList so two readings read
+        // "X वा Y" and never a menu.
         let options = naturalList(
             Array(reading.options.prefix(DialogueConfig.maxSpokenCandidates)),
             locale: locale)
-        return L10n.str(Key.understoodNo, locale: locale) + " " +
-            String(format: L10n.str(Key.correctionAsk, locale: locale),
-                   reading.surface, options)
+        return String(format: L10n.str(Key.didYouMean, locale: locale),
+                      options)
     }
 
     /// [CASUAL-COPY] (2026-10-13, owner: "doesn't sound like a normal

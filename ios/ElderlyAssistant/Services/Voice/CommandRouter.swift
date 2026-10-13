@@ -163,6 +163,12 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// logged, never persisted.
     var lastTurnCorrection: CorrectionResult? { get }
 
+    /// [JUDGE-PRE-INTERPRET] True when the semantic judge ALREADY ran
+    /// for this turn (before the interpreter). The failure path reads
+    /// it so a judged turn is never judged twice: it goes straight to
+    /// the spoken clarification.
+    var lastTurnCorrectionJudged: Bool { get }
+
     /// The pluggable semantic judge (constitution: engines stay
     /// selectable). The shipped implementation judges on the RESIDENT 4B
     /// brain only; `isReady == false` (brain not resident, fine-tuned
@@ -491,6 +497,7 @@ extension VoiceCommandCoordinating {
     // judge, so the unrecognised path falls through to its existing
     // did-you-mean/reprompt behavior byte-identically.
     var lastTurnCorrection: CorrectionResult? { nil }
+    var lastTurnCorrectionJudged: Bool { false }
     var correctionJudge: SemanticJudge { NoSemanticJudge() }
     var isOnDeviceStack: Bool { false }
     // [DIRECTIONS] (2026-09-07) Navigation defaults — see the requirement
@@ -846,6 +853,7 @@ final class CommandRouter {
         // failing re-route from arming a second correction question.
         if safetyNetText == nil, coordinator?.activeDialogueFrame == nil {
             correctionProbeConsumed = false
+            pendingCorrectionCommand = nil
         }
         coordinator?.recordTranscript(raw)
 
@@ -1118,6 +1126,17 @@ final class CommandRouter {
             case .cancel:
                 coordinator?.resolveDialogueFrame(.cancelled)
                 emitDialogueFrameResolved(.cancelled)
+                // [CORRECTION-CONFLICT] "होइन" to the correction question
+                // means the heard word WAS the word — the stashed original
+                // interpretation dispatches verbatim (the typo was the
+                // user's intent, not an error).
+                if frame.probeKind == .correctionChoice,
+                   let deferred = takePendingCorrectionCommand() {
+                    pendingTranscript = deferred.raw
+                    dispatchInterpreted(deferred.command, raw: deferred.raw)
+                    pendingTranscript = nil
+                    return .unrecognised(transcript: raw)
+                }
                 speak(key: "dialogue.cancelled")
                 return .unrecognised(transcript: raw)
             case .bargeIn:
@@ -1779,6 +1798,19 @@ final class CommandRouter {
                 // [TURN-TIMING] The model answered (or abstained).
                 self.turnTracer?.mark("llm_done")
                 if let command = command {
+                    // [CORRECTION-CONFLICT] The silent-failure gate (17
+                    // Pro Max field report 2026-10-13): the brain answered
+                    // CONFIDENTLY with a typo riding into its message —
+                    // "bajan" went to YouTube search. When the corrector
+                    // flagged a token whose surface appears in what the
+                    // brain is about to DO, the correction question is
+                    // asked BEFORE the dispatch; the command is stashed,
+                    // and the answer decides: "हो" re-routes the
+                    // corrected text, "होइन" dispatches the original.
+                    if self.armCorrectionConflictIfNeeded(command, raw: raw) {
+                        self.resolveTurnReplyPending()
+                        return
+                    }
                     // REPHRASE band (spec §4, decision #6): a mid-band
                     // tier-`free` command becomes a yes/no question rather
                     // than an immediate dispatch. Tier-`confirm` actions
@@ -1807,7 +1839,8 @@ final class CommandRouter {
                         self.pendingTranscript = nil
                     }
                 } else {
-                    _ = self.routeKeywordRemainder(safetyRaw)
+                    _ = self.routeKeywordRemainder(safetyRaw,
+                                               isCorrectionReroute: safetyNetText != nil)
                 }
                 // The async dispatch has committed its reply (spoken /
                 // queued / declined) — the turn is no longer pending.
@@ -1824,7 +1857,8 @@ final class CommandRouter {
             return .unrecognised(transcript: raw)
         }
 
-        return routeKeywordRemainder(safetyRaw)
+        return routeKeywordRemainder(safetyRaw,
+                                   isCorrectionReroute: safetyNetText != nil)
     }
 
     /// [INTENT-KEYWORDS] (2026-09-11) Observability for a fired relaxed
@@ -2275,6 +2309,15 @@ final class CommandRouter {
               correction.mode == .apply,
               !correction.judgeItems.isEmpty else { return false }
 
+        // [JUDGE-PRE-INTERPRET] A turn the pre-interpret judge already
+        // answered is never judged twice — the spoken clarification is
+        // the next step, whatever the judge decided.
+        if coordinator?.lastTurnCorrectionJudged == true {
+            armCorrectionClarification(correction,
+                                       reason: .judgeRejected, raw: raw)
+            return true
+        }
+
         let judge = coordinator?.correctionJudge ?? NoSemanticJudge()
         guard judge.isReady else {
             // The brain is not resident (the shipped Gemini-first turn) —
@@ -2335,10 +2378,53 @@ final class CommandRouter {
         return true
     }
 
+    /// [CORRECTION-CONFLICT] The deferred command, taken exactly once —
+    /// the "होइन" path dispatches it; every other resolution abandons
+    /// it (the pick re-routes, an escape/barge-in starts fresh).
+    private func takePendingCorrectionCommand()
+        -> (command: InterpretedCommand, raw: String)? {
+        defer { pendingCorrectionCommand = nil }
+        return pendingCorrectionCommand
+    }
+
+    /// [CORRECTION-CONFLICT] True when the corrector's flagged token
+    /// appears in what the brain is about to DO — the command's message,
+    /// topic or contact. The question is armed and the command stashed;
+    /// the caller must NOT dispatch.
+    private func armCorrectionConflictIfNeeded(
+        _ command: InterpretedCommand, raw: String) -> Bool {
+        guard !correctionProbeConsumed,
+              let correction = coordinator?.lastTurnCorrection,
+              correction.mode == .apply,
+              let item = correction.judgeItems.first else { return false }
+        let fields = [command.message, command.topic, command.contact]
+            .compactMap { $0 }
+        let flagged = item.surface
+        let flaggedKey = STTCorrector.lexiconKey(of: flagged)
+        guard fields.contains(where: { field in
+            field.range(of: flagged) != nil
+                || STTCorrector.lexiconKey(of: field).range(of: flaggedKey)
+                    != nil
+        }) else { return false }
+        pendingCorrectionCommand = (command, raw)
+        armCorrectionClarification(correction, reason: .marginTooSmall,
+                                   raw: raw)
+        return true
+    }
+
     /// Arms the correction question — the one-deep frame, at most once
     /// per turn — and speaks it. On any failure (no coordinator, a live
     /// window, no readings) the shipped reprompt line stands
     /// byte-identically.
+    ///
+    /// [DOMAIN-ENRICHED] Before arming, the readings are enriched with
+    /// the DOMAIN near-matches the shipped keyword machinery already
+    /// knows (`DialogueCandidateBuilder` — the music rule's canonical
+    /// keys like भजन/bhajan). The device field report (2026-10-12) made
+    /// this load-bearing: the lexicographical top-2 for "बजन" were
+    /// बज्न/बचन — useless readings — while the music rule's keys
+    /// carried the intended भजन. Domain keys go FIRST; the heard word is
+    /// never offered back.
     private func armCorrectionClarification(_ correction: CorrectionResult,
                                             reason: ClarifyReason,
                                             raw: String) {
@@ -2349,8 +2435,25 @@ final class CommandRouter {
             speak(key: "router.reprompt")
             return
         }
+        let domainKeys = DialogueCandidateBuilder.build(
+            for: raw, excludingDomain: nil, rephraseHypothesis: nil)
+            .flatMap(\.matchKeys)
+        var readings = clarification.readings
+        if let first = readings.first {
+            var options = first.options
+            let heardKey = STTCorrector.lexiconKey(of: first.surface)
+            for key in domainKeys where
+                STTCorrector.lexiconKey(of: key) != heardKey
+                    && !options.contains(key) {
+                options.insert(key, at: 0)
+            }
+            readings = [CorrectionClarification.Reading(
+                tokenRange: first.tokenRange,
+                surface: first.surface,
+                options: Array(options.prefix(2)))]
+        }
         let frame = DialogueFrame.correctionChoice(
-            readings: clarification.readings,
+            readings: readings,
             original: correction.original,
             sourceTranscript: raw)
         guard coordinator.startDialogueFrame(frame) else {
@@ -2387,6 +2490,10 @@ final class CommandRouter {
                                        capture: CaptureForm,
                                        frame: DialogueFrame,
                                        raw: String) -> RoutingResult {
+        // [CORRECTION-CONFLICT] A pick means the heard word WAS wrong —
+        // the deferred original interpretation is abandoned, never
+        // dispatched.
+        _ = takePendingCorrectionCommand()
         coordinator?.resolveDialogueFrame(.correctionSelected(index: index))
         emitDialogueFrameResolved(.correctionSelected(index: index))
         guard let reading = frame.correctionReadings.first,
@@ -2420,7 +2527,8 @@ final class CommandRouter {
     /// the user hears THAT (spec §7 no dead ends), not a lie that blames
     /// their pronunciation.
     @discardableResult
-    private func routeKeywordRemainder(_ raw: String) -> RoutingResult {
+    private func routeKeywordRemainder(_ raw: String,
+                                       isCorrectionReroute: Bool = false) -> RoutingResult {
         let text = raw
             .lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2534,7 +2642,17 @@ final class CommandRouter {
                     // byte-identically (NFR-MTC-012). The
                     // cloud-failure-class branch above and both no-brain
                     // branches below are untouched.
-                    speakDialogueDidYouMeanOrReprompt(raw)
+                    //
+                    // [CORRECTION-CONFLICT] On a correction re-route the
+                    // upgrade is SUPPRESSED: the user already answered
+                    // one question this turn, and a second probe chain
+                    // is the measured "weird loop" (17 Pro Max field
+                    // report 2026-10-13). The plain reprompt stands.
+                    if isCorrectionReroute {
+                        speak(key: "router.reprompt")
+                    } else {
+                        speakDialogueDidYouMeanOrReprompt(raw)
+                    }
                 }
             }
         case .downloadingBrain:
@@ -4259,6 +4377,13 @@ final class CommandRouter {
     /// re-route fires — so a re-route can never arm a second correction
     /// frame (the recursion bound). In-memory only.
     private var correctionProbeConsumed = false
+
+    /// [CORRECTION-CONFLICT] The interpreted command deferred behind a
+    /// correction question: "होइन" dispatches it verbatim, a pick
+    /// abandons it in favour of the re-route. Turn-scoped; cleared at
+    /// fresh-turn entry and on every resolution.
+    private var pendingCorrectionCommand: (command: InterpretedCommand,
+                                           raw: String)?
 
     /// [NO-GIBBERISH] (2026-09-07) Clock seam for the deterministic
     /// time/date pre-answers (`TopicPreAnswer` reads the current time from
