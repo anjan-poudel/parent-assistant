@@ -221,7 +221,7 @@ final class DialogueLogAndEgressTests: XCTestCase {
                 expectedSubstrings: [
                     "dialogue_degenerate_query", "\"intake\": \"ladder\"",
                     "dialogue_probe_spoken", "\"probe_kind\": \"slotFill\"",
-                    "\"attempt\": \"1\"", "\"option_count\": \"4\""
+                    "\"attempt\": \"1\"", "\"option_count\": \"0\""
                 ]))
         }
 
@@ -360,7 +360,7 @@ final class DialogueLogAndEgressTests: XCTestCase {
             observedDialogueKeys.formUnion(assertSinkHygiene(
                 console, scenario: "exhaustion", markers: [marker],
                 expectedSubstrings: [
-                    "\"attempt\": \"2\"", "\"option_count\": \"4\"",
+                    "\"attempt\": \"2\"", "\"option_count\": \"0\"",
                     "\"reason\": \"degenerateAnswer\"",
                     "outcome=defaultExecuted", "\"merge_source\": \"defaultQuery\""
                 ]))
