@@ -184,6 +184,17 @@ final class PiperVoiceSpeakerTests: XCTestCase {
 
     func testCancelDuringPlaybackSettlesPromptly() async throws {
         try installFakeVoice(ModelCatalog.piperEnglishUS)
+        // [COLD-AUDITION WARM-UP] The one-shot voice audition runs inside
+        // the first speak of a process (persisted afterwards): on a cold
+        // first run it outlasts the 1.5 s settle deadline below even
+        // though the cancel itself settles promptly — the full-gate run
+        // and a 5-iteration isolation run both failed ONLY the cold
+        // iteration (~3.0 s) and passed every warm one (~0.4 s). A
+        // throwaway warm-up utterance mirrors production (the first
+        // reply warms the speaker), so the measurement pins the cancel
+        // property, not the audition.
+        engine.secondsOfAudio = 0
+        await speaker.speak("warm", locale: Locale(identifier: "en-US"))
         engine.secondsOfAudio = 44_100   // 2 s of audio — long enough to cancel into
 
         let started = Date()

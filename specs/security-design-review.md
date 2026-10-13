@@ -1,138 +1,131 @@
-# Security design review — Multi-Turn Conversation (STRIDE)
+# Security Design Review — family-contacts-unify
 
-**Task.** `security-design-review` — the security gate of the `multi-turn-conversation` workflow. Workflow exit condition: `review.decision == "SECURITY-GO"`.
+**Task:** `security-design-review` · **Decision: SECURITY-GO**
+**Worktree:** `/Users/anjan/workspace/projects/elderly-ai-assistant-family-contacts-unify` (branch `feat/family-contacts-unify`, HEAD `f6ba251b`; base master `8089c735`)
+**Date:** 2026-10-12 · **Reviewer:** security reviewer (read-only; no artifacts modified)
+**Artifacts under review:** `specs/design-l1.md` (frozen architecture), `specs/design-l2.md` rev 3 (design commit `e687f075`; `review-l2` GO at `f6ba251b`)
+**Inputs:** `specs/family-contacts-unify/constitution.md`; root `constitution.md` (Safety & Compliance Delta, Standards); `specs/define-requirements.md` + `FR/`/`NFR/` (esp. FR-FCU-005/006/008/009/010/014, NFR-FCU-002/003/007); `.ai-sdd/workflows/family-contacts-unify.yaml` (security-design-review scope comment)
 
-**Agent.** sdd-reviewer (ai-sdd), read-only.
+## 0. Scope, method, and verification limitation
 
-**Artifacts under review**
+Method: the design's own §6.3 STRIDE notes were explicitly **not** accepted as evidence. Every claim below was re-derived from the design text and independently checked against the worktree code at HEAD; where a claim rests on a pin (source scan, test suite) rather than existing code, the pin's infrastructure was verified to exist and the claim is marked accordingly.
 
-| Artifact | Contract | Size | Status |
+Limitation (stated honestly): this is a **design-stage** review. The new files (`SystemContactLinkService.swift`, `SystemContactPhotoWriter.swift`, `FamilyContactIndex.swift`) do not exist yet; the write seam's real glue (`CNSaveRequest.execute`, read-back) cannot be exercised at unit level (`CNContactStore` is not fakeable) and is covered by the source-scan pin, `security-test`, and the DV-3/DV-4 device gates. The risk of *implementation* diverging from this design belongs to `implement` (paired review + confidence 0.85), `review-implementation`, and `security-test` (SECURITY-GO exit).
+
+## 1. Preconditions verified in the worktree
+
+| # | Claim / precondition | Evidence | Verdict |
 |---|---|---|---|
-| `specs/design-l1.md` | `architecture_l1` | 680 lines | gate-cleared at `design-l1` |
-| `specs/design-l2.md` | `component_design_l2` | 1005 lines | `review-l2` GO (F-1..F-4, C-1..C-5) |
-| `specs/review-l2.md` | review record | 245 lines | security-relevant findings carried |
+| P1 | `specs/design-l1.md` exists (frozen) and `specs/design-l2.md` rev 3 is the reviewed revision | files read; `git log`: `e687f075` "design-l2 rev 3"; header names rev 3 | ✓ |
+| P2 | `review-l2` GO exists (dependency satisfied) | `f6ba251b` | ✓ |
+| P3 | No `CNSaveRequest` / `CNMutableContact` anywhere in the app today (the "first write" premise) | `grep -rn` over `ios/` (incl. tests): **0 hits**, both symbols | ✓ |
+| P4 | `CNContactStore` is constructed only in `AddressBookDirectory.swift` today | `grep`: other mentions are comments only (`LeafViews.swift:900`, `MissedCallContactResolver.swift:23`) | ✓ |
+| P5 | The source-scan pin's helper exists | `ios/ElderlyAssistantTests/Services/LiveTranslate/FeatureSourceScan.swift:39` (`swiftFiles(in:)`), `:62` (`codeText(of:)`) | ✓ |
+| P6 | Release log gate is wired into the build | `ios/build.sh:431` runs `tools/check-release-log-safety.sh` | ✓ |
+| P7 | LogSanitiser's allow-list contains every key the design's events use | `LogSanitiser.swift:56-65` — `outcome`, `state`, `error_code`, `duration_ms`, `entry_count`, `contact_id_hash` all present | ✓ |
+| P8 | The runtime sanitise choke point is real | `AppCoordinator.swift:11666` — `let clean = sanitiser.sanitise(event)` on the bus implementation's `emit` | ✓ |
+| P9 | `MissedCallContactResolver.matches` is the floor-8 trailing-digit rule the design reuses | `MissedCallContactResolver.swift:44-53` | ✓ |
+| P10 | `ContactResolver` scores are `Double`; accept 0.6 / margin 0.15 at :61-62; rival rule strict `<` at :83-84 | `ContactResolver.swift:61-62,77,83-84` | ✓ |
+| P11 | `ContactsAccess` currently collapses `.limited` via `@unknown default → .denied` | `AddressBookDirectory.swift:245-249` (enum), `:348-355` | ✓ |
+| P12 | `FamilyContact` custom-decoder degrade pattern exists | `FamilyContactStore.swift:61-150` | ✓ |
+| P13 | `ContactPhotoStore` matches the fallback description: ≤512 px JPEG q0.8, orientation baked, metadata stripped, `.completeFileProtection`, non-throwing, plain-filename guard | `ContactPhotoStore.swift:8-19,27-28,75-104,143-149` | ✓ |
+| P14 | All six scoped suites named by the constitution + L10n suite exist | files present under `ios/ElderlyAssistantTests/` | ✓ |
+| P15 | L10n catalog anchors cited by the design exist where claimed | catalog greps | ✓ |
+| P16 | The five `AddressBookDirectory.access()` consumers + the wizard/switch sites are where the design says | verified per site (AppCoordinator `:8333-8346`, SettingsView `:2117/:2323-2338`, LeafViews `:1343/:1347-1362/:1368-1370/:1379-1388/:1413/:1519`) | ✓ (see F6) |
+| P17 | Duplicate-claim premise: wizard records the picked row's `entry.normalized` as `numberKey` | `UnifiedContactSearch.swift:37-55`, `AddressBookDirectory.swift:46-76` | ✓ |
+| P18 | Four live `contactPhoto(for:)` call sites exist (deletion is compile-verified); `DownsampledImageCache.contactFace` key is `contact:<filename>` | `SettingsView.swift:1596, :2710`; `LeafViews.swift:1161, :2650`; `ViewCaches.swift:211` | ✓ |
 
-`design-l2.md` sha256 re-verified at review time (chunked here for readability): `9c164658 5b137833 0129c007 8cc4ae0f 3a32ab3e 818e3a86 ac87fe8c 069c6f51`.
+## 2. STRIDE threat model (independently verified)
 
-**Feature / worktree.** `multi-turn-conversation` @ `/Users/anjan/workspace/projects/elderly-ai-assistant-multi-turn-conversation`, branch `feat/multi-turn-conversation`. **Date.** 2026-10-10.
+### 2.1 Threats
 
-**Basis.** Feature supplement `specs/multi-turn-conversation/constitution.md` (Safety-Relevant Constraints 1-4; Feature Constraints 1-10); root `constitution.md` (Standards: encrypted storage, quarantine-level injection discipline, logs must not contain PII; Release gates: the release log-surface gate wired into `ios/build.sh`); the requirement set FR-MTC-001..020 / NFR-MTC-001..012 (security-relevant: FR-MTC-005/006/009/011/012/013/017, NFR-MTC-004/008/012); the workflow's six security focus areas; `specs/review-l2.md`.
+| ID | Threat (entry point) | Mitigation in the design | Independent verification | Residual verdict |
+|---|---|---|---|---|
+| S-1 | Spoofing: wrong-contact photo write — a stale/reused identifier routes the save to a different person's card | Attempt-time fingerprint re-check BEFORE the request is built (§1.4 step 2, §6.2); read-back byte verification (§1.4 step 4) | The writer fetches by identifier, fingerprints with `matches` (P9), and only then builds the intent/request; a mismatch returns `.identityMismatch` with no request constructed | Acceptable (F8) |
+| S-2 | Spoofing: wrong-person merge — an identifier now resolves to a different person | Refresh verification = record exists AND a current number satisfies `matches`; unverified links treated as ABSENT; stale line surfaced | Consumers read only the snapshot; `.empty`/unverified ⇒ today's unlinked behavior exactly | Acceptable |
+| S-3 | Spoofing: a linked row over-claims reachability | Synthesized rows carry the FAMILY phone and channels; the caption only explains the book-side name | Caption key/`linkedBookNames` shape consistent with `Result.id = "family-<uuid>"` | Acceptable (informational) |
+| S-4 | Spoofing/identity: voice resolution returns the wrong person | Conservative bands (1.00/0.90/0.85/0.80/0.75/0.60), margin 0.15, ties ⇒ ambiguity, near-miss exactly-one, family-roster-only candidates | Scores `Double` (P10); strict `<` rival rule re-derived — see math block | Acceptable (F2) |
+| T-1 | Tampering: partial or other-field mutation of the system record | Single target file for `CNSaveRequest`/`CNMutableContact`; only `imageData` assigned; intent field-set asserted; read-back; actor serialization | Zero such construction today (P3); pin helper exists (P5); update-only, never add/delete | Acceptable (F1) |
+| T-2 | Tampering: corrupt persisted payload | Decoder contract §3.4; separate `LegacyNicknameKeys`; empty identifier/numberKey ⇒ nil; synthesized encoder kept | Decode-degrade pattern verified (P12) | Strong |
+| T-3 | Tampering: a second contact claims the same system record | Wizard steering + coordinator duplicate-claim guard + verification-side uniqueness (first in roster order wins) | `storedClaimant` uses the STORED link — defense in depth | Strong |
+| T-4 | Tampering: unlink loses the displayed photo, or touches the system record | `SystemContactUnlinkMode` with copy-before-clear; `false` ⇒ link NOT cleared; unlink never writes the system record | Mode rule is pure and testable; no `CNSaveRequest` on the unlink path | Acceptable (F3) |
+| T-5 | Tampering: dedupe hides a person or strands a call | Pass 3 fires only on VERIFIED links; SYNTHESIZE keeps the person findable; Pass 4 unchanged for unlinked pairs; recount before the limit slice | Current matched-only dedupe contract verified; `.nickname` tier insertion is additive | Strong |
+| R-1 | Repudiation: write/unlink/refresh/claim-refusal leave no trace | §5.2 closed-vocabulary events, outcomes reason-coded | All metadata keys allow-listed (P7); runtime sanitiser choke point (P8) | Acceptable per house policy |
+| I-1 | Information disclosure: PII reaching logs | Reason-code-only vocabularies; NO console writes in the three new files; FEATURE_ROOTS registration | Allowed keys (P7); gate rules + fixture harness (P6) | Acceptable |
+| I-2 | Information disclosure: photo bytes / source metadata | Only the processed ≤512 px JPEG (metadata stripped) reaches the system record; display bytes downsampled; intent carries a hash; cache in-memory, 24/16 MiB | Pipeline claims verified against `ContactPhotoStore.swift` (P13) | Strong |
+| I-3 | Information disclosure: identifiers in events | `contact_id_hash` declared but UNUSED; no identifier/nickname/name event fields | Key list verified; `imageBytesHash` is a sha256 prefix by construction | Strong |
+| I-4 | Information disclosure: dishonest permission copy | `Info.plist:115` replacement adds the photo-update disclosure | Current copy is read/search-only (gap real); string-only edit — no new usage keys | Strong |
+| I-5 | Information disclosure: alt caption reveals a book name | Re-displays a name already shown on ordinary book rows; suppressed when duplicating the family name | Design-internal | Neutral |
+| D-1 | DoS: unbounded fetches/caches/loops | ≤12 identifiers per batch; NSCache 24/16 MiB; one fetch per cache miss; no retries/backoff/timeouts | `maxContacts = 12` verified; constants named | Acceptable |
+| D-2 | DoS: crash loop from corrupt state | Decode-degrade; snapshot degrade; non-throwing photo store; checked casts; caught throws | Pattern verified; `try!`/force-casts absent from the write-seam contract | Strong |
+| D-3 | DoS: refresh storms | Single-flight drain with latest-roster capture + coalescing; early-return when no link exists | Drain semantics coherent and terminating | Acceptable |
+| D-4 | DoS: oversized strings entering the index/search | Editor caps 8 nicknames/contact; model/decoder accept more without failing | No length bound on entries or book-side names (F5) | Acceptable (low impact); F5 advisory |
+| E-1 | Elevation of privilege: writing any other field or any other contact | Confinement to one file; update-only on the fingerprint-verified contact; single `imageData` assignment; source-scan pin | No such API today (P3); pin infra exists (P5) | Strong (F1 strengthens layer 2) |
+| E-2 | Elevation of privilege: prompting/nagging outside user-initiated flows | Prompts only at the editor's photo step + pre-existing point-of-use paths; denied/limited never re-prompt | Existing `grantAccess` sites are user taps only | Strong |
+| E-3 | Elevation of privilege: `.limited` silently collapsed or equality gates taking the else path | `.limited` + `allowsReading`; per-site enumeration; source-pin suite `ContactsAccessGateTests` | Independent enumeration matches (2 switches + equality sites + coordinator fifth site) | Strong (F6) |
+| E-4 | Elevation of privilege: read-scope expansion under `.limited` | Reads limited to the GRANTED subset; writes attempt-based per-record | Matches Apple's limited-access model; removes a fail-closed collapse, does not widen beyond the grant | Acceptable |
 
-**Verification method.** Read-only; no artifact, workflow file or git state was modified. Every load-bearing security claim was re-checked against shipped source in this worktree — routing order in `route()`, the emergency block, the confirmation hook, the contact/YouTube/keyword predicates, the session state machine and timers, the coordinator window seams, the input seam, `InputSanitiser`, `LogSanitiser`, and the release-log gate (script, shell entry point, `build.sh` wiring). The ledger below states claim, source read and verdict.
+### 2.2 Identity-integrity math — independent re-derivation
 
-## Summary
+- 1.00 − 0.85 = `0.15000000000000002` → **not** `< 0.15` → name-exact resolves over nickname-exact (FR-FCU-014 scenario 2 holds).
+- 0.90 vs 0.85 = 0.05 → ambiguous; 0.85 vs 0.80 = 0.0499… → ambiguous; 0.85 vs 0.75 = 0.10 → ambiguous; 0.85 vs 0.85 = 0.0 → ambiguous.
+- New pairs from the 0.75 band land exactly on the margin: 0.90 − 0.75 = `0.15000000000000002` and 0.75 − 0.60 = `0.15000000000000002` → both **decisive** by the same representation artifact; not enumerated in the design's table or pins — advisory F2.
+- Fingerprint: stored `numberKey` = the picked row's normalized number; verification accepts ANY current number satisfying `matches` (floor 8, trailing 8-10 digits; ADDED/kept verifies, changed/gone does not). Conservative direction confirmed.
 
-**Decision: SECURITY-GO** — 8 surfaces threat-modelled, 0 BLOCKERs, 5 must-fix conditions (M-1..M-5), 4 verify-and-record items (V-1..V-4), 8 evidence obligations for `security-test`, 5 accepted residuals.
+### 2.3 Write authority — layer-by-layer verification
 
-The load-bearing safety properties hold against the shipped code: the emergency check runs on the raw transcript before every other content handler; the interception block sits between the confirmation hook and the safety net, so an answer turn returns before the interpreter, the cache and the ladder; every recovery word, barge-in, timeout and expiry path resolves the frame; the new sources join the release log gate with per-root fixtures; the feature adds no network surface; and the deterministic merge is the degraded-brain contract. The must-fix items are edit-list and implementation pins found by reading the code — wiring and bookkeeping, not design rework.
+1. **File-local construction** — HOLDS as a design pin: zero `CNSaveRequest`/`CNMutableContact` today (P3); the only-writer file and source-scan test are specified; scan helper exists (P5); `CNContactStore` allowance list matches reality (P4). No bulk path: `update` of one fetched contact only.
+2. **PhotoWriteIntent field-set assertion** — PARTIAL: single-case `PhotoWriteField` makes `fields == [.photo]` unfalsifiable; the `assert` is DEBUG-only. Effective enforcement = single-assignment construction + file confinement + review/security-test. Advisory F1.
+3. **Read-back byte verification** — HOLDS: `.written` requires byte equality; anything else → `.failed(.readBackMismatch)` → fallback label (never a false success). The acknowledged imperfect-read case errs safe (false negative, never false positive) — F7.
+4. **Attempt-time fingerprint re-check** — HOLDS: fetch → fingerprint → build → execute; a mismatch returns before any request exists — prevented, not detected (S-1).
+5. **mutableCopy crash-safety** — HOLDS: L1's `as!` replaced by checked `as?` → `.failed(.saveRejected)` + DEBUG `assertionFailure`; no `try!`; `execute` throws caught.
+6. **Serialization** — HOLDS: actor isolation; the refresh drain cannot interleave write attempts.
 
-- **M-1** — the pipeline-state guard is not extended to the new window state, so pipeline events can close the window and cancel its timer.
-- **M-2** — four confirmation arming sites transition the session directly, not through the window opener the design names as the funnel.
-- **M-3** — the answer sanitiser source must be pinned in production (the shared helper's nil-seam path returns the raw transcript).
-- **M-4** — log-gate bookkeeping: six new metadata keys, not seven, and the pre-existing `reason` key must hold closed tokens only.
-- **M-5** — candidate-index bounds: the classifier's index must never address outside the frame's candidate list.
+### 2.4 Degradation safety — outcome→state totality
 
-## Verification ledger
+The §1.5 mapping covers every outcome case and payload, total by construction (exhaustive switch, no default). No unhandled case. No false success (`.written` requires read-back equality). No crash paths. Permission states: skip-and-label for notDetermined/denied (no prompt, no nag), attempt-and-detect for limited/full. One comment inconsistency (F4) — no security impact.
 
-| # | Claim | Source read (worktree) | Verdict |
-|---|---|---|---|
-| 1 | Emergency check precedes all answer handling; reads the raw transcript | `CommandRouter.swift:775` (`preText = raw`), `:779-783` | HOLDS |
-| 2 | The planned emergency frame-clear is side-effect-only after dispatch; it gates nothing | design-l2 `:542-548`; shipped branch `:779-783` | HOLDS |
-| 3 | Interception insertion point between the confirmation hook and the safety net | `:789-886` (hook), `:897-899` (safety net); design-l2 `:486-538` | HOLDS |
-| 4 | Handler order: sanity `:747-758` → emergency `:779-783` → hook `:789-886` → interception `:886-897` → safety net `:897-899` | direct read | HOLDS |
-| 5 | B1-B7 predicate sites exist and compile as planned | `CommandRouter.swift:1913`, `:1869`; `VoiceContactSearchRoute.swift:52-58,67,101,137-140`; `YouTubeRoute.swift:41-46,56`; `KeywordIntentRule.swift:164` | HOLDS |
-| 6 | Access widenings (L2-D2) match the declarations | `:1869` `private static let`; `:137-140` `private static func`; `:1913` already internal | HOLDS |
-| 7 | Medication-ack exclusion is scoped to app-launch confirmations | `CommandRouter.swift:858-862` | HOLDS |
-| 8 | Music parity: ladder arm and interpreted dispatch converge on one executor | `:1223-1234` (`:1233`), `:3336-3355`, `:2667-2678`, `:2614-2647` | HOLDS |
-| 9 | State machine mirrors (enum, edges, Talk reset, Config, transition, opener, arm guard, cancel) | `VoiceSessionStateMachine.swift:9-17,21-57,71-78,93-96,111-127,153-181,183-208` | HOLDS |
-| 10 | The pinned window-seconds expression cannot type-level address the instance `Config` property (carried F-1/C-1) | `:93-96`; design-l2 `:54,:207,:687,:917` | CONFIRMED, mechanical |
-| 11 | Confirmation timeout speaks; the frame timeout must not, and must not call `recordConfirmationTimeout` | `AppCoordinator.swift:2996-3038` (`:3035-3036`); ADR-MTC-08 | HOLDS |
-| 12 | The window opener is the main-hop funnel with two callers | `:7019-7027`; callers `:7008`, `:10337` | HOLDS |
-| 13 | Four confirmation arming sites transition the session directly, not via the opener | `:7228`, `:7401`, `:7461`, `:8548` | CONTRADICTS edit 9 → M-2 |
-| 14 | `handlePipelineState` early-return guard is single-state and absent from the edit lists | `:4750-4766` (guard `:4756`); design-l2 §14/§15 edit lists | GAP → M-1 |
-| 15 | Watchdog fires only in `.listening`; Talk reset suppressed in the window states | `:4865`, `:4871`; `VoiceSessionStateMachine.swift:71-78` | HOLDS (M-2's observer owed) |
-| 16 | `isAwaitingConfirmation` is pending-field based, not state based | `:10535-10540` | HOLDS |
-| 17 | Sanitiser discipline: quarantine level, 200-char clamp behind a raw-length gate (L2-D5) | `InputSanitiser.swift:22,37-50,52-85`; design-l2 `:760` | HOLDS |
-| 18 | Shared seam: sanitise then `seam.prepare`; nil seam returns raw as `prepared` (byte-parity) | `LocalBrainChain.swift:275-285,296-307`; design-l2 `:715` | HOLDS; M-3 pins production |
-| 19 | Production input seam wired non-nil | `AppCoordinator.swift:1812-1825` | HOLDS |
-| 20 | Transcript recording at route entry (existing policy); cache untouched because `pendingTranscript` is dispatch-only | `CommandRouter.swift:741`, `:3307`, `:1516-1518`; `AppCoordinator.swift:5986-5999` | HOLDS (V-3, R4) |
-| 21 | Log choke point: unknown keys dropped; `reason` pre-allow-listed; other allowed values shape-scrubbed only | `LogSanitiser.swift:466-511` (drop `:483`), `:175` | CONFIRMED → M-4 |
-| 22 | Release gate: feature-root rules, four new roots, per-root fixtures, shell wiring | `check-release-log-safety.py:141-176,664-701`; `check-release-log-safety.sh`; `ios/build.sh:431` | HOLDS |
-| 23 | The `emit` helper is two-argument; §12.2's three-argument call does not exist (carried F-3/C-3) | `:3982-3991`; direct-construction pattern `:1406-1413` | CONFIRMED → M-4 |
-| 24 | Debug-only text print in `speak()` (pre-existing) | `:3850-3851` | RESIDUAL R1 |
-| 25 | Gibberish guard precedes the emergency check | `:747-758` vs `:779` | HOLDS (V-1, R5) |
-| 26 | Candidate execution shape `executeDialogueCandidate(index - 1, ...)` needs a bounds pin | design-l2 `:517-524`, `:862` | GAP → M-5 |
+## 3. Security checklist (template mapped to this app)
 
-Assets: the frame's slot value and candidate set; probe and answer text; the window/session state; the intent cache and chat history; log and telemetry sinks; the emergency dispatch path. Boundaries: microphone/STT → `route()`; router → coordinator hooks (main-queue confined); coordinator → state machine and dialogue manager; events → `LogSanitiser` → observability bus; the release gate over the four new source files; network egress (unchanged by this feature).
+| Checklist item | Verdict | Basis |
+|---|---|---|
+| Data flows identified; transit encryption | PASS — on-device only; no network transit surface exists in this feature at all | NFR-FCU-003 by construction |
+| PII identified with handling specified | PASS with one advisory — names/numbers/nicknames/photos/identifiers/link; display on owner/parent surfaces; logs reason-code-only; caches bounded; strings not length-bounded (F5) | §4.3/§5.2/§3.4, P7/P8/P13 |
+| Input validation for external inputs | PASS with advisory — identifier non-emptiness gated; digits()/matches filtering; plain-filename guard; decode-degrade; Text-only sinks; missing explicit length caps (F5) | P9/P12/P13 |
+| Audit logging covers security-relevant events | PASS — write/unlink/refresh/claim-refusal all reason-coded with allow-listed metadata; console-only sink is the stated residual | §5.2/P7/P8 |
+| Secrets management | PASS (N/A) — no credentials, keys or tokens introduced; access is OS-mediated | §1.4/§9.3 |
+| Least privilege | PASS — photo-field-only write on the verified-linked record; key-scoped fetches; limited access respected per-record; no new usage keys | P3/P4/P11 |
+| Compliance traceability (App Store, disclosure, limited-access honesty) | PASS — point-of-use plain-language copy; honest NSContactsUsageDescription; never claims an unverified write; limited-access honesty on both search surfaces | FR-FCU-009, NFR-FCU-002/003 |
+| Explicit error return types | PASS — typed outcome enums, documented-Optional seams, no `any`/`unknown`; `@unknown default` fails closed | §1.1-§1.9 |
+| Async/external failure modes + recovery | PASS — every seam has a typed degrade path | §1.3-§1.5, §4.5, §5 |
+| Timeouts/retries configurable, not hardcoded | PASS — none introduced; future waits must be named constants; cache/limit constants are named statics | §4.5/§6.2 |
+| Every element traces to an FR/NFR | PASS — L1 §18 and L2 §10 tables | |
+| Design describes what the operator sees on run and failure | PASS — full fallback label table, source caption, stale-link line, steering cards; one internal comment inconsistency (F4) | §1.5/§2.2-§2.6 |
 
-## STRIDE threat model
+## 4. Findings (advisory — **no blocking findings**)
 
-### S1 Emergency precedence mid-dialogue (Spoofing, Elevation)
-Threat: a hostile or corrupted answer reaching the merge or an executor ahead of, or in place of, the emergency dispatch. Verified: the check (`:779-783`) runs on the raw transcript (`:775`) before the hook and the interception; the planned clear is post-dispatch and gates nothing; no answer handling runs before it. Residual: the sanity guard (`:747-758`) sits above it — shipped ordering (V-4/R5). Evidence: E1.
+- **F1 — LOW — `PhotoWriteIntent` assertion is documentation-grade, not an enforcement layer.** Recommendation (for `security-test` + writer tests): add a source-level assertion that no property other than `imageData` is assigned on the mutable contact and that `CNSaveRequest` usage is `update`-only, alongside the existing confinement scan.
+- **F2 — LOW — Two new band pairs sit exactly on the ambiguity margin and are decisive but unpinned.** 0.90 vs 0.75 and 0.75 vs 0.60 → `0.15000000000000002` ≥ 0.15 → NOT ambiguous. Recommendation: add explicit `ContactResolverTests` consequence-table rows pinning both pairs (and keep the 1.00/0.85 row).
+- **F3 — LOW — `unlinkKeepingDisplayedPhotoLocally` must set the contact's `photoFilename` to the copied file.** State it in the implement task spec and pin it in coordinator tests.
+- **F4 — INFO — §2.6's comment (`.written`/`.skippedNoLink` → dismiss) contradicts §1.5's mapping (`.written` → `.updatedInSystem`, shown).** Both honest; pick one at implement (recommend: show the label) and align the comment.
+- **F5 — INFO — No length bounds on externally-sourced strings.** Recommend: cap stored nickname length in `normalizedNicknames` (e.g. 64 chars) or add a worst-case long-string assertion to the §6.1 perf tests.
+- **F6 — INFO — One adjacent `allEntries()` consumer (`AppCoordinator.makeDialectBiasProfileProvider` :2529) is outside the R2 enumeration.** Behavior unchanged by this feature; record it in §3.5's list (or footnote) so the claim stays exact.
+- **F7 — INFO — Accepted honest false-negative: `.failed(.readBackMismatch)` can show "Kept in this app only" while the system record received the photo.** Safe direction (never a false success); keep as-is.
+- **F8 — INFO — Shared-number fingerprint residual (S-1/S-2):** two distinct cards sharing the dialled number would pass the fingerprint if an identifier is reused. Extremely low likelihood and bounded (one photo field of a card the owner believed was the linked person). Recorded as accepted residual for `security-test`.
 
-### S2 Free-text answer into routing and execution (Tampering, Elevation)
-An answer carrying command vocabulary, structured text or tool-shaped payloads must not steer execution beyond the frame's two admissible effects — fill one slot value, or pick one enumerated candidate — and must not reach the interpreter or cache. Verified: interception before the ladder and interpreter; classification is a pure function over the prepared text plus the frame; execution stays inside the frame's own domain seam. Barge-in predicates (B1-B7) only decide whether an utterance executes as itself under normal tiers — the not-trapped requirement, not an injection. Sanitisation rides the shared helper; M-3 pins the production seam. Evidence: E2, E8.
+## 5. Accepted residual risks (recorded)
 
-### S3 Frame-trap resistance (Denial of service)
-No state the user cannot leave: cancel and escape words resolve and ack; barge-in resolves and falls through to execute once; the 45 s timer mirrors the confirmation machinery including the still-open guard; frame reads are expiry-checked; resolve is idempotent; Talk reset is suppressed inside the window, with the watchdog and Talk recovery as outer backstops. Gaps: M-1 (the timer can be cancelled by pipeline events) and M-2 (the transition-out observer is under-anchored). Evidence: E3.
+1. Write-seam real glue is unit-untestable (`CNContactStore` not fakeable): covered by source-scan pin + `security-test` + DV-3/DV-4 device evidence.
+2. `request.update` writes the fetched snapshot back; minimal fetch keys limit materialised fields; any throw degrades to a labeled fallback.
+3. New coordinator/UI lines remain outside the gate's rules 3-6 (documented §5.3); bounded by rules 1-2, the runtime allow-list choke point (P8), review, and `security-test`.
+4. Audit events are console-only (existing house infrastructure).
+5. `.limited` readable semantics: a deliberate, bounded scope correction (the user's granted subset), pinned per site (E-3, F6).
+6. English-only usage strings (pre-existing project pattern).
 
-### S4 Answer authority claims and candidate poisoning (Spoofing, Tampering)
-An answer claiming to be a confirmation, naming an unlisted candidate, or engineered to match another domain must not change what executes. Verified: picks address the frame's candidate list only; the merge value is data; tiers do not read the answer (hostile-corpus row `testAnswerClaimingATierChangesNothing`); B6 keeps a same-domain music match from bouncing mid-music answers to the ladder. M-5 pins index bounds. Evidence: E2.
+## 6. Decision
 
-### S5 Log and observability disclosure (Information disclosure)
-Probe, answer and candidate text must not reach logs or telemetry beyond the existing transcript policy. Verified: closed-vocabulary events with count/enum metadata; the four new source files join `FEATURE_ROOTS` (any non-Debug console write fails; content-worded writes fail in any configuration; unlisted metadata keys fail); the unknown-key drop at `LogSanitiser.swift:483` is the runtime choke point. Gaps: M-4. Note: the router/coordinator edits live outside the feature roots — the gate's transcript/error rules are the only static cover there; E4/E5 carry the burden. Evidence: E4, E5.
+**SECURITY-GO.**
 
-### S6 Egress (Information disclosure)
-Probes and answers must stay on-device. Verified by source shape: no new network calls; the merged music command reuses `fireMusicRequest` (`:2667`) through the same seam a directly spoken request uses; probes and acks ride the on-device reply lane (`speak` → `noteAssistantSpoke`, `CommandRouter.swift:3864`). Evidence: E6.
+The STRIDE analysis found no blocking weakness. The write-authority design satisfies the workflow's bar ("a wrong-contact write is prevented, not just detected"): target chosen once (fetch → fingerprint → build → execute), confinement pinned by a source scan, read-back gates every success claim, no crash path, and the wrong-contact direction requires a compound coincidence (F8). Identity integrity holds independently verified (ambiguity math re-derived exactly; ties refuse to dial; stale links degrade without false merges; unlink never writes the system record and never loses the displayed photo). Degradation is total by construction; no false success; PII discipline enforced by verified allow-listed keys, closed vocabularies, and the release gate; no new egress, permissions, or data collection.
 
-### S7 Degraded-brain path integrity (Tampering)
-With the brain abstaining or unavailable, the merge must not weaken safety. Verified structurally: the answer turn returns from the interception block before the interpreter, so the deterministic merge cannot depend on brain output; the Phase 2 clause is defaulted off; the emergency path and confirmation tiers are untouched by the merge. Evidence: E7.
-
-### S8 Window lifecycle and co-existence (Tampering, Denial of service)
-A live frame and a confirmation window must not coexist, and no session transition may strand a frame. Verified: arming a frame refuses while any pending confirmation exists (edit 3's guard over the pending-field `isAwaitingConfirmation`, `:10535-10540`); the opener is a main-hop funnel; turn serialisation keeps one utterance in flight. Gaps: M-1 and M-2 — the four direct arming sites and the pipeline-state guard sit outside the funnel the design names, and "any transition out resolves" is not anchored to an edit. Evidence: E3.
-
-## BLOCKERs
-
-None. Every gap above is bounded by shipped invariants — turn serialisation, expiry-checked frame reads, the pending-field window check, the unknown-key drop — and none yields a reachable path that dispatches emergency late, executes an unasked action, opens an egress, or leaves a user without a recovery word. They are must-fix conditions on the implementation (M-1..M-5), not design defects that block this gate.
-
-## Conditions carried to plan-tasks / implement
-
-- **M-1 (window state can be closed by pipeline events).** Shipped `handlePipelineState` returns early only for `.awaitingConfirmation` (`AppCoordinator.swift:4756`), and the comment above it states why — pipeline events must not close a window that owns the turn. The C-MTC-07/C-MTC-08 edit lists do not extend the guard to `.awaitingSlotAnswer`, so the probe's own speaking/listening events can transition the session out of the window and cancel the slot timer; the 45 s silent close and its `.timedOut` event would then never fire. Add the guard extension to the edit list; pin with a pipeline-events-mid-window test (E3).
-- **M-2 (mutual-exclusion wiring under-anchored).** Edit 7 funnels `openConfirmationWindow()` only; edit 9 asserts the pending-rephrase seams "pend through the window opener" — false in code: `startRephraseConfirmation` (`:7401`), calendar (`:7228`), call (`:7461`) and navigation (`:8548`) transition the session directly. The claimed "any transition out resolves through the coordinator funnel" (L2 risk 12) is likewise not anchored to a concrete hook. Route the four sites through the funnel or add resolve-at-site, and name the observer that resolves the frame on any legal session exit; pin with Talk-mid-window, watchdog-mid-window and pipeline-event tests (E3).
-- **M-3 (answer sanitiser source pinned).** `IntentTranscriptPreparation` returns the raw transcript as its answer value when the seam is nil (deliberate byte-parity with `turnInput`). Production wires a non-nil seam (`AppCoordinator.swift:1824`) and the router fallback sanitises when the coordinator is absent, but no test pins either fact. Pin the production wiring (seam non-nil; or sanitise in the helper's nil-seam path for the answer value) and keep the parity path test-only. No production path may consume an unsanitised answer (NFR-MTC-008).
-- **M-4 (log-gate facts corrected).** `reason` is already in `LogSanitiser.allowedKeys` (`LogSanitiser.swift:175`); of the seven proposed keys, six are new. The design text and the §26 justification must read six-new-plus-one-reused; because `reason` is generic and pre-existing, dialogue values under it must be closed enum tokens enforced at the construction site. The carried F-3/C-3 three-argument `emit` must be implemented by direct event construction (`:1406-1413` pattern) — the `reason` metadata must never be dropped to make it compile.
-- **M-5 (candidate index bounds).** `executeDialogueCandidate(index - 1, ...)` trusts the classifier's index. `DialogueAnswerPath.classify` / `matchCandidate` must be total over the frame's candidate list and the executor must bounds-check; a hostile answer must not be able to address outside the frame's candidates or induce a crash (local denial of service).
-
-Carried mechanical conditions from `review-l2` (no security content beyond being done): C-1 (the pinned default-argument expression cannot type-level address the instance `Config` property `:93-96`; keep 45 s single-source with no new literal), C-2 (news-arm anchor), C-5 (bind the taken rephrase command at `:806`).
-
-## Verify-and-record items
-
-- **V-1.** Gibberish mid-frame: the sanity guard (`:747-758`) precedes the emergency check and the interception; such an utterance is dropped with the router's reprompt, increments no attempt, and the frame lives to its deadline (§18's gibberish row). Record the ordering so later edits keep it.
-- **V-2.** Debug lanes: the touched legacy files (router, coordinator) carry Debug-only prints and are outside the feature roots; record that the diff adds no console write there — the gate's transcript/error rules are the only static cover for those files.
-- **V-3.** Answer flow vs persistence: `recordTranscript` runs for every utterance (existing policy) while `pendingTranscript` stays dispatch-only, so the intent cache is not taught by answers; re-verify after implementation (E8).
-- **V-4.** Sanity-guard-above-emergency ordering (R5): record as pre-existing and unchanged.
-
-## Evidence obligations for security-test
-
-- **E1 — emergency answer mid-frame.** With a frame live, an utterance embedding emergency vocabulary dispatches emergency; the frame is cleared with `.emergency`; dispatch is proven independent of the clear by forcing the clear to a no-op (§18 `E2` row).
-- **E2 — hostile answer corpus through the production-shaped seam.** Injection-marker text, control characters, structured/tool-shaped payloads, candidate-poisoning utterances and authority claims all resolve to the frame's admissible effects or a re-probe/close; no interpreter, no cache, no crash; run through a non-nil seam so the sanitiser is exercised (M-3).
-- **E3 — trap matrix.** Cancel, escape, barge-in, timeout, expiry, Talk-mid-window, watchdog-mid-window and pipeline-events-mid-window all recover; after 45 s no window is half-open; resolve stays idempotent (covers M-1, M-2).
-- **E4 — log capture over a full dialogue.** Probe, answer, merge, cancel, timeout, escape, exhaustion and the did-you-mean path, in Debug and Release: zero raw transcript/answer/probe/candidate text in console and log sinks (NFR-MTC-004 scenarios 1-3); `ios/tools/check-release-log-safety.sh` exits 0 including its fixtures suite, with the four new roots and their fixture entries present.
-- **E5 — log allow-list diff and value vocabularies.** Exactly the six new keys are added; `reason` is reused with closed tokens; every dialogue event field is a non-content token; the unlisted-key drop remains in force at the runtime choke point.
-- **E6 — egress.** Source-level grep (design §29) shows zero new network calls in the feature's files; the merged music path calls only the existing helper (`fireMusicRequest`, `:2667`).
-- **E7 — degraded brain.** With the brain abstaining or unavailable, the merge remains deterministic; emergency precedence and confirmation tiers are unchanged; the Phase 2 clause is off in Phase 1 builds (prompt-digest pins).
-- **E8 — cache/history boundary.** No answer text reaches `pendingTranscript` or the intent cache on the frame execution path; chat history follows the existing transcript policy unchanged.
-
-## Accepted residuals (explicit)
-
-- **R1.** Debug-configuration prints in touched legacy files (e.g. the `#if DEBUG` text print in `speak()`, `CommandRouter.swift:3850-3851`) remain possible in Debug builds; they cannot compile into Release (`SWIFT_ACTIVE_COMPILATION_CONDITIONS` is Debug-only) and the design adds none.
-- **R2.** The release gate is a static source check with documented blind spots (indirection, runtime-assembled metadata — its own header states them); the runtime choke point, typed construction and E4/E5 are the primary arms.
-- **R3.** Values of allow-listed string keys are scrubbed for PII shapes but not value-constrained; closed vocabularies at construction sites are the discipline (M-4, E5).
-- **R4.** Answer utterances are recorded into the on-device chat history by the existing transcript policy (V-3); no new persistence or egress is introduced.
-- **R5.** The sanity guard precedes the emergency check (`:747-758` vs `:779`); an utterance it rejects is dropped with the router's reprompt before any handler — shipped ordering, unaltered by this feature (V-4).
-
-## Decision
-
-decision: SECURITY-GO
-
-**Rationale.** The safety constraints with security content are carried by verified structure: emergency precedence is absolute (check on the raw transcript at `:779-783`, ahead of every content handler; the planned clear is post-dispatch and cannot gate); the answer path opens no new injection surface (pre-ladder interception, pure-function classification, execution confined to the frame's own domain seam, quarantine sanitisation through the shared helper with M-3 pinning the production wiring); and log safety keeps its shipped framing (closed-vocabulary events, four new gate roots with fixtures, the unknown-key drop). Frame-trap resistance is genuinely backed by the confirmation-machinery mirror, expiry-checked reads, idempotent resolve and the suppressed Talk reset. The five must-fix conditions are wiring and bookkeeping gaps found by reading the shipped code — specific, real, and fixable inside `plan-tasks`/`implement` without design rework; none is a reachable path that dispatches emergency late, executes an unasked action, opens an egress, or leaves a user without a recovery word. No BLOCKER exists; the gate passes with the conditions above binding implementation and the evidence obligations binding `security-test`.
+Advisory findings F1-F8 are carried into `security-test` expectations and the implement task specs (F1/F2/F3 close the remaining "enforced vs inferred" gaps); none gates implementation.

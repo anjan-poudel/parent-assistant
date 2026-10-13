@@ -912,9 +912,11 @@ struct RemindersView: View {
 /// search surface as before (field, voice search, access cards, ranked
 /// rows) as an explicit mode; clearing the field to empty, or tapping
 /// the mode's back button, returns to the curated list. The photos come
-/// from the coordinator's `contactPhoto(for:)` contract
-/// (contact-photos task, 2026-09-07): a photo resolves when the
-/// contact has a `photoFilename`, otherwise the initials avatar stays.
+/// from the coordinator's face resolver
+/// (`faceThumbnail(for:diameter:displayScale:)`; contact-photos task,
+/// 2026-09-07; unified precedence T-157): a photo resolves when the
+/// contact has a readable linked system photo or an app-local
+/// `photoFilename`, otherwise the initials avatar stays.
 struct CallView: View {
     @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
@@ -974,11 +976,11 @@ struct CallView: View {
 
     /// Faces for the current search's family rows, resolved OFF the body
     /// (design review P2 — "keep image-file reads out of `body`"). The
-    /// results pass used to call `coordinator.contactPhoto(for:)` — a
-    /// file read plus a full-size decode — once per family row, inside
-    /// `body`, so every keystroke re-read every face. One keyed pass
-    /// fills this instead and the rows only index it; each face is also
-    /// downsampled to the 52pt circle it is drawn in.
+    /// results pass used to resolve each face inside `body` — a file
+    /// read plus a full-size decode per family row per keystroke. One
+    /// keyed pass through the coordinator's async face path fills this
+    /// instead and the rows only index it; each face is also downsampled
+    /// to the 52pt circle it is drawn in.
     @State private var resultPhotos: [String: UIImage] = [:]
 
     var body: some View {
@@ -1017,10 +1019,13 @@ struct CallView: View {
             // keeps showing.
             coordinator.refreshMissedCallCorrelations(promptIfNeeded: true)
         }
-        // Re-resolve the search rows' faces when the query or the roster
-        // changes — never during body evaluation (see `resultPhotos`).
-        .task(id: resultPhotoKey) {
-            resultPhotos = resolveResultPhotos()
+        // Re-resolve the search rows' faces when the query or any face
+        // identity changes — never during body evaluation (see
+        // `resultPhotos`). T-157: the resolver is the coordinator's
+        // async face path, so a linked contact's SYSTEM photo wins where
+        // available (design-l1 §10.1).
+        .task(id: resultFaceKey) {
+            resultPhotos = await resolveResultPhotos()
         }
         .onChange(of: coordinator.pendingContactSearchRequest?.id) { _ in
             consumePendingVoiceRequestIfPresent()
@@ -1131,34 +1136,45 @@ struct CallView: View {
     private var isSearching: Bool { !trimmedQuery.isEmpty }
 
     /// What the resolved faces depend on: the query the rows matched and
-    /// each family contact's stored file (a photo edit keeps the contact
-    /// id, so the file name has to be part of the identity).
+    /// the ARRAY of per-contact face identities (design-l2 §4.4 — the
+    /// batch passes key on the array; a photo or link edit keeps the
+    /// contact id, so the identity's other components carry the change).
     /// `recency` deliberately stays out — re-ranking a row never changes
     /// its face.
-    private var resultPhotoKey: String {
-        let family = coordinator.familyContacts
-            .map { "\($0.id.uuidString):\($0.photoFilename ?? "-")" }
-            .joined(separator: ",")
-        return "\(trimmedQuery)|\(family)"
+    private var resultFaceKey: [String] {
+        [trimmedQuery] + coordinator.familyContacts.map { coordinator.faceIdentity(for: $0) }
     }
 
-    /// One pass over the current search outcome's `.family` rows,
-    /// through the shared downsampling cache — a face already decoded at
-    /// this size (this screen, the family list, a tile) is a memory hit.
-    private func resolveResultPhotos() -> [String: UIImage] {
+    /// One pass over the current search outcome's `.family` rows through
+    /// the coordinator's async face path (shared downsampling cache
+    /// underneath: a face already decoded at this size — this screen,
+    /// the family list, a tile — is a memory hit).
+    private func resolveResultPhotos() async -> [String: UIImage] {
         guard isSearching, let entries else { return [:] }
+        // The coordinator's PUBLISHED index and verified-link snapshot
+        // (T-156; design-l2 §3.6) — the same pair `resultsArea` renders
+        // from, so the faces resolved here can never come from a roster
+        // or a link set the rows do not see.
         let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                   family: coordinator.familyContacts,
+                                                  index: coordinator.familyIndex,
                                                   in: entries,
+                                                  verifiedLinks: coordinator.verifiedLinks,
                                                   recency: recency)
         var resolved: [String: UIImage] = [:]
         for row in outcome.entries {
             guard case .family(let contact) = row else { continue }
-            resolved[row.id] = DownsampledImageCache.shared.contactFace(
+            let identity = coordinator.faceIdentity(for: contact)
+            let face = await coordinator.faceThumbnail(
                 for: contact,
                 diameter: UnifiedContactResultRow.avatarDiameter,
-                displayScale: displayScale
-            ) { coordinator.contactPhoto(for: contact) }
+                displayScale: displayScale)
+            // Post-await identity re-check (design-l2 §4.4):
+            // `.task` cancellation is best-effort, so the guard is the
+            // guarantee — a face resolved for a superseded identity is
+            // dropped, never assigned.
+            guard coordinator.faceIdentity(for: contact) == identity else { continue }
+            if let face { resolved[row.id] = face }
         }
         return resolved
     }
@@ -1167,10 +1183,13 @@ struct CallView: View {
     /// INTO WhatsApp, so with the app absent the whole card hides
     /// (there is nothing to guide to). Probed live on the main thread
     /// (body evaluation); the `whatsapp` scheme sits in
-    /// LSApplicationQueriesSchemes so the probe is honest.
+    /// LSApplicationQueriesSchemes so the probe is honest. The probe
+    /// itself delegates to the ONE chain implementation (T-151,
+    /// NFR-CDP-002): `CallChannelChain.whatsAppInstalled(canOpen:)` over
+    /// the shipped `canOpenURL` — the row adds no second probe, no new
+    /// URL literal and no coordinator dependency.
     private var whatsAppInstalled: Bool {
-        guard let url = URL(string: "whatsapp://") else { return false }
-        return UIApplication.shared.canOpenURL(url)
+        CallChannelChain.whatsAppInstalled(canOpen: { UIApplication.shared.canOpenURL($0) })
     }
 
     /// Big search pill (≥44pt, body-size text, warm card). Search runs as
@@ -1340,11 +1359,28 @@ struct CallView: View {
     private var searchArea: some View {
         HStack(spacing: 10) {
             searchExitButton
-            if access == .allowed {
+            if access?.allowsReading == true {
                 searchField
             }
         }
-        if access == .allowed {
+        if access?.allowsReading == true {
+            // `.limited` (iOS 18 "Select Contacts") is a granted,
+            // READABLE subset — it takes today's `.allowed` display
+            // path, led by the honest caption (design-l2 §3.5): the
+            // FIRST line of the readable block, directly under the
+            // field row and above the mic caption, so a search over a
+            // partial book never silently pretends to search
+            // everything. `.denied` stays the only blocked arm;
+            // `.limited` never re-prompts (it can never render the
+            // empty dead area `allowsReading` exists to prevent).
+            if access == .limited {
+                Text(L10n.str("call.search.accessLimited", locale: coordinator.activeLocale))
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 6)
+            }
             micCaption
             if entries == nil {
                 if loadFailed {
@@ -1367,7 +1403,7 @@ struct CallView: View {
     private func refreshDirectory() {
         let status = AddressBookDirectory.access()
         access = status
-        guard status == .allowed else { return }
+        guard status.allowsReading else { return }
         recency = coordinator.contactCallRecency
         if entries == nil || loadFailed {
             loadEntries()
@@ -1375,12 +1411,16 @@ struct CallView: View {
     }
 
     /// The user tapped Allow on the access card — the ONE place the
-    /// permission prompt may fire (point of use, constitution).
+    /// permission prompt may fire (point of use, constitution). The
+    /// system sheet may yield `.limited` (iOS 18 Select Contacts), so
+    /// the load decision reads the RE-READ status, never the binary
+    /// request result (design-l2 §3.5): a limited selection still
+    /// loads its granted set.
     private func grantAccess() {
         Task {
-            let granted = await directory.requestAccess()
+            _ = await directory.requestAccess()
             access = AddressBookDirectory.access()
-            if granted {
+            if access?.allowsReading == true {
                 recency = coordinator.contactCallRecency
                 loadEntries()
             }
@@ -1410,7 +1450,7 @@ struct CallView: View {
     /// as visible — the ask happens at the tap (point of use); a denial
     /// flips `micHidden` for the rest of this visit.
     private var micButtonVisible: Bool {
-        guard !micHidden, access == .allowed else { return false }
+        guard !micHidden, access?.allowsReading == true else { return false }
         switch SFSpeechRecognizer.authorizationStatus() {
         case .authorized, .notDetermined: break
         case .denied, .restricted: return false
@@ -1516,14 +1556,19 @@ struct CallView: View {
     private func announceVoiceResultIfReady() {
         guard let voice = voiceRequest,
               announcedVoiceSearchID != voice.id,
-              access == .allowed,
+              access?.allowsReading == true,
               let entries,
               !loadFailed,
               trimmedQuery == voice.query else { return }
         announcedVoiceSearchID = voice.id
+        // The coordinator's published index + verified-link snapshot
+        // (T-156; design-l2 §3.6) — the announced first row is the
+        // rendered first row by construction.
         let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                   family: coordinator.familyContacts,
+                                                  index: coordinator.familyIndex,
                                                   in: entries,
+                                                  verifiedLinks: coordinator.verifiedLinks,
                                                   recency: recency)
         let locale = coordinator.activeLocale
         if let name = outcome.entries.first?.name {
@@ -1542,9 +1587,15 @@ struct CallView: View {
     }
 
     /// The row's WhatsApp pill — a chat surface, not a call, so no
-    /// recency entry (channel opens are not dials).
-    private func whatsApp(_ result: UnifiedContactSearch.Result) {
-        coordinator.performSystemContactWhatsApp(name: result.name, phone: result.phone)
+    /// recency entry (channel opens are not dials). The `hop` parameter
+    /// (call-dialer-primary-secondary, T-151) is the launch-failure
+    /// recovery the dial zone's `.whatsApp` route threads in; the pill's
+    /// own tap passes none — the pill is a chat surface, not a
+    /// chain-routed dial.
+    private func whatsApp(_ result: UnifiedContactSearch.Result,
+                          hop: AppCoordinator.LaunchHop? = nil) {
+        coordinator.performSystemContactWhatsApp(name: result.name, phone: result.phone,
+                                                 hop: hop)
     }
 
     /// Primary-circle dial of a search row (channel-chooser task,
@@ -1561,14 +1612,41 @@ struct CallView: View {
     /// family tiles dial with, so every open — and every honest
     /// fallback — is announced exactly as it is. GSM keeps the local
     /// recency bump the old dial gave it.
+    ///
+    /// The chain announcement and the hop (call-dialer-primary-secondary,
+    /// T-151; FR-CDP-016/015): when the resolution skipped a channel, the
+    /// tap names the routed channel at resolution, BEFORE the opener runs
+    /// (ADR-CDP-07 — a successful open may background the app before
+    /// post-open speech could be heard). Every routed opener carries the
+    /// row's pre-built `LaunchHop` so a failed open recovers through the
+    /// remaining candidates; the `.phone` floor does not hop (RES-10) and
+    /// the WhatsApp pill's own tap stays hop-less (a chat surface, not a
+    /// chain-routed dial).
     private func dialChannel(_ result: UnifiedContactSearch.Result) {
-        switch rowChannelState(for: result).resolvedChannel {
+        let state = rowChannelState(for: result)
+        let locale = coordinator.activeLocale
+        if let skipped = state.fellBackFrom.first {
+            // ADR-CDP-07: at resolution, BEFORE the open — a successful
+            // open may background the app before post-open speech could
+            // be heard. Nothing is spoken when nothing fell back.
+            coordinator.speak(text: L10n.fmt("call.announce.fallbackRouted",
+                                             locale: locale,
+                                             CallChannelChain.label(skipped, locale: locale),
+                                             result.name,
+                                             CallChannelChain.label(state.resolvedChannel,
+                                                                    locale: locale)))
+        }
+        let hop = AppCoordinator.LaunchHop(candidates: state.hopCandidates,
+                                           handle: resolvedMessengerHandle(for: result),
+                                           phone: result.phone)
+        switch state.resolvedChannel {
         case .phone:
-            dial(result)
+            dial(result)                                   // floor: no hop
         case .faceTime:
-            coordinator.performFaceTimeCall(name: result.name, phone: result.phone, video: false)
+            coordinator.performFaceTimeCall(name: result.name, phone: result.phone,
+                                            video: false, hop: hop)
         case .whatsApp:
-            whatsApp(result)
+            whatsApp(result, hop: hop)
         case .messenger:
             guard let handle = resolvedMessengerHandle(for: result) else {
                 // Stale state only — resolution forces a handle-less row
@@ -1579,7 +1657,8 @@ struct CallView: View {
                                                  locale: locale, result.name))
                 return
             }
-            coordinator.performSystemContactMessenger(name: result.name, handle: handle)
+            coordinator.performSystemContactMessenger(name: result.name, handle: handle,
+                                                      hop: hop)
         }
     }
 
@@ -1597,11 +1676,17 @@ struct CallView: View {
     }
 
     /// One result row's channel truth for the CURRENT outcome
-    /// (channel-chooser task, 2026-09-07): stored preference, resolved
-    /// dial channel, handle availability, and the store key they live
-    /// under. Computed once per outcome in the results area — never per
-    /// row body evaluation — and re-computed there after a chooser pick
-    /// or a saved handle (the `channelStateVersion` bump above).
+    /// (channel-chooser task, 2026-09-07; chain-routed by T-151): stored
+    /// preference, the RESOLVED dial channel plus the provenance that
+    /// routed it (the skipped channels) and the launch-failure candidates
+    /// for the routed channel — all from one snapshot, so the circle, the
+    /// announcement and the hop can never disagree (L2-D10). The probe
+    /// input is the ONE shipped WhatsApp probe (`whatsAppInstalledNow` →
+    /// the chain static); the vocabulary argument takes its default
+    /// (`.anyChannel`, the row surface). Computed once per outcome in the
+    /// results area — never per row body evaluation — and re-computed
+    /// there after a chooser pick or a saved handle (the
+    /// `channelStateVersion` bump above).
     private func rowChannelState(for result: UnifiedContactSearch.Result) -> RowChannelState {
         _ = channelStateVersion
         let storeKey = ContactNumberKey.normalized(result.phone)
@@ -1609,14 +1694,22 @@ struct CallView: View {
             ? nil
             : coordinator.storedChannelPreference(forNormalizedPhone: storeKey)
         let hasHandle = resolvedMessengerHandle(for: result) != nil
-        let resolvedChannel = AppCoordinator.resolvedCallChannel(
+        let preferred = storedPreference ?? coordinator.defaultCallApp
+        let route = AppCoordinator.resolvedCallChannel(
             explicit: storedPreference,
             defaultApp: coordinator.defaultCallApp,
-            messengerHandleAvailable: hasHandle)
+            secondaryApp: coordinator.secondaryCallApp,
+            messengerHandleAvailable: hasHandle,
+            whatsAppInstalled: coordinator.whatsAppInstalledNow)
         return RowChannelState(storedPreference: storedPreference,
-                               resolvedChannel: resolvedChannel,
+                               resolvedChannel: route.channel,
                                hasHandle: hasHandle,
-                               storeKey: storeKey)
+                               storeKey: storeKey,
+                               fellBackFrom: route.fellBackFrom,
+                               hopCandidates: CallChannelChain.hopCandidates(
+                                   preferred: preferred,
+                                   secondary: coordinator.secondaryCallApp,
+                                   routed: route.channel))
     }
 
     /// The usable Messenger handle behind a row's messenger channel —
@@ -1679,9 +1772,15 @@ struct CallView: View {
     @ViewBuilder
     private var resultsArea: some View {
         if let entries {
+            // The coordinator's published index + verified-link
+            // snapshot (T-156; design-l2 §3.6) — one consistent
+            // snapshot per pass, never an inline rebuild that could
+            // disagree with the link state the faces resolved under.
             let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                       family: coordinator.familyContacts,
+                                                      index: coordinator.familyIndex,
                                                       in: entries,
+                                                      verifiedLinks: coordinator.verifiedLinks,
                                                       recency: recency)
             if outcome.moreAvailable {
                 Text("call.search.moreAvailable")
@@ -1722,6 +1821,9 @@ struct CallView: View {
                     ForEach(outcome.entries) { result in
                         UnifiedContactResultRow(result: result,
                                                 photo: resultPhotos[result.id],
+                                                caption: CallResultRowText.linkedBookCaption(
+                                                    for: result, in: outcome,
+                                                    locale: coordinator.activeLocale),
                                                 channelState: channelStates[result.id]
                                                     ?? rowChannelState(for: result),
                                                 dial: { dialChannel(result) },
@@ -2263,6 +2365,17 @@ private struct RowChannelState {
     /// family contact may be configured loosely) — then nothing can be
     /// stored for the row, and the add-handle button is hidden.
     let storeKey: String
+    /// The channels the resolution skipped on the way to
+    /// `resolvedChannel`, in attempt order (empty when the preferred
+    /// channel routed). The tap's announcement names its first entry
+    /// (`call.announce.fallbackRouted`; L2-D10). `var … = []` so the
+    /// synthesized memberwise initializer keeps a DEFAULTED parameter
+    /// (L2-D3) — the construction site above passes both explicitly.
+    var fellBackFrom: [CallApp] = []
+    /// The launch-failure candidates for `resolvedChannel` (L2-D1/D2) —
+    /// the hop the tap threads into the opener it opens, so a failed
+    /// open recovers through the remaining channels.
+    var hopCandidates: [CallApp] = []
 }
 
 /// One unified search result — a family member or a system address-book
@@ -2290,11 +2403,21 @@ private struct UnifiedContactResultRow: View {
     let result: UnifiedContactSearch.Result
     /// The row's leading photo thumbnail (contact-photos task,
     /// 2026-09-07): ONLY `.family` rows carry one — the leaf resolves
-    /// it once per search outcome from
-    /// `AppCoordinator.contactPhoto(for:)` — book rows pass nil and
-    /// keep the initials avatar. Caller-driven like everything else in
-    /// the row; the row never touches the photo resolver itself.
+    /// it once per search outcome through
+    /// `AppCoordinator.faceThumbnail(for:diameter:displayScale:)` —
+    /// book rows pass nil and keep the initials avatar. Caller-driven
+    /// like everything else in the row; the row never touches the photo
+    /// resolver itself.
     let photo: UIImage?
+    /// The synthesized-row alt caption — "Also in your phone book as …"
+    /// (design-l1 §7.2; family-contacts-unify T-161): composed by
+    /// `CallView` through `CallResultRowText` from the outcome's
+    /// `linkedBookNames` map, which holds SYNTHESIZED rows only. nil
+    /// for every other row — no extra line, today's layout exactly.
+    /// `var` with a default so the memberwise initializer keeps every
+    /// existing construction compiling (the house defaulted-field
+    /// pattern, e.g. `RowChannelState.fellBackFrom`).
+    var caption: String? = nil
     /// The leaf-resolved channel truth for this row (see `RowChannelState`).
     let channelState: RowChannelState
     /// Dial the RESOLVED channel (`CallView.dialChannel`) — the circle
@@ -2352,6 +2475,18 @@ private struct UnifiedContactResultRow: View {
                             .font(.system(size: appearance.typography.captionPointSize))
                             .foregroundStyle(appearance.colors.textSecondary)
                             .lineLimit(2)
+                    }
+                    if let caption {
+                        // The synthesized-row explanation (design-l1
+                        // §7.2): why a name the user did not type into
+                        // the family record surfaces this row — its
+                        // own caption line under the number line, same
+                        // caption token.
+                        Text(caption)
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
                     }
                 }
                 Spacer(minLength: 8)
@@ -2556,6 +2691,30 @@ private struct UnifiedContactResultRow: View {
     }
 }
 
+/// The call-surface search rows' composed text (family-contacts-unify
+/// T-161; the house `<Surface>RowText` seam — mirror of
+/// `ActivityRowText` in HistoryView.swift): the synthesized family
+/// row's alt caption composed OUTSIDE the view, so the caption-parity
+/// claim (one frozen key, one wording, on every search surface) is
+/// pinnable without a view instance.
+enum CallResultRowText {
+    /// The extra caption line for a row the link merge SYNTHESIZED
+    /// (design-l1 §7.2): the person is also stored in the phone book
+    /// under `linkedBookNames[result.id]`, so the row explains why a
+    /// name the user did not type into the family record appears.
+    /// nil for every other row — the map holds synthesized rows only —
+    /// and an empty stored name is suppressed rather than rendered as
+    /// a dangling "…as " (never a fabricated identity).
+    static func linkedBookCaption(for result: UnifiedContactSearch.Result,
+                                  in outcome: UnifiedContactSearch.Outcome,
+                                  locale: Locale) -> String? {
+        guard let bookName = outcome.linkedBookNames[result.id], !bookName.isEmpty else {
+            return nil
+        }
+        return L10n.fmt("call.search.linkedBookName", locale: locale, bookName)
+    }
+}
+
 /// Face/photo avatar + name, with per-contact VIDEO and AUDIO call
 /// buttons — no list picker in between (redesign spec §3.1 "one face,
 /// one tap"; contact-call-buttons task 2026-09-06). Each button opens
@@ -2564,9 +2723,11 @@ private struct UnifiedContactResultRow: View {
 /// deferred follow-up) through `AppCoordinator.performContactCall`,
 /// which also announces the opened surface aloud.
 ///
-/// The leading face (contact-photos task, 2026-09-07) is the contact's
-/// own photo thumbnail when the coordinator resolves one from the
-/// contact's `photoFilename` (`AppCoordinator.contactPhoto(for:)`),
+/// The leading face (contact-photos task, 2026-09-07; unified resolver
+/// T-157) is the contact's own photo thumbnail when the coordinator
+/// resolves one — the SYSTEM photo where the contact is verified-linked
+/// and one is readable, the app-local file otherwise
+/// (`AppCoordinator.faceThumbnail(for:diameter:displayScale:)`) —
 /// otherwise the initials FaceAvatar — same 52pt circle either way, so
 /// a curated row of tiles keeps a uniform face column.
 struct ContactTile: View {
@@ -2576,13 +2737,13 @@ struct ContactTile: View {
     @Environment(\.locale) private var locale
     @Environment(\.displayScale) private var displayScale
 
-    /// DESIGN-REVIEW (P2): the tile used to call
-    /// `coordinator.contactPhoto(for:)` — a file read plus a full-size
-    /// decode — while composing the row, i.e. once per contact per body
+    /// DESIGN-REVIEW (P2): the tile used to read and decode the photo
+    /// file while composing the row, i.e. once per contact per body
     /// evaluation. The face is now resolved in `.task` (off the body)
-    /// through the shared downsampling cache, so a re-render costs a
-    /// dictionary lookup and the bitmap it holds is sized for a 52pt
-    /// circle rather than the 512pt file on disk.
+    /// through the coordinator's async precedence path and the shared
+    /// downsampling cache, so a re-render costs a dictionary lookup and
+    /// the bitmap it holds is sized for a 52pt circle rather than the
+    /// 512pt file on disk.
     @State private var photo: UIImage?
 
     /// The tile's face circle — photo or initials (see the struct doc).
@@ -2639,15 +2800,21 @@ struct ContactTile: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
-        // Keyed by the stored file name, so replacing a contact's photo
-        // (or clearing it) re-resolves the face; an unchanged contact
-        // costs one cached lookup per appearance.
-        .task(id: contact.photoFilename ?? "") {
-            photo = DownsampledImageCache.shared.contactFace(
+        // Keyed by the face identity (design-l2 §4.4), so replacing a
+        // contact's photo, linking/unlinking the record or an epoch bump
+        // re-resolves the face; an unchanged contact costs one cached
+        // lookup per appearance.
+        .task(id: coordinator.faceIdentity(for: contact)) {
+            let identity = coordinator.faceIdentity(for: contact)
+            let face = await coordinator.faceThumbnail(
                 for: contact,
                 diameter: Self.avatarDiameter,
-                displayScale: displayScale
-            ) { coordinator.contactPhoto(for: contact) }
+                displayScale: displayScale)
+            // Post-await identity re-check (design-l2 §4.4): abandon the
+            // assignment when the identity moved while awaiting — the
+            // re-keyed task resolves the fresh face anyway.
+            guard coordinator.faceIdentity(for: contact) == identity else { return }
+            photo = face
         }
     }
 

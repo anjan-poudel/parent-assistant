@@ -1,0 +1,15 @@
+{
+  "id": "11a79180-1149-4ad1-8591-0a8d52c47178",
+  "task_id": "design-l1",
+  "workflow_id": "family-contacts-unify",
+  "status": "RESOLVED",
+  "reason": "HIL triggered for task 'design-l1'",
+  "context": {
+    "task_description": "Produce the L1 system architecture document. Define system components,\ntechnology stack, integration points, and key architectural decisions.\nConsult the requirements lock file (specs/<requirements-task-id>.lock.yaml)\nto ensure the architecture covers all locked FRs and NFRs.\n",
+    "risk_tier": "T1",
+    "agent": "architect"
+  },
+  "created_at": "2026-10-11T16:43:19.025Z",
+  "notes": "T1 design gate, no owner-decision content: owner-level choices are settled in the constitution (three asks + pre-authorized fallbacks + resolved ODs). Design-level items (link storage shape, write seam, index structure, ambiguity rules) are architect-resolved and reviewed by design-l2/review-l2 + STRIDE. Owner checkpoints remain T2 final-sign-off + DV-1..6. House precedent: call-dialer T1 design gates resolved inline.",
+  "resolved_at": "2026-10-11T16:43:53.387Z"
+}

@@ -2,6 +2,10 @@ import Foundation
 import AVFoundation
 import BackgroundTasks
 import Combine
+// CryptoKit (T-157): the face token is a sha256 prefix of resolved
+// system photo bytes — same hashing shape as
+// `SystemContactLinkService.photoCacheKey`, one prefix length.
+import CryptoKit
 import UserNotifications
 import UIKit
 import MessageUI
@@ -333,6 +337,23 @@ final class AppCoordinator: ObservableObject {
         }
     }
     private static let defaultCallAppKey = "defaultCallApp"
+
+    /// The fallback dialer (call-dialer-primary-secondary, 2026-10-12):
+    /// the chain's second step, persisted under its own key with the
+    /// shipped `defaultCallApp` pattern. An absent or unknown stored
+    /// value restores `.phone` (GSM) — exactly the frozen default for
+    /// existing installs. `secondary == primary` is legal; the chain
+    /// dedupes at routing time, never at storage. A UI preference, not a
+    /// secret — persisted in UserDefaults the same way as `appTheme`.
+    /// didSet persists; the init-time restore assigns directly (house
+    /// pattern — didSet does not fire there).
+    @Published var secondaryCallApp: CallApp {
+        didSet {
+            UserDefaults.standard.set(secondaryCallApp.rawValue,
+                                      forKey: Self.secondaryCallAppKey)
+        }
+    }
+    private static let secondaryCallAppKey = "secondaryCallApp"
 
     /// Which map surface voice navigation opens (directions task,
     /// 2026-09-07) — Settings → Places. `.auto` (the default) opens
@@ -933,8 +954,69 @@ final class AppCoordinator: ObservableObject {
 
     /// The curated "Family and friends" list (spec §4.4.2) — persisted
     /// encrypted, feeds the notifier whenever the list changes.
+    ///
+    /// T-156 (design-l2 §1.9, §3.6): this assignment is THE roster
+    /// choke point — boot restore, add, update and remove all assign
+    /// here, so the derived index is rebuilt and the verified-link
+    /// refresh is triggered from one place and the published pair can
+    /// never drift from the roster it was derived from.
     let familyContactStore: FamilyContactStore
-    @Published private(set) var familyContacts: [FamilyContact]
+    @Published private(set) var familyContacts: [FamilyContact] {
+        didSet {
+            // Wholesale rebuild: the index derives ONLY from the roster
+            // it was handed, so it cannot disagree with it (a rebuild
+            // swaps a whole value — no torn read is even representable).
+            familyIndex = FamilyContactIndex(family: familyContacts)
+            // Then the link refresh — a no-op unless some contact
+            // carries a stored link, so an unlinked roster never reads
+            // the address book at all (design-l2 §3.6).
+            refreshVerifiedLinks()
+        }
+    }
+
+    /// The derived identity index over the roster (T-151, design-l2
+    /// §1.2/§3.6) — rebuilt wholesale inside `familyContacts.didSet`,
+    /// never persisted, never mutated in place. Consumers: the voice
+    /// resolver's `indexProvider` below, the unified search tiers, the
+    /// face surfaces.
+    @Published private(set) var familyIndex: FamilyContactIndex = .empty
+
+    /// The VERIFIED-link snapshot (T-149, design-l2 §1.3/§3.6) — starts
+    /// `.empty` ⇒ today's unlinked behaviour exactly. Published only by
+    /// `refreshVerifiedLinks`' completion, and only when the incoming
+    /// generation is newer than the published one; a stored link that
+    /// failed verification is simply absent (FR-FCU-006: stale links
+    /// degrade to unlinked, they are never presented).
+    @Published private(set) var verifiedLinks: VerifiedLinksSnapshot = .empty
+
+    /// Identity/face epoch (design-l2 §4.4): bumps exactly once per
+    /// identity change — a publish whose links differ from the
+    /// published set, a successful link write/clear (T-158) and every
+    /// foreground activation (the only way an EXTERNAL contact edit
+    /// surfaces). Face consumers (T-157) key their caches on it.
+    @Published private(set) var faceEpoch: UInt64 = 0
+
+    /// Last-resolved system photo hash prefixes, per contact id
+    /// (design-l2 §4.4) — the token half of the face identity. Written
+    /// ONLY inside the `@MainActor` face methods (T-157 owns them;
+    /// declared here because it is part of this identity-state block).
+    private var systemPhotoTokens: [UUID: String] = [:]
+
+    /// The verified-link service this coordinator consumes (T-149; the
+    /// single owner of the snapshot drain and the photo cache — a second
+    /// instance would mean two truths).
+    ///
+    /// `lazy` ([BOOT-REVIEW P0-1] first use, not `init()`: building it
+    /// constructs a `CNContactStore`, and a launch whose roster carries
+    /// no link must never need an address-book handle). Resolved on the
+    /// caller's context before any Task captures it, never inside one.
+    private lazy var linkService: SystemContactLinkReading =
+        injectedLinkService ?? SystemContactLinkService(observabilityBus: observabilityBus)
+
+    /// Test seam (T-156): the scripted link service `linkService` hands
+    /// out in place of the real actor. nil — the app's own construction —
+    /// builds the real one at first use. Set once in `init`.
+    private var injectedLinkService: SystemContactLinkReading? = nil
 
     /// Saved places for voice navigation (directions task, 2026-09-07) —
     /// see `SavedPlaceStore` for the cap and the default-home rules.
@@ -1182,6 +1264,19 @@ final class AppCoordinator: ObservableObject {
     /// is derived, not a pipeline state.
     private var lastPipelineState: VoicePipeline.State = .stopped
     private var speakingCount = 0
+    /// [HERO-STATES] (2026-10-13) Published overlays for the hero. The
+    /// slot window keeps the session machine in `.awaitingSlotAnswer`
+    /// through three visually different moments — the probe speaking,
+    /// the auto-listen capture live, and the closed-capture wait — which
+    /// the raw state cannot tell apart. `isSpeaking` is true exactly
+    /// while any reply audio plays (the machine state is untouched: the
+    /// transition table stays the contract); `slotAnswerCaptureActive`
+    /// is true exactly while the auto-listen capture is live, so a
+    /// closed-capture window shows the talk affordance instead of a
+    /// false "listening". Both settable by the wiring tests via
+    /// @testable; the coordinator owns their lifecycle.
+    @Published var isSpeaking = false
+    @Published var slotAnswerCaptureActive = false
     private var voiceWatchdog: DispatchWorkItem?
     /// Guards `VoicePipeline.start`: its only async gap is the
     /// mic-permission callback, which can silently never fire — leaving
@@ -1929,11 +2024,26 @@ final class AppCoordinator: ObservableObject {
     // MARK: - Intent layer services (spec 2026-09-05)
     /// Deterministic slot resolution + learning stores. Lazy so `storage`
     /// and `familyContacts` exist before first use.
-    private lazy var contactResolver = ContactResolver { [weak self] in self?.familyContacts ?? [] }
+    ///
+    /// T-156: the resolver reads the PUBLISHED index (T-151) instead of
+    /// building a throwaway one per call — the coordinator's index is
+    /// rebuilt at the roster choke point, so the resolver and the search
+    /// tiers judge one projection. The resolver's own nil-fallback keeps
+    /// it whole (test-parity) if the index has not been published yet.
+    private lazy var contactResolver = ContactResolver(
+        contactsProvider: { [weak self] in self?.familyContacts ?? [] },
+        indexProvider: { [weak self] in self?.familyIndex ?? .empty })
     private lazy var callMethodPreferences = CallMethodPreferenceStore(storage: storage)
     private lazy var confirmedMethodHistory = ConfirmedMethodHistoryStore(storage: storage)
-    private lazy var methodResolver = MethodResolver(preferenceStore: callMethodPreferences,
-                                                     historyStore: confirmedMethodHistory)
+    private lazy var methodResolver = MethodResolver(
+        preferenceStore: callMethodPreferences,
+        historyStore: confirmedMethodHistory,
+        // FR-CDP-012: the settings primary, mapped by call type — a
+        // video-word call versus a plain call (design-l2 §8). Read per
+        // resolution, so a settings change applies from the next call.
+        globalDefault: { [weak self] isVideo in
+            CallChannelChain.method(for: self?.defaultCallApp ?? .phone, isVideo: isVideo)
+        })
     private lazy var intentCache = IntentCommandCache(storage: storage)
     private lazy var repetitionGuard = RepetitionGuard(storage: storage)
     /// Numbers this app has genuinely dialed, newest first — the ranking
@@ -2104,21 +2214,59 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Resolves which channel an ADDRESS-BOOK row's call button opens
-    /// (Phone-tab redesign, 2026-09-07): the row's explicit per-contact
-    /// pick wins, else the global default (`defaultCallApp`). One hard
-    /// rule on top of the fallback chain — never resolve to a channel
-    /// the row cannot open: a `.messenger` result needs an on-file
-    /// handle (Messenger addresses people by username, not number), so
-    /// without one the result drops to `.phone` rather than dead-ending
-    /// the tap. Pure static so the whole matrix is unit-testable without
-    /// an AppCoordinator instance (same seam as
+    /// (Phone-tab redesign, 2026-09-07; chain seam: call-dialer-primary-
+    /// secondary, 2026-10-12). The row's explicit per-contact pick is the
+    /// chain's PREFERRED (explicit-pick-wins), else the global default
+    /// (`defaultCallApp`). The chain is preferred → secondary → phone,
+    /// deduped, each channel attempted at most once, with `.phone`
+    /// always IN the order — so the shipped one-hard-rule form is now
+    /// one case of the chain: a `.messenger` preference with no on-file
+    /// handle is skipped and the route falls to the secondary or the
+    /// phone floor instead of dead-ending the tap. The returned `Result`
+    /// carries `fellBackFrom` — the skipped channels in attempt order —
+    /// the single provenance source the announcements compose from.
+    /// Pure static so the whole matrix is unit-testable without an
+    /// AppCoordinator instance (same seam as
     /// `shouldAutoDownloadAssistantBrain`).
     static func resolvedCallChannel(explicit: CallApp?,
                                     defaultApp: CallApp,
-                                    messengerHandleAvailable: Bool) -> CallApp {
-        let resolved = explicit ?? defaultApp
-        if resolved == .messenger && !messengerHandleAvailable { return .phone }
-        return resolved
+                                    secondaryApp: CallApp,
+                                    messengerHandleAvailable: Bool,
+                                    whatsAppInstalled: Bool,
+                                    vocabulary: CallChannelVocabulary = .anyChannel)
+                                    -> CallChannelChain.Result {
+        resolveChannel(preferred: explicit ?? defaultApp,
+                       secondaryApp: secondaryApp,
+                       messengerHandleAvailable: messengerHandleAvailable,
+                       whatsAppInstalled: whatsAppInstalled,
+                       vocabulary: vocabulary)
+    }
+
+    /// The shared seam algorithm (ADR-CDP-03 steps 1–3), one
+    /// implementation for both public seams: normalize the preferred
+    /// input through the surface vocabulary — SILENT, exactly like the
+    /// shipped `guard resolved.supportsAudio else { return .phone }`,
+    /// which also substituted without a word — then run the pure chain
+    /// and substitute an out-of-vocabulary routed channel with the
+    /// vocabulary terminal. The substitution never fabricates
+    /// provenance: `fellBackFrom` keeps only the feasibility-skipped
+    /// channels and is unchanged by it. The terminal is always feasible,
+    /// so the seam is total and the route never dead-ends.
+    private static func resolveChannel(preferred: CallApp,
+                                       secondaryApp: CallApp,
+                                       messengerHandleAvailable: Bool,
+                                       whatsAppInstalled: Bool,
+                                       vocabulary: CallChannelVocabulary)
+                                       -> CallChannelChain.Result {
+        let routed = CallChannelChain.route(
+            preferred: vocabulary.normalized(preferred),
+            secondary: secondaryApp,
+            feasibility: CallChannelChain.Feasibility(
+                messengerHandleAvailable: messengerHandleAvailable,
+                whatsAppInstalled: whatsAppInstalled))
+        guard !vocabulary.permits(routed.channel) else { return routed }
+        return CallChannelChain.Result(channel: vocabulary.terminal,
+                                       fellBackFrom: routed.fellBackFrom)
     }
 
     /// Compile-time: is the vendored LLM.swift runtime linked into THIS
@@ -2561,8 +2709,20 @@ final class AppCoordinator: ObservableObject {
     ///     built. The app always wires it (the wizard needs it); a test
     ///     exercising the nil-safe consumers passes false and reads
     ///     `profilePersonalization` as nil (design-l2 §5.6).
+    ///   - systemContactLinkService: the verified-link service the
+    ///     coordinator consumes (T-156). nil (the app's own construction)
+    ///     = the real `SystemContactLinkService` actor, built at FIRST
+    ///     USE, not here; the coordinator suites inject a scripted fake
+    ///     through this seam so no `CNContactStore` ever enters a test.
+    ///   - systemContactPhotoWriter: the system-photo write seam
+    ///     `syncSystemPhoto` delegates to (T-158). nil (the app's own
+    ///     construction) = the real `SystemContactPhotoWriter` actor,
+    ///     built at FIRST USE, not here; the coordinator suites inject
+    ///     the T-154 `FakeSystemContactPhotoWriter` through this seam.
     init(profileStorage: ProfilePayloadStorage? = nil,
-         wireProfilePersonalization: Bool = true) {
+         wireProfilePersonalization: Bool = true,
+         systemContactLinkService: SystemContactLinkReading? = nil,
+         systemContactPhotoWriter: SystemContactPhotoWriting? = nil) {
         // [BOOT-REVIEW P0 item 1] `bootstrap-init` — the composition root's
         // own cost, measured separately from every other startup metric:
         // this is what runs before the app exists at all (the App struct's
@@ -2667,6 +2827,16 @@ final class AppCoordinator: ObservableObject {
         // SAME `load()` calls run, just off-main.
         let contactStore = FamilyContactStore(storage: storage)
         self.familyContactStore = contactStore
+        // T-156: the identity-state seam, armed before the roster's first
+        // assignment below (whose `didSet` — when this init runs late
+        // enough for observers to fire — rebuilds the index and runs the
+        // link refresh; on an empty roster that refresh early-returns
+        // before touching the service, so no address-book handle is ever
+        // built here).
+        self.injectedLinkService = systemContactLinkService
+        // T-158: the write-seam injection, same pattern — armed before the
+        // roster's first assignment. The lazy writer is never built here.
+        self.injectedSystemContactPhotoWriter = systemContactPhotoWriter
         self.familyContacts = []
         self.familyNotifier = APNsFamilyNotifier(
             contacts: [],
@@ -2867,6 +3037,16 @@ final class AppCoordinator: ObservableObject {
         // nothing needs to react to the restored value.
         self.defaultCallApp = UserDefaults.standard
             .string(forKey: Self.defaultCallAppKey)
+            .flatMap(CallApp.init(rawValue:)) ?? .phone
+
+        // Fallback dialer (call-dialer-primary-secondary, 2026-10-12) —
+        // restore the persisted secondary call app with the primary's
+        // exact shape; missing/unknown raw values fall back to `.phone`,
+        // the GSM floor every route contains. This is the property's
+        // ONLY initial assignment, so its didSet does not fire here
+        // (same rule as `defaultCallApp` above).
+        self.secondaryCallApp = UserDefaults.standard
+            .string(forKey: Self.secondaryCallAppKey)
             .flatMap(CallApp.init(rawValue:)) ?? .phone
 
         // Default map surface (directions task, 2026-09-07) — restore
@@ -3127,7 +3307,14 @@ final class AppCoordinator: ObservableObject {
         // almost every session transition.
         dialogueSessionExitCancellable = voiceSession.$state
             .removeDuplicates()
-            .sink { [weak self] _ in
+            .sink { [weak self] newState in
+                // [HERO-STATES] Leaving the slot window closes the
+                // auto-listen claim in the same hop that the exit is
+                // published — the hero can never keep showing "listening"
+                // once the window has resolved.
+                if newState != .awaitingSlotAnswer {
+                    self?.slotAnswerCaptureActive = false
+                }
                 DispatchQueue.main.async {
                     self?.resolveDialogueFrameOnSessionExit()
                 }
@@ -4860,7 +5047,18 @@ self.noteTalkContractChanged()
         // is published directly by the pipeline start callback.
         updateVoiceReadiness()
         guard voiceSession.state != .awaitingConfirmation,
-              voiceSession.state != .awaitingSlotAnswer else { return }
+              voiceSession.state != .awaitingSlotAnswer else {
+            // [HERO-STATES] The auto-listen capture has closed (or never
+            // opened) once the pipeline settles back to idle mid-window
+            // — the hero stops claiming "listening" for the remainder of
+            // the 45 s window. The re-open hook in `noteSpeakingEnded`
+            // re-arms the flag right after (its call order is
+            // handlePipelineState first, hook second).
+            if voiceSession.state == .awaitingSlotAnswer, state == .idle {
+                slotAnswerCaptureActive = false
+            }
+            return
+        }
         switch state {
         case .stopped:
             voiceSession.transition(to: .stopped)
@@ -4917,9 +5115,25 @@ self.noteTalkContractChanged()
             voiceSession.transitionViaIdle(to: .listening)
             armVoiceWatchdog()
         case .processing:
-            voiceSession.transition(to: .transcribing)
+            // [AUTO-LISTEN LATE-EVENT FIX] (2026-10-11, device crash
+            // ElderlyAssistant-2026-10-11-223011.ips, 17 Pro Max) The
+            // mid-cycle events are legality-checked, not asserted: the
+            // answer interception resolves the dialogue frame back to
+            // `.idle` INSIDE the turn, while this same turn's
+            // `.processing`/`.routing` emissions still travel the
+            // main-queue sink behind it — an `.idle → .transcribing`
+            // edge is not in the transition table, and the debug
+            // assertion crash only surfaced on the 12 GB device (on the
+            // 6 GB devices the OOM kill masked the same bug). A late
+            // event whose edge is illegal is the tail of a turn whose
+            // session side already closed — skip it.
+            if voiceSession.state.canTransition(to: .transcribing) {
+                voiceSession.transition(to: .transcribing)
+            }
         case .routing:
-            voiceSession.transition(to: .understanding)
+            if voiceSession.state.canTransition(to: .understanding) {
+                voiceSession.transition(to: .understanding)
+            }
         case .error:
             voiceSession.transition(to: .error)
             cancelVoiceWatchdog()
@@ -5273,6 +5487,7 @@ self.noteTalkContractChanged()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.speakingCount += 1
+            self.isSpeaking = true
             self.wakeWordActivityGate.setSpeaking(true)
             // Promote straight to .speaking when TTS starts during the
             // busy pre-speech states (call-ui fix, 2026-09-07): the old
@@ -5307,9 +5522,56 @@ self.noteTalkContractChanged()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.speakingCount = max(0, self.speakingCount - 1)
+            self.isSpeaking = self.speakingCount > 0
             self.wakeWordActivityGate.setSpeaking(self.speakingCount > 0)
             self.handlePipelineState(self.lastPipelineState)
+            self.openAnswerCaptureIfProbeJustSpoken()
         }
+    }
+
+    /// [MULTI-TURN AUTO-LISTEN] (2026-10-11, owner-confirmed) When the
+    /// probe's speech ends — and only then — the answer window opens the
+    /// mic itself, so the elder answers the question without tapping Talk
+    /// or saying the wake word. The conditions are the window contract:
+    /// nothing still speaking, the session inside `.awaitingSlotAnswer`
+    /// (the early-return guard in `handlePipelineState` keeps the 45 s
+    /// timer intact while the pipeline captures), a live frame, and an
+    /// idle pipeline (a racing Talk press that already opened a capture
+    /// owns the epoch — `beginAnswerCapture`'s generation guard drops the
+    /// loser). One auto-open per probe: an invalid answer re-speaks the
+    /// retry probe, whose speech end re-arms this path the same way; the
+    /// answer turn's own execution speech cannot re-trigger it because
+    /// the frame is resolved before that speech starts.
+    /// The pure auto-listen predicate (testable without `start()`, which
+    /// the witness strategy never calls): the window contract's four
+    /// conditions — nothing still speaking, the session inside the slot
+    /// answer window, a live frame, and an idle pipeline.
+    static func shouldAutoOpenAnswerCapture(speakingCount: Int,
+                                            sessionState: VoiceSessionState,
+                                            frameLive: Bool,
+                                            pipelineState: VoicePipeline.State?) -> Bool {
+        speakingCount == 0
+            && sessionState == .awaitingSlotAnswer
+            && frameLive
+            && pipelineState == .idle
+    }
+
+    private func openAnswerCaptureIfProbeJustSpoken() {
+        guard Self.shouldAutoOpenAnswerCapture(
+            speakingCount: speakingCount,
+            sessionState: voiceSession.state,
+            frameLive: dialogueManager.liveFrame != nil,
+            pipelineState: voicePipeline?.state) else { return }
+        voicePipeline?.beginAnswerCapture()
+        slotAnswerCaptureActive = true
+        observabilityBus.emit(ObservabilityEvent(
+            component: "app_coordinator",
+            eventType: "dialogue_answer_capture",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: [:]
+        ))
     }
 
     /// Called by `CommandRouter` with the text being spoken so the Home
@@ -6438,15 +6700,508 @@ self.noteTalkContractChanged()
     /// Photo thumbnails for curated contacts (family-and-friends task,
     /// 2026-09-07). Lazy like the intent-layer stores: nothing touches
     /// Application Support paths before launch completes. Photos are
-    /// best-effort visuals — the store is non-throwing, and every call
-    /// site below tolerates a nil filename.
+    /// best-effort visuals — the store is non-throwing, and every face
+    /// call site below tolerates a nil filename.
     lazy var contactPhotoStore = ContactPhotoStore()
 
-    /// The stored thumbnail for a curated contact, or nil when none is
-    /// on file (or the file vanished) — the single lookup every row
-    /// renders through, so the Photo-tab UI needs nothing but a contact.
-    func contactPhoto(for contact: FamilyContact) -> UIImage? {
-        contactPhotoStore.load(named: contact.photoFilename)
+    // MARK: - Faces (T-157; design-l1 §10.1, design-l2 §1.9, §4.4)
+
+    /// The stable `.task(id:)` identity of a contact's face (design-l2
+    /// §4.4): `"<id>:<token>:<filename|->:<faceEpoch>"`.
+    ///
+    /// Token = `systemPhotoTokens[contact.id]` — the 16-hex sha256
+    /// prefix of the last-resolved system photo bytes — or `"-"`
+    /// (linked, not yet resolved) or `"link-nil"` (no verified link).
+    /// The filename component is `"-"` when the contact has no
+    /// app-local photo.
+    ///
+    /// Stable: repeated derivation without an identity change returns
+    /// the identical string. Versioned: any link, filename or epoch
+    /// change — or a freshly resolved system photo — yields a
+    /// different string, so a `.task(id:)` keyed on it re-runs exactly
+    /// when a face could differ, and a UI cache keyed on it rotates
+    /// with it (no stale image is ever served under the new identity).
+    ///
+    /// Reads ONLY main-confined state (`verifiedLinks`, the token map,
+    /// `familyContacts`-derived values, `faceEpoch`) — @MainActor, like
+    /// the two resolvers below, is what makes every read atomic per
+    /// contact: a publish swaps whole values, so no torn identity (an
+    /// id from one revision next to a hash from another) is even
+    /// representable.
+    @MainActor
+    func faceIdentity(for contact: FamilyContact) -> String {
+        let token = verifiedLinks.links[contact.id] != nil
+            ? (systemPhotoTokens[contact.id] ?? "-")
+            : "link-nil"
+        return "\(contact.id.uuidString):\(token):\(contact.photoFilename ?? "-"):\(faceEpoch)"
+    }
+
+    /// The contact's face at its stored size TOGETHER WITH its source —
+    /// the ONE precedence resolver (design-l1 §10.1, FR-FCU-007) plus
+    /// the attribution the editor's `family.photo.sourceSystem` caption
+    /// needs (family-contacts-unify T-160, design-l2 §2.4: rendered
+    /// exactly when the displayed photo is the resolved SYSTEM one).
+    /// The pair comes out of ONE pass, so the image and its source can
+    /// never disagree — and `faceImage` is this same call with the
+    /// source dropped, never a second precedence expression to drift
+    /// from (design-l2 §8.1's two-paths hazard).
+    ///
+    /// Order: (1) a VERIFIED link whose record holds readable photo
+    /// bytes → the SYSTEM photo, `isSystemPhoto` true; (2) the app-local
+    /// `photoFilename` file, false; (3) `(nil, false)` — the caller
+    /// draws the existing initials avatar. Any failure at a step
+    /// degrades to the next; never throws (a tile is never blank and
+    /// never crashes).
+    ///
+    /// "Readable access" is the link service's own gate: its
+    /// `photoImageData` answers nil without touching the store when
+    /// access is not readable, so bytes only ever come back through a
+    /// readable door. System bytes are bounded to
+    /// `ContactPhotoStore.maxDimension` before returning — the same
+    /// 512px envelope a stored family thumbnail lives in — so a
+    /// phone-book full-size photo cannot round into the UI unbounded.
+    @MainActor
+    func faceImageWithSource(for contact: FamilyContact) async
+        -> (image: UIImage?, isSystemPhoto: Bool) {
+        if let system = await resolvedSystemPhoto(for: contact) { return (system, true) }
+        return (contactPhotoStore.load(named: contact.photoFilename), false)
+    }
+
+    /// The contact's face at its stored size — `faceImageWithSource`
+    /// with the source dropped (the two are the same resolution, by
+    /// construction).
+    @MainActor
+    func faceImage(for contact: FamilyContact) async -> UIImage? {
+        await faceImageWithSource(for: contact).image
+    }
+
+    /// The contact's face thumbnail at `diameter`, through the shared
+    /// bounded downsampling cache — the `sysphoto:` key family
+    /// (`"sysphoto:<identifier>:<token>"`) for system photos, the
+    /// existing `"contact:<filename>"` key for app-local ones, so the
+    /// two sources can never collide (design-l2 §1.9). The token in
+    /// the key IS the bytes' version: new bytes ⇒ new token ⇒ a cache
+    /// miss, never a stale serve.
+    @MainActor
+    func faceThumbnail(for contact: FamilyContact, diameter: CGFloat,
+                       displayScale: CGFloat) async -> UIImage? {
+        if let system = await resolvedSystemPhoto(for: contact),
+           let link = verifiedLinks.links[contact.id],
+           let token = systemPhotoTokens[contact.id] {
+            let thumbnail = DownsampledImageCache.shared.thumbnail(
+                forKey: Self.systemPhotoCacheKey(identifier: link.identifier, token: token),
+                pointSize: diameter,
+                displayScale: displayScale,
+                load: { system })
+            if let thumbnail { return thumbnail }
+        }
+        return DownsampledImageCache.shared.contactFace(
+            for: contact,
+            diameter: diameter,
+            displayScale: displayScale
+        ) { contactPhotoStore.load(named: contact.photoFilename) }
+    }
+
+    /// The verified link's system photo, decoded and bounded to
+    /// `ContactPhotoStore.maxDimension` — nil when the contact has no
+    /// VERIFIED link, the record holds no readable photo, or the bytes
+    /// do not decode.
+    ///
+    /// The ONE system-byte resolver both face methods run, and the only
+    /// writer of `systemPhotoTokens` (design-l2 §4.4: the token map is
+    /// written ONLY from the @MainActor face path, never from a
+    /// background Task): the token is the sha256 prefix of the bytes
+    /// that were just resolved, recorded only on a successful resolve —
+    /// an unresolvable system photo leaves the link's token at `"-"`
+    /// and the identity stable.
+    @MainActor
+    private func resolvedSystemPhoto(for contact: FamilyContact) async -> UIImage? {
+        guard let link = verifiedLinks.links[contact.id], !link.identifier.isEmpty else {
+            return nil
+        }
+        let service = linkService
+        guard let data = await service.photoImageData(forIdentifier: link.identifier),
+              let image = UIImage(data: data) else { return nil }
+        systemPhotoTokens[contact.id] = Self.systemPhotoToken(of: data)
+        return DownsampledImageCache.downsampled(image,
+                                                 maxPixelEdge: ContactPhotoStore.maxDimension)
+    }
+
+    /// The token half of a face identity: the first 16 hex characters
+    /// of sha256 over the resolved system photo bytes (design-l2 §4.4).
+    /// The SAME hashing shape as `SystemContactLinkService.photoCacheKey`,
+    /// through one shared prefix length — and a hash by construction,
+    /// so no identifier or byte content can leave the app through an
+    /// identity string or a cache key (NFR-FCU-002).
+    static func systemPhotoToken(of data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return String(hex.prefix(SystemContactLinkService.photoKeyHashPrefixLength))
+    }
+
+    /// The `sysphoto:` thumbnail cache key: record identifier plus the
+    /// resolved bytes' token (design-l1 §10.1). Never collides with a
+    /// `contact:<filename>` key — the two families share one bounded
+    /// cache, not one key space.
+    static func systemPhotoCacheKey(identifier: String, token: String) -> String {
+        "sysphoto:\(identifier):\(token)"
+    }
+
+    // MARK: - Identity: verified links and the family index (T-156; design-l2 §1.9, §3.6)
+
+    /// Refresh entry point for VERIFIED links (design-l2 §1.9, §3.6).
+    ///
+    /// Early-returns — no fetch, no generation bump — unless some roster
+    /// contact carries a stored link, so a roster with no links never
+    /// touches the address book at all (the unlinked-parity anchor: this
+    /// feature is invisible until the first link exists).
+    ///
+    /// Otherwise: one Task, a roster captured BY VALUE (the published
+    /// array stays main-confined; the task reads its own snapshot), and
+    /// the actor's drain does the verification. The result publishes on
+    /// main only when its generation is NEWER than the published one —
+    /// the counter orders publication, so a slow refresh that finished
+    /// after a newer one is discarded, never published (FR-FCU-006:
+    /// stale serves; no flap). The epoch bumps once per identity change
+    /// and never on a no-op refresh.
+    ///
+    /// No retries, no backoff, no delays (L1 §13.4): a failed or
+    /// unreadable pass leaves the previous snapshot in place and the
+    /// next trigger — a roster mutation, a foreground activation, an
+    /// access change, a write outcome — re-runs this.
+    func refreshVerifiedLinks() {
+        guard familyContacts.contains(where: { $0.systemContact != nil }) else { return }
+        let roster = familyContacts
+        // Resolve the seam HERE, on the caller's (main) context: the lazy
+        // seam is built at first use, never inside the Task.
+        let service = linkService
+        Task { [weak self] in
+            let snapshot = await service.refresh(contacts: roster)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                guard snapshot.generation > self.verifiedLinks.generation else {
+                    return   // an older generation never overwrites a newer snapshot
+                }
+                if snapshot.links != self.verifiedLinks.links {
+                    self.faceEpoch += 1   // identity changed — exactly once per change
+                }
+                self.verifiedLinks = snapshot
+            }
+        }
+    }
+
+    /// Foreground identity hook (design-l2 §4.5), wired into
+    /// `handleScenePhase(.active)`: wholesale photo-cache invalidation +
+    /// one epoch bump — the only way an EXTERNAL contact edit (photos
+    /// changed in Contacts.app while this app was backgrounded) can
+    /// surface — then the ordinary link refresh.
+    ///
+    /// Both steps are await-free from the caller's seat. The Task's
+    /// internal ORDER is what matters: invalidate FIRST, bump SECOND, so
+    /// by the time a face consumer re-resolves under the new epoch the
+    /// cache is already cold (a bump that outran its invalidation could
+    /// serve the bytes it was meant to drop).
+    func refreshContactsIdentity() {
+        let service = linkService
+        Task { [weak self] in
+            await service.invalidate(identifier: nil)
+            await MainActor.run { [weak self] in self?.faceEpoch += 1 }
+        }
+        refreshVerifiedLinks()
+    }
+
+    /// Whether `claim` names a record ANOTHER roster contact's stored link
+    /// already owns (design-l2 §1.9 clause 4; L1 §6.1) — the duplicate-
+    /// claim guard's whole rule, pure and static so both write paths and
+    /// the suites judge by the SAME expression. An empty identifier is
+    /// "no linkable record" (§3.5), never a claim.
+    static func isDuplicateLinkClaim(_ claim: SystemContactLink?,
+                                     in roster: [FamilyContact],
+                                     excluding id: UUID?) -> Bool {
+        guard let identifier = claim?.identifier, !identifier.isEmpty else { return false }
+        return roster.contains { $0.id != id && $0.systemContact?.identifier == identifier }
+    }
+
+    /// One reason-coded event for a write REFUSED by the duplicate-claim
+    /// guard: the `command_router` rejection shape — closed vocabulary
+    /// (`rejected` / `duplicate_claim`), `metadata: [:]`, and nothing
+    /// about the person, the number or the identifier in any field
+    /// (NFR-FCU-002, design-l2 §5.2).
+    private func emitDuplicateLinkClaimRefusal() {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "family_contacts",
+            eventType: "family_contact_write_refused",
+            durationMs: nil,
+            outcome: "rejected",
+            errorCode: "duplicate_claim",
+            metadata: [:]
+        ))
+    }
+
+    // MARK: - Link / unlink seam (T-158; design-l2 §1.9, design-l1 §6.4)
+
+    /// The photo consequence an unlink books (design-l2 §1.9, design-l1
+    /// §6.4; FR-FCU-005). Every mode leaves BOTH records intact — an
+    /// unlink only ever clears this coordinator's own stored claim and
+    /// NEVER writes to the system record (the system contact is not
+    /// edited, not deleted, not touched).
+    enum SystemContactUnlinkMode: Equatable {
+        /// Default: the stored link is cleared; the app-local photo file
+        /// is untouched.
+        case unlinkKeepingLocalAsIs
+        /// The displayed photo IS the linked record's system photo and no
+        /// app-local file exists: copy those bytes into the app-local
+        /// store FIRST, assign the copied file to `photoFilename`, and
+        /// clear the link only after that assignment persisted. A copy
+        /// that produced no file does NOT clear (F3; the never-lose rule
+        /// wins over the unlink).
+        case unlinkKeepingDisplayedPhotoLocally
+        /// Explicit "remove everything": the link and the app-local photo
+        /// file are both cleared (the system record is still untouched).
+        case unlinkAndClearAppLocalPhoto
+    }
+
+    /// The pure mode rule the wizard applies BEFORE calling
+    /// `setFamilyContactLink` (design-l2 §1.9): an app-local file exists →
+    /// keep it as is; otherwise, when the displayed photo is the linked
+    /// system one, copy it locally first; else nothing displayed would be
+    /// lost → keep as is. Static and total so the wizard's choice and the
+    /// suites judge by the SAME expression.
+    static func unlinkMode(appLocalFileExists: Bool,
+                           displayedPhotoIsSystem: Bool) -> SystemContactUnlinkMode {
+        if appLocalFileExists { return .unlinkKeepingLocalAsIs }
+        return displayedPhotoIsSystem ? .unlinkKeepingDisplayedPhotoLocally
+                                      : .unlinkKeepingLocalAsIs
+    }
+
+    /// The ONLY unlink path (design-l2 §1.9, design-l1 §6.4; FR-FCU-005,
+    /// FR-FCU-006). Clears the stored link, books the photo consequence
+    /// per `mode`, bumps the face epoch and republishes the roster (whose
+    /// `didSet` triggers the verified-link refresh). Never writes to the
+    /// system record.
+    ///
+    /// `true` = cleared, or already absent (no stored link to clear);
+    /// `false` = no such contact, or a consequence that could not be
+    /// booked — in which case the link is NOT cleared (the never-lose
+    /// rule wins over the unlink) and the refusal is reason-coded on the
+    /// bus, never silent.
+    ///
+    /// F3 (security advisory): `.unlinkKeepingDisplayedPhotoLocally`
+    /// copies the displayed system bytes BEFORE any record write, then
+    /// assigns the copied file to `photoFilename` in the SAME store write
+    /// that clears the link — so the displayed photo survives the unlink,
+    /// both records stay intact, and a failure leaves neither a dangling
+    /// `photoFilename` nor an orphaned copy.
+    @discardableResult
+    @MainActor
+    func setFamilyContactLink(id: UUID, mode: SystemContactUnlinkMode) async -> Bool {
+        guard let contact = familyContacts.first(where: { $0.id == id }) else { return false }
+
+        let oldFilename = contact.photoFilename
+        var newFilename = oldFilename
+
+        // (1) Book the photo consequence — the COPY runs first, before any
+        // record write, so a failure can refuse the unlink without having
+        // touched the stored record.
+        switch mode {
+        case .unlinkKeepingLocalAsIs:
+            break   // app-local file untouched
+        case .unlinkKeepingDisplayedPhotoLocally:
+            guard let link = contact.systemContact, !link.identifier.isEmpty else {
+                // No stored link = nothing is displayed from the system
+                // record: nothing to copy, and the unlink is a plain
+                // clear (design-l2 §1.9: `true` = "already absent").
+                break
+            }
+            newFilename = await copyDisplayedSystemPhotoLocally(forIdentifier: link.identifier)
+            if newFilename == nil {
+                emitUnlinkRefusal(reasonCode: "copy_failed")
+                return false   // never-lose: the link is NOT cleared
+            }
+        case .unlinkAndClearAppLocalPhoto:
+            newFilename = nil
+        }
+
+        // (2) ONE record write: the photoFilename consequence and the
+        // cleared link land together, so no window exists where a cleared
+        // link sits next to a stale filename (or the reverse). From a
+        // fresh store read — the roster snapshot may be a beat older.
+        var all = familyContactStore.load()
+        guard let index = all.firstIndex(where: { $0.id == id }) else {
+            if let newFilename, newFilename != oldFilename {
+                contactPhotoStore.delete(named: newFilename)   // never orphan a file
+            }
+            emitUnlinkRefusal(reasonCode: "save_failed")
+            return false
+        }
+        all[index].photoFilename = newFilename
+        all[index].systemContact = nil
+        guard familyContactStore.save(all) else {
+            if let newFilename, newFilename != oldFilename {
+                contactPhotoStore.delete(named: newFilename)   // never orphan a file
+            }
+            emitUnlinkRefusal(reasonCode: "save_failed")
+            return false
+        }
+
+        // (3) The commit point passed — the replaced/cleared app-local
+        // file can go now (the `updateFamilyContact` sequencing: the
+        // record is the commit point, the old file only follows it).
+        if let oldFilename, oldFilename != newFilename {
+            contactPhotoStore.delete(named: oldFilename)
+        }
+
+        // (4) Republish (didSet: wholesale index rebuild + link refresh —
+        // the stale claim disappears from the next snapshot, FR-FCU-006)
+        // and bump the epoch (design-l2 §4.4: an unlink is an identity
+        // change). The system record was never touched.
+        familyContacts = familyContactStore.load()
+        familyNotifier.updateContacts(Self.emergencyContacts(from: familyContacts,
+                               defaultCallApp: defaultCallApp))
+        faceEpoch += 1
+        emitUnlinkEvent(mode)
+        return true
+    }
+
+    /// The displayed system photo bytes copied into the app-local store as
+    /// the processed JPEG the app holds everywhere (design-l1 §6.4: "one
+    /// encode via `processedJPEG`") — the copied file's name, or nil when
+    /// nothing could be copied (no bytes, undecodable bytes, or a rejected
+    /// store write), which the unlink reads as "refuse to clear".
+    ///
+    /// Reads through the one link-reading seam: the same readable-access
+    /// gate the face resolver uses, so no byte ever comes back through an
+    /// unreadable door.
+    @MainActor
+    private func copyDisplayedSystemPhotoLocally(forIdentifier identifier: String) async -> String? {
+        let service = linkService
+        guard let data = await service.photoImageData(forIdentifier: identifier),
+              let image = UIImage(data: data) else { return nil }
+        return contactPhotoStore.save(image)
+    }
+
+    /// The §5.2 unlink row: `contacts_link` / `unlink`, outcome = the
+    /// booked mode consequence, no error code on success. Reason-code
+    /// only — no name, number, identifier, filename or byte anywhere in a
+    /// field (NFR-FCU-002).
+    private func emitUnlinkEvent(_ mode: SystemContactUnlinkMode) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "contacts_link",
+            eventType: "unlink",
+            durationMs: nil,
+            outcome: Self.unlinkOutcomeToken(mode),
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+
+    /// The closed §5.2 outcome vocabulary of the unlink event.
+    static func unlinkOutcomeToken(_ mode: SystemContactUnlinkMode) -> String {
+        switch mode {
+        case .unlinkKeepingLocalAsIs: return "keeping_local_as_is"
+        case .unlinkKeepingDisplayedPhotoLocally: return "keeping_displayed_photo_locally"
+        case .unlinkAndClearAppLocalPhoto: return "clear_app_local_photo"
+        }
+    }
+
+    /// One reason-coded event for an unlink REFUSED by the never-lose
+    /// rule — the §5.2 `claim_refused` row's shape (component
+    /// `contacts_link`, outcome `refused`, a specific fixed error code)
+    /// for the class of failure that row does not cover: the promise the
+    /// mode booked could not be kept, so the link stayed. The codes are
+    /// fixed strings — `copy_failed` (the displayed-photo copy produced
+    /// no local file) and `save_failed` (the record write could not
+    /// persist the consequence) — and the metadata is empty, so no name,
+    /// number, identifier, filename or byte can reach an event field
+    /// (NFR-FCU-002; F7).
+    private func emitUnlinkRefusal(reasonCode: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "contacts_link",
+            eventType: "unlink_refused",
+            durationMs: nil,
+            outcome: "refused",
+            errorCode: reasonCode,
+            metadata: [:]
+        ))
+    }
+
+    // MARK: - Post-save system photo step (T-158; design-l2 §1.9, §2.6, §4.4, §4.5)
+
+    /// The verified-link write seam `syncSystemPhoto` delegates to (T-154;
+    /// the ONE place that can write a system record — this coordinator
+    /// never writes one itself). `lazy` for the same reason as
+    /// `linkService` ([BOOT-REVIEW P0-1] first use, not `init()`: building
+    /// it constructs a `CNContactStore`, and a launch whose contacts never
+    /// save a linked photo must never need an address-book handle).
+    private lazy var systemContactPhotoWriter: SystemContactPhotoWriting =
+        injectedSystemContactPhotoWriter ?? SystemContactPhotoWriter(observabilityBus: observabilityBus)
+
+    /// Test seam (T-158), the `injectedLinkService` pattern: the scripted
+    /// writer this coordinator hands out in place of the real actor. nil —
+    /// the app's own construction — builds the real one at first use. Set
+    /// once in `init`.
+    private var injectedSystemContactPhotoWriter: SystemContactPhotoWriting? = nil
+
+    /// The wizard's post-save system-photo step (design-l2 §1.9/§2.6;
+    /// L1 §10.2 steps 2-3) — a THIN delegation to the T-154 write seam.
+    /// The payload is the app-local processed JPEG the record already
+    /// holds (`loadData` — the bytes the system record receives are
+    /// byte-identical to the bytes the app stored), and the outcome
+    /// vocabulary is the writer's own.
+    ///
+    /// `nil` when no family contact carries `id` (the wizard's only caller
+    /// passes the id it just saved; nil means the record left the roster).
+    /// `.skippedNoLink` when the contact has no VERIFIED link — no
+    /// attempt, and the writer seam is never even built — plus
+    /// `.skippedNoAuthorization(access)` when the write access refuses the
+    /// attempt (no store call; the honest fallback label).
+    ///
+    /// Consequences (design-l2 §4.4/§4.5): `.written` — invalidate the
+    /// identifier's photo cache and bump `faceEpoch` (the resolved system
+    /// bytes may differ); `.recordGone`/`.identityMismatch` — refresh the
+    /// verified links (the stored claim may now degrade, FR-FCU-006). No
+    /// other outcome triggers anything.
+    @MainActor
+    func syncSystemPhoto(forContactID id: UUID,
+                         clearing: Bool) async -> SystemContactPhotoWriteOutcome? {
+        guard let contact = familyContacts.first(where: { $0.id == id }) else { return nil }
+        guard let link = verifiedLinks.links[id], !link.identifier.isEmpty else {
+            // No verified link → no attempt (today's unlinked UX exactly).
+            // Short-circuited BEFORE the writer seam is resolved, so a
+            // contact with no link never constructs a `CNContactStore` —
+            // the same first-use rule the lazy seam above exists for.
+            return .skippedNoLink
+        }
+        // Resolve the seam on the caller's (main) context, before any await.
+        let writer = systemContactPhotoWriter
+        let access = await writer.writeAccess()
+        if let preAttempt = SystemContactWriteDecision.preAttemptOutcome(hasVerifiedLink: true,
+                                                                         access: access) {
+            return preAttempt   // .skippedNoAuthorization(access) — no store call
+        }
+        let outcome: SystemContactPhotoWriteOutcome
+        if clearing {
+            outcome = await writer.clearPhoto(from: link)
+        } else if let jpeg = contactPhotoStore.loadData(named: contact.photoFilename) {
+            outcome = await writer.writePhoto(jpeg, to: link)
+        } else {
+            // The payload IS the app-local photo; without it there is
+            // nothing to write to the system (reachable when the record
+            // save kept an older/no file). No attempt, no false success —
+            // the honest kept-on-phone state.
+            outcome = .failed(.fetchFailed)
+        }
+        switch outcome {
+        case .written:
+            let service = linkService
+            await service.invalidate(identifier: link.identifier)
+            faceEpoch += 1
+        case .recordGone, .identityMismatch:
+            refreshVerifiedLinks()
+        case .skippedNoLink, .skippedNoAuthorization, .failed:
+            break   // no consequence (the writer's own event records the outcome)
+        }
+        return outcome
     }
 
     /// Adds a curated contact (spec §4.4.2). `photo`, when given, is
@@ -6455,9 +7210,23 @@ self.noteTalkContractChanged()
     /// the just-written file is deleted again, so a failed add never
     /// orphans a photo on disk.
     ///
-    /// `nickname` (family-wizard task, 2026-09-07): the optional
-    /// informal name from the wizard's last step; defaulted so the
-    /// onboarding call site (which never collects one) is unchanged.
+    /// `id` (T-156, design-l2 §1.9): the identity the caller already
+    /// knows — the wizard stages a draft id across its steps — defaulted
+    /// so every pre-existing call site compiles unchanged.
+    ///
+    /// `nicknames` (T-156, design-l2 §1.9/§3.2 — the REAL signature; the
+    /// interim single-value shim is gone): the informal names, passed
+    /// through `FamilyContact.normalizedNicknames` HERE, the one point
+    /// every caller passes through, so no untrimmed or whitespace-only
+    /// entry can reach the store and order is preserved exactly as the
+    /// family entered it.
+    ///
+    /// `link` (T-156, design-l2 §1.9): a non-nil claim is stored on the
+    /// new contact — nil means unlinked. A claim on an identifier
+    /// ANOTHER contact already stores is REFUSED before anything is
+    /// written (defense in depth per L1 §6.1 — the wizard's steering
+    /// prevents the path; the refusal is reason-coded rather than
+    /// silent).
     ///
     /// `address` (directions task, 2026-09-07) is the contact's optional
     /// home address for voice navigation — blank text is stored as nil.
@@ -6468,21 +7237,28 @@ self.noteTalkContractChanged()
     /// Defaulted so the onboarding call site (which has no toggle) is
     /// unchanged; an add written before the flag simply stores false.
     @discardableResult
-    func addFamilyContact(name: String, phone: String, relationship: String,
+    func addFamilyContact(id: UUID = UUID(),
+                          name: String, phone: String, relationship: String,
                           messengerHandle: String? = nil,
                           photo: UIImage? = nil,
-                          nickname: String? = nil,
+                          nicknames: [String] = [],
                           address: String? = nil,
                           email: String? = nil,
-                          isEmergencyContact: Bool = false) -> Bool {
+                          isEmergencyContact: Bool = false,
+                          link: SystemContactLink? = nil) -> Bool {
+        guard !Self.isDuplicateLinkClaim(link, in: familyContacts, excluding: nil) else {
+            emitDuplicateLinkClaimRefusal()
+            return false
+        }
         let filename = photo.flatMap { contactPhotoStore.save($0) }
-        let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
+        let contact = FamilyContact(id: id, name: name, phone: phone, relationship: relationship,
                                     messengerHandle: messengerHandle,
                                     photoFilename: filename,
-                                    nickname: nickname,
+                                    nicknames: FamilyContact.normalizedNicknames(nicknames),
                                     address: Self.normalizedOptionalText(address),
                                     email: FamilyContactValidation.normalizedEmail(email),
-                                    isEmergencyContact: isEmergencyContact)
+                                    isEmergencyContact: isEmergencyContact,
+                                    systemContact: link)
         guard familyContactStore.add(contact) else {
             if let filename { contactPhotoStore.delete(named: filename) }
             return false
@@ -6506,9 +7282,18 @@ self.noteTalkContractChanged()
     /// deleted after the new record is safely persisted, so a failed
     /// edit never loses the photo the contact already had.
     ///
-    /// `nickname` (family-wizard task, 2026-09-07): the wizard's
-    /// optional informal name; nil clears a stored one, defaulted so
-    /// pre-wizard callers compile unchanged.
+    /// `nicknames` (T-156, design-l2 §1.9 — the widened, REAL signature;
+    /// the interim single-value shim is gone): the contact's full list of
+    /// informal names, passed through `FamilyContact.normalizedNicknames`
+    /// before persisting. An empty list clears the stored nicknames; the
+    /// caller passes the complete intended list (the save REPLACES it).
+    ///
+    /// `link` (T-156, design-l2 §1.9): non-nil sets or REPLACES the
+    /// stored `SystemContactLink` claim; nil leaves the stored link
+    /// UNCHANGED — clearing a link is `setFamilyContactLink` only
+    /// (T-158), never this seam. A claim on an identifier ANOTHER
+    /// contact already stores is REFUSED before anything is written
+    /// (defense in depth, L1 §6.1).
     ///
     /// `isEmergencyContact` (family-emergency task, 2026-09-07): the
     /// editor's current "Emergency contact" toggle value — the save
@@ -6522,16 +7307,26 @@ self.noteTalkContractChanged()
     func updateFamilyContact(id: UUID, name: String, phone: String, relationship: String,
                              messengerHandle: String?,
                              photo: UIImage? = nil, removingPhoto: Bool = false,
-                             nickname: String? = nil,
+                             nicknames: [String] = [],
                              address: String? = nil,
                              email: String? = nil,
-                             isEmergencyContact: Bool = false) -> Bool {
+                             isEmergencyContact: Bool = false,
+                             link: SystemContactLink? = nil) -> Bool {
+        // The duplicate-claim guard runs FIRST: a refused write persists
+        // nothing, so no photo is saved and no orphan can be created.
+        guard !Self.isDuplicateLinkClaim(link, in: familyContacts, excluding: id) else {
+            emitDuplicateLinkClaimRefusal()
+            return false
+        }
         guard var contact = familyContacts.first(where: { $0.id == id }) else { return false }
         contact.name = name
         contact.phone = phone
         contact.relationship = relationship
         contact.messengerHandle = messengerHandle
-        contact.nickname = nickname
+        contact.nicknames = FamilyContact.normalizedNicknames(nicknames)
+        // `link` non-nil sets/replaces the claim; nil keeps the stored
+        // link UNCHANGED (unlink is `setFamilyContactLink` only, T-158).
+        if let link { contact.systemContact = link }
         contact.isEmergencyContact = isEmergencyContact
         // The editor passes the CURRENT text each save; blank clears the
         // stored address (nil), so "remove the address" is an edit, not a
@@ -7270,6 +8065,27 @@ self.noteTalkContractChanged()
         return DispatchQueue.main.sync { UIApplication.shared.canOpenURL(url) }
     }
 
+    /// The one WhatsApp probe (call-dialer-primary-secondary,
+    /// 2026-10-12; FR-CDP-005): the pure static over the shipped
+    /// main-thread `canOpenURL` hop above, probing only the compiled
+    /// `whatsapp://` literal. Computed at call time only — no caching,
+    /// no polling, no new plist entry, no new permission, no new egress
+    /// (NFR-CDP-002/004); a `false` for any reason (including a
+    /// platform refusal) is "not installed" and the chain hops on,
+    /// announced.
+    var whatsAppInstalledNow: Bool {
+        CallChannelChain.whatsAppInstalled(canOpen: canOpenURLOnMain)
+    }
+
+    /// A usable Messenger handle on file, by the shipped normalization
+    /// (call-dialer-primary-secondary, 2026-10-12; FR-CDP-004) — the
+    /// same `CallLinks.messengerHandle` normalization the shipped
+    /// confirmation gates derive through, so availability here can never
+    /// disagree with what the message opener will accept.
+    private func hasUsableMessengerHandle(_ raw: String?) -> Bool {
+        !CallLinks.messengerHandle(raw ?? "").isEmpty
+    }
+
     private func emitContactLeafLaunch(outcome: String) {
         observabilityBus.emit(ObservabilityEvent(
             component: "contact_leaf_launch",
@@ -7485,11 +8301,23 @@ self.noteTalkContractChanged()
         let sourceTranscript: String?
         let sourceCommand: InterpretedCommand?
         /// [INTENTLOG-CAPTURE] When the confirmation question was asked —
-        /// the flywheel's latency start (question → verdict). Reset when
-        /// a correction re-pends an amended action: the elder is being
-        /// asked a NEW question, so the new question's clock is the one
-        /// the answer belongs to.
-        let requestedAt: Date = Date()
+        /// the flywheel's latency start. `var` (L2-D3) so the hop's copy
+        /// can preserve the ORIGINAL question's clock.
+        ///
+        /// Still reset when a correction re-pends an amended action: a
+        /// construction that omits the field takes the default — the new
+        /// question's clock is the one the answer belongs to.
+        var requestedAt: Date = Date()
+        /// Channels the chain attempted and skipped, in attempt order —
+        /// empty when nothing fell back (FR-CDP-008). Drives the prompt
+        /// disclosure (FR-CDP-013); never mutated after construction.
+        var fellBackFrom: [CallApp] = []
+        /// The launch-fail candidates: the attempt order's
+        /// vocabulary-filtered suffix after the routed channel
+        /// (FR-CDP-015, L2-D1). Empty for touch-shaped constructions and
+        /// after an override (the amended action deliberately drops
+        /// provenance so a stale disclosure is never re-spoken).
+        var hopCandidates: [CallApp] = []
 
         /// This action's flywheel identity, for whichever verdict lands
         /// (confirmed / denied / corrected / timeout). The slots are the
@@ -7502,6 +8330,21 @@ self.noteTalkContractChanged()
                 slots: ["contact": contact.name, "method": method.rawValue],
                 confidence: sourceCommand?.confidence,
                 requestedAt: requestedAt)
+        }
+
+        /// The hop's re-entry copy (FR-CDP-015; L2-D3/D7): routed method
+        /// and remaining candidates replaced; the flywheel pair carries
+        /// over; `fellBackFrom` deliberately resets to `[]` (not passed
+        /// below) so the hop never re-speaks the disclosure while the
+        /// training context survives.
+        func replacing(method: CallMethod, hopCandidates: [CallApp]) -> PendingCallAction {
+            PendingCallAction(contact: contact,
+                              method: method,
+                              unsupportedRequestedApp: nil,
+                              sourceTranscript: sourceTranscript,
+                              sourceCommand: sourceCommand,
+                              requestedAt: requestedAt,
+                              hopCandidates: hopCandidates)
         }
     }
 
@@ -7544,6 +8387,13 @@ self.noteTalkContractChanged()
                                  sourceTranscript: String?, sourceCommand: InterpretedCommand?) -> String? {
         guard let contactQuery else { return nil }
         let contact: FamilyContact
+        // [NEAR-MISS] (2026-10-11) A rejected query gets ONE more chance:
+        // a single near-miss family contact (edit-distance band in
+        // `ContactResolver.nearMiss`) becomes the SAME spoken
+        // confirmation the exact path uses — the yes IS the call gate,
+        // and the prompt discloses both the heard name and the proposed
+        // one, so nothing is ever dialed on a silent substitution.
+        var isNearMiss = false
         switch contactResolver.resolve(contactQuery) {
         case .one(let match):
             contact = match
@@ -7551,28 +8401,37 @@ self.noteTalkContractChanged()
             let names = matches.prefix(2).map(\.name).joined(separator: ", ")
             return L10n.fmt("router.call.disambiguate", locale: activeLocale, names)
         case .none:
-            return nil
+            guard let near = contactResolver.nearMiss(contactQuery) else { return nil }
+            contact = near
+            isNearMiss = true
         }
         let resolved = methodResolver.resolve(contactId: contact.id,
                                               requestedApp: requestedApp,
                                               callType: callType)
-        // Messenger needs a per-contact handle (username/user-id), not a
-        // phone number — and most contacts won't have one yet. Caught
-        // HERE, before the confirmation question, so the elder is never
-        // asked to yes/no an action that can only fail (mirrors the
-        // .ambiguous path above: nothing pended, and the returned line
-        // tells them what actually unblocks it). The same normalization
-        // the opener uses decides "usable", so the two checks can't
-        // disagree.
-        if resolved.method == .messengerAudio || resolved.method == .messengerVideo,
-           CallLinks.messengerHandle(contact.messengerHandle ?? "").isEmpty {
-            return L10n.fmt("router.call.messengerNoHandle", locale: activeLocale, contact.name)
-        }
+        // ADR-CDP-05 step 3: the chain runs BEFORE the action is pended —
+        // the feasibility fallback replaces the shipped Messenger-no-
+        // handle refusal, so the elder is never asked to yes/no an action
+        // that can only fail.
+        let intentIsVideo = resolved.method == .facetimeVideo
+            || resolved.method == .messengerVideo
+        let preferred = CallChannelChain.channel(for: resolved.method)
+        let route = Self.resolvedCallChannel(
+            explicit: preferred,
+            defaultApp: defaultCallApp,
+            secondaryApp: secondaryCallApp,
+            messengerHandleAvailable: hasUsableMessengerHandle(contact.messengerHandle),
+            whatsAppInstalled: whatsAppInstalledNow)
         let action = PendingCallAction(contact: contact,
-                                       method: resolved.method,
+                                       method: CallChannelChain.method(for: route.channel,
+                                                                       isVideo: intentIsVideo),
                                        unsupportedRequestedApp: resolved.unsupportedRequestedApp,
                                        sourceTranscript: sourceTranscript,
-                                       sourceCommand: sourceCommand)
+                                       sourceCommand: sourceCommand,
+                                       fellBackFrom: route.fellBackFrom,
+                                       hopCandidates: CallChannelChain.hopCandidates(
+                                           preferred: preferred,
+                                           secondary: secondaryCallApp,
+                                           routed: route.channel))
         pendingCallAction = action
         // Dementia-loop guard (spec §7.2): same target called again
         // within the window → the confirmation prompt says so out loud.
@@ -7580,7 +8439,17 @@ self.noteTalkContractChanged()
         // [MTC] M-2 (ADR-MTC-03): pend through the ONE window opener —
         // a live dialogue frame is superseded before the challenge arms.
         openConfirmationWindow()
-        return confirmationPrompt(for: action, isRepeat: isRepeat)
+        let prompt = confirmationPrompt(for: action, isRepeat: isRepeat)
+        // [NEAR-MISS] Disclose the substitution in the SAME utterance as
+        // the confirmation: the elder hears the name that was heard, the
+        // name proposed, and the method — the yes that follows is a fully
+        // informed call gate, never a silent substitution.
+        if isNearMiss {
+            let prefix = L10n.fmt("router.call.didYouMeanPrefix", locale: activeLocale,
+                                  contactQuery, contact.name)
+            return prefix + " " + prompt
+        }
+        return prompt
     }
 
     /// Call-confirmation correction protocol (spec §7.2): the user
@@ -7622,7 +8491,13 @@ self.noteTalkContractChanged()
         return true
     }
 
-    private func confirmationPrompt(for action: PendingCallAction, isRepeat: Bool) -> String {
+    /// Composes the confirmation utterance (design-l2 §8): the parts, in
+    /// order, are [repeat notice][unsupported-app notice][fallback
+    /// disclosure][method sentence + confirm question]; the near-miss
+    /// prefix is prepended by the caller. Internal (not private) so the
+    /// wording pins can drive it with a constructed action against the
+    /// real catalog (design-l2 §28).
+    func confirmationPrompt(for action: PendingCallAction, isRepeat: Bool) -> String {
         let locale = activeLocale
         var parts: [String] = []
         if isRepeat {
@@ -7630,6 +8505,14 @@ self.noteTalkContractChanged()
         }
         if let unsupported = action.unsupportedRequestedApp {
             parts.append(L10n.fmt("router.call.appUnsupportedNotice", locale: locale, unsupported))
+        }
+        if let skipped = action.fellBackFrom.first {
+            parts.append(L10n.fmt("router.call.fallbackDisclosure", locale: locale,
+                                  CallChannelChain.label(skipped, locale: locale),
+                                  action.contact.name,
+                                  CallChannelChain.label(
+                                      CallChannelChain.channel(for: action.method),
+                                      locale: locale)))
         }
         let methodKey: String
         switch action.method {
@@ -7658,7 +8541,13 @@ self.noteTalkContractChanged()
         let locale = activeLocale
         switch action.method {
         case .phone:
-            callLinks.openPhone(action.contact.phone)
+            guard callLinks.openPhone(action.contact.phone) else {
+                // RES-8/RES-10: the floor is terminal but its open can
+                // still fail (an undialable number) — the shipped honest
+                // line, no hop exists from the floor.
+                announceNoUsableNumber(contact: action.contact, locale: locale)
+                return
+            }
             contactNumberUsed(action.contact.phone)
             setOutcome(icon: "phone.fill",
                        text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
@@ -7688,9 +8577,20 @@ self.noteTalkContractChanged()
                 setOutcome(icon: "exclamationmark.triangle.fill",
                            text: L10n.str("router.call.facetimeUnavailable", locale: locale))
                 speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+                // FR-CDP-015 (L2 §10.1): the shipped honest line just
+                // spoke; a remaining candidate hops — announced by the
+                // shared step, then re-entered through THIS executor.
+                hopFromCallAction(after: .faceTime, action: action,
+                                  isVideo: isVideo, locale: locale)
             }
         case .whatsappChat:
-            callLinks.openWhatsAppChat(action.contact.phone)
+            guard callLinks.openWhatsAppChat(action.contact.phone) else {
+                // M-1 disposition (i) (T-144, design-l2 §10.1): false means
+                // no dialable digits remain — the shipped honest line, no
+                // success, no learning, no activity, no hop (RES-10).
+                announceNoUsableNumber(contact: action.contact, locale: locale)
+                return
+            }
             setOutcome(icon: "message.fill",
                        text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, action.contact.name))
@@ -7735,8 +8635,135 @@ self.noteTalkContractChanged()
                 setOutcome(icon: "exclamationmark.triangle.fill",
                            text: L10n.fmt("router.call.messengerNoHandle", locale: locale, action.contact.name))
                 speak(text: L10n.fmt("router.call.messengerNoHandle", locale: locale, action.contact.name))
+                // Same rule as the FaceTime arm (L2 §10.1): the honest
+                // line has spoken, then a remaining candidate hops.
+                hopFromCallAction(after: .messenger, action: action,
+                                  isVideo: action.method == .messengerVideo, locale: locale)
             }
         }
+    }
+
+    // MARK: - Launch-fail hop (call-dialer-primary-secondary, 2026-10-12)
+    //
+    // FR-CDP-015/016, design-l2 §10: a failed open walks the remaining
+    // candidates at most once each, announcing the swap through the ONE
+    // shipped catalogue key before attempting the next channel. Failure
+    // semantics stay exactly as shipped: a failed open records no
+    // learning, no activity and no history — the hop only decides, says
+    // and re-attempts. Synchronous throughout (NFR-CDP-004): no await,
+    // no timer, no queue, no detached task.
+
+    /// The launch-fail hop input a per-channel opener may carry
+    /// (FR-CDP-015): the remaining candidates at THIS attempt, plus the
+    /// contact's resolved Messenger handle (the feasibility filter).
+    /// `nil` means "no hop" — the shipped behaviour, byte-identical.
+    ///
+    /// `phone` is the W6-review N-4 carry (adjudicated into T-151/T-152):
+    /// the messenger opener has no number of its own, so a hopped
+    /// `.phone` leg would otherwise land on the shipped no-number line
+    /// although the surface that hopped HAS a number. `var` with a
+    /// default (the L2-D3 lesson): the synthesized memberwise
+    /// initializer keeps a DEFAULTED parameter, so every shipped
+    /// `LaunchHop(candidates:handle:)` call site compiles unchanged.
+    struct LaunchHop: Equatable {
+        let candidates: [CallApp]
+        let handle: String?
+        var phone: String? = nil
+    }
+
+    /// The shared hop decision + announcement (the ONLY
+    /// `call.announce.launchFailedFallback` site, FR-CDP-015). Returns
+    /// the next channel and the remaining candidates (the input list
+    /// minus everything up to and including `next`), or nil at
+    /// exhaustion — the caller's shipped failure line already spoke.
+    ///
+    /// Internal (not private) so this unit's pins can drive the decision
+    /// step against the real catalogue — the same §28 relaxation
+    /// `confirmationPrompt` carries (T-148); behaviour and signature are
+    /// otherwise the design-l2 §10.2 listing verbatim.
+    func launchFailHopStep(after failed: CallApp, candidates: [CallApp],
+                           handle: String?, name: String,
+                           locale: Locale) -> (next: CallApp, remaining: [CallApp])? {
+        guard let next = CallChannelChain.nextLaunchFailCandidate(
+                after: failed,
+                attemptOrder: candidates,
+                messengerHandleAvailable: hasUsableMessengerHandle(handle)) else {
+            return nil
+        }
+        noteLaunchFailHop(after: failed, next: next)
+        speak(text: L10n.fmt("call.announce.launchFailedFallback", locale: locale,
+                             CallChannelChain.label(failed, locale: locale),
+                             name,
+                             CallChannelChain.label(next, locale: locale)))
+        let remaining = Array(candidates.drop(while: { $0 != next }).dropFirst())
+        return (next, remaining)
+    }
+
+    /// The TAP-path hop (FR-CDP-015, ADR-08; L1 C5 signature, verbatim):
+    /// on a failed open, speak the hop announcement and attempt the next
+    /// channel through the shipped per-channel opener for its type.
+    /// Returns true when a hop was attempted. The candidate list is
+    /// consumed one item per hop and the recursion is synchronous, so at
+    /// most one hop is in flight per tap and no channel is attempted
+    /// twice.
+    @discardableResult
+    private func performLaunchFailHop(after failed: CallApp,
+                                      candidates: [CallApp],
+                                      name: String, phone: String, handle: String?,
+                                      isVideo: Bool, locale: Locale) -> Bool {
+        guard let step = launchFailHopStep(after: failed, candidates: candidates,
+                                           handle: handle, name: name,
+                                           locale: locale) else { return false }
+        switch step.next {
+        case .phone:
+            performSystemContactCall(name: name, phone: phone)   // floor: its own honest line
+        case .faceTime:
+            // W6-review N-1 carry (T-151/T-152): the failed FaceTime
+            // attempt threads its remaining candidates on — the same form
+            // the `.whatsApp` and `.messenger` legs below already carry,
+            // so a hop never abandons its suffix.
+            performFaceTimeCall(name: name, phone: phone, video: isVideo,
+                                hop: LaunchHop(candidates: step.remaining, handle: handle))
+        case .whatsApp:
+            performSystemContactWhatsApp(name: name, phone: phone,
+                                         hop: LaunchHop(candidates: step.remaining, handle: handle))
+        case .messenger:
+            guard let handle, !handle.isEmpty else { return true }  // filtered above; defensive
+            performSystemContactMessenger(name: name, handle: handle,
+                                          hop: LaunchHop(candidates: step.remaining, handle: handle))
+        }
+        return true
+    }
+
+    /// The hop's classification event (L2-D12): category strings only, no
+    /// names, no numbers, `metadata: [:]`. The failed attempt's own
+    /// event (where the context emits one) already recorded the attempt.
+    private func noteLaunchFailHop(after failed: CallApp, next: CallApp) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "call_launch_fallback",
+            eventType: "hop",
+            durationMs: nil,
+            outcome: "\(failed.rawValue):\(next.rawValue)",
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+
+    /// FR-CDP-015 for the voice path (ADR-08): decide + announce through
+    /// `launchFailHopStep`, then re-enter `performCallAction` with the
+    /// copied action — the same executor a fresh confirmation reaches,
+    /// and the routed (hopped) method is what the success branch records
+    /// and teaches (L2-D7).
+    private func hopFromCallAction(after failed: CallApp, action: PendingCallAction,
+                                   isVideo: Bool, locale: Locale) {
+        guard let step = launchFailHopStep(after: failed,
+                                           candidates: action.hopCandidates,
+                                           handle: action.contact.messengerHandle,
+                                           name: action.contact.name,
+                                           locale: locale) else { return }
+        performCallAction(action.replacing(
+            method: CallChannelChain.method(for: step.next, isVideo: isVideo),
+            hopCandidates: step.remaining))
     }
 
     /// Post-execution learning (spec §4.2 + §6.2): a CONFIRMED call is
@@ -7755,31 +8782,63 @@ self.noteTalkContractChanged()
     }
 
     /// Tap-originated call from a ContactTile video/audio button
-    /// (contact-call-buttons task, 2026-09-06). The tap IS the
-    /// confirmation (redesign precedent: the user's own hand on their own
-    /// unlocked phone — the same trust model as any contacts app), so
-    /// unlike the voice flow there is no PendingCallAction: resolve the
-    /// contact's preferred app (contact preference → global default,
-    /// baked into the model) and open it immediately, announcing aloud
+    /// (contact-call-buttons task, 2026-09-06; chain-routed by T-152).
+    /// The tap IS the confirmation (redesign precedent: the user's own
+    /// hand on their own unlocked phone — the same trust model as any
+    /// contacts app), so unlike the voice flow there is no
+    /// PendingCallAction: the contact's preferred app (contact
+    /// preference → global default, baked into the model) goes through
+    /// the resolution chain with THIS button's vocabulary — a video tile
+    /// never resolves to the GSM dialer, an audio tile never to FaceTime
+    /// (the seam substitutes what the vocabulary forbids) — the routed
+    /// channel is announced at resolution when the chain skipped one
+    /// (FR-CDP-016; ADR-CDP-07: BEFORE the open, since a successful open
+    /// may background the app), and the branch opens it, announcing aloud
     /// which surface actually appeared — the same dual-channel honesty
-    /// `performCallAction` holds to. No method-history learning here:
-    /// the contact's stored preference IS this path's source of truth,
-    /// and `CallMethod` has no messenger case to record.
+    /// `performCallAction` holds to. A failed open hops through the
+    /// remaining candidates; the phone floor stays terminal (RES-10) and
+    /// the WhatsApp lane's terminal/recovery arms never hop. No
+    /// method-history learning here: the contact's stored preference IS
+    /// this path's source of truth, and `CallMethod` has no messenger
+    /// case to record.
     func performContactCall(_ contact: FamilyContact, kind: ContactCallKind) {
         let locale = activeLocale
-        let app = kind == .video ? contact.resolvedVideoApp : contact.resolvedAudioApp
+        let preferred = kind == .video ? contact.resolvedVideoApp : contact.resolvedAudioApp
+        let vocabulary: CallChannelVocabulary = kind == .video ? .video : .audio
+        let route = Self.resolvedCallChannel(
+            explicit: preferred,
+            defaultApp: defaultCallApp,
+            secondaryApp: secondaryCallApp,
+            messengerHandleAvailable: hasUsableMessengerHandle(contact.messengerHandle),
+            whatsAppInstalled: whatsAppInstalledNow,
+            vocabulary: vocabulary)
         observabilityBus.emit(ObservabilityEvent(
             component: "contact_call_buttons",
             eventType: "tap",
             durationMs: nil,
-            outcome: "\(kind == .video ? "video" : "audio"):\(app.rawValue)",
+            outcome: "\(kind == .video ? "video" : "audio"):\(route.channel.rawValue):"
+                + (route.fellBackFrom.isEmpty ? "direct" : "fellBack"),
             errorCode: nil,
             metadata: [:]  // no contact identifiers — C9 policy
         ))
-        switch app {
+        if let skipped = route.fellBackFrom.first {
+            // ADR-CDP-07: at resolution, BEFORE the open. Nothing is
+            // spoken when nothing fell back (FR-CDP-016 scenario 3).
+            speak(text: L10n.fmt("call.announce.fallbackRouted", locale: locale,
+                                 CallChannelChain.label(skipped, locale: locale),
+                                 contact.name,
+                                 CallChannelChain.label(route.channel, locale: locale)))
+        }
+        let candidates = CallChannelChain.hopCandidates(preferred: preferred,
+                                                        secondary: secondaryCallApp,
+                                                        routed: route.channel,
+                                                        vocabulary: vocabulary)
+        switch route.channel {
         case .faceTime:
-            // Video-only in the button vocabulary; `resolvedVideoApp`
-            // already guarantees an audio tap never lands here.
+            // Video-only in the button vocabulary: `resolvedVideoApp` is
+            // video-legal by construction and the seam substitutes any
+            // forbidden route with the vocabulary terminal, so an audio
+            // tap can never reach this branch.
             switch callLinks.openFaceTime(handle: contact.phone, video: true) {
             case .opened:
                 setOutcome(icon: "video.fill",
@@ -7792,6 +8851,13 @@ self.noteTalkContractChanged()
                 setOutcome(icon: "exclamationmark.triangle.fill",
                            text: L10n.str("router.call.facetimeUnavailable", locale: locale))
                 speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+                // Failed open (L2 §10.1): the shipped line above stands;
+                // the hop then attempts the remaining candidates through
+                // the same shipped openers.
+                performLaunchFailHop(after: .faceTime, candidates: candidates,
+                                     name: contact.name, phone: contact.phone,
+                                     handle: contact.messengerHandle,
+                                     isVideo: kind == .video, locale: locale)
             }
         case .phone:
             guard callLinks.openPhone(contact.phone) else {
@@ -7822,8 +8888,19 @@ self.noteTalkContractChanged()
                                messengerHandle: contact.messengerHandle)
             case .invalidHandle:
                 announceNoUsableNumber(contact: contact, locale: locale)
+                // Failed open (L2 §10.1): the shipped line above stands;
+                // the hop then attempts the remaining candidates.
+                performLaunchFailHop(after: .messenger, candidates: candidates,
+                                     name: contact.name, phone: contact.phone,
+                                     handle: contact.messengerHandle,
+                                     isVideo: kind == .video, locale: locale)
             }
         case .whatsApp:
+            // The WhatsApp lane never hops (L2 §10.1): `invalidPhone` is
+            // a data failure and `needsNativeCompose`/`copiedNumber` are
+            // recoveries — every arm below is the shipped terminal or
+            // recovery, byte-identical, and `candidates` is deliberately
+            // not consulted here.
             switch callLinks.openWhatsAppCallChat(contact.phone) {
             case .openedChat:
                 setOutcome(icon: "message.fill",
@@ -7857,7 +8934,15 @@ self.noteTalkContractChanged()
     /// really fail, but if it somehow does, say so aloud instead of
     /// going silent. The number enters the recency ranking only after
     /// the dial actually opened.
-    func performSystemContactCall(name: String, phone: String) {
+    /// The `hop` parameter is accepted for call-site uniformity with the
+    /// three search-shaped openers but deliberately never consulted: the
+    /// GSM floor is TERMINAL (design-l2 §10.1, "the floor is the last
+    /// resort") — an undialable number speaks the shipped honest line
+    /// below and nothing further is attempted. (The task spec lists this
+    /// opener among the four that gain the parameter; the design's three
+    /// are the hopping ones — see the T-149 notes.)
+    func performSystemContactCall(name: String, phone: String,
+                                  hop: LaunchHop? = nil) {
         guard let url = PhoneDialer.url(for: phone) else {
             setOutcome(icon: "exclamationmark.triangle.fill",
                        text: L10n.fmt("call.announce.noPhoneNumber", locale: activeLocale, name))
@@ -7878,7 +8963,12 @@ self.noteTalkContractChanged()
     /// opened before, and tapping it opens FaceTime again — the same
     /// genuine-open path performContactCall's faceTime case uses, with
     /// the same "record only a real open" rule.
-    func performFaceTimeCall(name: String, phone: String, video: Bool) {
+    /// `hop` (FR-CDP-015, design-l2 §10.1): `.unavailable`/`.invalidHandle`
+    /// is a failed open — after the shipped honest line the remaining
+    /// candidates are attempted through `performLaunchFailHop`. `nil` (the
+    /// non-chain callers) preserves the shipped behaviour byte-identically.
+    func performFaceTimeCall(name: String, phone: String, video: Bool,
+                             hop: LaunchHop? = nil) {
         let locale = activeLocale
         switch callLinks.openFaceTime(handle: phone, video: video) {
         case .opened:
@@ -7894,6 +8984,11 @@ self.noteTalkContractChanged()
             setOutcome(icon: "exclamationmark.triangle.fill",
                        text: L10n.str("router.call.facetimeUnavailable", locale: locale))
             speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+            // Failed open (L2 §10.1 row 11): hop, when the caller carried
+            // one. Nothing is recorded from the failure itself.
+            performLaunchFailHop(after: .faceTime, candidates: hop?.candidates ?? [],
+                                 name: name, phone: phone, handle: hop?.handle,
+                                 isVideo: video, locale: locale)
         }
     }
 
@@ -7905,7 +9000,13 @@ self.noteTalkContractChanged()
     /// native Messages sheet, else the number on the pasteboard — each
     /// swap disclosed out loud. No recency entry: opening a chat is not
     /// a call (consistent with the family whatsApp button).
-    func performSystemContactWhatsApp(name: String, phone: String) {
+    /// `hop` is accepted for call-site uniformity with its sibling
+    /// openers but never consulted: every outcome of this opener is
+    /// TERMINAL (`invalidPhone` — nothing dialable anywhere) or a
+    /// RECOVERY (`needsNativeCompose`, `copiedNumber`) per design-l2
+    /// §10.1, and only a failure-with-hop row may hop (RES-10).
+    func performSystemContactWhatsApp(name: String, phone: String,
+                                      hop: LaunchHop? = nil) {
         let locale = activeLocale
         switch callLinks.openWhatsAppCallChat(phone) {
         case .openedChat:
@@ -7987,7 +9088,17 @@ self.noteTalkContractChanged()
     /// thread opens in-app when Messenger is installed, as the m.me web
     /// chat in Safari when it is not, and a missing handle opens nothing
     /// and says so. No recency entry.
-    func performSystemContactMessenger(name: String, handle: String) {
+    /// `hop` (FR-CDP-015, design-l2 §10.1): `.invalidHandle` is a failed
+    /// open — after the shipped honest line the remaining candidates are
+    /// attempted. This opener carries no number of its own (design-l2
+    /// §14), so a hopped `.phone` leg dials `hop.phone` when the hopping
+    /// surface carried one (W6-review N-4 carry, T-151/T-152) and the
+    /// shipped `call.announce.noPhoneNumber` line when it did not — the
+    /// hop can no longer report "no number" for a row that has one.
+    /// `isVideo: false` matches the search surfaces' audio-shaped
+    /// FaceTime (L2 §9.1).
+    func performSystemContactMessenger(name: String, handle: String,
+                                       hop: LaunchHop? = nil) {
         let locale = activeLocale
         switch callLinks.openMessengerThread(handle: handle) {
         case .openedThread:
@@ -8016,6 +9127,15 @@ self.noteTalkContractChanged()
                        text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
             speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
             noteSearchChannelTap(outcome: "messenger:invalidHandle")
+            // Failed open (L2 §10.1 row 14): the shipped line and the
+            // shipped tap event above stand; the hop then attempts the
+            // remaining candidates through the same shipped openers. The
+            // hopped floor leg dials the hop's own number (N-4 carry) —
+            // `?? ""` keeps the shipped no-number line for hop-less
+            // callers, byte-identical to before.
+            performLaunchFailHop(after: .messenger, candidates: hop?.candidates ?? [],
+                                 name: name, phone: hop?.phone ?? "", handle: hop?.handle,
+                                 isVideo: false, locale: locale)
         }
     }
 
@@ -8233,16 +9353,24 @@ self.noteTalkContractChanged()
             $0.channel == .unanswered && !$0.phone.isEmpty
         }
         let family = familyContacts
+        let snapshot = verifiedLinks
         var names: [UUID: String] = [:]
         for row in rows {
-            if let contact = MissedCallContactResolver.familyMatch(phone: row.phone, in: family) {
+            // The LINK-AWARE family correlation (T-158, design-l2 §8.2):
+            // the SAME lookup the dial-back identity uses, so the list and
+            // the tap can never disagree about who a number reaches
+            // (FR-FCU-004 — one person on every surface).
+            if let contact = familyContact(matchingPhone: row.phone) {
                 names[row.id] = contact.name
             }
         }
         missedCallDisplayNames = names
         let needNative = rows.filter { names[$0.id] == nil }
         guard !needNative.isEmpty else { return }
+        // The verified snapshot travels BY VALUE with the captured roster
+        // (this method is main-confined; the native pass runs detached).
         refreshNativeMissedCallNames(needNative, family: family,
+                                     snapshot: snapshot,
                                      promptIfNeeded: promptIfNeeded)
     }
 
@@ -8250,8 +9378,8 @@ self.noteTalkContractChanged()
     /// second source, after the family contacts (the task's order). The
     /// CNContact search runs off-main (`AddressBookDirectory` enumerates
     /// the whole book) and its result publishes back on main. `family`
-    /// is captured BY VALUE here — the published array stays main-queue
-    /// confined and the task reads its own snapshot.
+    /// and `snapshot` are captured BY VALUE here — the published state
+    /// stays main-queue confined and the task reads its own snapshot.
     ///
     /// POINT-OF-USE PERMISSION: Contacts access is asked for HERE — when
     /// a numbered missed-call row needs a name the family list cannot
@@ -8263,16 +9391,24 @@ self.noteTalkContractChanged()
     /// and the app never asks again.
     private func refreshNativeMissedCallNames(_ rows: [AppActivityEntry],
                                               family: [FamilyContact],
+                                              snapshot: VerifiedLinksSnapshot,
                                               promptIfNeeded: Bool) {
         let phoneRows = rows.map { (id: $0.id, phone: $0.phone) }
         Task.detached(priority: .utility) { [weak self] in
             let directory = AddressBookDirectory()
             var access = AddressBookDirectory.access()
             if access == .notDetermined, promptIfNeeded {
-                let granted = await directory.requestAccess()
-                access = granted ? .allowed : .denied
+                _ = await directory.requestAccess()
+                // Post-prompt RE-READ (design-l2 §3.5, review-iter-2 R4):
+                // the sheet may grant full authorization OR a limited
+                // selection — the status is the truth, and collapsing a
+                // limited grant into `.allowed` would claim access that
+                // was never given (and vice versa).
+                access = AddressBookDirectory.access()
             }
-            guard access == .allowed,
+            // `.limited` is READABLE: the granted set enumerates. Only a
+            // genuinely unreadable state skips the pass.
+            guard access.allowsReading,
                   let entries = try? directory.allEntries() else { return }
             var names: [UUID: String] = [:]
             for row in phoneRows {
@@ -8280,7 +9416,8 @@ self.noteTalkContractChanged()
                     phone: row.phone,
                     family: family,
                     native: entries,
-                    access: .allowed)
+                    access: access,
+                    snapshot: snapshot)
                 if case .name(let name) = resolution {
                     names[row.id] = name
                 }
@@ -8301,29 +9438,52 @@ self.noteTalkContractChanged()
     /// number). Also the dial-back's identity source: a matched contact
     /// makes the tap resolve EXACTLY like that contact's audio call
     /// button (`resolvedMissedCallChannel`).
+    ///
+    /// LINK-AWARE (T-158, design-l2 §1.8/§8.2; FR-FCU-004): after the
+    /// contact's OWN phone, the VERIFIED linked records' numbers are
+    /// consulted (`linkedFamilyMatch`), so a call from the number of the
+    /// system record a family contact is linked to resolves to that
+    /// FAMILY person. The published snapshot is the only link source — an
+    /// unverified or stale claim is absent from it and falls through to
+    /// today's behaviour exactly (FR-FCU-006: never the wrong person).
     func familyContact(matchingPhone phone: String) -> FamilyContact? {
         MissedCallContactResolver.familyMatch(phone: phone, in: familyContacts)
+            ?? MissedCallContactResolver.linkedFamilyMatch(phone: phone,
+                                                          in: familyContacts,
+                                                          snapshot: verifiedLinks)
     }
 
-    /// The channel a missed-call row's dial-back opens (missed-calls fix,
-    /// 2026-09-18) — resolved the SAME way a family contact's AUDIO call
+    /// The route a missed-call row's dial-back opens (missed-calls fix,
+    /// 2026-09-18; chain seam: call-dialer-primary-secondary,
+    /// 2026-10-12) — resolved the SAME way a family contact's AUDIO call
     /// button resolves (`FamilyContact.resolvedAudioApp`), because a
     /// dial-back IS an audio call: the matched family contact's own
     /// preference wins (that contact's `preferredCallApp`, FaceTime
     /// excluded — it is video-only in the button vocabulary), else the
-    /// global `defaultCallApp` — with the one hard rule from
-    /// `resolvedCallChannel` on top: never resolve to a channel the row
-    /// cannot open (Messenger needs an on-file handle, else `.phone`).
-    /// The GSM `tel:` path is always in the chain, so dialing always
-    /// works. Pure static so the whole matrix is unit-testable.
+    /// global `defaultCallApp`, through the shared chain seam with the
+    /// audio vocabulary — a FaceTime preference still routes to the
+    /// phone floor, exactly as today, and a Messenger preference
+    /// without an on-file handle falls to the secondary or the floor
+    /// rather than dead-ending. The GSM `tel:` path is always in the
+    /// chain, so dialing always works. The `Result` carries the routed
+    /// channel plus the attempt-order provenance the dial-back
+    /// announcement and the launch-fail hop compose from. Pure static so
+    /// the whole matrix is unit-testable.
     static func resolvedMissedCallChannel(familyContact: FamilyContact?,
                                           defaultApp: CallApp,
-                                          messengerHandleAvailable: Bool) -> CallApp {
-        let resolved = familyContact?.resolvedAudioApp ?? defaultApp
-        guard resolved.supportsAudio else { return .phone }
-        return resolvedCallChannel(explicit: resolved,
-                                   defaultApp: defaultApp,
-                                   messengerHandleAvailable: messengerHandleAvailable)
+                                          secondaryApp: CallApp,
+                                          messengerHandleAvailable: Bool,
+                                          whatsAppInstalled: Bool)
+                                          -> CallChannelChain.Result {
+        // ADR-CDP-03 step 4: the shipped `supportsAudio` guard's own
+        // semantics ARE this seam's vocabulary (`.audio`): a FaceTime
+        // preference on an audio path still routes to `.phone`, exactly
+        // as today.
+        resolveChannel(preferred: familyContact?.resolvedAudioApp ?? defaultApp,
+                       secondaryApp: secondaryApp,
+                       messengerHandleAvailable: messengerHandleAvailable,
+                       whatsAppInstalled: whatsAppInstalled,
+                       vocabulary: .audio)
     }
 
     /// What a missed-call row's tap resolves to (missed-calls fix,
@@ -8352,70 +9512,143 @@ self.noteTalkContractChanged()
         case messenger(name: String, phone: String, handle: String)
     }
 
-    /// The pure dial-back decision (missed-calls fix, 2026-09-18): the
-    /// channel `resolvedMissedCallChannel` picks, mapped onto the row's
-    /// action. A numberless row keeps the honest Phone-app open; a number
-    /// that normalizes to nothing speaks the honest dead-row line instead
-    /// of a silent dead tap.
+    /// The dial-back decision plus its routing provenance (FR-CDP-011):
+    /// the action to dispatch and everything the announcement and the
+    /// launch-fail hop need, so `dialBackMissedCall` never re-derives a
+    /// routing fact (single source — the pure seam).
+    struct MissedCallDialRoute: Equatable {
+        let action: MissedCallDialAction
+        /// The routed channel — nil for the two numberless actions,
+        /// which return before the chain (nothing to route).
+        let channel: CallApp?
+        /// Skipped channels in attempt order (empty = no fallback).
+        let fellBackFrom: [CallApp]
+        /// The launch-fail candidates for `channel` ([] when nil).
+        let hopCandidates: [CallApp]
+    }
+
+    /// The pure dial-back decision (missed-calls fix, 2026-09-18; route
+    /// value: call-dialer-primary-secondary, 2026-10-12) — the shipped
+    /// `MissedCallDialAction` decision extended into the
+    /// `MissedCallDialRoute` (design-l2.md:404-438, L2-D9): the routed
+    /// CHANNEL, the attempt-order PROVENANCE the announcement composes
+    /// from, and the launch-fail CANDIDATES the hop consumes — one
+    /// snapshot, so the dispatch re-derives no routing fact (design-
+    /// l2.md:753-786). The two shipped guards are preserved verbatim: a
+    /// numberless row keeps the honest Phone-app open; a number that
+    /// normalizes to nothing speaks the honest dead-row line instead of
+    /// a silent dead tap — both return BEFORE the chain, so their route
+    /// carries `channel: nil`, `fellBackFrom: []` and `hopCandidates: []`.
     static func missedCallDialAction(phone: String,
                                      familyContact: FamilyContact?,
                                      defaultApp: CallApp,
+                                     secondaryApp: CallApp,
                                      messengerHandle: String?,
-                                     name: String) -> MissedCallDialAction {
-        guard !phone.isEmpty else { return .openPhoneApp }
+                                     whatsAppInstalled: Bool,
+                                     name: String) -> MissedCallDialRoute {
+        guard !phone.isEmpty else {
+            return MissedCallDialRoute(action: .openPhoneApp, channel: nil,
+                                       fellBackFrom: [], hopCandidates: [])
+        }
         guard !ContactNumberKey.normalized(phone).isEmpty else {
-            return .unusableNumber(name: name)
+            return MissedCallDialRoute(action: .unusableNumber(name: name), channel: nil,
+                                       fellBackFrom: [], hopCandidates: [])
         }
-        let channel = resolvedMissedCallChannel(
-            familyContact: familyContact,
-            defaultApp: defaultApp,
-            messengerHandleAvailable: messengerHandle?.isEmpty == false)
-        switch channel {
-        case .phone: return .call(name: name, phone: phone)
-        case .faceTime: return .faceTime(name: name, phone: phone)
-        case .whatsApp: return .whatsApp(name: name, phone: phone)
-        case .messenger: return .messenger(name: name, phone: phone,
-                                           handle: messengerHandle ?? "")
+        // L2-D9 (design-l2.md:404-438) + W3-review N-2: the messenger
+        // availability input stays the RAW shipped derivation
+        // (`messengerHandle?.isEmpty == false`), verbatim — NOT
+        // `hasUsableMessengerHandle`. A handle non-empty raw but
+        // normalising to empty (whitespace-only, "@"-only) is unusable
+        // for the row/voice predicate yet usable here; the divergence is
+        // shipped behaviour, design-sanctioned ("derived exactly as
+        // shipped") and pinned by `MissedCallDialBackTests` — do not
+        // "fix" it into the normalised predicate.
+        let preferred = familyContact?.resolvedAudioApp ?? defaultApp
+        let route = resolvedMissedCallChannel(
+            familyContact: familyContact, defaultApp: defaultApp,
+            secondaryApp: secondaryApp,
+            messengerHandleAvailable: messengerHandle?.isEmpty == false,
+            whatsAppInstalled: whatsAppInstalled)
+        let action: MissedCallDialAction
+        switch route.channel {
+        case .phone: action = .call(name: name, phone: phone)
+        case .faceTime: action = .faceTime(name: name, phone: phone)
+        case .whatsApp: action = .whatsApp(name: name, phone: phone)
+        case .messenger: action = .messenger(name: name, phone: phone,
+                                             handle: messengerHandle ?? "")
         }
+        return MissedCallDialRoute(
+            action: action, channel: route.channel, fellBackFrom: route.fellBackFrom,
+            hopCandidates: CallChannelChain.hopCandidates(
+                preferred: preferred, secondary: secondaryApp,
+                routed: route.channel, vocabulary: .audio))
     }
 
     /// Tap-to-dial-back of a missed-call row (missed-calls fix,
-    /// 2026-09-18) — the row's action in HistoryView and CallView's
-    /// recent-activity section. A row WITH a number dials it back through
-    /// the same deep-link resolution a family contact's audio call button
-    /// uses (matched family contact's preference, else the global
-    /// default, Messenger gated on a handle, `tel:` always in the chain —
-    /// `performSystemContactCall` opens `tel://` unconditionally), so the
-    /// tap always opens the resolved app or the dialer. A numberless row
-    /// (an old anonymous entry, or a caller iOS masked) keeps the honest
-    /// Phone-app open — there is no number to dial and the app never
-    /// fakes one. Main queue (every dispatch below is a coordinator
-    /// method confined to it).
+    /// 2026-09-18; chain routing + announcement: call-dialer-primary-
+    /// secondary, 2026-10-12) — the row's action in HistoryView and
+    /// CallView's recent-activity section. A row WITH a number dials it
+    /// back through the same deep-link resolution a family contact's
+    /// audio call button uses (matched family contact's preference, else
+    /// the global default, then the secondary, Messenger gated on a
+    /// handle, `tel:` always in the chain — `performSystemContactCall`
+    /// opens `tel://` unconditionally), so the tap always opens the
+    /// resolved app or the dialer. The routed channel is ANNOUNCED at
+    /// resolution, before the dispatch, only when the chain skipped a
+    /// channel (ADR-CDP-07; design-l2.md:753-786): a successful open may
+    /// background the app before post-open speech could be heard. The
+    /// route's hop candidates feed the LaunchHop the hopping openers
+    /// consume on a failed launch (FR-CDP-015); the GSM floor never hops
+    /// (RES-10). A numberless row (an old anonymous entry, or a caller
+    /// iOS masked) keeps the honest Phone-app open — there is no number
+    /// to dial and the app never fakes one. Main queue (every dispatch
+    /// below is a coordinator method confined to it).
     func dialBackMissedCall(_ entry: AppActivityEntry) {
         let identity = ActivityRowText.unansweredIdentity(
             for: entry,
             correlatedName: missedCallDisplayNames[entry.id]) ?? ""
         let family = familyContact(matchingPhone: entry.phone)
-        let action = Self.missedCallDialAction(
+        let route = Self.missedCallDialAction(
             phone: entry.phone,
             familyContact: family,
             defaultApp: defaultCallApp,
+            secondaryApp: secondaryCallApp,
             messengerHandle: family?.messengerHandle,
+            whatsAppInstalled: whatsAppInstalledNow,
             name: identity)
-        switch action {
+        if let skipped = route.fellBackFrom.first, let channel = route.channel {
+            // ADR-CDP-07: at resolution, BEFORE the dispatch — the
+            // spoken line names the skipped channel and the one that
+            // actually opens. Nothing is spoken when nothing fell back
+            // (FR-CDP-016 scenario 3).
+            speak(text: L10n.fmt("call.announce.fallbackRouted", locale: activeLocale,
+                                 CallChannelChain.label(skipped, locale: activeLocale),
+                                 identity,
+                                 CallChannelChain.label(channel, locale: activeLocale)))
+        }
+        // W6-review N-4 carry (T-151/T-152): the hop carries the row's
+        // own number — the additive defaulted `phone` field landed at
+        // `LaunchHop` (AppCoordinator.swift:7992) so a hopped `.phone`
+        // leg dials it instead of speaking the shipped no-number line;
+        // the design listing at design-l2.md:772 shows the two-label
+        // form.
+        let hop = LaunchHop(candidates: route.hopCandidates,
+                            handle: family?.messengerHandle,
+                            phone: entry.phone)
+        switch route.action {
         case .openPhoneApp:
             PhoneAppOpener.openDialer()
         case .unusableNumber:
             speak(text: L10n.fmt("call.announce.noPhoneNumber",
                                  locale: activeLocale, identity))
         case .call(let name, let phone):
-            performSystemContactCall(name: name, phone: phone)
+            performSystemContactCall(name: name, phone: phone)          // floor: no hop
         case .faceTime(let name, let phone):
-            performFaceTimeCall(name: name, phone: phone, video: true)
+            performFaceTimeCall(name: name, phone: phone, video: true, hop: hop)
         case .whatsApp(let name, let phone):
-            performSystemContactWhatsApp(name: name, phone: phone)
+            performSystemContactWhatsApp(name: name, phone: phone, hop: hop)
         case .messenger(let name, _, let handle):
-            performSystemContactMessenger(name: name, handle: handle)
+            performSystemContactMessenger(name: name, handle: handle, hop: hop)
         }
     }
 
@@ -9959,6 +11192,13 @@ self.noteTalkContractChanged()
             // its own timer because a foreground return is the only
             // moment the elder's device is reliably online.
             syncCalendarShare()
+            // [FAMILY-CONTACTS-UNIFY T-156] (2026-10-12) Identity refresh
+            // (design-l2 §4.5): one wholesale photo-cache invalidation +
+            // epoch bump (an EXTERNAL photo edit in Contacts.app
+            // surfaces here and only here), then the ordinary link
+            // refresh against the live address book. Both steps are
+            // non-blocking; `.background` is untouched.
+            refreshContactsIdentity()
         case .background:
             // [MODEL-WARDEN] Step 0/1 — the scene-phase hook. A backgrounded
             // app is judged against a much smaller jetsam limit and its

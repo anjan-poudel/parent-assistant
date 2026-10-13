@@ -781,6 +781,104 @@ final class DialogueCoordinatorWiringTests: XCTestCase {
         XCTAssertFalse(emit.contains("transcript"), "no transcript may reach the event metadata")
     }
 
+    // MARK: - Auto-listen answer capture (2026-10-11): the predicate
+
+    func testAutoListenPredicateTruthTable() {
+        let allTrue = AppCoordinator.shouldAutoOpenAnswerCapture(
+            speakingCount: 0, sessionState: .awaitingSlotAnswer,
+            frameLive: true, pipelineState: .idle)
+        XCTAssertTrue(allTrue)
+
+        XCTAssertFalse(AppCoordinator.shouldAutoOpenAnswerCapture(
+            speakingCount: 1, sessionState: .awaitingSlotAnswer,
+            frameLive: true, pipelineState: .idle),
+            "a reply still speaking must not open the mic")
+
+        XCTAssertFalse(AppCoordinator.shouldAutoOpenAnswerCapture(
+            speakingCount: 0, sessionState: .idle,
+            frameLive: true, pipelineState: .idle),
+            "no slot window open — nothing to answer")
+
+        XCTAssertFalse(AppCoordinator.shouldAutoOpenAnswerCapture(
+            speakingCount: 0, sessionState: .awaitingSlotAnswer,
+            frameLive: false, pipelineState: .idle),
+            "an expired or resolved frame must not re-open the mic")
+
+        XCTAssertFalse(AppCoordinator.shouldAutoOpenAnswerCapture(
+            speakingCount: 0, sessionState: .awaitingSlotAnswer,
+            frameLive: true, pipelineState: nil),
+            "no pipeline — nothing to open")
+
+        XCTAssertFalse(AppCoordinator.shouldAutoOpenAnswerCapture(
+            speakingCount: 0, sessionState: .awaitingSlotAnswer,
+            frameLive: true, pipelineState: .capturingCommand),
+            "a racing Talk press already owns the capture epoch")
+
+        XCTAssertFalse(AppCoordinator.shouldAutoOpenAnswerCapture(
+            speakingCount: 0, sessionState: .awaitingConfirmation,
+            frameLive: true, pipelineState: .idle),
+            "the yes/no chips own the confirmation window — never auto-listen")
+    }
+
+    func testHeroOverlayFlagsFollowSpeechAndTheWindowLifecycle() {
+        let coordinator = makeCoordinator()
+        XCTAssertFalse(coordinator.isSpeaking)
+
+        // The speaking overlay follows the speech count, queued
+        // utterances included.
+        coordinator.noteSpeakingStarted()
+        coordinator.noteSpeakingStarted()
+        drainMainQueue()
+        XCTAssertTrue(coordinator.isSpeaking)
+        coordinator.noteSpeakingEnded()
+        drainMainQueue()
+        XCTAssertTrue(coordinator.isSpeaking, "one utterance still playing")
+        coordinator.noteSpeakingEnded()
+        drainMainQueue()
+        XCTAssertFalse(coordinator.isSpeaking)
+
+        // A mid-window pipeline idle closes the capture claim — the
+        // closed-capture wait must not keep showing "listening". The
+        // window opens via legal edges only (.stopped → .idle →
+        // .awaitingSlotAnswer), and the early-return guard keeps it open.
+        coordinator.voiceSession.transition(to: .idle)
+        coordinator.voiceSession.transition(to: .awaitingSlotAnswer)
+        coordinator.slotAnswerCaptureActive = true
+        coordinator.handlePipelineState(.idle)
+        XCTAssertFalse(coordinator.slotAnswerCaptureActive,
+                       "the pipeline settling to idle mid-window closes the "
+                       + "auto-listen claim")
+        XCTAssertEqual(coordinator.voiceSession.state, .awaitingSlotAnswer,
+                       "the early-return guard keeps the window open")
+
+        // Leaving the window (a legal exit) also closes the claim.
+        coordinator.slotAnswerCaptureActive = true
+        coordinator.voiceSession.transition(to: .idle)
+        drainMainQueue()
+        XCTAssertFalse(coordinator.slotAnswerCaptureActive,
+                       "a session exit out of the slot window closes the claim")
+    }
+
+    func testLateMidCyclePipelineEventsAfterResolutionAreTolerated() {
+        // Device crash 2026-10-11 (ElderlyAssistant-2026-10-11-223011.ips,
+        // iPhone 17 Pro Max): the answer interception resolves the frame
+        // to `.idle` inside the turn while the same turn's
+        // `.processing`/`.routing` emissions still travel the sink
+        // behind it — `.idle → .transcribing` is not a legal edge and
+        // the debug assertion crashed the app. Pre-fix, calling these
+        // handlers from `.idle` traps in the debug host; post-fix they
+        // are skipped as the tail of a closed turn.
+        let coordinator = makeCoordinator()
+        coordinator.voiceSession.transition(to: .idle)
+
+        coordinator.handlePipelineState(.processing)
+        XCTAssertEqual(coordinator.voiceSession.state, .idle,
+                       "a late .processing after resolution is skipped, never asserted")
+        coordinator.handlePipelineState(.routing)
+        XCTAssertEqual(coordinator.voiceSession.state, .idle,
+                       "a late .routing after resolution is skipped, never asserted")
+    }
+
     // MARK: - Fixtures and helpers
 
     /// In-memory stand-in for the encrypted channel (the

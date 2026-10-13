@@ -1,0 +1,14 @@
+{
+  "schema_version": "1",
+  "question_id": "2ebd486d-37bc-4cab-ac2f-4bbd428fb94f",
+  "kind": "hil",
+  "channel_id": "C0C87HJM8BD",
+  "message_ts": "1791736632.470199",
+  "thread_ts": "1791736632.470199",
+  "hil_id": "2ebd486d-37bc-4cab-ac2f-4bbd428fb94f",
+  "status": "awaiting_answer",
+  "asked_at": "2026-10-11T16:37:12.456Z",
+  "expires_at": null,
+  "consumed": [],
+  "answer": null
+}

@@ -1,74 +1,268 @@
-# Multi-Turn Conversation — Implementation Notes (T-125 … T-143)
+# implement — running unit log (family-contacts-unify)
 
-- **Description:** Implementation record of the multi-turn-conversation feature run — one-deep dialogue frames with template probes (slot-fill + did-you-mean candidate choice), pre-ladder answer interception, deterministic merge, curated on-device catalog, and the bhajan probe as the first end-to-end case. All 19 units across 7 dependency waves are implemented and reviewed; this file records per-unit status, wave-review verdicts, gate evidence, and the owner/device items that remain open by design.
-- **Feature:** multi-turn-conversation (ai-sdd run, direct dispatch, unit_based execution in topological waves, paired review per wave)
-- **Branch and worktree:** feat/multi-turn-conversation in the dedicated feature worktree; the main checkout was not used for task work.
-- **Date:** 2026-10-10
-- **Scope honoured:** Phase 1 only (FR-MTC-001..017 + the FR-MTC-020 protocol); iOS only; no prompt or model-stack change (zero prompt edits; the Phase 2 frame clause ships only with the v17 training iteration); no new network egress; no emergency/medication behaviour change; no reminder/calendar change.
+Short per-unit summaries for the engine record (full notes per unit live in
+`specs/T-NNN-notes.md`).
 
-## 1. Per-unit status (19 units)
+## T-145 — FamilyContact identity model and nicknames — DONE
 
-| Unit | Title (short) | Wave | Status | Evidence summary |
-|---|---|---|---|---|
-| T-125 | Dialogue frame, manager and probe composer | W1 | DONE | DialogueFrameTests 17/17 (scoped run 15:26; re-verified at the W1 combined gate). Frame core per design-l2 §8. Flagged: wave-order hoist of CaptureForm/MergeSource/DialogueMerge from design-l2 §9 into DialogueManager.swift (contract: T-131 consumes, never re-declares). |
-| T-126 | Curated option catalog and bundled resource | W1 | DONE | DialogueOptionCatalogTests 10/10 (15:49). Catalog loader + bundled DialogueOptionCatalog.json v1 (bhajan.deity) + project.yml resource entry; bundle presence exactly-once, byte-identical (sha e51de88e…) verified. |
-| T-127 | Shared input-seam helper (IntentTranscriptPreparation) | W1 | DONE | IntentTranscriptPreparationTests 8/8 + LocalBrainChainTests 29/29 (15:32, existing suite unmodified). turnInput rewired in place via the helper; C-5 nil-seam parity comment pinned by a source-scan test; transcriptPreparationSeam accessor added for T-136. |
-| T-128 | Barge-in predicate access widenings (L2-D2) | W1 | DONE | Widenings landed: CommandRouter.sensitiveCallPhrases and VoiceContactSearchRoute.isDirectCallUtterance private → internal only, no behaviour change. The unit's scoped run was blocked by the cross-unit compile state (14:28–15:26); executed green at the W1 wave gate: CommandRouterTests 33/33 + VoiceContactSearchRouteTests 28/28. |
-| T-129 | dialogue.* localisation inventory (17 keys) | W1 | DONE | L10nCatalogCoverageTests 10/10 (15:31). Exactly 17 dialogue.* keys added verbatim from design-l2 §16 (catalog 1364 → 1381); dialogue.timeout deliberately absent (C-4). Note: a pre-existing stale Spotify catalog pin (1361) is red at the branch base, unchanged by this unit. |
-| T-130 | Keyword-rule provenance, near-matches and markers | W1 | DONE | KeywordIntentRuleTests 54/54 + KeywordIntentRuleProvenanceTests 23/23 (15:28). MusicQueryExtraction + closed Provenance {content, markerFallback, transcriptFallback}; thin byte-identical musicQuery wrapper (parity over the full fixture corpus); nearMatches for the 4 framable domains (medication excluded). |
-| T-131 | Answer path: classification, merge and barge-in | W2 | DONE | DialogueAnswerPathTests 36/36 (16:41, re-gate r2; first run red at 16:19 — one design-internal root cause, the S3 scaffold-strip vocabulary vs the pinned V13 — resolved in-unit with the public pin unchanged and red-run evidence recorded). classify / isBargeIn (B1–B7) / S1–S6 ladder / merge / merging per design-l2 §9/§11/§22; M-5 totality; E7 pure-merge pin; 14-field Mirror assertion. Post-review W2 F-2/F-3 applied: medicationNames doc corrected (B6 consumes it; B1 does not) and the candidateChoice marker-only degenerate guard added with its classify↔merge mirror pin. Flagged: the medication-photo half of B6 is inert until T-136 passes the live vocabulary (T-136 obligation); S3 strip is frame-kind aware; ladder order per design L2-D1. |
-| T-132 | Candidate assembly for did-you-mean probes | W2 | DONE | DialogueCandidateBuilderTests 29/29 (16:10, first attempt). Pure assembly per design-l2 §10: nearest-match mapping in rule order, hypothesis last only alongside ≥1 near-match, cap = config maxCandidates (parameter), zero candidates → empty list (no frame). Deviations: hypothesis omitted when its mapped message/topic is nil/blank; excludingDomain applies to near-match readings only; slotFillCandidates re-resolves the catalog group fail-closed. |
-| T-133 | Router interception block, protocol and execution | W3 | DONE | CommandRouterDialogueTests 21/21 (17:04; red run 17:00 — 2 compile errors in the new suite, fixed); wave gate 99/99 (17:13). Pre-ladder interception between the confirmation hook and the safety net; six protocol members + inert defaults; emergency clear post-dispatch; FR-MTC-017 consumed-arm returns; C-2 news parity; C-3 direct events; M-5 bounds seam (internal); medicationNames live at the interception site (W2 F-1 discharged); V-2 region scan. Deviations adjudicated ACCEPT at the W3 review: attempts<=maxProbes (confirmed §12.2 erratum vs FR-MTC-007), additive defaulted activeCommand/locale params, .bargedIn over the task Gherkin's "superseded", frame_resolved component split (T-136 funnel: timeout/emergency/supersession only). |
-| T-134 | Degenerate-music triggers and did-you-mean upgrades | W4 | DONE | CommandRouterDegenerateTriggerTests 13/13; combined gate 102/102 (17:51). Four trigger sites wired (ladder, interpreted .music, rephrase "no" + C-5 bind, keyword-remainder reprompt); byte-identity fallbacks (NFR-MTC-012). Post-review: the base NO_GO blocker F-1 lived here — the rephrase "no" branch armed its probe synchronously while the take's queued idle was still pending, so the session-exit observer killed the fresh frame one tick later; fixed by deferring the arm+probe exactly one main tick (take, emit and builder stay synchronous; shipped-line fallbacks byte-identical); the new real-seam integration test (method name in specs/T-134-notes.md) pins frame-live + 45 s window + zero resolved events + answer-path consumption (DialogueCoordinatorWiringTests 17/17); pre-fix red captured 16/17 with the exact superseded signature. Deviations adjudicated ACCEPT: T-133 test-10 fixture swap (now-degenerate utterance); one composed probe utterance (lead sentence already in the composer). |
-| T-135 | awaitingSlotAnswer state and 45 s window | W1 | DONE | VoiceSessionStateMachineTests 24/24 (15:30). New .awaitingSlotAnswer mirroring confirmation; 45 s single-source (command-window param); F14 idle-bridge; F6 still-open guard; additive inert UI mappings in HomeView/HomeSubviews (to confirm at T-136/device). |
-| T-136 | Coordinator wiring: ownership, funnels, timeout | W4 | DONE | DialogueCoordinatorWiringTests 16/16 (17:54; 17 with the F-2 seam test); gate3 101/101. Six protocol members; one resolve funnel (timedOut/emergency/superseded only, component app_coordinator — no double-emit); silent slot timeout; M-1 guard extension (:4830-4831); M-2 four arming sites via openConfirmationWindow + supersede at its top; C-1 window from voiceSession.answerWindowSeconds (one additive accessor in T-135's file, adjudicated ACCEPT); M-3 prepareDialogueAnswerText via the non-nil production seam; live medicationVoiceEntries producer (W2 F-1 producer half discharged). Adjudicated ACCEPT: off-main start refusal (§12.6 literal hop not implementable for a synchronous Bool); funnel-based supersede; init-top construction (phase-1 rule, red gate1). |
-| T-137 | LogSanitiser dialogue metadata keys (M-4) | W1 | DONE | LogSanitiserTests 34/34 (15:31); release-log gate green in the same build. Six keys added (78 → 84) with closed vocabularies per design-l2 §26; reason reused (producer-validated, test-pinned). Deviation: the T-137 task file's parenthetical token lists match no emitting enum and appear nowhere else in the spec tree — design-l2 §26 vocabularies implemented instead (grep-verified). |
-| T-138 | Release log gate: feature roots and fixtures | W3 | DONE | Gate .sh rc=0 (16:46; 24 cases over 12 rules), --falsify rc=0; FEATURE_ROOTS 17→21 (the four dialogue helper files; +12 lines, no rule/allow-list widening); 16 per-root fixture plants + 2 expect files (fixtures 38→55 files; case/rule counts 24/12 unchanged by construction); in-build gate green at the unit build (DialogueOptionCatalogTests 10/10, 16:45) and the wave gate (17:13). Deviation: "mirror the spotify fixtures" has no referent — the profile-interview per-root precedent used instead (adjudicated ACCEPT). |
-| T-139 | Hostile-answer corpus and trap matrix suites | W5 | DONE | DialogueHostileCorpusTests 8/8 + DialogueTrapMatrixTests 8/8; unit run 114/114 (19:12, six suites; red history: run 1 own-file compile fix, run 2 sibling in-flight compile block — retry-not-fix honoured, run 3 one expectation corrected to the verified music normalization); W5 wave gate 157/157 (19:29). E1 forced-no-op clear pair (dispatch side effects asserted with the clear disabled, then the clear-on ordering); five E2 hostile rows with causal control legs (interpreter 0, cache reads/writes 0, hostile text absent from telemetry); injection markers → emptyAfterStrip re-probe attempts=2; control chars → closed catalog repetition; tool-shaped → closed freeText, the frame's own opener only; candidate poisoning → in-list candidate only; authority claim → stripped, the ordinary freeText arm; M-5 route leg re-probe + executor [-1, 1, 12] → three .exhausted. Eight E3 trap rows (cancel/escape/barge-in/timeout/expiry/Talk/watchdog/pipeline events), each terminal with no half-open window, late hourglass no-op, double-resolve no-op; M-1 six-stage sweep + control leg; M-2 Talk refusal + watchdog supersession. Deterministic (no sleeps; expectation-based drains only). Deviations adjudicated ACCEPT: production-installed timeout seam + 1 s clock leg, watchdog precondition+consequence drive, expiry over the real manager's clock seam, normalized candidate expectation. |
-| T-140 | Cache-bypass, log-capture and egress suites | W5 | DONE | DialogueCacheBypassTests 4/4 + DialogueLogAndEgressTests 5/5; unit run 117/117 (19:21; one red run — own-file source-pin fix, red bundle retained); W5 wave gate 157/157 (19:29). E8 seeded-entry causal A/B (the seeded entry is served on the control re-route; on the answer turn interpreter 0, reads/writes 0, no cache_hit; cache state unchanged), answer text never interned, pendingTranscript nil (Mirror + counters + six-region source pin + call-turn positive control), confirmed-execution recording negative control. E4 production bus (LogSanitiser) across probe, answer, merge, cancel, timeout, escape, exhaustion and did-you-mean legs; seven planted marker tokens absent from bus-format sink lines (claim scoped to sink lines per review F-1); E5 runtime out-of-vocabulary redaction + unlisted-key drop + producer-closed reason=overLength + 84-key runtime allow-list pin (reason reused); E6 source audit (four dialogue files + six router regions + coordinator region, zero forbidden symbols) + 20 spy transports silent, only the offline playback helper addressed. V-3 re-verification recorded observed-vs-assumed. Deterministic (no sleeps). Deviations adjudicated ACCEPT: raw-read source pins (comment-stripping scanner vs comment anchors), §12.2 heading anchor, file-private test fake, direct timeout seam, near-match-paired did-you-mean fixture, runtime allow-list re-verification. |
-| T-141 | End-to-end acceptance and no-regression sweep | W6 | DONE | DialogueAcceptanceTests (new; 4 methods over the five Gherkin scenarios: S1 anchor end-to-end with interpreter 0 + control 1 + four egress spies silent + catalog canonical query; S2 reminder/calendar/medication A/B frame-guard with equal routing/spoken/effects; S3 prompt pins re-derived + base-byte digests + feature vocabulary absent; S4 golden music digest re-derived) green 4/4 in both full gates and the scoped run; W1 F-4 discharged (Spotify catalog pin 1341 → 1361; red at base — 1364 vs stale expectation — green at HEAD 1381); one feature-caused regression found and fixed in-unit (LiveTranslateAllowListTests declared six-key delta vs LogSanitiser.allowedKeys 78 → 84) with scoped-green evidence. Full unit gate at HEAD (authoritative run2): 6638 executed / 6620 passed / 8 failed / 10 skipped vs measured base 0cbe4e6 6403 / 6357 / 36 / 10 — base strictly redder in every paired comparison (scoped: base 13 vs HEAD 4 on identical 173 tests); all 8 HEAD failures classified (5 exact-name at base, 2 same-suite family members, 1 load flake green 11/11 isolated) → no new failures attributable to the feature. Sweep record: specs/T-141-notes.md (reviewed GO; F-1/F-2/F-6 corrections applied in place pre-commit). In-build gates green in both full gates (log-safety 24 fixtures / 12 rules; prompt mirror 2717 bytes / 4 placeholders / 7 self-tests). |
-| T-142 | Security evidence index (E1..E8, V-1..V-4, M-1..M-5, R1..R5) | W7 | DONE | specs/MTC-security-evidence-index.md (new; 65 lines). E1..E8 each with producer task, exact reproducible command, observed result with counts and a pointer; V-1..V-4 dispositions with where-verified; M-1..M-5 pinning task + DoD line + observed pin; R1..R5 accepted residual dispositions; 7 coverage-boundary items (W5 F-1 scoped sink-line citation, W5 F-3 no fixture literals, W6 F-3 FR-MTC-019 ask-line boundary, W6 F-5 S3 division of labour, measured base inventory superseding the "~21" estimate, device validation open by design, T-138 fixture scoping). Structural validation (Gherkin S3): E 8/8, V 4/4, M 5/5, R 5/5, all cells non-empty, no cell marked incomplete, 8/8 reproducible E-row pointers, 43/43 cited test tokens resolve in ios/ElderlyAssistantTests, NFR self-scan clean; negative path exercised on a mutated copy (a producerless row fails the record). Reviewed GO 0.90 (specs/implement-review-w7.md); F-1/F-2/F-3 record corrections applied in place pre-commit; corrected-index re-validation FAILURES 0. Docs-only; no builds, no source. |
-| T-143 | DV-1..DV-5 protocol and record (FR-MTC-020) | W5 | DONE | specs/MTC-device-validation-protocol.md (300 lines): protocol body §1-§5, DV-1..DV-5 (§6, verbatim tri-source item texts), record §7 (session-block template; 7.3 all five items BLOCKED / step zero OUTSTANDING — no execution claimed), completion gate §8, capture discipline §9, recording rules §10. Step zero = the outstanding Phase 0 PR #156 smoke (hard prerequisite; a failure stops the session with no partial results). Authoring checks: 15/15 verbatim item texts, 10/10 gate phrases, backtick-parity clean. Execution is owner/device-dependent by design (missing execution is an open gate item at final sign-off, not a missing deliverable). Nine recorded deviations adjudicated ACCEPT. No code, no build. |
+Commit 5914777e. Model: `nicknames: [String]` replaces the single nickname
+(no shim); new `SystemContactLink` struct; decoder per design §3.4 (presence
+wins, separate legacy-key container, corrupt link → nil, synthesized encoder
+kept); `normalizedNicknames` trim/drop/order; 64-char cap (F5).
+Compile-forced shared-file minimums (marked in code as T-156 debt):
+AppCoordinator add/update still take the single nickname for now;
+SettingsView loadDraft/save; ProfileInterviewSteps pass-through.
+Gate (run before the speed-mode directive): FamilyContactStoreTests 31/31,
+KinDesignationTests 4/4, whole-module build green, zero errors.
+Handoff: T-156 must widen the coordinator seam to `nicknames: [String]` +
+normalization, otherwise multi-nickname contacts lose entries through the
+interim single-field paths.
 
-## 2. Wave log and review verdicts
+## T-147 — Frozen L10n keys + disclosure — DONE
 
-| Wave | Units | Commit | Review verdict |
-|---|---|---|---|
-| W1 | T-125, T-126, T-127, T-128, T-129, T-130, T-135, T-137 | 76b28b9 | GO — Confidence 0.90 (specs/implement-review-w1.md; 0 blockers; findings all note-level) |
-| W2 | T-131, T-132 | 3b44c0c | GO — Confidence 0.90 (specs/implement-review-w2.md; 0 blockers; F-1 major cross-wave obligation → T-136 dispatch; F-2/F-3 applied post-review, re-gated at r2 65/65) |
-| W3 | T-133, T-138 | cf416ac | GO — Confidence 0.90 (specs/implement-review-w3.md; 0 blockers; all 8 flagged adjudications ACCEPT; findings all note-level; F-1 notes correction applied pre-commit) |
-| W4 | T-134, T-136 | cc065b0 | GO — Confidence 0.90 (specs/implement-review-w4.md; base review NO_GO — 1 blocker F-1, the rephrase "no"-branch probe-window race — fixed with the reviewer's prescribed one-tick deferral + real-seam integration test, re-gated 204/204, re-review GO 0.90 with 0 blockers; F-7 note-level comment-precision finding recorded) |
-| W5 | T-139, T-140, T-143 | ac89744 | GO — Confidence 0.90 (specs/implement-review-w5.md; 0 blockers; all 20 flagged adjudications ACCEPT; findings: 1 minor (F-1 — scoped marker-scan citation carried to the T-140 row and the T-142 index) + 2 notes; test-only + docs delta, no production source touched) |
-| W6 | T-141 | 5860878 | GO — Confidence 0.90 (specs/implement-review-w6.md; 0 blockers; all flagged adjudications A–G ACCEPT; findings: 3 minor record corrections — F-1 base-scoped family-member count, F-2 run1 pre-fix framing, F-6 dictionary-path family variant — applied in place to specs/T-141-notes.md pre-commit + 3 notes (F-3 FR-MTC-019 ask-line coverage boundary, F-4 calendar comparator title-scope wording, F-5 S3 default-prompt scope) carried to T-142; test-only delta, no production source touched) |
-| W7 | T-142 | 134d77e | GO — Confidence 0.90 (specs/implement-review-w7.md; 0 blockers; all flagged adjudications A–K ACCEPT; findings: 2 minor record corrections — F-1 T-133 C-3 DoD citation :120 corrected to :117, F-2 verification-ledger "rows 25-26" corrected to "row 25" — applied in place to specs/MTC-security-evidence-index.md pre-commit + 1 note (F-3 E2 pointer section name corrected to T-139's actual map section); docs-only delta, no production source touched) |
+Commit 4ffc9389. 21 keys en+ne at the design §7 placements (22-line span
+pin; the 3 pre-existing photo keys at 16-18); NSContactsUsageDescription
+replaced with the frozen write disclosure; L10nCatalogCoverageTests extended
+(coverage + span functions, 14 fixtures, verbatim copy table, the #16
+ASCII-exemption pin). Baseline re-measured: 1389 → 1410 (+21).
+Whole-module typecheck green (build-for-testing, exit 0). Scoped suite
+deferred to T-163 per speed mode. Open: T-144 merge must re-measure the
+absolute baseline; SpotifyLocalizationTests count pin pre-existing red at
+HEAD (untouched, flagged).
 
-W1 findings disposition (F-1..F-7, all note-level): F-1 non-redeclaration contract for T-131 — carried into the W2 dispatch brief; F-2/F-3 spec-text clarifications (T-130 task file; design §13b) — deferred to the next spec touch, no code change; F-4 pre-existing Spotify catalog pin red at base — carried to the T-141 full-gate baseline comparison (must not be counted as a W1 regression); F-5 `.awaitingSlotAnswer` UI mappings — compile-forced placeholders, confirm at T-136/device; F-6 did-you-mean copy reading — owner copy review at the feature review; F-7 `intake` vocabulary forward-reference — confirm when T-138/W3 type lands.
+## T-148a — ContactsAccess .limited + identifier plumbing — DONE
 
-W2 findings disposition (F-1..F-7): F-1 (major, T-131/T-136) — the live medication vocabulary must be passed to `classify` at T-136's interception site (with the default, the medication-photo half of B6 is inert) plus the design-l2 §12.2 snippet erratum — carried into the W3 T-136 dispatch; F-2 (comment) and F-3 (merge candidateChoice marker-only degenerate guard, W2 review's own prescription) applied post-review with the classify↔merge mirror pin, re-gated 65/65 at r2; F-4/F-5 spec/design wording queued for the next spec or design touch, no code change; F-6 (M-5 executor bounds-check, consumer side) — carried into the W3 dispatch (T-133/T-136); F-7 both new files join the T-138 log-gate FEATURE_ROOTS with per-root fixtures — carried into the W3 dispatch.
+Commit d162aa16. ContactsAccess gains .limited + allowsReading + from(_:) as
+the single iOS-18 gate; access() delegates; AddressBookEntry.identifier
+plumbing (make default, CNContactIdentifierKey, allEntries pass-through).
+Compile-forced fallout: MissedCallContactResolver resolve gains the .limited
+readable arm (own file); ONE mechanical shared-file fix — wizard searchSection
+:2117 case .allowed, .limited (T-148b debt marked in code). New suite
+ContactsAccessTests (9 tests incl. the module-wide single-gate scan).
+Whole-module typecheck green (build-for-testing, exit 0, 0 errors). Scoped run
+deferred to T-163 per speed mode.
 
-W3 findings disposition (F-1..F-6): F-1 the T-133 notes' claim that CommandRouter.swift is a T-138 feature root was corrected in the notes before the commit (the four roots are the dialogue helper files; the router is covered by the existing transcript/error rules); F-2 erratum-comment citation fixup queued for the next touch — the attempts<=maxProbes binding is confirmed by the W3 review and recorded here so T-134/T-136 do not weaken the re-probe arm; F-3 --falsify rc=0 reported without a retained log — capture at the feature review; F-4 xcresults pruned before the review closed — W4 process note: retain bundles until each wave review completes; F-5 optional V-2 anchor extension at the next touch; F-6 advisory only (device/OOM validation remains with the DV items).
+## T-151 — FamilyContactIndex — DONE
 
-W4 findings disposition (F-1..F-7): F-1 (blocker) — fixed post-review in the rephrase "no" branch region only (take/emit/builder synchronous; arm+probe deferred one main tick so the take's queued idle lands first; fallback legs byte-identical, NFR-MTC-012); the new real-seam test fails on the byte-exact pre-fix revision (16/17, the superseded emission observed) and passes on the fix; re-gated 204/204 (r2). F-2 (minor) — discharged by the same integration test (real AppCoordinator + real router across the take/start seam). F-3 (note) — the gate-2 tally annotated in T-136-notes.md against the retained log (aborted-run summaries unreliable; TEST FAILED + failing list + .ips + rc=65 are the witnesses). F-4 (note) — opener supersede scope beyond the four M-2 sites recorded in T-136-notes.md (pendAppLaunch :7083, startVoiceAckConfirmation :10426; ADR-MTC-03-consistent; A/B test candidate at the next touch). F-5 (note) — V-2 anchor extension recorded in T-136-notes.md, optional at the next touch. F-6 — W1 F-5 UI mappings remain open by design (review/device wave). F-7 (note) — the F-1 ordering comment's rationale wording is imprecise (the observer no-op comes from the resolver's .awaitingSlotAnswer guard, not from frame absence); comment fix at the next CommandRouter.swift touch; recorded here so the fixup is not lost; the notes files were kept byte-exact per the re-review's commit conditions.
+Commit 7b041b2d. Pure value type per design §1.2/§5.4: Entry set, multi-valued
+idsByNickname map, empty anchor, lookups; normalization via the existing
+NepaliTextNormalizer only (grapheme pin honored). New suite FamilyContactIndexTests
+(17 tests: O(1) map contract, 12x8 perf ceilings incl. 256-char F5 worst case,
+Devanagari positive pin, deliberate negative pin, canonical-variant unification,
+duplicate holders roster order, rebuild, empty parity, legacy payload decode).
+Whole-module build-for-testing green, 0 errors. Scoped run deferred to T-163.
+Not wired: coordinator publish (T-156), search tiers (T-152), resolver provider
+(T-153).
 
-W5 findings disposition (F-1..F-3): F-1 (minor) — the T-140 notes' marker-scan sentence reads broader than the reviewed behavior: the suite's scan is scoped to bus-format sink lines (a marker legitimately reaches spoken output on the did-you-mean leg, and the legacy debug print is the accepted residual R1), so the T-140 row above and any T-142 index citation use the scoped claim; the checked-in notes file was left byte-exact per the review's commit conditions. F-2 (note) — the T-140 notes describe cache seeding via IntentRouter.recordConfirmedExecution while the suite seeds cache.record(transcript:command:) directly: identical effect, the control leg proves the entry live (no action). F-3 (note) — T-139-notes.md:194 quotes test-fixture literals in backticks: do not quote them into scanned records (T-141/T-142 index) (awareness only).
+## T-153 — ContactResolver nickname bands — DONE
 
-W6 findings disposition (F-1..F-6): F-1 (minor) — the T-141 notes' family-membership cell understated base redness ("3 same-signature members in each sample"); corrected in place to "3 at base full / 8 at base scoped" before the commit. F-2 (minor) — run1 was framed as preceding both declaration fixes; run1 in fact postdates the W1 F-4 pin fix (scoped3 green 20:06:53, before run1's 20:09:01 bundle; no Spotify pin failure drawn in run1) and precedes only the allow-list fix; all three passages corrected in place. F-6 (minor) — the dictionary-path row's "exact name reproduced" was inexact: run1's variant is the SessionModel timeout method while the base samples drew the sibling Pipeline consent variant; softened to family membership (suite red 3 full / 8 scoped) with the sibling-suite variant as corroboration; BASELINE unchanged. F-4 (note) — S2's calendar A/B comparator compares request titles only; prose tightened to "calendarEventRequests (titles)". F-3 (note) — FR-MTC-019's literal missing-time / missing-title ask-line cases are untested anywhere (handlers source-untouched; design-l2 scopes Phase-1 reminder/calendar as no-change) → carried to T-142 as a recorded coverage boundary. F-5 (note) — S3's "Address them as" absence covers the default prompt only; the broader pins live in IntentPromptTests → record the division of labour when T-142 cites S3. Naming hazard (awareness): the w6 review file in the worktree carried the Spotify feature's record at the branch base; w1..w5 were already replaced by multi-turn reviews in their wave commits — the PR-time integration owns the collision decision for master's Spotify review files.
+Commit 65f6fee9. indexProvider init param (nil = per-call build, test-parity);
+band ladder 1.00/0.90/0.85/0.80/0.75/0.60 with the strict < rival rule and
+tie-ambiguity unchanged; nearMiss extended over nickname spellings (exactly-one
+rule counts contacts). Tests 13 -> 37: the F2 consequence table (three
+at-margin decisive rows pinned at 0.15000000000000002, four sub-margin
+ambiguous), index-path parity, Devanagari grapheme pin, 12x8 <=20 ms ceiling
+(measured ~1.7-2.4 ms in the pre-commit harness). Whole-module build green,
+0 errors. Scoped run deferred; handoff: T-156 passes the published index at
+the coordinator construction site.
 
-W7 findings disposition (F-1..F-3): F-1 (minor) — the M-4 row cited T-133 :120 for the C-3 (carried) DoD item; the C-3 item is at :117 (:120 is the V-1/V-4 DoD item); corrected in place pre-commit. F-2 (minor) — the V-1 row cited verification-ledger "rows 25-26"; row 26 is the candidate-execution-shape / M-5 GAP row and does not support V-1; corrected to "row 25". F-3 (note) — the E2 row cited a section name that does not exist in specs/T-139-notes.md (the name is T-140's); corrected to T-139's actual map section name, with the sibling E3 pointer tightened to the same name in the same pass. Sha chain: index reviewed e6d1c17c9d4e4ed90c0ce88d700c7935939efd87ba7fe8c37839a1dc621d648d → corrected d03d8dc4dc001807018145b6b58a1c99e26872bd532891b1cf84997c4c430617; T-142 notes reviewed bc7ebd847021d4d1db7f51850b4084c95980c350a91dbf04874dc0994100e95a → corrected 753b77bb755820ef779f5610b07a36dc316c7fe7981ed08ceac3d6431b9fc725. Awareness carried to the security-test step: the index's E4 row quotes the gate command in a backtick-prefixed form that matches an INJ-011-class scanner pattern, and its long camelCase method names match the INJ-009-class pattern — honest content in an ungated file (sweep confirms); the security-test content file must avoid the backtick-prefixed gate-command form and the long-camelCase-on-a-run-mentioning-line shape.
+## T-154 — SystemContactPhotoWriter — DONE
 
-## 3. Gate evidence
+Commit 307928d0. The app's first CNSaveRequest surface, confined to one file:
+exact §1.4 attempt sequence (attempt-time fingerprint, checked mutableCopy as?,
+update-only request, do/catch, read-back byte equality with unverifiable never
+success); closed §5.2 event vocabulary; FamilyPhotoEditorState.from exhaustive
+no-default; six internal decisions recorded in the unit notes. Suite: 37 tests
+incl. the F1 source-level pins (only imageData assigned, update-only request,
+ten-marker order pin) and module-wide FeatureSourceScan confinement scans; a
+pre-commit dry-run caught and fixed two defects in the scan tests themselves.
+Whole-module build green, 0 errors. Scoped run deferred. Handoffs: T-155
+FEATURE_ROOTS registration; T-158 injection + preAttemptOutcome use; T-160 label
+rendering.
 
-- W1 wave gate (2026-10-10 15:53–15:54 AEDT): combined scoped run of all eight W1 units' suites under the shared build lock — `cd ios && ./build.sh test:unit DialogueFrameTests DialogueOptionCatalogTests IntentTranscriptPreparationTests LocalBrainChainTests VoiceContactSearchRouteTests CommandRouterTests L10nCatalogCoverageTests KeywordIntentRuleTests KeywordIntentRuleProvenanceTests VoiceSessionStateMachineTests LogSanitiserTests` → rc=0, **270 tests executed, 270 passed, 0 failures** (`Test-ElderlyAssistant-2026.10.10_15-53-36-+1100.xcresult`; log /tmp/mtc-w1-gate.log; "Scoped unit run passed (baseline not advanced)"). Per suite: DialogueFrameTests 17, DialogueOptionCatalogTests 10, IntentTranscriptPreparationTests 8, LocalBrainChainTests 29, VoiceContactSearchRouteTests 28, CommandRouterTests 33, L10nCatalogCoverageTests 10, KeywordIntentRuleTests 54, KeywordIntentRuleProvenanceTests 23, VoiceSessionStateMachineTests 24, LogSanitiserTests 34. The release log-safety gate (24 fixtures over 12 rules) ran green inside the same build.
-- W2 wave gate (2026-10-10 16:29 AEDT): combined scoped run `cd ios && ./build.sh test:unit DialogueAnswerPathTests DialogueCandidateBuilderTests` → rc=0, **64 tests executed, 64 passed, 0 failures** (`Test-ElderlyAssistant-2026.10.10_16-29-31-+1100.xcresult`; log /tmp/mtc-w2-gate.log). T-131's red-run history: 16:19 run, 4 failed assertions over 3 tests, one design-internal root cause, fixed in-unit with evidence.
-- W2 gate r2 (2026-10-10 16:40–16:41 AEDT), after the post-review F-2/F-3 fix: same combined scoped run → rc=0, **65 tests executed, 65 passed, 0 failures** (`Test-ElderlyAssistant-2026.10.10_16-40-17-+1100.xcresult`; log /tmp/mtc-w2-gate-r2.log; per suite: DialogueAnswerPathTests 36, DialogueCandidateBuilderTests 29). The r2 run is the wave-commit gate; the 16:29 run remains the evidence for the reviewed revision.
-- W3 wave gate (2026-10-10 17:13 AEDT): combined scoped run `cd ios && ./build.sh test:unit CommandRouterDialogueTests CommandRouterMusicTests CommandRouterTests DialogueOptionCatalogTests` → rc=0, **99 tests executed, 99 passed, 0 failures** (`Test-ElderlyAssistant-2026.10.10_17-13-06-+1100.xcresult`; log /tmp/mtc-w3-gate.log; per suite: CommandRouterDialogueTests 21, CommandRouterMusicTests 35, CommandRouterTests 33, DialogueOptionCatalogTests 10). In-build: release log-safety gate green with the four new T-138 roots (24 cases over 12 rules) and the prompt mirror. T-133's red-run history: 17:00 run, 2 compile errors in the new suite, fixed (log /tmp/mtc-w3-t133-run1.log).
-- W4 wave gate (2026-10-10 18:01–18:03 AEDT): combined scoped run of both units' suites (10 classes) under the shared build lock — `cd ios && ./build.sh test:unit CommandRouterDialogueTests CommandRouterMusicTests CommandRouterTests CommandRouterDegenerateTriggerTests DialogueCoordinatorWiringTests AppCoordinatorSpotifyWiringTests VoiceSessionStateMachineTests VoiceSessionBindingTests DialogueFrameTests DialogueAnswerPathTests` → rc=0, **203 tests executed, 203 passed, 0 failures** (`Test-ElderlyAssistant-2026.10.10_18-01-58-+1100.xcresult`; log /tmp/mtc-w4-gate.log; per suite: CommandRouterDialogueTests 21, CommandRouterMusicTests 35, CommandRouterTests 33, CommandRouterDegenerateTriggerTests 13, DialogueCoordinatorWiringTests 16, AppCoordinatorSpotifyWiringTests 4, VoiceSessionStateMachineTests 24, VoiceSessionBindingTests 4, DialogueFrameTests 17, DialogueAnswerPathTests 36). This is the revision the base W4 review reviewed.
-- W4 re-gate r2 (2026-10-10 18:26 AEDT), after the F-1 fix: same 10-class command → rc=0, **204 tests executed, 204 passed, 0 failures** (`Test-ElderlyAssistant-2026.10.10_18-26-06-+1100.xcresult`; log /tmp/mtc-w4-gate-r2.log; DialogueCoordinatorWiringTests 17 = +1 real-seam integration test). This is the wave-commit gate. Pre-fix red evidence: the byte-exact pre-fix CommandRouter.swift + the new test → 16 passed / 1 failed, 14 assertion failures naming the superseded emission (`Test-ElderlyAssistant-2026.10.10_18-30-16-+1100.xcresult`; log /tmp/mtc-w4-prefix-f2.log); restored revision re-ran 17/17 (`Test-ElderlyAssistant-2026.10.10_18-32-28-+1100.xcresult`). All W4 bundles retained in /tmp/mtc-w4-evidence/ until the wave review closed (the W3 F-4 process note honoured). In-build gates green in both runs (log-safety 24 cases over 12 rules; prompt mirror; privacy guards).
-- W4 red-run history (unit-level): T-134 runs 1–2 rc=65 (sibling in-flight AppCoordinator compile noise, retry-not-fix honoured), run 3 the deviation-1 fixture collision (1 failed test, fixed by the adjudicated swap); T-136 gate1 build-red (its own file, phase-1 init), gate2 2 test-side mechanics failures (SIGILL diagnosed from the crash .ips).
-- W5 wave gate (2026-10-10 19:29 AEDT): combined scoped run of the four new suites plus five touch-adjacent suites under the shared build lock — `cd ios && ./build.sh test:unit DialogueHostileCorpusTests DialogueTrapMatrixTests DialogueCacheBypassTests DialogueLogAndEgressTests CommandRouterDialogueTests DialogueCoordinatorWiringTests VoiceSessionStateMachineTests DialogueAnswerPathTests LogSanitiserTests` → rc=0, **157 tests executed, 157 passed, 0 failures** (`Test-ElderlyAssistant-2026.10.10_19-29-39-+1100.xcresult`; log /tmp/mtc-w5-gate.log; bundle retained in /tmp/mtc-w5-evidence/ until the wave review closed; per suite: CommandRouterDialogueTests 21, DialogueAnswerPathTests 36, DialogueCacheBypassTests 4, DialogueCoordinatorWiringTests 17, DialogueHostileCorpusTests 8, DialogueLogAndEgressTests 5, DialogueTrapMatrixTests 8, LogSanitiserTests 34, VoiceSessionStateMachineTests 24 — independently walked by the session). Unit red-run histories: T-139 runs 1–3 (own-file compile fix; sibling in-flight compile block with retry-not-fix honoured; one expectation corrected to the verified music normalization, then green 114/114); T-140 run 1 rc=65 (own-file source-pin fix: comment-stripping scanner vs comment anchors; red bundle retained /tmp/t140-gate-red.xcresult, then green 117/117 /tmp/t140-gate2.xcresult). In-build gates green in the wave run (log-safety 24 cases over 12 rules; prompt mirror; privacy guards).
-- W6 full-gate evidence (2026-10-10, T-141; the implement-stage full unit gate): run2 on the frozen tree (authoritative) — rc=65, 6638 executed / 6620 passed / 8 failed / 10 skipped (bundle Test-ElderlyAssistant-2026.10.10_22-00-27-+1100.xcresult; log /tmp/mtc-t141-full2.log; the console aggregate counts duplicate records — the bundle is authoritative). Run1 on the pre-allow-list-fix tree: same totals (bundle 20-09-01). Measured base 0cbe4e6 in a scratch worktree: 6403 / 6357 / 36 / 10 (bundle 20-43-42) — the 36 = 15 pre-existing LiveTranslate timing-family records (incl. SnapshotModeTests 10) + 17 /tmp-checkout path-pinned artifacts + 2 timing margins + the Spotify catalog pin + the plugin glyph; this measured inventory supersedes the old "~21 pre-existing failures" figure. Base scoped 173 / 160 / 13 vs HEAD scoped 173 / 169 / 4 on the identical suite set — base strictly redder in every paired comparison. All six bundles + JSON exports retained in /tmp/mtc-w6-evidence/ (T-142 source); the session independently walked the run2, base-full and base-scoped totals and the run2 green set (DialogueAcceptanceTests 4/4, SpotifyLocalizationTests 9/9, LiveTranslateAllowListTests 28/28). In-build gates green in both full gates (log-safety 24 fixtures / 12 rules; prompt mirror 2717 bytes / 4 placeholders / 7 self-tests).
-- W7 structural gate (2026-10-11, T-142; docs-only unit): no build; the deliverable's own structural validation is the wave gate — E 8/8, V 4/4, M 5/5, R 5/5, non-empty cells, 8/8 reproducible E-row pointers, 43/43 cited test tokens resolve against ios/ElderlyAssistantTests, NFR self-scan clean (devanagari 0, markers 0, fixture literals none); negative path exercised on a mutated copy. Re-checked on the W7-review-corrected index: FAILURES 0 (/tmp/mtc-t142-validate.py; log /tmp/mtc-t142-validate.log). The last executed unit gate remains the W6 full gate at commit 5860878; W7 changes no code, so no re-run is owed.
-- Freshness runs per wave: W3–W6 done via the wave gates above; W7 docs-only (structural validation only — no build).
-- Full unit gate at the end of the implement stage: done (T-141, W6) — see the W6 full-gate evidence bullet.
-- Release log-gate feature roots (T-138, W3) and egress/log-capture suites (T-140, W5): done — see the W3 and W5 gate bullets.
-- Known pre-existing red at the branch base: master's unit gate carries ~21 pre-existing failures in unrelated suites (recorded baseline; not regressions of this feature). Confirmed at W1: no W1 suite is among them (270/270 green scoped). Superseded at W6 by the measured base inventory (36 records / 34 unique across 18 suites, classified; see the W6 full-gate bullet).
+## T-149 — SystemContactLinkService — DONE
+
+Commit 64727330. VerifiedLinksSnapshot + the two reading seams + actor service:
+one batched verification fetch (identifier+phoneNumbers keys only), fingerprint
+rule reused unchanged, duplicate claims first-in-roster-order, single-flight
+drain with latest-roster capture (one documented Task.yield window), photo cache
+(24/16 MiB/16-hex sha256 keys, no negative caching), closed-vocabulary events,
+no console writes. AddressBookDirectory gains the SystemContactReading
+conformance. Suite: 27 tests incl. deterministic gate-forced drain cases.
+Whole-module build green + release log-safety gate passes. Scoped run deferred.
+Handoff: T-156 must pass the FULL roster to refresh.
+
+## T-152 — UnifiedContactSearch tiers and dedupe — DONE
+
+Commit b0e8dc7f. FamilyMatchTier.nickname at raw 2 (containment renumbered 3);
+Outcome.linkedBookNames defaulted; search requires index:, five passes per
+design (nickname exact via O(1) map + Character-safe substring; Pass 3
+drop/synthesize with name-equal suppression; Pass 4 unchanged; Pass 5 recount;
+.empty short-circuit = structural parity). Guards: no phantom drop, one-row-per
+person, stale stored claims never merge. Shared-file fixes: 3 call sites in
+LeafViews (inline index hoists, T-156 interim). Wizard does not call the unified
+search yet (T-159 scope, verified). Tests: 22 existing + 17 new (tier order,
+Devanagari pins positive+negative, Pass 3-5, parity anchors, ambiguity, failure
+paths, <=20 ms ceiling); the one uncertain Foundation behavior probed standalone.
+Whole-module build green, 0 errors. Scoped run deferred.
+
+## T-155 — FEATURE_ROOTS + release-gate coverage — DONE
+
+Commit 432584b8. The three Contacts seam files registered as feature-role
+roots in check-release-log-safety.py (design §5.3 block); 3 positive + 3
+negative fixtures + 3 expect pins. Evidence: full shell gate exit 0 (24
+fixtures/12 rules); injected-PII fixture names each planted file+line;
+falsify green; registration-drift caught in an isolated copy. Whole-module
+typecheck green (attempt 1 red only on T-150's concurrent mid-wave state, per
+protocol waited and retried). Scoped run deferred. One documented limitation
+(rule-3 Debug framing) recorded in the notes.
+
+## T-150 — MissedCallContactResolver link-aware — DONE
+
+Commit 56605e1d. linkedFamilyMatch (roster order, snapshot-only, matches
+reused unchanged) + resolve(snapshot:) with the §1.8 precedence: family own
+phones -> verified links -> native half gated on allowsReading with verified
+link identifier remap; notDetermined -> needsPermission; denial -> unresolved.
+Default .empty keeps all 4-arg callers unchanged; AppCoordinator untouched
+(T-158 wires the real snapshot). Tests: 18 new (32 total) — linked resolution,
+precedence, remap, .limited, denial, unlinked parity matrix, roster-order
+determinism (5x), single-snapshot semantics, dial-back mirror. Whole-module
+build green on a forced recompile of both files (0 errors); release log-safety
+gate passes. Scoped run deferred.
+
+## T-144 — Sequencing gate (master merge) — DONE
+
+Call-dialer PR #171 merged to master (81de796a, marker CallChannelChain.swift
+present); master merged into feat/family-contacts-unify (commit 78d9a34d).
+Conflict resolutions: spec files ours (per-feature records); evidence JSONL
+unioned; L10n baseline pins re-measured to the combined catalog (1,415 keys:
+dialogue 1_396, calling 1_410, family 1_394); FEATURE_ROOTS unioned (our 3
+files + call-dialer's Services/Calls). Merged-tree build-for-testing GREEN
+(exit 0). Frozen call-dialer suites deferred to T-163 per speed mode.
+Line-anchor drift: L10nCatalogCoverageTests + check-release-log-safety.py are
+the union points; downstream units read current file state, not old anchors.
+
+## T-156 — Coordinator identity and link refresh — DONE
+
+Commit 6751cc50. familyContacts.didSet = single roster choke point (index
+rebuild + refreshVerifiedLinks); published familyIndex/verifiedLinks/faceEpoch;
+lazy link-service seam (first use, never init); generation-guarded publish;
+duplicate-claim guard refuses before any write (reason-coded PII-free event);
+add/update widened to nicknames: [String] + link: (interim shims removed);
+ContactResolver reads the published index. Foreground hook appended after
+syncCalendarShare; call-dialer chain untouched (no secondaryCallApp symbols in
+the diff). New suite: 9 tests. Log-safety gate exit 0 (24/24 fixtures);
+whole-module build green, 0 errors. Scoped run deferred.
+
+## T-157 — Coordinator face identity — DONE
+
+Commit a8bc3986 (+ notes 995e6ddb). faceIdentity/faceImage/faceThumbnail async
+accessors; 16-hex sha256 system-photo tokens written only inside the @MainActor
+face path; §10.1 precedence (system > app-local > nil/initials); sysphoto:/contact:
+content-addressed cache families + ViewCaches invalidation-contract doc note; all
+four sync contactPhoto(for:) call sites migrated to .task(id:) with post-await
+identity guards; the sync resolver DELETED per §8.1 (scan: 0 code refs remain).
+New suite: 8 tests incl. format pins, precedence, no-stale-serve, source pins.
+Whole-module build green, 0 errors. Notes use a disambiguated filename
+(T-157-notes.md is call-dialer's merged record). Scoped run deferred.
+
+## T-161 — CallView faces and caption — DONE
+
+Commit 44846df3. UnifiedContactResultRow caption seam (defaulted var) + pure
+composer on the frozen key; all six §3.5 gate sites moved to allowsReading
+(.denied only blocked arm, grantAccess re-reads status); accessLimited caption
+leads the readable block; three search sites read coordinator.familyIndex +
+verifiedLinks (interim hoists gone); call-dialer dial layer untouched (pinned).
+New suite: 10 tests (33 source pins pre-verified via a Python mirror).
+Whole-module build green, 0 errors; concurrent T-158 compiled clean too.
+Deviations recorded (suite naming, dial-back tests untouched). Scoped run
+deferred.
+
+## T-158 — Link/unlink seam and missed-call names — DONE
+
+Commit b23f190b. SystemContactUnlinkMode + pure unlinkMode rule +
+setFamilyContactLink (the only unlink path; F3 copy-before-clear with
+never-lose refusal; one atomic record write; no write-seam symbols in the
+unlink body — source-pinned); lazy injected photo-writer seam +
+syncSystemPhoto outcome mapping (byte-identical payload; .written invalidates
++ bumps; recordGone/identityMismatch refresh); link-aware
+familyContact(matchingPhone:) (own phone first, snapshot only); R4 gate shape
+in refreshNativeMissedCallNames (post-prompt re-read, allowsReading, real
+access + snapshot passthrough). New suite: 16 tests. Whole-module build green,
+0 errors (contention handled by waiting for T-161's build). Scoped run
+deferred.
+
+## T-159 — Wizard find and link steps — DONE
+
+Commit 2bc3817a. Find step converted to UnifiedContactSearch with the
+published roster/index/verified links; pure seam FamilyWizardFindPresentation
+(rows/storedClaimant/draftLink/linkState/bookName); draft link + 4-state link
+section with unlink through setFamilyContactLink; steering micro-flow
+(onSteerTo + parent in-place sheet swap); allowsReading gates + limited
+caption; draftLink passed through Save. New suite FamilyWizardFindStepTests
+(pure seams, engine-integrated Gherkin paths, drift pin, source pins).
+Whole-module build green, 0 errors. CallingSettingsView untouched. 7
+decisions/deviations recorded in the notes. Scoped run deferred.
+
+## T-160 — Wizard photo step and save — DONE
+
+Commit 3294a397. Photo step per §2.4 (source caption pure rule; write-access
+cards for verified-link editing only — shared askCard reusing grantAccess,
+denied line with Settings door; state line with the F4 label mapping); save
+flow per §2.6/§10.2 (store write first, photo Task via syncSystemPhoto, §10.4
+remove recheck through the same resolver, non-nil state stays open with
+common.close footer, nil dismisses); nickname step per §2.5 (enumerated rows,
+≥44pt labeled remove, 8-entry cap, F5 cappedNickname, full list through the
+coordinator seam — interim loss window closed). One production deviation:
+faceImageWithSource coordinator seam (recorded). New suite:
+FamilyWizardPhotoSaveTests. Whole-module build green, 0 errors. Scoped run
+deferred.
+
+## T-162 — Family list chip + legacy deletion — DONE
+
+Commit d8f6fed9. Link chip via pure seam (verified links only) appended to the
+role-chip row; ≥44pt tap floor, VoiceOver label, opens the editor (the
+copy-preserving unlink flow). T-157 face migration verified complete (one
+batch .task(id:) pass, post-await re-check, single publication) + one stale
+doc comment fixed. loadDraft preview confirmed on the T-160 async path.
+Legacy contactPhoto(for:) deletion CONFIRMED: 0 code references across the
+391-file production module (both scan patterns). New suite
+FamilyListLinkChipTests incl. the named deletion pin. Whole-module build
+green, 0 errors (195 warnings, one fewer than baseline). Scoped run deferred.
+
+## T-163 — Acceptance and release gates — DONE
+
+Commit e46c3ed1. Scoped sweep 32/32 suites green (five first-run failures
+were test-side bugs, fixed with in-code markers; ZERO production changes).
+Full unit bundle once on the final tree: 7062 total, 7030 passed, 22 failed,
+10 skipped — zero FCU suites failed; all 22 attributed category (b)
+pre-existing at baseline 81de796a with per-suite baseline evidence; zero (a),
+zero (c). Attempt 1 hung in the pre-existing Piper simulator-audio wedge
+(aborted, recorded); completing run used a disclosed 120s per-test timeout
+guard. Gates: log-safety exit 0, prompt-mirror green, L10n pins held
+(1396/1410/1415), no-egress pins green. Perf all within 20ms ceilings
+(index <=1.6ms, voice <=10.3ms, search 2.78ms). Evidence in
+specs/T-163-acceptance-notes.md. DV-1..6 is T-164, outstanding.
+
+## T-165 — Security evidence and feasibility honesty — DONE
+
+Commit 6e86ebd9. FCU-security-evidence-index.md (F1-F8 closure with verifier
+commands, 21-row STRIDE index, residuals + gaps) + feasibility-honesty report
+(all three asks delivered as specified; device verdicts OUTSTANDING pending
+T-164). F4 comment aligned in design-l2 §2.6 and design-l1 §10.2 step 3; F6
+§3.5 footnote with the post-T-144 verified anchor. F1/F2/F3/F5 CLOSED via the
+T-163 sweep pins; F7 no-action recorded; F8 accepted residual recorded for
+the DV session. 35/35 cited test tokens verified; log gate re-run exit 0.
+No production code touched.
+
+## T-164 — Device validation DV-1..6 protocol — DONE (execution PENDING)
+
+Commit 32e2382f. FCU-device-validation-protocol.md: the six DV items verbatim
+from the constitution with preconditions, shipped-copy steps, expected
+outcomes, pass/fail criteria, a11y spot-checks, evidence slots, record
+templates, build/install pointers (device-install.sh artifact-derived bundle
+id). HONEST STATUS: protocol written, execution PENDING — no Anzaan session;
+every item recorded BLOCKED with its named dependency; no PASS claimed; final
+sign-off gated until a device session executes all six (FR-FCU-017). Owner
+actions OA-1..OA-6 + the pre-release device console check are named in the
+protocol.

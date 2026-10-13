@@ -3049,6 +3049,40 @@
         }
       }
     },
+    "call.announce.fallbackRouted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ isn't available — calling %2$@ via %3$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ उपलब्ध छैन — %2$@ लाई %3$@ बाट कल गर्दैछु।"
+          }
+        }
+      }
+    },
+    "call.announce.launchFailedFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ didn't open for %2$@ — trying %3$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%2$@ को %1$@ खुलेन — %3$@ मार्फत प्रयास गर्दैछु।"
+          }
+        }
+      }
+    },
     "call.announce.messenger": {
       "extractionState": "manual",
       "localizations": {
@@ -3304,6 +3338,23 @@
         }
       }
     },
+    "call.search.accessLimited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Searching shows only the contacts you allowed."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खोज्दा तपाईंले अनुमति दिनुभएका सम्पर्कहरू मात्र देखिन्छन्।"
+          }
+        }
+      }
+    },
     "call.search.allowBody": {
       "extractionState": "manual",
       "localizations": {
@@ -3419,6 +3470,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "परिवार"
+          }
+        }
+      }
+    },
+    "call.search.linkedBookName": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Also in your phone book as %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोनबुकमा %@ को रूपमा पनि छ"
           }
         }
       }
@@ -4137,6 +4205,23 @@
         }
       }
     },
+    "dialogue.option.conjunction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " or "
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " वा "
+          }
+        }
+      }
+    },
     "dialogue.probe.bhajanKind": {
       "extractionState": "manual",
       "localizations": {
@@ -4234,7 +4319,7 @@
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "के तपाईंको मतलब %@ हो?"
+            "value": "तपाईंले %@ भन्नुभएको हो?"
           }
         }
       }
@@ -5854,6 +5939,261 @@
         }
       }
     },
+    "family.link.alreadyLinked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ is already a family contact."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ पहिले नै परिवारको सम्पर्क हो।"
+          }
+        }
+      }
+    },
+    "family.link.chip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Linked"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जोडिएको"
+          }
+        }
+      }
+    },
+    "family.link.linkedTo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Linked to %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@सँग जोडिएको"
+          }
+        }
+      }
+    },
+    "family.link.pickHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose the phone contact this person is in."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो व्यक्ति फोनमा कुन सम्पर्कको रूपमा छ, त्यो छान्नुहोस्।"
+          }
+        }
+      }
+    },
+    "family.link.sectionTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Phone contact"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोन सम्पर्क"
+          }
+        }
+      }
+    },
+    "family.link.stale": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This phone contact is no longer in your address book. The link is ignored."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोन सम्पर्क अब तपाईंको फोनबुकमा छैन। लिंक बेवास्ता गरिएको छ।"
+          }
+        }
+      }
+    },
+    "family.link.unlink": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove link"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "लिंक हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "family.link.unlinkHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This only separates the two records. Nothing is deleted, and your phone's contact is not changed."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यसले दुई रेकर्डलाई मात्र छुट्याउँछ। केही मेटिँदैन, र तपाईंको फोनको सम्पर्क परिवर्तन हुँदैन।"
+          }
+        }
+      }
+    },
+    "family.nickname.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "family.nickname.entryPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a name or variation (e.g. sanu, सानु)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नाम वा अर्को रूप थप्नुहोस् (जस्तै sanu, सानु)"
+          }
+        }
+      }
+    },
+    "family.nickname.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Any of these names finds this person — typed or spoken. Names are kept exactly as you enter them."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यीमध्ये कुनै नामले यो व्यक्ति भेटिन्छ — टाइप गरेको वा बोलेको। नामहरू तपाईंले लेखेकै रूपमा राखिन्छ।"
+          }
+        }
+      }
+    },
+    "family.nickname.removeLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "family.photo.accessBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allowing contacts access lets the app copy the photo you choose onto this person's contact card. Nothing else in your contacts is changed. The app works fully even if you say no."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पर्क पहुँच अनुमति दिनुभयो भने, तपाईंले छान्नुभएको फोटो यो व्यक्तिको सम्पर्क कार्डमा प्रतिलिपि गर्न सकिन्छ। तपाईंको सम्पर्कमा अरू केही परिवर्तन हुँदैन। तपाईंले नभन्नुभए पनि एप पूरै चल्छ।"
+          }
+        }
+      }
+    },
+    "family.photo.accessDeniedBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Contacts access is off, so the photo will be kept in this app only. You can change this in iPhone Settings."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पर्कको पहुँच बन्द छ, त्यसैले फोटो यही एपमा मात्र रहन्छ। तपाईं आईफोनको सेटिङमा यो बदल्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "family.photo.accessTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update this person's photo in your phone's contacts?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो व्यक्तिको फोटो फोनको सम्पर्कमा पनि अपडेट गर्ने हो?"
+          }
+        }
+      }
+    },
     "family.photo.add": {
       "extractionState": "manual",
       "localizations": {
@@ -5901,6 +6241,74 @@
           "stringUnit": {
             "state": "translated",
             "value": "फोटो हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "family.photo.sourceSystem": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shown from your phone's contacts."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोनको सम्पर्कबाट देखाइएको।"
+          }
+        }
+      }
+    },
+    "family.photo.state.keptOnPhone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kept in this app only."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यही एपमा मात्र राखिएको।"
+          }
+        }
+      }
+    },
+    "family.photo.state.systemPhotoRemains": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your phone's contact still has its own photo. Change it in the Contacts app to remove it."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको फोनको सम्पर्कमा अझै आफ्नै फोटो छ। हटाउन कन्ट्याक्ट्स एपमा गएर बदल्नुहोस्।"
+          }
+        }
+      }
+    },
+    "family.photo.state.updatedInSystem": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photo updated in your phone's contacts."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो फोनको सम्पर्कमा अपडेट भयो।"
           }
         }
       }
@@ -13252,6 +13660,40 @@
         }
       }
     },
+    "router.call.didYouMeanPrefix": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I couldn't find %1$@ in your contacts. Did you mean %2$@?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मैले %@ लाई सम्पर्कमा भेटिनँ। के तपाईं %@ भन्न खोज्नुभएको हो?"
+          }
+        }
+      }
+    },
+    "router.call.nameUnclear": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I heard you want to call, but I didn't catch who — please say 'call' and the person's name."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोन गर्ने कुरा त बुझें, तर कोलाई भन्ने बुझिन — कृपया नामसँगै भन्नुहोस्, जस्तै 'छोरालाई फोन गर'।"
+          }
+        }
+      }
+    },
     "router.call.facetimeUnavailable": {
       "extractionState": "manual",
       "localizations": {
@@ -13265,6 +13707,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "यो उपकरणमा फेसटाइम उपलब्ध छैन, त्यसैले कल सुरु गर्न सकिनँ।"
+          }
+        }
+      }
+    },
+    "router.call.fallbackDisclosure": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ isn't available, so I'll call %2$@ via %3$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ उपलब्ध छैन, त्यसैले %2$@ लाई %3$@ बाट कल गर्नेछु।"
           }
         }
       }
@@ -14489,6 +14948,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "क्यालेन्डर साझा"
+          }
+        }
+      }
+    },
+    "settings.calling.primaryTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Primary dialer"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मुख्य डायलर"
+          }
+        }
+      }
+    },
+    "settings.calling.secondaryTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fallback dialer"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वैकल्पिक डायलर"
           }
         }
       }

@@ -533,7 +533,12 @@ struct EmergencyContactsStep: View {
                 phone: entry.contact.phone,
                 relationship: entry.contact.relationship,
                 messengerHandle: entry.contact.messengerHandle,
-                nickname: entry.contact.nickname,
+                // T-156 (family-contacts-unify, 2026-10-12): the widened
+                // coordinator seam takes the full list, so this
+                // pass-through carries the contact's stored nicknames
+                // VERBATIM — a flag write can no longer drop the
+                // entries past the first.
+                nicknames: entry.contact.nicknames,
                 address: entry.contact.address,
                 email: entry.contact.email,
                 isEmergencyContact: entry.isEmergencyContact) {

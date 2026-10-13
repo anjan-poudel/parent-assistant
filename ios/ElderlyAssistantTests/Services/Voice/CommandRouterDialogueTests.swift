@@ -18,9 +18,11 @@ import SwiftUI
 ///     index before any addressing, driven directly with a hostile index
 ///     (classify is total, so a hostile index cannot arrive through
 ///     `route()`; the executor is proven total anyway);
-///   · V-1 — the gibberish guard keeps its shipped position: rejected
-///     noise speaks the reprompt, consumes no attempt, and the frame
-///     lives on;
+///   · V-1 — the gibberish guard keeps its shipped position, but a
+///     rejected transcript while a frame is live is an invalid ANSWER
+///     (auto-listen correction, 2026-10-11): it re-probes within the
+///     budget — the generic reprompt would leave the mic closed and
+///     strand the window — consumes one attempt, and the frame lives on;
 ///   · V-4 — the sanity guard still precedes the emergency check
 ///     (shipped ordering): a rejected over-long utterance that CONTAINS
 ///     an emergency phrase never triggers the emergency;
@@ -729,7 +731,14 @@ final class CommandRouterDialogueTests: XCTestCase {
     // MARK: - V-1 / V-4: the sanity guard's shipped ordering
 
     @MainActor
-    func testGibberishMidFrameConsumesNoAttemptAndLeavesTheFrameLive() throws {
+    func testGibberishMidFrameReProbesAndKeepsTheFrameLive() throws {
+        // [AUTO-LISTEN] (2026-10-11) Deliberate correction of the shipped
+        // V-1 pin: a rejected transcript while a frame is live is an
+        // invalid ANSWER, not a fresh turn. The generic reprompt would
+        // leave the mic closed and strand the window; the re-probe path
+        // (one attempt within the budget) speaks the retry probe, whose
+        // speech end re-opens the mic via the coordinator's auto-listen
+        // hook.
         let world = makeWorld()
         XCTAssertTrue(world.coordinator.startDialogueFrame(try slotFillDraft()))
         let looped = Array(repeating: "औषधि खाएँ", count: 6).joined(separator: " ")
@@ -742,14 +751,20 @@ final class CommandRouterDialogueTests: XCTestCase {
         let rejected = world.events("gibberish_rejected").first
         XCTAssertEqual(rejected?.outcome, "rejected")
         XCTAssertEqual(rejected?.errorCode, "repetition_loop")
-        XCTAssertTrue(world.coordinator.assistantSpoken.contains(
-            L10n.str("router.reprompt", locale: ne)))
+        XCTAssertFalse(world.coordinator.assistantSpoken.contains(
+            L10n.str("router.reprompt", locale: ne)),
+            "the generic reprompt must not strand the window")
+        let probe = world.events("dialogue_probe_spoken").first
+        XCTAssertEqual(probe?.metadata["attempt"], "2",
+                       "the re-probe carries the fresh ordinal")
         XCTAssertTrue(world.coordinator.resolutions.isEmpty)
-        XCTAssertTrue(world.dialogueEvents.isEmpty)
-        XCTAssertEqual(world.coordinator.manager.frame?.attempts, 1,
-                       "V-1: rejected noise consumes no attempt")
+        XCTAssertEqual(world.coordinator.manager.frame?.attempts, 2,
+                       "the rejected answer consumes one attempt")
         XCTAssertEqual(world.interpreter.interpretCount, 0,
-                       "no med-ack, no attempt, no model — the guard ends the turn")
+                       "no med-ack, no model — the guard ends the turn")
+        XCTAssertEqual(world.speaker.speeds.last,
+                       DialogueConfig.dialogueProbeSpeechSpeed,
+                       "probes speak at the slower dialogue rate")
     }
 
     @MainActor
@@ -765,15 +780,17 @@ final class CommandRouterDialogueTests: XCTestCase {
         let result = world.router.route(transcript: raw)
 
         // V-4: the sanity guard's shipped placement above the emergency
-        // check is unchanged — the rejected utterance takes the reprompt
-        // path and the emergency never fires.
+        // check is unchanged — the emergency never fires. With the live
+        // frame the rejected utterance takes the re-probe path
+        // (auto-listen correction), not the generic reprompt.
         XCTAssertEqual(result, .unrecognised(transcript: raw))
         XCTAssertEqual(world.events("gibberish_rejected").first?.errorCode, "too_long")
         XCTAssertFalse(world.bus.emittedEvents.contains { $0.eventType == "command_emergency_keyword" })
         XCTAssertTrue(world.coordinator.clears.isEmpty)
         XCTAssertNotNil(world.coordinator.manager.frame, "the frame lives on")
-        XCTAssertTrue(world.coordinator.assistantSpoken.contains(
-            L10n.str("router.reprompt", locale: ne)))
+        XCTAssertFalse(world.coordinator.assistantSpoken.contains(
+            L10n.str("router.reprompt", locale: ne)),
+            "the generic reprompt must not strand the window")
     }
 
     // MARK: - V-2: the new regions add no console write
@@ -1015,11 +1032,17 @@ private final class DialogueMockCoordinator: VoiceCommandCoordinating {
     func requestContactSearch(query: String?) {}
 }
 
-private final class DialogueMockSpeaker: Speaker {
+private final class DialogueMockSpeaker: Speaker, SpeechRateAdjusting {
     private(set) var utterances: [(text: String, locale: Locale)] = []
+    private(set) var speeds: [Float] = []
 
     func speak(_ text: String, locale: Locale) async {
         utterances.append((text, locale))
+    }
+
+    func speak(_ text: String, locale: Locale, speed: Float) async {
+        utterances.append((text, locale))
+        speeds.append(speed)
     }
 
     func cancel() {}

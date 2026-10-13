@@ -64,17 +64,25 @@ struct AddressBookEntry: Equatable, Identifiable {
     /// Messenger identity.
     let messengerHandle: String?
 
+    /// The system address-book record this row IS — `CNContact.identifier`
+    /// (family-contacts-unify T-148a, design-l2 §3.5) — empty when the
+    /// row was not built from a live record (test fixtures, `make`'s
+    /// default). Only a non-empty value can back a stored contact link:
+    /// an empty identifier is "no linkable record", never a link target.
+    var identifier: String = ""
+
     /// Memberwise stand-in with a nil-handle default — same pattern as
     /// `FamilyContact`'s defaulted `messengerHandle`: a row with no
     /// linkage (the common case) reads naturally instead of spelling
     /// `messengerHandle: nil` at every construction site.
     init(name: String, label: String, phone: String, normalized: String,
-         messengerHandle: String? = nil) {
+         messengerHandle: String? = nil, identifier: String = "") {
         self.name = name
         self.label = label
         self.phone = phone
         self.normalized = normalized
         self.messengerHandle = messengerHandle
+        self.identifier = identifier
     }
 
     var id: String { normalized }
@@ -104,12 +112,17 @@ struct AddressBookEntry: Equatable, Identifiable {
     /// `derivedMessengerHandle`, never from the phone — a bare number
     /// is not a Messenger identity. A handle never changes the row's
     /// existence: no dialable number still means no row, handle or not.
+    ///
+    /// `identifier` is the source record's `CNContact.identifier`
+    /// (defaulted empty so every existing call site compiles unchanged);
+    /// see `AddressBookEntry.identifier`.
     static func make(givenName: String,
                      familyName: String,
                      organizationName: String,
                      numbers: [(label: String, phone: String)],
                      instantMessageAddresses: [(service: String, username: String)] = [],
-                     socialProfiles: [(service: String, urlString: String)] = []) -> AddressBookEntry? {
+                     socialProfiles: [(service: String, urlString: String)] = [],
+                     identifier: String = "") -> AddressBookEntry? {
         guard let number = numbers.first(where: {
             !ContactNumberKey.normalized($0.phone).isEmpty
         }) else { return nil }
@@ -126,7 +139,8 @@ struct AddressBookEntry: Equatable, Identifiable {
                                 normalized: ContactNumberKey.normalized(number.phone),
                                 messengerHandle: derivedMessengerHandle(
                                     instantMessageAddresses: instantMessageAddresses,
-                                    socialProfiles: socialProfiles))
+                                    socialProfiles: socialProfiles),
+                                identifier: identifier)
     }
 
     /// The Messenger handle this contact's stored Facebook linkage
@@ -242,10 +256,36 @@ struct AddressBookEntry: Equatable, Identifiable {
 /// App-facing authorization state. `.restricted` (parental controls etc.)
 /// is surfaced as `.denied`: for both, the only forward path is the
 /// system Settings screen, so the UI copy is the same.
+///
+/// `.limited` (iOS 18+ "Select Contacts") is the user granting access to
+/// a SUBSET of the address book: the granted records enumerate and are
+/// readable, so a read path must treat limited as readable — while never
+/// assuming the whole book is visible (a person outside the selection
+/// simply has no row, an honest "no match", never a claim that contacts
+/// are unavailable).
 enum ContactsAccess: Equatable {
     case notDetermined
     case allowed
     case denied
+    /// iOS 18+ "Select Contacts" — a granted subset of the book.
+    case limited
+
+    /// `.allowed` and `.limited` are READABLE; denial/nagging logic keys
+    /// on `.denied` only — limited never re-prompts (L1 §9.3).
+    var allowsReading: Bool { self == .allowed || self == .limited }
+
+    /// Pure mapping — the ONE iOS-18 availability gate in the feature
+    /// (pinned by `ContactsAccessTests`). Unknown (future) statuses fail
+    /// closed to `.denied`.
+    static func from(_ status: CNAuthorizationStatus) -> ContactsAccess {
+        if #available(iOS 18.0, *), status == .limited { return .limited }
+        switch status {
+        case .authorized: return .allowed
+        case .denied, .restricted: return .denied
+        case .notDetermined: return .notDetermined
+        @unknown default: return .denied
+        }
+    }
 }
 
 /// Search + ranking over address-book rows.
@@ -330,7 +370,13 @@ final class AddressBookDirectory {
     /// `AddressBookEntry.derivedMessengerHandle`). One pass serves both
     /// the plain dial search and the badged unified one, so they are
     /// fetched unconditionally.
+    ///
+    /// `CNContactIdentifierKey` (family-contacts-unify T-148a): the
+    /// record handle a stored contact link anchors on — fetched so
+    /// `allEntries()` can carry it onto every row (see
+    /// `AddressBookEntry.identifier`).
     private static let fetchKeys: [CNKeyDescriptor] = [
+        CNContactIdentifierKey,
         CNContactGivenNameKey,
         CNContactFamilyNameKey,
         CNContactOrganizationNameKey,
@@ -346,12 +392,7 @@ final class AddressBookDirectory {
     }
 
     static func access() -> ContactsAccess {
-        switch CNContactStore.authorizationStatus(for: .contacts) {
-        case .authorized: return .allowed
-        case .denied, .restricted: return .denied
-        case .notDetermined: return .notDetermined
-        @unknown default: return .denied
-        }
+        ContactsAccess.from(CNContactStore.authorizationStatus(for: .contacts))
     }
 
     /// Point-of-use permission request (constitution: permissions are
@@ -411,7 +452,8 @@ final class AddressBookDirectory {
                                                     organizationName: contact.organizationName,
                                                     numbers: numbers,
                                                     instantMessageAddresses: instantMessages,
-                                                    socialProfiles: socialProfiles) else { return }
+                                                    socialProfiles: socialProfiles,
+                                                    identifier: contact.identifier) else { return }
             let existing = byNumber[entry.normalized]
             let entryHasRealName = entry.name != entry.phone
             if existing == nil {
@@ -424,5 +466,31 @@ final class AddressBookDirectory {
         return byNumber.values.sorted {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
+    }
+}
+
+// MARK: - SystemContactReading conformance (family-contacts-unify T-149, design-l2 §1.3)
+
+/// The read seam `SystemContactLinkService` consumes. Both members are thin
+/// glue over the private `CNContactStore` — the store stays private to this
+/// file, and the identifier-predicate fetch is what keeps link verification to
+/// ONE batched read (the service decides the identifiers and the keys; this
+/// conformance decides nothing).
+///
+/// `currentAccess()` delegates to the SAME single iOS-18 mapping every other
+/// read path uses (`ContactsAccess.from`, T-148a) — re-mapping the status here
+/// would be exactly the version-gate drift `ContactsAccessTests` exists to
+/// catch.
+extension AddressBookDirectory: SystemContactReading {
+
+    func currentAccess() -> ContactsAccess { Self.access() }
+
+    /// Records matching `identifiers`, under the current access. A record the
+    /// user did not grant (iOS 18 "Select Contacts") is simply absent from the
+    /// result — never an error, never invented; a store-level failure throws
+    /// and the service degrades to its previous snapshot (design-l2 §1.3).
+    func contacts(identifiers: [String], keysToFetch: [CNKeyDescriptor]) throws -> [CNContact] {
+        let predicate = CNContact.predicateForContacts(withIdentifiers: identifiers)
+        return try store.unifiedContacts(matching: predicate, keysToFetch: keysToFetch)
     }
 }

@@ -1,0 +1,39 @@
+{
+  "id": "d0600ad4-0905-4f99-bcc7-78b97c787d4f",
+  "task_id": "design-l1",
+  "workflow_id": "call-dialer-primary-secondary",
+  "status": "RESOLVED",
+  "reason": "T1 design gate — L1 architecture for call-dialer-primary-secondary (design-l1). The architect produced specs/design-l1.md (871 lines): contract sections Overview/Architecture/Components present; 11 ADRs (ADR-CDP-01..11) + 10 recorded design-time resolutions (RES-1..10) — NO amendment to the frozen design's owner decisions (1–5), type shapes (Feasibility, Result.route) or flow; the RES items are the placements the frozen design / requirements explicitly left to design-l1 (resolver file at Services/Calls/CallChannelChain.swift; resolvedCallChannel / resolvedMissedCallChannel returning the chain Result with fellBackFrom provenance; CallChannelVocabulary at the coordinator seam holding FR-CDP-010's audio-never-FaceTime / video-never-GSM binding without touching the frozen route; copy names fellBackFrom.first + routed channel inside the frozen five-key budget; tap announcement at resolution before the open (app-switch may silence post-open speech); additive attemptOrder/nextLaunchFailCandidate statics for the FR-CDP-015 hop; defaulted PendingCallAction.fellBackFrom/hopCandidates and an injected MethodResolver globalDefault closure mapped CallApp→CallMethod by call type; launch-fail exhaust speaks the shipped noPhoneNumber line, no sixth catalog key; voice-path vocabulary .anyChannel; launch-fail observation at all open-outcome sites with WhatsApp recoveries preserved). New pure-static CallChannelChain (route + statics) with injected feasibility closures; secondaryCallApp on the existing UserDefaults seam defaulting to .phone (absent key → GSM for existing installs); the Messenger-no-handle refusal becomes a chain hop on the request path while the override protocol gate stays byte-identical (FR-CDP-014); tap announcements and launch-fail hops reuse the existing spoken-outcome lane; zero new network / log / auth surface. Coverage: 19/19 FR-CDP + 10/10 NFR-CDP traceability matrix; STRIDE pre-map of the five workflow security focus areas; DV-1..7 mapping; 31-row integration table with every file:line re-verified against the worktree source at design time. Verification by the dispatching session: contract headers literal; 0 SEC-002 long-token hits; spot-checked 12 line references against the worktree, all correct; lock coverage complete. Gate nature: T1 design gate with NO owner-decision content — the design was owner-approved and frozen 2026-10-12 (docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md) and no recorded resolution changes a frozen shape or owner decision. Resolved inline per the owner's autonomous-continuation instruction relayed via the coordinator conversation 2026-10-12 (continue design-l1 → … → security-test autonomously, stopping only at genuine owner gates; final-sign-off T2 remains the human gate), consistent with the run precedent for this gate class (multi-turn-conversation design-l1, gate aa361816, approved on the same no-owner-decision-content basis). Artifact uncommitted pending gate closure.",
+  "context": {
+    "task_description": "System-architect L1 design pass for the call-dialer-primary-secondary feature: system components, integration points, feasibility seam design, chain placement, confirmation-window ordering, localisation keys, persistence/upgrade behaviour, launch-fail observation, security pre-map, traceability.",
+    "risk_tier": "T1",
+    "agent": "architect",
+    "artifacts": [
+      "specs/design-l1.md"
+    ],
+    "artifact_stats": {
+      "lines": 871,
+      "bytes": 63195,
+      "adrs": 11,
+      "recorded_resolutions": 10,
+      "integration_rows": 31
+    },
+    "verification": {
+      "contract_sections": "## Overview @29, ## Architecture @95, ## Components @487 (literal, contract architecture_l1)",
+      "sec002_long_tokens": 0,
+      "line_reference_spot_checks": "12 references re-verified against worktree source (AppCoordinator 330/335, 2099, 2851, 8382, 8423, 6452-6468, 7586+; LeafViews 1173, 1612; MethodResolver 22-26, 74-78; VoiceSessionStateMachine 135; CallLinks 66, 340-344; Info.plist 94) — all correct",
+      "lock_coverage": "19/19 FR-CDP + 10/10 NFR-CDP present in the traceability matrix",
+      "amendments": "None to frozen owner decisions 1–5 or type shapes; RES-1..10 recorded design-time resolutions only"
+    },
+    "gate_class": "T1 design gate — no owner-decision content",
+    "precedent": "multi-turn-conversation design-l1 gate aa361816-b22d-4664-b5f6-a656193b5b79 (approved inline, same basis)",
+    "branch": "feat/call-dialer-primary-secondary",
+    "branch_tip": "8a3a4156",
+    "artifacts_uncommitted": true,
+    "open_decisions": [],
+    "note": "Item created by the dispatching session because the task was dispatched directly (not via the ai-sdd run command), which is the path that normally creates it."
+  },
+  "created_at": "2026-10-11T16:24:45.668Z",
+  "notes": "Approved as a T1 design gate with no owner-decision content. Basis: (1) the frozen design was owner-approved 2026-10-12 and binds every owner decision (1-5) and type shape (Feasibility, CallChannelChain.Result.route); the RES-1..RES-10 items recorded in specs/design-l1.md are design-detail placements the frozen design and the locked requirements explicitly left to design-l1 - none changes a frozen shape, flow, or owner decision, and review-l2 / security-design-review remain ahead as the design gates; (2) resolution performed inline per the owner's autonomous-continuation instruction relayed via the coordinator conversation 2026-10-12: continue design-l1 through security-test autonomously, stopping only at genuine owner HIL gates (final-sign-off T2 remains the human gate); (3) this matches the run precedent for the same gate class - multi-turn-conversation design-l1 (gate aa361816-b22d-4664-b5f6-a656193b5b79) was approved on exactly this no-owner-decision-content basis. Verification before approval: contract headers literal (Overview/Architecture/Components), 0 SEC-002 long-token hits, 12 spot-checked file:line references all correct against the worktree, 19/19 FR + 10/10 NFR coverage. No amendments requested.",
+  "resolved_at": "2026-10-11T16:24:52.495Z"
+}

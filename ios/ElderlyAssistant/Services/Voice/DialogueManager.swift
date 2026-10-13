@@ -361,6 +361,7 @@ enum DialogueProbeComposer {
         static let understoodNo = "dialogue.understood.no"
         static let didYouMean = "dialogue.didYouMean"
         static let correctionOr = "dialogue.correction.or"
+        static let conjunction = "dialogue.option.conjunction"
     }
 
     /// slotFill: the group's question key with `%@` = the capped option
@@ -412,10 +413,13 @@ enum DialogueProbeComposer {
 
     private static func candidateChoiceProbe(for frame: DialogueFrame,
                                              locale: Locale) -> String {
+        // Narrowed + conversational (owner feedback 2026-10-11): at most
+        // two candidates joined with the locale conjunction ("X वा Y?"),
+        // never a bare comma list that reads like an IVR menu.
         let labels = frame.candidates
-            .prefix(DialogueConfig.maxCandidates)
+            .prefix(DialogueConfig.maxSpokenCandidates)
             .map { candidateLabel(for: $0, locale: locale) }
-            .joined(separator: ", ")
+            .joined(separator: L10n.str(Key.conjunction, locale: locale))
         return L10n.str(Key.understoodNo, locale: locale) + " " +
             String(format: L10n.str(Key.didYouMean, locale: locale), labels)
     }
@@ -427,6 +431,7 @@ enum DialogueProbeComposer {
     /// `dialogue.didYouMean` template; two → the X-or-Y template with
     /// the top two readings; beyond two the rest are simply not offered.
     /// Answer "हो" for the first, echo the second, "होइन" to close.
+    /// (Supersedes the 2026-10-11 ", "-joined lead form on master.)
     private static func correctionChoiceProbe(for frame: DialogueFrame,
                                               locale: Locale) -> String {
         guard let reading = frame.correctionReadings.first,
@@ -461,6 +466,12 @@ enum DialogueConfig {
     static let maxProbes = 2
     /// FR-MTC-004 — <= 2-3 candidates per probe.
     static let maxCandidates = 3
+    /// The SPOKEN candidate cap (owner feedback 2026-10-11: choice
+    /// questions must narrow, not sound like a phone IVR). The frame may
+    /// hold up to `maxCandidates`; the spoken question offers at most
+    /// two, joined with the conjunction ("X वा Y?"). The answer path's
+    /// index words still address every held candidate.
+    static let maxSpokenCandidates = 2
     /// FR-MTC-003 — <= 3-4 named options per probe.
     static let maxSlotOptions = 4
     /// [CORRECTION-REVIVE] The correction question's turn-scoped budget:
@@ -468,6 +479,10 @@ enum DialogueConfig {
     /// arm a second correction frame), separate from the shared retry
     /// budget above.
     static let maxCorrectionProbes = 1
+    /// The dialogue probes' TTS rate — slower than the standard 0.95 so
+    /// the elder can follow a spoken question with options (owner
+    /// feedback 2026-10-11: "it speaks too fast for me to understand").
+    static let dialogueProbeSpeechSpeed: Float = 0.8
 }
 
 /// The complete error vocabulary of the new dialogue types (design-l2

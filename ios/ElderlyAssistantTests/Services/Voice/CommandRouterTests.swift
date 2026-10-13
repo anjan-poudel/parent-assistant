@@ -84,7 +84,13 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertEqual(result, .emergencyTriggered)
     }
 
-    func testSensitiveCallCommandIsBlockedUntilAuthExists() async {
+    /// [DETERMINISTIC-CALL] (2026-10-11) With NO interpreter available, a
+    /// direct call request must still reach the confirmation seam via
+    /// deterministic name extraction. The old behavior was a blanket
+    /// "secure authentication not ready" refusal (`router.sensitiveBlocked`),
+    /// which named an auth gate that has never existed — the real gate is
+    /// the spoken yes/no confirmation every call path shares.
+    func testCallWithoutInterpreterResolvesDeterministicallyAndAsksConfirmation() async {
         let coordinator = MockVoiceCommandCoordinator()
         let speaker = MockSpeaker()
         let bus = MockObservabilityBus()
@@ -98,17 +104,146 @@ final class CommandRouterTests: XCTestCase {
         await Task.yield()
 
         XCTAssertEqual(result, .blockedSensitiveAction)
-        XCTAssertTrue(coordinator.acknowledgedEntryIds.isEmpty)
+        XCTAssertEqual(coordinator.callConfirmationRequests.count, 1)
+        XCTAssertEqual(coordinator.callConfirmationRequests.first?.contact, "छोरा")
+        XCTAssertNil(coordinator.callConfirmationRequests.first?.callType)
+        XCTAssertNil(coordinator.callConfirmationRequests.first?.requestedApp)
         XCTAssertTrue(bus.emittedEvents.contains {
-            $0.eventType == "command_sensitive_blocked_auth_unavailable"
+            $0.eventType == "command_call_deterministic_confirmation"
         })
-        // The refusal must ALSO land on the outcome card — the live-caption
-        // pill is gone by the time the block fires, so a spoken-only reply
-        // leaves the screen with no transcript and no answer (2026-09-05).
+    }
+
+    /// A nameless call request ("फोन गर") extracts nothing usable — the
+    /// honest ask-for-the-name line, carded so it survives the missing
+    /// caption pill (field report 2026-09-05).
+    func testNamelessCallRequestSpeaksHonestNameUnclearCard() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        let speaker = MockSpeaker()
+        let bus = MockObservabilityBus()
+        let router = CommandRouter(
+            coordinator: coordinator,
+            observabilityBus: bus,
+            speaker: speaker
+        )
+
+        let result = router.route(transcript: "फोन गर")
+        await Task.yield()
+
+        XCTAssertEqual(result, .blockedSensitiveAction)
+        XCTAssertTrue(coordinator.callConfirmationRequests.isEmpty)
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "command_call_name_unclear"
+        })
+        XCTAssertEqual(coordinator.genericReplies.count, 1)
+    }
+
+    /// The extracted name goes through the SAME coordinator seam as the
+    /// LLM path — when `ContactResolver` matches nobody, the honest
+    /// contact-not-found line runs (carded), never the old auth refusal.
+    func testUnmatchedExtractedNameSpeaksContactNotFoundHonestly() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.callConfirmationPrompt = nil
+        let speaker = MockSpeaker()
+        let bus = MockObservabilityBus()
+        let router = CommandRouter(
+            coordinator: coordinator,
+            observabilityBus: bus,
+            speaker: speaker
+        )
+
+        let result = router.route(transcript: "मैयालाई फोन गर")
+        await Task.yield()
+
+        XCTAssertEqual(result, .blockedSensitiveAction)
+        XCTAssertEqual(coordinator.callConfirmationRequests.count, 1)
+        XCTAssertEqual(coordinator.callConfirmationRequests.first?.contact, "मैया")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "command_call_contact_not_found"
+        })
         XCTAssertEqual(coordinator.genericReplies.count, 1)
     }
 
     // MARK: - Trial wiring: voice call / send message (LLM-interpreted path)
+
+    /// [DETERMINISTIC-CALL] (2026-10-11) The model resolved `call` but set
+    /// no contact slot — the transcript's own name survives deterministic
+    /// extraction and the SAME confirmation seam runs, instead of the old
+    /// "secure authentication" refusal.
+    func testCallIntentWithEmptyContactSlotRetriesDeterministicExtraction() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .call, entryId: nil, contact: nil, time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil, pluginAction: nil, pluginEntities: nil,
+            confidence: 0.95, reply: "ठिक छ"
+        )
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "मैयालाई फोन गर")
+
+        XCTAssertEqual(coordinator.callConfirmationRequests.count, 1)
+        XCTAssertEqual(coordinator.callConfirmationRequests.first?.contact, "मैया")
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_call_confirmation_requested" })
+    }
+
+    /// [SLOT-VERIFY] (2026-10-11) Field report: the model filled a
+    /// WRONG contact name ("Seema" for a request to call "syanu"). When
+    /// the model's slot fails to resolve, the transcript's own extracted
+    /// name gets a second attempt through the SAME confirmation seam —
+    /// a hallucinated slot must not cost the elder the call.
+    func testWrongModelContactSlotFallsBackToTranscriptName() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.callConfirmationPromptProvider = { query in
+            query == "syanu" ? "स्यानुलाई फोन गर्ने हो?" : nil
+        }
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .call, entryId: nil, contact: "Seema", time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil, pluginAction: nil, pluginEntities: nil,
+            confidence: 0.95, reply: "ठिक छ"
+        )
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "syanu lai phone gara")
+
+        XCTAssertEqual(coordinator.callConfirmationRequests.map(\.contact),
+                       ["Seema", "syanu"],
+                       "the model's slot is tried first, then the transcript's name")
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_call_deterministic_confirmation" })
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "command_call_contact_not_found" })
+    }
+
+    /// [SLOT-VERIFY] When BOTH the model's slot and the transcript's
+    /// name fail to resolve, the failure line quotes the TRANSCRIPT's
+    /// reading (the least-wrong name), never the hallucinated slot —
+    /// the elder hears the name they actually said.
+    func testFailedCallQuotesTranscriptNameNotHallucinatedSlot() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.callConfirmationPrompt = nil
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .call, entryId: nil, contact: "Anita", time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil, pluginAction: nil, pluginEntities: nil,
+            confidence: 0.95, reply: "ठिक छ"
+        )
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "anjan lai phone gara")
+
+        XCTAssertEqual(coordinator.callConfirmationRequests.map(\.contact),
+                       ["Anita", "anjan"])
+        XCTAssertEqual(coordinator.genericReplies.count, 1)
+        let line = coordinator.genericReplies.first ?? ""
+        XCTAssertTrue(line.contains("anjan"), "the failure line must quote the transcript's name")
+        XCTAssertFalse(line.contains("Anita"), "the hallucinated slot must not be quoted")
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_call_contact_not_found" })
+    }
 
     /// 2026-09-05: calling now asks for confirmation FIRST — the router's
     /// job is just to request it and speak the prompt. Nothing is dialed
@@ -965,10 +1100,15 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
 
     var isAwaitingCallConfirmation = false
     var callConfirmationPrompt: String? = "फोन गर्ने हो?"
+    /// [SLOT-VERIFY] Per-query override — lets a test fail one name and
+    /// resolve another, exactly the field scenario (hallucinated slot vs
+    /// transcript name).
+    var callConfirmationPromptProvider: ((String?) -> String?)?
     var callConfirmationRequests: [(contact: String?, callType: String?, requestedApp: String?)] = []
     func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?,
                                  sourceTranscript: String?, sourceCommand: InterpretedCommand?) -> String? {
         callConfirmationRequests.append((contactQuery, callType, requestedApp))
+        if let provider = callConfirmationPromptProvider { return provider(contactQuery) }
         return callConfirmationPrompt
     }
 
@@ -1349,8 +1489,9 @@ final class CommandRouterIntentToolsTests: XCTestCase {
         // (mirrors the sensitive-call phrases) — they route onward, they
         // are never answered as arithmetic. With an interpreter present
         // the LLM path fires first (its asynchronous return shape is
-        // `.unrecognised`); the post-LLM sensitive-call block then wins
-        // inside the completion.
+        // `.unrecognised`); the abstaining completion then lands in the
+        // deterministic call fallback, which extracts the name and asks
+        // for confirmation instead of the old auth-block refusal.
         let callCoordinator = MockVoiceCommandCoordinator()
         let interpreter = FakeCommandInterpreter()
         let bus = MockObservabilityBus()
@@ -1361,8 +1502,8 @@ final class CommandRouterIntentToolsTests: XCTestCase {
         XCTAssertEqual(interpreter.interpretCallCount, 1)
         XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_dispatched_to_llm" })
         XCTAssertTrue(bus.emittedEvents.contains {
-            $0.eventType == "command_sensitive_blocked_auth_unavailable"
-        }, "the post-LLM sensitive-call block must still fire")
+            $0.eventType == "command_call_deterministic_confirmation"
+        }, "the post-LLM deterministic call fallback must request confirmation")
         XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "intent_tool_calculator" },
                        "call talk must never be answered as arithmetic")
     }
