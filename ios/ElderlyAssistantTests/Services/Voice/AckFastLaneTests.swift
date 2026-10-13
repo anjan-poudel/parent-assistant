@@ -470,6 +470,36 @@ final class AckFastLaneTests: XCTestCase {
         XCTAssertEqual(finished, 1, "a cancel with nothing playing is a no-op")
     }
 
+    func testPlayerThatRefusesToPlaySettlesInsteadOfHangingTheFastLane() throws {
+        // play() returning false means no delegate callback will ever
+        // fire — the fast lane must settle (end the seam, fire the
+        // finished note) or the turn hangs and the session stays in the
+        // loud playback category with no mic.
+        final class RefusingPlayer: AVAudioPlayer {
+            override func play() -> Bool { false }
+        }
+        var seamBegins = 0
+        var seamEnds = 0
+        ResponsePlaybackModeSeam.begin = { seamBegins += 1 }
+        ResponsePlaybackModeSeam.end = { seamEnds += 1 }
+        let bus = RecordingBus()
+        let player = AckFastLanePlayer(
+            cache: cache, observabilityBus: bus,
+            playerFactory: { url in try RefusingPlayer(contentsOf: url) })
+        let spec = AckVoiceSpec.resolve(locale: ne)
+        try cache.store(wav: writeTinyWAV("refusing.wav"), variant: 1, spec: spec)
+
+        var finished = 0
+        player.onPlaybackFinished = { finished += 1 }
+
+        let played = player.playCachedAck(variant: 1, locale: ne)
+
+        XCTAssertFalse(played, "a refused play reads as a miss — the router falls back")
+        XCTAssertEqual(seamBegins, 1)
+        XCTAssertEqual(seamEnds, 1, "the refused play still settles the seam")
+        XCTAssertEqual(finished, 1, "the finished note fires — no hang")
+    }
+
     // MARK: - [VOLUME-BOOST] The ack carries the reply volume
 
     func testPlayerAtOneHundredPercentHandsTheCachedFileStraightThrough() throws {

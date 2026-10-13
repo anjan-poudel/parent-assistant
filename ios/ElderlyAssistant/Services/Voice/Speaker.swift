@@ -19,12 +19,12 @@ protocol SpeechRateAdjusting: Speaker {
     func speak(_ text: String, locale: Locale, speed: Float) async
 }
 
-/// [LOUD-TTS] Response-playback loudness seam: switches the shared audio
-/// session to `.voicePrompt` mode while the assistant speaks and restores
-/// the capture preset afterwards (see `AudioSessionManager`). A static
-/// seam — the same pattern as `NewsSourceEditorSeam` — installed by
-/// `AppCoordinator.start()`; the no-op default keeps speaker unit tests
-/// audio-free.
+/// [LOUD-TTS-CATEGORY] Response-playback loudness seam: switches the
+/// shared audio session to the bell's loud `.playback` configuration
+/// while the assistant speaks and restores the capture preset afterwards
+/// (see `AudioSessionManager`). A static seam — the same pattern as
+/// `NewsSourceEditorSeam` — installed by `AppCoordinator.start()`; the
+/// no-op default keeps speaker unit tests audio-free.
 enum ResponsePlaybackModeSeam {
     static var begin: () -> Void = {}
     static var end: () -> Void = {}
@@ -33,7 +33,7 @@ enum ResponsePlaybackModeSeam {
 // MARK: - [VOLUME-BOOST] Spoken-reply output volume (poor hearing)
 
 /// Persisted loudness setting for the assistant's SPOKEN REPLIES: percent
-/// of the voice file's own amplitude, 50–150 % in 10 % steps, default
+/// of the voice file's own amplitude, 50–200 % in 10 % steps, default
 /// 100 % (the loudness the app shipped with). The top of the range is the
 /// boost; the range goes below 100 % so a quiet room can be covered too.
 ///
@@ -52,7 +52,7 @@ enum VoiceOutputVolume {
     static let defaultsKey = "voice.outputVolumePercent"
     static let defaultPercent = 100
     static let minimumPercent = 50
-    static let maximumPercent = 150
+    static let maximumPercent = 200
     static let stepPercent = 10
 
     /// Range clamp — the single definition both the write path and the
@@ -82,40 +82,49 @@ enum VoiceOutputVolume {
     }
 }
 
-/// [VOLUME-BOOST] The playback gain + peak limiter for one spoken reply.
+/// [VOLUME-BOOST] The playback gain + soft-knee limiter for one spoken
+/// reply.
 ///
-/// Gain — linear factor = percent / 100, i.e. 0.5× … 1.5×
-/// (−6.0 dB … +3.5 dB). It is applied to the SAMPLES of the reply WAV
+/// Gain — linear factor = percent / 100, i.e. 0.5× … 2.0×
+/// (−6.0 dB … +6.0 dB). It is applied to the SAMPLES of the reply WAV
 /// that is about to play — never to the shared audio session, never to a
 /// global/system volume — so no other audio path in the app can change
 /// because of it.
 ///
-/// Limiter — normalize-then-limit, whole buffer in hand (a zero-attack
-/// look-ahead, one scale factor for the entire utterance):
+/// The per-sample transfer (gain `g`, knee `k`, ceiling `c`):
 ///
-///     peakIn  = max |sample| over every channel
-///     boosted = peakIn × requested gain
-///     applied = boosted ≤ ceiling ? requested gain : ceiling / peakIn
-///     out[i]  = clamp(in[i] × applied, −ceiling, +ceiling)
+///     boosted = sample × g
+///     g ≤ 1:   out = clamp(boosted, −c, +c)                  — pure linear
+///     g > 1:   |boosted| ≤ k → out = boosted                 — full gain
+///              |boosted| > k → out = sign · (k + (c − k) ·
+///                                        tanh((|boosted| − k) / (c − k)))
 ///
-/// One factor for every channel keeps the stereo image unshifted; the
-/// final clamp is the float-rounding / non-finite safety net, so the
-/// output can never exceed the ceiling. Ceiling = −1 dBFS (≈ 0.891
-/// linear), leaving headroom for the route's own processing.
+/// Why a knee instead of the original whole-buffer ceiling scale: the
+/// bundled Piper speech peaks near full scale, so a pure peak limiter
+/// applied ≈ ceiling/peak ≈ 1.0× at 150 % — the setting bought almost
+/// nothing on real replies (field report 2026-10-14: replies far
+/// quieter than other apps even at the top of the range). Speech is
+/// low-RMS with occasional peaks, so the knee gives the BODY of the
+/// speech the full requested gain while the loudest moments compress
+/// smoothly toward the ceiling instead of clipping. Attenuation
+/// (≤ 100 %) stays pure linear: a quiet room is turned down, never
+/// compressed.
+///
+/// Ceiling = −1 dBFS (≈ 0.891 linear), knee = −12 dBFS (≈ 0.251
+/// linear). tanh is smooth (derivative 1 at the knee), so the
+/// compression onset has no audible corner, and |out| approaches the
+/// ceiling asymptotically without ever reaching it. One transfer for
+/// every channel keeps the stereo image unshifted.
 ///
 /// Honest limits — this is NOT a hearing aid and makes no such claim:
-///  · The gain can only amplify what the voice file already contains.
-///    The bundled Piper exports are already close to full scale, so most
-///    of the 100 → 150 % range buys little loudness there, and the
-///    intelligibility gain flattens as the base amplitude approaches
-///    0 dBFS. Quiet synthesis benefits most; a file that is already at
-///    the ceiling simply gets limited.
-///  · Above the ceiling the limiter trades loudness for compression:
-///    loud passages are pulled down to the ceiling while quiet passages
-///    keep the full gain, so speech near the top of the range can sound
-///    slightly compressed rather than simply louder.
+///  · High settings trade dynamics for loudness: the loudest passages
+///    compress, so speech near the top of the range sounds denser
+///    rather than simply louder.
 ///  · Broadband gain only — no frequency shaping, no per-band
 ///    compression, no assistive-device claims.
+///  · The gain can only amplify what the voice file already contains —
+///    digital silence stays silent, and an already-loud RMS gains less
+///    than a quiet one.
 ///
 /// The system-speech fallback (`SystemSpeechSpeaker`) cannot exceed
 /// unity at all: `AVSpeechUtterance.volume` caps at 1.0, so replies that
@@ -129,7 +138,14 @@ enum VoiceOutputGain {
     /// The ceiling as a linear amplitude (≈ 0.8913).
     static var ceilingLinear: Float { powf(10, ceilingDBFS / 20) }
 
-    /// Percent → linear multiplier. Clamped first: the limiter must
+    /// Soft-knee threshold in dBFS — below it the full requested gain
+    /// applies linearly, above it samples compress toward the ceiling.
+    static let kneeDBFS: Float = -12
+
+    /// The knee as a linear amplitude (≈ 0.2512).
+    static var kneeLinear: Float { powf(10, kneeDBFS / 20) }
+
+    /// Percent → linear multiplier. Clamped first: the transfer must
     /// never see an out-of-range gain.
     static func linearFactor(percent: Int) -> Float {
         Float(VoiceOutputVolume.clamp(percent)) / 100
@@ -141,16 +157,18 @@ enum VoiceOutputGain {
         20 * log10f(linearFactor(percent: percent))
     }
 
-    /// What the limiter did to one buffer (diagnostics + tests).
+    /// What the transfer did to one buffer (diagnostics + tests).
     struct LimiterResult: Equatable {
-        /// Factor actually applied to every sample (≤ the requested gain).
+        /// The gain applied in the linear region — the requested gain,
+        /// clamped to ≥ 0. The knee compresses individual loud samples;
+        /// it never reduces the whole-buffer factor.
         var appliedGain: Float
         /// Peak |sample| of the input.
         var peakIn: Float
         /// Peak |sample| of the output (never above the ceiling).
         var peakOut: Float
-        /// True when the requested gain would have crossed the ceiling,
-        /// so the limiter pulled the whole buffer down instead.
+        /// True when the boost pushed the loudest samples into the knee
+        /// (they compress toward the ceiling instead of scaling freely).
         var didLimit: Bool
 
         /// Output peak in dBFS (−∞ for digital silence).
@@ -169,20 +187,10 @@ enum VoiceOutputGain {
         return peak
     }
 
-    /// The factor the limiter applies to a buffer whose loudest sample is
-    /// `peak`: the requested gain when it still fits under the ceiling,
-    /// else the largest factor that does.
-    static func scaleFactor(peak: Float, gain: Float,
-                            ceiling: Float = VoiceOutputGain.ceilingLinear) -> Float {
-        let requested = max(0, gain)
-        guard peak.isFinite, peak > 0, requested > 0 else { return 0 }
-        let boosted = peak * requested
-        guard boosted.isFinite else { return 0 }
-        return boosted <= ceiling ? requested : ceiling / peak
-    }
-
-    /// The buffer-wide decision: one factor derived from the loudest
-    /// channel peak, so every channel is scaled identically.
+    /// The buffer-wide decision: the linear-region gain (the requested
+    /// gain) plus whether the loudest samples enter the knee. Every
+    /// channel goes through the SAME transfer, so the stereo image
+    /// cannot shift under the boost.
     static func scale(gain: Float, peaks: [Float],
                       ceiling: Float = VoiceOutputGain.ceilingLinear) -> LimiterResult {
         let peakIn = peaks.reduce(Float(0)) { max($0, $1.isFinite ? $1 : 0) }
@@ -191,22 +199,43 @@ enum VoiceOutputGain {
             return LimiterResult(appliedGain: 0, peakIn: 0, peakOut: 0, didLimit: false)
         }
         let requested = max(0, gain)
-        let applied = scaleFactor(peak: peakIn, gain: requested, ceiling: ceiling)
-        return LimiterResult(appliedGain: applied,
+        let boosted = peakIn * requested
+        guard boosted.isFinite, requested > 0 else {
+            return LimiterResult(appliedGain: 0, peakIn: peakIn, peakOut: 0,
+                                 didLimit: false)
+        }
+        let didLimit = requested > 1 && boosted > kneeLinear
+        let peakOut = min(limited(peakIn, gain: requested, ceiling: ceiling),
+                          ceiling)
+        return LimiterResult(appliedGain: requested,
                              peakIn: peakIn,
-                             peakOut: min(peakIn * applied, ceiling),
-                             didLimit: peakIn * requested > ceiling)
+                             peakOut: peakOut,
+                             didLimit: didLimit)
     }
 
-    /// One sample through the limiter. Non-finite input (a broken
-    /// synthesis, not a signal) becomes silence — never NaN into the
-    /// player.
+    /// One sample through the transfer. Gain ≤ 1 is pure linear (a quiet
+    /// room is attenuated, never compressed); a boost applies the full
+    /// gain below the knee and a tanh soft-knee above it, so the output
+    /// approaches — and never reaches — the ceiling. Non-finite input (a
+    /// broken synthesis, not a signal) becomes silence — never NaN into
+    /// the player.
     static func limited(_ sample: Float, gain: Float,
-                        ceiling: Float = VoiceOutputGain.ceilingLinear) -> Float {
+                        ceiling: Float = VoiceOutputGain.ceilingLinear,
+                        knee: Float = VoiceOutputGain.kneeLinear) -> Float {
         guard sample.isFinite else { return 0 }
         let boosted = sample * gain
         guard boosted.isFinite else { return 0 }
-        return min(ceiling, max(-ceiling, boosted))
+        if gain <= 1 {
+            // Linear half of the range: clamp to the ceiling for safety,
+            // never compress.
+            return min(ceiling, max(-ceiling, boosted))
+        }
+        let magnitude = abs(boosted)
+        guard magnitude > knee else { return boosted }
+        let sign: Float = boosted < 0 ? -1 : 1
+        let compressed = knee + (ceiling - knee)
+            * tanhf((magnitude - knee) / (ceiling - knee))
+        return sign * compressed
     }
 
     /// In-place gain + limit for one channel.
@@ -242,14 +271,14 @@ enum VoiceOutputGain {
 /// Why a file transform rather than a player property:
 ///  · `AVAudioPlayer.volume` is 0…1 — it can only attenuate, so a boost
 ///    is impossible there (the reason the boost has to touch samples);
-///  · doing the limiting here is what keeps a 150 % boost from clipping —
-///    a bare gain would hard-clip every full-scale passage.
+///  · doing the transfer here is what keeps a boost from clipping — a
+///    bare gain would hard-clip every full-scale passage.
 ///
-/// Honest limits: this is a broadband gain + peak limiter applied to the
-/// reply's own WAV, nothing more (no frequency shaping, no hearing-aid
-/// behavior). It can only amplify what the file contains — see
-/// `VoiceOutputGain`. If the file cannot be read/rewritten as PCM the
-/// caller plays the ORIGINAL file: processing can degrade loudness,
+/// Honest limits: this is a broadband gain + soft-knee limiter applied to
+/// the reply's own WAV, nothing more (no frequency shaping, no
+/// hearing-aid behavior). It can only amplify what the file contains —
+/// see `VoiceOutputGain`. If the file cannot be read/rewritten as PCM
+/// the caller plays the ORIGINAL file: processing can degrade loudness,
 /// never speech.
 enum SpokenReplyGainProcessor {
 
@@ -288,9 +317,10 @@ enum SpokenReplyGainProcessor {
         catch { throw GainError.unreadable(wav) }
         guard let data = buffer.floatChannelData else { throw GainError.unsupportedFormat }
 
-        // Peak FIRST (every channel), then one factor for the whole
-        // utterance — the limiter needs the entire buffer in hand before
-        // it can decide, which is exactly what a file transform gives us.
+        // Peak FIRST (every channel), then one transfer for the whole
+        // utterance — the decision needs the entire buffer in hand before
+        // it can say whether the knee engages, which is exactly what a
+        // file transform gives us.
         let channelCount = Int(format.channelCount)
         let length = Int(buffer.frameLength)
         var peaks: [Float] = []
@@ -333,6 +363,12 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
     private let synthesizer: AVSpeechSynthesizer
     private let observabilityBus: ObservabilityBus
     private var currentContinuation: CheckedContinuation<Void, Never>?
+    /// [LOUD-TTS-CATEGORY] True between this speaker's own seam
+    /// begin/end — `cancel()` ends the seam ONLY when this speaker
+    /// opened it (see PiperVoiceSpeaker's `playbackSeamOpen`: a
+    /// fallback cancel from a Piper speaker that never began playback
+    /// must not consume an ack's outstanding begin).
+    private var seamOpen = false
 
     init(observabilityBus: ObservabilityBus,
          synthesizer: AVSpeechSynthesizer = AVSpeechSynthesizer()) {
@@ -352,10 +388,11 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
         utterance.volume = 1.0
         utterance.pitchMultiplier = 1.0
 
-        // [LOUD-TTS] Spoken responses get the loudness-optimized session
-        // mode for the duration of the utterance (restored by the
-        // delegate's finish/cancel below and by cancel()).
+        // [LOUD-TTS-CATEGORY] Spoken responses get the loud playback
+        // configuration for the duration of the utterance (restored by
+        // the delegate's finish/cancel below and by cancel()).
         ResponsePlaybackModeSeam.begin()
+        seamOpen = true
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             currentContinuation = continuation
@@ -368,7 +405,16 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
-        ResponsePlaybackModeSeam.end()
+        settleSpeech()
+    }
+
+    /// Ends the seam (if this speaker opened it) and resumes the
+    /// awaiting continuation exactly once.
+    private func settleSpeech() {
+        if seamOpen {
+            seamOpen = false
+            ResponsePlaybackModeSeam.end()
+        }
         if let cont = currentContinuation {
             currentContinuation = nil
             cont.resume()
@@ -405,19 +451,11 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
 extension SystemSpeechSpeaker: AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                            didFinish utterance: AVSpeechUtterance) {
-        ResponsePlaybackModeSeam.end()
-        if let cont = currentContinuation {
-            currentContinuation = nil
-            cont.resume()
-        }
+        settleSpeech()
     }
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                            didCancel utterance: AVSpeechUtterance) {
-        ResponsePlaybackModeSeam.end()
-        if let cont = currentContinuation {
-            currentContinuation = nil
-            cont.resume()
-        }
+        settleSpeech()
     }
 }
 
@@ -691,6 +729,12 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
     private var currentContinuation: CheckedContinuation<Void, Never>?
     private var generationTask: Task<URL?, Never>?
     private var cancelled = false
+    /// [LOUD-TTS-CATEGORY] True between this speaker's own seam
+    /// begin/end — `cancel()` ends the seam ONLY when this speaker
+    /// opened it, so a cancel while synthesis is still in flight cannot
+    /// consume an ack's outstanding begin (the shared depth accounting
+    /// would restore the capture preset under the ack's tail).
+    private var playbackSeamOpen = false
 
     init(fallback: SystemSpeechSpeaker,
          observabilityBus: ObservabilityBus,
@@ -907,9 +951,12 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
         engine.cancelSynthesis()
         player?.stop()
         player = nil
-        // [LOUD-TTS] Restore the capture mode (a no-op when playback never
-        // began — the seam's depth guard handles it).
-        ResponsePlaybackModeSeam.end()
+        // [LOUD-TTS-CATEGORY] End the playback seam ONLY if this speaker
+        // opened it — see `playbackSeamOpen`.
+        if playbackSeamOpen {
+            playbackSeamOpen = false
+            ResponsePlaybackModeSeam.end()
+        }
         fallback.cancel()
         if let cont = currentContinuation {
             currentContinuation = nil
@@ -962,13 +1009,21 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
             self.player = player
             player.delegate = self
             player.prepareToPlay()
-            // [LOUD-TTS] Spoken responses get the loudness-optimized
-            // session mode for the duration of the playback (restored by
-            // settlePlayback and cancel() below).
+            // [LOUD-TTS-CATEGORY] Spoken responses get the loud bell
+            // configuration (category `.playback`) for the duration of
+            // the playback (restored by settlePlayback and cancel()
+            // below).
             ResponsePlaybackModeSeam.begin()
+            playbackSeamOpen = true
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                 currentContinuation = cont
-                player.play()
+                // play() can return false (broken file, session race):
+                // no delegate callback ever fires, so settle here —
+                // otherwise the turn hangs and the seam stays open,
+                // stranding the session in `.playback` (no mic).
+                if !player.play() {
+                    settlePlayback()
+                }
             }
         } catch {
             emit("tts_player_failed_fallback", locale: locale)
@@ -992,6 +1047,7 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
     }
 
     private func settlePlayback() {
+        playbackSeamOpen = false
         ResponsePlaybackModeSeam.end()
         if let cont = currentContinuation {
             currentContinuation = nil

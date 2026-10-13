@@ -6054,15 +6054,16 @@ struct TTSVoicesSettingsView: View {
         }
     }
 
-    // MARK: - [VOLUME-BOOST] Spoken-reply volume (50–150 %, default 100)
+    // MARK: - [VOLUME-BOOST] Spoken-reply volume (50–200 %, default 100)
 
     /// The one loudness control for the assistant's spoken replies. Two
     /// big tap targets in 10 % steps rather than a slider: a drag is the
     /// wrong gesture for shaky hands, and every step is a discrete,
     /// readable number. The copy carries both honest limits — the boost
-    /// can only amplify what the voice already contains, and the peak
-    /// limiter trades loudness for slight compression at the top of the
-    /// range (see Localizable.xcstrings, `settings.voice.volumeNote`).
+    /// can only amplify what the voice already contains, and the
+    /// soft-knee limiter trades loudness for slight compression at the
+    /// top of the range (see Localizable.xcstrings,
+    /// `settings.voice.volumeNote`).
     private var volumeCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("settings.voice.volumeLabel")
@@ -6116,7 +6117,7 @@ struct TTSVoicesSettingsView: View {
         .accessibilityLabel(Text(labelKey))
     }
 
-    /// Persists the next step (saturating at 50 % / 150 %). One writer:
+    /// Persists the next step (saturating at 50 % / 200 %). One writer:
     /// this screen; the speaker only ever reads.
     private func stepVolume(bySteps steps: Int) {
         let next = VoiceOutputVolume.stepped(volumePercent, bySteps: steps)

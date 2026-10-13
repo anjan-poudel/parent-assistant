@@ -3549,10 +3549,10 @@ final class AppCoordinator: ObservableObject {
         NewsSourceEditorSeam.makeEditor = { [newsSourceStore] in
             AnyView(NewsSourcesSettingsView(store: newsSourceStore))
         }
-        // [LOUD-TTS] Response-playback loudness seam: while the assistant
-        // speaks, the shared session switches to .voicePrompt (loud,
-        // speech-optimized playback) and returns to the capture preset
-        // the moment playback settles.
+        // [LOUD-TTS-CATEGORY] Response-playback loudness seam: while the
+        // assistant speaks, the shared session switches to the bell's
+        // loud .playback configuration (media-volume gain staging) and
+        // returns to the capture preset the moment playback settles.
         ResponsePlaybackModeSeam.begin = { [weak self] in
             self?.audioSessionManager.beginResponsePlayback()
         }

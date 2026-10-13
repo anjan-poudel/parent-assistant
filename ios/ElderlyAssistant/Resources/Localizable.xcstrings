@@ -18648,13 +18648,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Plays the assistant's spoken replies louder or quieter. Above 100% the voice is boosted before it plays, with a limiter so it does not distort — but louder may sound slightly compressed, and a reply that is already near full volume will change little. It is not a hearing aid. Applies from the next reply; alarms, the wake-word cue and other sounds are unaffected."
+            "value": "Plays the assistant's spoken replies louder or quieter. Above 100% the voice is boosted before it plays, with a soft limiter so it does not distort — at the top of the range the loudest moments compress slightly, while the quieter parts of speech gain the most. It is not a hearing aid. Applies from the next reply; alarms, the wake-word cue and other sounds are unaffected."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "सहायकले बोल्ने जवाफको आवाज ठूलो वा सानो बनाउँछ। 100% भन्दा माथि आवाज बज्नु अघि नै बढाइन्छ र विकृत नहोस् भनेर लिमिटर लगाइन्छ — तर धेरै ठूलो बनाउँदा आवाज अलिकति दबिएको (कम्प्रेस्ड) सुनिन सक्छ, र पहिले नै पूरा ठूलो भएको जवाफमा खासै फरक पर्दैन। यो श्रवण यन्त्र होइन। अर्को जवाफदेखि लागू हुन्छ; अलार्म, वेक-वर्डको आवाज र अन्य ध्वनिमा असर पर्दैन।"
+            "value": "सहायकले बोल्ने जवाफको आवाज ठूलो वा सानो बनाउँछ। 100% भन्दा माथि आवाज बज्नु अघि नै बढाइन्छ र विकृत नहोस् भनेर नरम लिमिटर लगाइन्छ — सबैभन्दा माथिल्लो सेटिङमा ठूला आवाजहरू अलिकति दबिन्छन्, र बोलीका साना भागहरूमा सबैभन्दा धेरै फरक पर्छ। यो श्रवण यन्त्र होइन। अर्को जवाफदेखि लागू हुन्छ; अलार्म, वेक-वर्डको आवाज र अन्य ध्वनिमा असर पर्दैन।"
           }
         }
       }

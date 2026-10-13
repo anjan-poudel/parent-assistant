@@ -24,10 +24,6 @@ protocol AudioSessionControlling: AnyObject {
                      options: AVAudioSession.CategoryOptions) throws
     func setActive(_ active: Bool,
                    options: AVAudioSession.SetActiveOptions) throws
-    /// Switches the session mode in place (category/options untouched) —
-    /// the [LOUD-TTS] response-playback seam uses this to move between the
-    /// capture preset and `.voicePrompt`.
-    func setMode(_ mode: AVAudioSession.Mode) throws
     /// Enables/disables Voice Processing I/O on the engine's input node
     /// (AVAudioIONode.setVoiceProcessingEnabled — iOS 13+; only while the
     /// engine is stopped, never in manual rendering mode). Throws when
@@ -83,10 +79,6 @@ private final class SystemAudioSessionController: AudioSessionControlling {
     func setActive(_ active: Bool,
                    options: AVAudioSession.SetActiveOptions) throws {
         try session.setActive(active, options: options)
-    }
-
-    func setMode(_ mode: AVAudioSession.Mode) throws {
-        try session.setMode(mode)
     }
 
     func setVoiceProcessingEnabled(_ enabled: Bool) throws {
@@ -167,31 +159,54 @@ final class AudioSessionManager {
     /// never makes an extra call (the byte-identical guarantee).
     private var voiceProcessingEnabledInProcess = false
 
-    // MARK: - Response playback loudness ([LOUD-TTS], 2026-09-11)
+    // MARK: - Response playback loudness ([LOUD-TTS], 2026-09-11;
+    //          [LOUD-TTS-CATEGORY], 2026-10-14)
     //
-    // While the assistant SPEAKS, the session mode switches to
-    // `.voicePrompt` — Apple's mode for spoken responses: loudness-
-    // optimized playback for the app's own output while the mic keeps
-    // running, so replies are clearly audible instead of being routed
-    // through the capture-tuned `.measurement` mode at reduced presence.
-    // The capture preset (`.measurement` / `.voiceChat`) returns the
-    // moment playback settles, so wake-word quality never changes.
+    // While the assistant SPEAKS, the session switches to the BELL's
+    // proven-loud configuration: category `.playback` (media-volume gain
+    // staging), mode `.default`, options `[.duckOthers,
+    // .defaultToSpeaker]` — byte-identical to `TimerAlarmBellPlayer`,
+    // the one audio path the field calls LOUD. The original mode-only
+    // switch to `.voicePrompt` did not move loudness: under
+    // `.playAndRecord` the output stays on call/voice gain staging,
+    // which plays far below media apps (field report 2026-10-14:
+    // replies < 50 % of other apps' loudness even at max boost).
+    //
+    // Trade, accepted (the bell's own doc spells it out): `.playback`
+    // has no input, so the mic is unavailable for the reply's duration.
+    // That is acceptable — wake-word processing is suppressed while the
+    // assistant speaks (AppCoordinator's wake gate), so no listening
+    // feature is lost — and the capture preset (`.measurement` /
+    // `.voiceChat` + VPIO) is restored IN PLACE the moment playback
+    // settles, the session left active (deactivating it would strand
+    // the voice pipeline's engine). Wake-latency after restore is the
+    // device-validation gate for this change (STT is the invariant).
     //
     // Depth-counted, not stacked: Piper falling back to the system
     // speaker nests begin/end, and only the OUTERMOST end restores the
-    // capture mode.
+    // capture preset.
 
     private var playbackModeDepth = 0
 
-    /// The mode the active capture preset uses — the value playback
-    /// restores to.
-    private var captureMode: AVAudioSession.Mode {
-        voiceProcessingEnabled ? Self.voiceProcessingMode : Self.measurementMode
-    }
+    /// The loud playback configuration — the bell's exact config
+    /// (`TimerAlarmBellPlayer`), the app's proven-loud audio path.
+    private static let playbackCategory: AVAudioSession.Category = .playback
+    private static let playbackMode: AVAudioSession.Mode = .default
+    private static let playbackOptions: AVAudioSession.CategoryOptions =
+        [.duckOthers, .defaultToSpeaker]
 
     func beginResponsePlayback() {
         if playbackModeDepth == 0 {
-            try? session.setMode(.voicePrompt)
+            do {
+                try session.setCategory(Self.playbackCategory,
+                                        mode: Self.playbackMode,
+                                        options: Self.playbackOptions)
+                try session.setActive(true, options: [])
+                emit(eventType: "audio_response_playback", outcome: "began")
+            } catch {
+                emit(eventType: "audio_response_playback", outcome: "failed",
+                     errorCode: "\((error as NSError).domain)")
+            }
         }
         playbackModeDepth += 1
     }
@@ -200,7 +215,36 @@ final class AudioSessionManager {
         guard playbackModeDepth > 0 else { return }
         playbackModeDepth -= 1
         guard playbackModeDepth == 0 else { return }
-        try? session.setMode(captureMode)
+        restoreCapturePreset()
+        emit(eventType: "audio_response_playback", outcome: "restored")
+    }
+
+    /// Re-arms the active capture preset after a reply, in place — the
+    /// session stays active. The VPIO branch re-runs the full
+    /// activate-time sequence (category → node enable, with its honest
+    /// measurement fallback) because the node's voice-processing flag is
+    /// not guaranteed to survive the category round-trip.
+    private func restoreCapturePreset() {
+        if voiceProcessingEnabled {
+            do {
+                try configureVoiceProcessingPreset()
+            } catch {
+                emit(eventType: "audio_response_playback",
+                     outcome: "restore_failed",
+                     errorCode: "\((error as NSError).domain)")
+            }
+            return
+        }
+        do {
+            try session.setCategory(Self.measurementCategory,
+                                    mode: Self.measurementMode,
+                                    options: Self.measurementOptions)
+            try session.setActive(true, options: [.notifyOthersOnDeactivation])
+        } catch {
+            emit(eventType: "audio_response_playback",
+                 outcome: "restore_failed",
+                 errorCode: "\((error as NSError).domain)")
+        }
     }
 
     /// Today's (pre-A/B) session configuration — `.measurement` mode.
