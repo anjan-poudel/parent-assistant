@@ -375,7 +375,11 @@ struct HomeView: View {
     /// stage element from the same table in the same transaction,
     /// instead of each view re-deriving its own conditions that could
     /// diverge.
-    private var stageVisuals: TalkStageVisuals { session.state.talkVisuals }
+    private var stageVisuals: TalkStageVisuals {
+        TalkStageVisuals.resolved(state: session.state,
+                                  isSpeaking: coordinator.isSpeaking,
+                                  slotAnswerCaptureActive: coordinator.slotAnswerCaptureActive)
+    }
 
     /// Status-line override fed to the hero: the failure-specific error
     /// caption while erroring, else the transient post-reset notice
@@ -400,6 +404,8 @@ struct HomeView: View {
         TalkStage(state: session.state,
                   session: session,
                   voice: voicePresentation,
+                  isSpeaking: coordinator.isSpeaking,
+                  slotAnswerCaptureActive: coordinator.slotAnswerCaptureActive,
                   onStart: coordinator.simulateWakeWordDetection,
                   onRecover: coordinator.recoverVoiceCycle,
                   onReset: coordinator.resetVoiceActivation)
@@ -539,6 +545,11 @@ struct TalkButton: View {
     @ObservedObject var session: VoiceSessionStateMachine
     @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// [HERO-STATES] True while any reply audio plays.
+    let isSpeaking: Bool
+    /// [HERO-STATES] True exactly while the auto-listen answer capture
+    /// is live.
+    let slotAnswerCaptureActive: Bool
     /// [P0-2] Manual Talk readiness — the shared `VoicePipelineReadiness`
     /// contract, and the hero's ONLY gate. `.loading` keeps the disc at
     /// its final dimensions with a spinner inside it and disables
@@ -584,7 +595,11 @@ struct TalkButton: View {
     /// — so the button can never render one state's color with another
     /// state's icon or label, and every element flips in the same
     /// transaction the state publishes.
-    private var visuals: TalkStageVisuals { session.state.talkVisuals }
+    private var visuals: TalkStageVisuals {
+        TalkStageVisuals.resolved(state: session.state,
+                                  isSpeaking: isSpeaking,
+                                  slotAnswerCaptureActive: slotAnswerCaptureActive)
+    }
 
     private var isBreathing: Bool { visuals.pulses && !reduceMotion }
 
@@ -1250,6 +1265,33 @@ struct ConfirmationChips: View {
 /// while speaking kept its ring, and each view had to be edited in
 /// lockstep to keep a state's look consistent. Nothing below branches on
 /// state equality; views read this table only.
+extension TalkStageVisuals {
+    /// [HERO-STATES] (2026-10-13) The hero's resolved visual — the one
+    /// mapping every stage element derives from. The speaking overlay
+    /// comes first: while any reply audio plays the hero shows the
+    /// speaking family, whatever the machine state (the slot window
+    /// stays in `.awaitingSlotAnswer` through its probe's speech, and
+    /// the resolved frame can leave the session `.idle` while the reply
+    /// still speaks — both previously showed the wrong icon). The
+    /// chip-owned confirmation window is exempt: its chips stay up
+    /// while the challenge speaks. Then the slot window's capture
+    /// truth: a live auto-listen capture shows the listening family; a
+    /// closed-capture window (the remaining 45 s) falls back to the
+    /// idle talk affordance instead of a false "listening". Everything
+    /// else is the raw state mapping, unchanged.
+    static func resolved(state: VoiceSessionState,
+                         isSpeaking: Bool,
+                         slotAnswerCaptureActive: Bool) -> TalkStageVisuals {
+        if isSpeaking, state != .awaitingConfirmation {
+            return VoiceSessionState.speaking.talkVisuals
+        }
+        if state == .awaitingSlotAnswer, !slotAnswerCaptureActive {
+            return VoiceSessionState.idle.talkVisuals
+        }
+        return state.talkVisuals
+    }
+}
+
 struct TalkStageVisuals {
     /// SF Symbol inside the hero (state icons — spec §3.3).
     let icon: String
