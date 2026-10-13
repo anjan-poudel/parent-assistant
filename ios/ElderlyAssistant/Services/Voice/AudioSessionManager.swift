@@ -198,12 +198,25 @@ final class AudioSessionManager {
     func beginResponsePlayback() {
         if playbackModeDepth == 0 {
             do {
+                // setCategory on an ACTIVE session throws on iOS 26
+                // (NSOSStatusErrorDomain — observed on Anzaan
+                // 2026-10-14, the first device field test: every begin
+                // failed and replies kept call-gain staging). Activation
+                // works because the session is inactive there, so cycle
+                // active off → category → active on. The pipeline's
+                // engine keeps running; its input resumes on the
+                // reactivation (wake processing is gated during replies
+                // anyway — see the MARK header).
+                try session.setActive(false, options: [.notifyOthersOnDeactivation])
                 try session.setCategory(Self.playbackCategory,
                                         mode: Self.playbackMode,
                                         options: Self.playbackOptions)
                 try session.setActive(true, options: [])
                 emit(eventType: "audio_response_playback", outcome: "began")
             } catch {
+                // Never leave the session deactivated after a partial
+                // failure — the mic pipeline is the invariant.
+                try? session.setActive(true, options: [])
                 emit(eventType: "audio_response_playback", outcome: "failed",
                      errorCode: "\((error as NSError).domain)")
             }
@@ -220,15 +233,29 @@ final class AudioSessionManager {
     }
 
     /// Re-arms the active capture preset after a reply, in place — the
-    /// session stays active. The VPIO branch re-runs the full
+    /// session ends active (deactivating it would strand the voice
+    /// pipeline's engine). Same active-session rule as begin: deactivate
+    /// first, then configure. The VPIO branch re-runs the full
     /// activate-time sequence (category → node enable, with its honest
     /// measurement fallback) because the node's voice-processing flag is
     /// not guaranteed to survive the category round-trip.
     private func restoreCapturePreset() {
+        do {
+            try session.setActive(false, options: [.notifyOthersOnDeactivation])
+        } catch {
+            emit(eventType: "audio_response_playback",
+                 outcome: "restore_failed",
+                 errorCode: "\((error as NSError).domain)")
+            return
+        }
         if voiceProcessingEnabled {
             do {
                 try configureVoiceProcessingPreset()
             } catch {
+                // configureVoiceProcessingPreset's own fallback
+                // reactivates the session; this catch is the case where
+                // even its category step threw — re-arm activation.
+                try? session.setActive(true, options: [.notifyOthersOnDeactivation])
                 emit(eventType: "audio_response_playback",
                      outcome: "restore_failed",
                      errorCode: "\((error as NSError).domain)")
@@ -241,6 +268,7 @@ final class AudioSessionManager {
                                     options: Self.measurementOptions)
             try session.setActive(true, options: [.notifyOthersOnDeactivation])
         } catch {
+            try? session.setActive(true, options: [.notifyOthersOnDeactivation])
             emit(eventType: "audio_response_playback",
                  outcome: "restore_failed",
                  errorCode: "\((error as NSError).domain)")
