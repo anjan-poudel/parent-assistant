@@ -1377,7 +1377,11 @@ struct CallView: View {
                 Text(L10n.str("call.search.accessLimited", locale: coordinator.activeLocale))
                     .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
-                    .lineLimit(1)
+                    // [AX-VIEWPORT] Essential consent text ("searching only
+                    // a part of your contacts") — wraps at accessibility
+                    // sizes instead of truncating. Standard sizes keep the
+                    // one-line caption.
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 6)
             }
@@ -2432,6 +2436,8 @@ private struct UnifiedContactResultRow: View {
     /// Open the Messenger-handle capture sheet (`CallView.presentHandleCapture`).
     let addHandle: () -> Void
     @Environment(\.locale) private var locale
+    /// [AX-VIEWPORT] Gates the channel-controls stacking below.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Channel brand colors — kept here, not in DesignTokens: they are
     /// the apps' own identities, not Warm & Soft palette tokens.
@@ -2558,17 +2564,39 @@ private struct UnifiedContactResultRow: View {
     /// controls — the add-handle button on handle-less rows, then the
     /// channel chooser.
     private var channelControls: some View {
-        HStack(spacing: 8) {
-            if result.whatsAppAvailable {
-                whatsAppPill
+        // [AX-VIEWPORT] At accessibility text sizes the WhatsApp pill and
+        // the two ≥44pt channel buttons cannot share one line without
+        // overflowing the card: the pill takes its own line, the two
+        // buttons keep theirs under it. Standard sizes keep today's
+        // single-line strip exactly.
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    if result.whatsAppAvailable {
+                        whatsAppPill
+                    }
+                    HStack(spacing: 8) {
+                        if !channelState.hasHandle, !channelState.storeKey.isEmpty {
+                            addHandleButton
+                        }
+                        channelChooser
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(spacing: 8) {
+                    if result.whatsAppAvailable {
+                        whatsAppPill
+                    }
+                    Spacer(minLength: 0)
+                    if !channelState.hasHandle, !channelState.storeKey.isEmpty {
+                        addHandleButton
+                    }
+                    channelChooser
+                }
+                .frame(maxWidth: .infinity)
             }
-            Spacer(minLength: 0)
-            if !channelState.hasHandle, !channelState.storeKey.isEmpty {
-                addHandleButton
-            }
-            channelChooser
         }
-        .frame(maxWidth: .infinity)
     }
 
     /// The WhatsApp pill, byte-for-byte the messenger-gate row's: white

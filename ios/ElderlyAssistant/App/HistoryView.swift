@@ -33,6 +33,8 @@ import SwiftUI
 struct HistoryView: View {
     @Environment(\.appAppearance) private var appearance
     @EnvironmentObject private var coordinator: AppCoordinator
+    /// [AX-VIEWPORT] Gates the row caption's line cap below.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         LeafScreen(titleKey: "history.title") {
@@ -99,7 +101,10 @@ struct HistoryView: View {
                 Text(caption(for: entry))
                     .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
-                    .lineLimit(2)
+                    // [AX-VIEWPORT] The caption (channel app + time) wraps
+                    // at accessibility sizes instead of truncating at two
+                    // lines. Standard sizes keep the 2-line cap.
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
             }
             Spacer(minLength: 0)
             if entry.channel == .unanswered {

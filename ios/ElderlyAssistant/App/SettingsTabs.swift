@@ -233,6 +233,8 @@ enum HiddenSettingsSheetUsage {
 /// tab rows and the hidden sheet's rows cannot drift apart.
 struct SettingsRowChrome: View {
     @Environment(\.appAppearance) private var appearance
+    /// [AX-VIEWPORT] Gates the status-under-title stacking below.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let icon: String
     let titleKey: LocalizedStringKey
     /// Live status dot + label (e.g. "जेमिनी AI, जोडिएको") for the rows
@@ -242,19 +244,22 @@ struct SettingsRowChrome: View {
     var body: some View {
         HStack(spacing: 14) {
             IconBadge(systemImage: icon, tint: .settings, diameter: 40)
-            Text(titleKey)
-                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
-                .foregroundStyle(appearance.colors.textPrimary)
-            Spacer()
-            if let status {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(appearance.statusForeground(status.color))
-                        .frame(width: 8, height: 8)
-                    Text(status.label)
-                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                        .foregroundStyle(appearance.colors.textSecondary)
+            // [AX-VIEWPORT] At accessibility text sizes the title and the
+            // status label cannot share one line without wrapping every
+            // word (the row triples in height with both squeezed into
+            // slivers). The status moves to its own line under the title:
+            // the row still reads "title, then status", just stacked.
+            // Standard sizes keep today's single-line row exactly.
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 4) {
+                    titleText
+                    statusText
                 }
+                Spacer(minLength: 8)
+            } else {
+                titleText
+                Spacer()
+                statusText
             }
             Image(systemName: "chevron.right")
                 .font(.system(size: 20, weight: .bold))
@@ -262,6 +267,27 @@ struct SettingsRowChrome: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
+    }
+
+    private var titleText: some View {
+        Text(titleKey)
+            .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+            .foregroundStyle(appearance.colors.textPrimary)
+    }
+
+    /// The live status dot + label; renders nothing for a plain row.
+    @ViewBuilder
+    private var statusText: some View {
+        if let status {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(appearance.statusForeground(status.color))
+                    .frame(width: 8, height: 8)
+                Text(status.label)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                    .foregroundStyle(appearance.colors.textSecondary)
+            }
+        }
     }
 }
 
@@ -340,6 +366,8 @@ struct SettingsTabBar: View {
     @Binding var selection: SettingsView.SettingsSection
 
     @Environment(\.locale) private var locale
+    /// [AX-VIEWPORT] Gates the pill's wrapping room.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -354,8 +382,23 @@ struct SettingsTabBar: View {
                             .font(.system(size: appearance.typography.bodyPointSize,
                                           weight: .semibold))
                             .foregroundStyle(selected ? appearance.colors.onAccent : appearance.colors.textPrimary)
-                            .lineLimit(1)
+                            .multilineTextAlignment(.center)
+                            // [AX-VIEWPORT] At accessibility text sizes a
+                            // single line of body text is taller than the
+                            // 44pt minimum, so with `.lineLimit(1)` and no
+                            // vertical padding the words touched the
+                            // capsule's edges — unreadable pills. The
+                            // title may now wrap (a width cap gives the
+                            // horizontal scroll a line to wrap AT — an
+                            // unbounded line still never wraps), and the
+                            // capsule gets vertical room that scales with
+                            // the type, like the text does. Standard sizes
+                            // keep the one-line pill byte-for-byte.
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                            .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? 220 : nil)
                             .padding(.horizontal, 20)
+                            .padding(.vertical, dynamicTypeSize.isAccessibilitySize
+                                     ? appearance.typography.captionPointSize * 0.4 : 0)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
                             .appSurface(role: selected ? .accent : .control, cornerRadius: 999)
                     }

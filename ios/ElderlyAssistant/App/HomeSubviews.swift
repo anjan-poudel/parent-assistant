@@ -45,7 +45,7 @@ struct HomeTopBar: View {
     let onOpenUpdates: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 4 : 8) {
             HStack(spacing: 8) {
                 NavigationLink(value: LeafDestination.settings) {
                     ReferenceIconArtwork(name: "settings", diameter: 32)
@@ -228,6 +228,7 @@ extension QuickAccessStrip: Equatable {
 /// the stage does not observe the session.
 struct TalkStage: View {
     @Environment(\.appAppearance) private var appearance
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// The state the stage renders (branch, hint carousel, tap behavior).
     let state: VoiceSessionState
     /// Handed to the hero, which observes it for its own live updates
@@ -267,7 +268,7 @@ struct TalkStage: View {
                 ConfirmationChips(titleKey: visuals.captionKey)
             } else {
                 // Separate the button, its status and the suggested phrase.
-                VStack(spacing: 24) {
+                VStack(spacing: 16) {
                     TalkButton(session: session,
                                // [HERO-STATES] The overlays flow down
                                // from the coordinator through the stage.
@@ -301,7 +302,6 @@ struct TalkStage: View {
                                        break
                                    }
                                },
-                               statusOverride: voice.statusOverride,
                                onLongPressReset: onReset,
                                // [P0-2] The ONE deterministic recovery for a
                                // failed boot-time start: an explicit button
@@ -310,29 +310,93 @@ struct TalkStage: View {
                                // startup has not completed.
                                onRecover: onRecover)
                     // [HERO-LAYOUT] (2026-10-13) The sub-hero region is
-                    // a FIXED slot: the hint carousel and the settings
-                    // recovery share one constant-height, top-aligned
-                    // frame and each is only VISIBLE in its own state —
-                    // a state flip can only swap the slot's content,
-                    // never the layout around it. The hero therefore
-                    // stays at the same position and size in every
-                    // state.
-                    ZStack(alignment: .top) {
-                        HintCarousel()
-                            .opacity(visuals.showsHintCarousel ? 1 : 0)
-                            .allowsHitTesting(visuals.showsHintCarousel)
-                            .accessibilityHidden(!visuals.showsHintCarousel)
-                        openSettingsButton
-                            .opacity(visuals.isError && voice.showsOpenSettings ? 1 : 0)
-                            .allowsHitTesting(visuals.isError && voice.showsOpenSettings)
-                            .accessibilityHidden(!(visuals.isError && voice.showsOpenSettings))
-                    }
-                    .frame(height: DesignTokens.talkSubHeroSlotHeight,
-                           alignment: .top)
+                    // a FIXED slot — extended [HERO-SIZE] (2026-10-14)
+                    // to also own the steady-state status line and the
+                    // accessibility-size state caption. A state flip can
+                    // only swap the slot's CONTENT, never the layout
+                    // height around it: the hero stays at the same
+                    // position and size in every state and every type
+                    // size (owner: "button size and positions must be
+                    // consistent across states").
+                    slotContent
+                        .frame(height: slotHeight, alignment: .top)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    /// [HERO-SIZE] The sub-hero slot height: the compact value at
+    /// ordinary type sizes (the carousel is ~81–99pt there), the full
+    /// token height at accessibility sizes (the slot also hosts the
+    /// state caption there).
+    private var slotHeight: CGFloat {
+        dynamicTypeSize.isAccessibilitySize
+            ? DesignTokens.talkSubHeroSlotHeight
+            : DesignTokens.talkSubHeroSlotHeightCompact
+    }
+
+    /// The slot's steady-state content, top-aligned inside the FIXED
+    /// frame: the accessibility-size state caption, the status line
+    /// (error/stopped captions, the post-reset notice), the open-settings
+    /// recovery, and the idle hint carousel. Heights may vary per state;
+    /// the frame never does.
+    @ViewBuilder
+    private var slotContent: some View {
+        VStack(spacing: 8) {
+            if dynamicTypeSize.isAccessibilitySize {
+                Text(accessibilityCaption)
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityHidden(true)
+            }
+            if !statusText.isEmpty {
+                Text(statusText)
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
+                                                weight: .medium))
+                    .foregroundStyle(appearance.colors.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("home.talk.status")
+            }
+            if visuals.isError && voice.showsOpenSettings {
+                openSettingsButton
+            }
+            if showsCarousel {
+                HintCarousel()
+            }
+        }
+    }
+
+    /// At accessibility sizes the in-disc caption is hidden (it would
+    /// not fit the 132pt disc), so the state label renders here instead
+    /// — same text the disc shows at ordinary sizes.
+    private var accessibilityCaption: String {
+        if voice.readiness.isLoading, case .loading(let stage) = voice.readiness {
+            return TalkReadinessCopy.loadingLabel(stage, locale: locale)
+        }
+        return session.state.buttonText(locale: locale)
+    }
+
+    /// The steady-state status line. The error caption (voice's
+    /// statusOverride) wins; `.stopped` falls back to its own status
+    /// text when no override is set (same precedence the hero used to
+    /// apply under the disc).
+    private var statusText: String {
+        switch state {
+        case .error, .stopped:
+            return voice.statusOverride ?? session.state.statusText(locale: locale)
+        default:
+            return voice.statusOverride ?? ""
+        }
+    }
+
+    /// The hint carousel shows at idle only, and stands down while the
+    /// post-reset notice occupies the status line.
+    private var showsCarousel: Bool {
+        visuals.showsHintCarousel && statusText.isEmpty
     }
 
     private var openSettingsButton: some View {
@@ -745,7 +809,10 @@ struct HomeDock: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
+        // [DOCK-FIT] (2026-10-14) Tightened in every mode — owner: "the
+        // dock menu has too much space at the bottom". 8→6 row gap and a
+        // slimmer rail inset; every tile keeps its 44pt tap floor.
+        VStack(spacing: 6) {
             LazyVGrid(columns: topColumns, alignment: .center, spacing: 8) {
                 Button(action: onAppliance) {
                     tile(artwork: "settings", titleKey: "plugin.applianceHelper.name", onRail: false)
@@ -774,7 +841,7 @@ struct HomeDock: View {
                          onRail: true, identifier: "home.action.reminders")
             }
             .padding(.horizontal, 8)
-            .padding(.top, 10)
+            .padding(.top, 6)
             .background {
                 Color.clear
                     .appSurface(role: .dock, cornerRadius: 20)
@@ -805,7 +872,6 @@ struct HomeDock: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 4)
-        .padding(.vertical, onRail ? 0 : 2)
         .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize,
                maxHeight: .infinity, alignment: onRail ? .center : .top)
         .contentShape(Rectangle())
