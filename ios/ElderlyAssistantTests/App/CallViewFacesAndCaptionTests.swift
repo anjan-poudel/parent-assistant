@@ -226,17 +226,22 @@ final class CallViewFacesAndCaptionTests: XCTestCase {
         XCTAssertLessThan(caption.lowerBound, micCaption.lowerBound,
                           "the caption is the FIRST line of the readable block, above micCaption")
 
+        // The caption's treatment ([AX-VIEWPORT]): pinned as two small
+        // code-only blocks rather than one contiguous block — the AX fix
+        // documents itself with an in-line comment between these two
+        // spans, and a prose line must not be part of a code pin.
         XCTAssertTrue(collapsed(searchArea).contains(collapsed("""
-            if access == .limited {
-                Text(L10n.str("call.search.accessLimited", locale: coordinator.activeLocale))
-                    .font(.system(size: appearance.typography.captionPointSize))
-                    .foregroundStyle(appearance.colors.textSecondary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 6)
-            }
+            Text(L10n.str("call.search.accessLimited", locale: coordinator.activeLocale))
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
             """).trimmingCharacters(in: .whitespaces)),
-                      "caption token, secondary color, one line (design-l2 §3.5)")
+                      "caption token + secondary color (design-l2 §3.5)")
+        XCTAssertTrue(collapsed(searchArea).contains(collapsed("""
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 6)
+            """).trimmingCharacters(in: .whitespaces)),
+                      "one line at standard sizes, wraps at accessibility sizes")
     }
 
     // MARK: - Source pins (caption + row wiring the runtime cannot reach)
