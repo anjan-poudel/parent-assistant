@@ -365,7 +365,8 @@ final class CommandRouterDialogueTests: XCTestCase {
         let probes = world.events("dialogue_probe_spoken")
         XCTAssertEqual(probes.count, 1)
         XCTAssertEqual(probes.first?.metadata,
-                       ["probe_kind": "slotFill", "attempt": "2", "option_count": "4"])
+                       ["probe_kind": "slotFill", "attempt": "2", "option_count": "0"],
+                       "the dictated placeholder-less probe speaks no options")
         var reprobe = draft
         reprobe.attempts = 2
         let expected = DialogueProbeComposer.probeText(for: reprobe,

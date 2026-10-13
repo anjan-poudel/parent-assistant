@@ -42,7 +42,10 @@ final class DialogueCorrectionChoiceTests: XCTestCase {
 
     // MARK: - Probe text (string equality — never model text)
 
-    func testTheProbeComposesTheHeardSurfaceAndNumberedReadings() {
+    func testTheProbeComposesTheHeardSurfaceAndTheReadingsConversationally() {
+        // The numbered "१) X, २) Y" form was retired in the
+        // conversational-copy passes (2026-10-11/13): readings join with
+        // the conjunction, never a text-menu numbering.
         let text = DialogueProbeComposer.probeText(for: frame(),
                                                    catalog: nil,
                                                    retry: false,
@@ -50,8 +53,8 @@ final class DialogueCorrectionChoiceTests: XCTestCase {
         XCTAssertTrue(text.hasPrefix("मैले बुझिन।"),
                       "the honest lead opens the question")
         XCTAssertTrue(text.contains("«गइ»"), "the heard surface is quoted")
-        XCTAssertTrue(text.contains("1) गइए"), "the readings are numbered")
-        XCTAssertTrue(text.contains("2) गर"))
+        XCTAssertTrue(text.contains("गइए वा गर"), "the readings join with the conjunction")
+        XCTAssertFalse(text.contains(")"), "no numbered menu markers")
     }
 
     func testTheRetryProbePrefixesTheRetryLine() {
@@ -59,7 +62,7 @@ final class DialogueCorrectionChoiceTests: XCTestCase {
                                                    catalog: nil,
                                                    retry: true,
                                                    locale: ne)
-        XCTAssertTrue(text.hasPrefix("फेरि सोध्छु — "))
+        XCTAssertTrue(text.hasPrefix("फेरि भन्नुस् न। "))
     }
 
     // MARK: - Classification

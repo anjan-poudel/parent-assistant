@@ -4007,13 +4007,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open %@?"
+            "value": "open %@"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ खोल्ने हो?"
+            "value": "%@ खोल्ने"
           }
         }
       }
@@ -4024,13 +4024,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Play %@?"
+            "value": "play %@"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ बजाउने हो?"
+            "value": "%@"
           }
         }
       }
@@ -4041,13 +4041,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The news?"
+            "value": "the news"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "समाचार सुनाउने हो?"
+            "value": "समाचार"
           }
         }
       }
@@ -4058,13 +4058,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Watch %@ on YouTube?"
+            "value": "%@ on YouTube"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "युट्युबमा %@ हेर्ने हो?"
+            "value": "युट्युबमा %@"
           }
         }
       }
@@ -4075,13 +4075,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "I heard «%@». Did you mean %@?"
+            "value": "I heard «%@» — %@?"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "मैले «%@» सुनें। के तपाईंले %@ भन्न खोज्नुभएको थियो?"
+            "value": "«%@» सुनें। %@ भन्ने?"
           }
         }
       }
@@ -4092,13 +4092,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Did you mean %@?"
+            "value": "You mean %@?"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "के तपाईंको मतलब %@ हो?"
+            "value": "तपाईंले %@ भन्नुभयो?"
           }
         }
       }
@@ -4109,13 +4109,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "OK, tell me again."
+            "value": "Go ahead, say it again."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "ठीक छ, फेरि भन्नुहोस्।"
+            "value": "फेरि भन्नुस् न।"
           }
         }
       }
@@ -4126,13 +4126,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "I didn't understand. Try again later."
+            "value": "Didn't get it — we'll try again later."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "मैले बुझिन। पछि फेरि भन्नुहोस्।"
+            "value": "बुझिन, पछि फेरि भन्नुहोस् न।"
           }
         }
       }
@@ -4245,13 +4245,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "What kind of bhajan? %@ … or say it yourself"
+            "value": "Whose bhajan?"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "कस्तो भजन? %@ … वा आफैँ भन्नुहोस्"
+            "value": "कसको भजन लगाऊ?"
           }
         }
       }
@@ -4262,13 +4262,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "What kind of music? Say the name."
+            "value": "What shall I play?"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "कस्तो संगीत चाहियो? नाम भन्नुहोस्।"
+            "value": "के सुन्ने हो?"
           }
         }
       }
@@ -4279,13 +4279,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Let me ask again —"
+            "value": "One more time."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "फेरि सोध्छु —"
+            "value": "फेरि भन्नुस् न।"
           }
         }
       }
@@ -4330,13 +4330,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Did you mean %@?"
+            "value": "You mean %@?"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "के तपाईंको मतलब %@ हो?"
+            "value": "तपाईंले %@ भन्नुभयो?"
           }
         }
       }
@@ -13683,13 +13683,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "I couldn't find %1$@ in your contacts. Did you mean %2$@?"
+            "value": "I couldn't find %1$@ — you mean %2$@?"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "मैले %@ लाई सम्पर्कमा भेटिनँ। के तपाईं %@ भन्न खोज्नुभएको हो?"
+            "value": "मैले %@ लाई सम्पर्कमा भेटिनँ — %@ भन्नुभयो?"
           }
         }
       }
