@@ -260,7 +260,7 @@ final class CallLinksTests: XCTestCase {
         // user-thread is keyed to numeric ids (field report 2026-10-12:
         // "call maiya" opened Messenger's home, not her thread — the
         // id-keyed form was used for a username). Usernames ride the
-        // official m.me form (see the opener tests).
+        // messenger.com/t universal link (see the opener tests).
         XCTAssertNil(CallLinks.messengerThreadURL(handle: "sita.sharma77"))
     }
 
@@ -286,6 +286,18 @@ final class CallLinksTests: XCTestCase {
         XCTAssertNil(CallLinks.messengerWebURL(handle: ""))
     }
 
+    func testMessengerUsernameThreadURLIsMessengerDotComForm() {
+        // The username form moved to Messenger's own domain after the
+        // m.me App-Store regression (field evidence 2026-10-13).
+        XCTAssertEqual(CallLinks.messengerUsernameThreadURL(handle: "@sita.sharma77")?.absoluteString,
+                       "https://messenger.com/t/sita.sharma77")
+    }
+
+    func testMessengerUsernameThreadURLNilForInvalidHandle() {
+        XCTAssertNil(CallLinks.messengerUsernameThreadURL(handle: ""))
+        XCTAssertNil(CallLinks.messengerUsernameThreadURL(handle: "sita sharma"))
+    }
+
     // MARK: - Messenger app-name vocabulary
 
     func testIsMessengerNameMatchesBothScriptsAndFbPhrasing() {
@@ -306,18 +318,20 @@ final class CallLinksTests: XCTestCase {
 
     // MARK: - Messenger open decisions (thread vs web fallback)
 
-    func testOpenMessengerThreadUsesOfficialMMeFormForUsernameWhenInstalled() {
+    func testOpenMessengerThreadUsesMessengerDotComFormForUsernameWhenInstalled() {
         // Field report 2026-10-12 ("call maiya" opened Messenger's home):
         // the id-keyed user-thread form fires the app WITHOUT navigating
-        // for a username handle. A username opens Meta's official m.me
-        // universal link instead, which resolves INTO the app's thread
-        // when Messenger is installed.
+        // for a username handle. Field evidence 2026-10-13: the first
+        // fix's m.me link was not captured by the installed app (Safari
+        // opened, the page redirected to the App Store) — a username
+        // now opens Messenger's OWN domain, messenger.com/t, whose
+        // universal link the app captures.
         let opener = FakeCallLinkOpener(canOpen: true)
         let links = CallLinks(opener: opener)
         let outcome = links.openMessengerThread(handle: "sita.sharma77")
         XCTAssertEqual(outcome, .openedThread)
         XCTAssertEqual(opener.opened.map(\.absoluteString),
-                       ["https://m.me/sita.sharma77"])
+                       ["https://messenger.com/t/sita.sharma77"])
         XCTAssertEqual(opener.canOpenChecks.map(\.absoluteString),
                        ["fb-messenger://"],
                        "the bare scheme canOpenURL is the honest installed check")

@@ -331,7 +331,8 @@ final class CallLinks {
     /// username in this slot fires the app WITHOUT navigating (field
     /// report 2026-10-12: "call maiya" opened Messenger's home, not her
     /// thread), so a username handle returns nil here and rides the
-    /// official `m.me` form instead (see messengerWebURL). The
+    /// `messenger.com` universal link instead (see
+    /// messengerUsernameThreadURL). The
     /// audio/video distinction is deliberately NOT a parameter: both
     /// land on the same thread URL, and a parameter that changes nothing
     /// would pretend otherwise. Nil when the handle normalizes to empty
@@ -343,13 +344,28 @@ final class CallLinks {
         return URL(string: "fb-messenger://user-thread/\(handle)")
     }
 
-    /// `https://m.me/<handle>` — Meta's only official thread link, for
-    /// BOTH the installed and the absent case: the universal link
-    /// resolves INTO the app's 1:1 thread when Messenger is installed
-    /// and into Safari's web chat when it is not, and the opener
-    /// discloses which surface appeared from the bare-scheme probe's
-    /// result. This is the form every username handle opens with (see
-    /// messengerThreadURL). Nil when the handle normalizes to empty.
+    /// `https://messenger.com/t/<handle>` — Messenger's OWN domain, the
+    /// form every USERNAME handle opens with (see messengerThreadURL
+    /// for the numeric half). The opener gates it on the bare-scheme
+    /// probe, and the device probe (`MessengerProbe`) settled the
+    /// capture question over devicectl on 2026-10-13: with Messenger
+    /// installed, `.universalLinksOnly` for this form answers true —
+    /// the system hands the link to the Messenger app — while `m.me`
+    /// answers false (Safari), which was the owner-observed regression.
+    /// Nil when the handle normalizes to empty.
+    static func messengerUsernameThreadURL(handle rawHandle: String) -> URL? {
+        let handle = messengerHandle(rawHandle)
+        guard !handle.isEmpty else { return nil }
+        return URL(string: "https://messenger.com/t/\(handle)")
+    }
+
+    /// `https://m.me/<handle>` — Meta's official short link, now the
+    /// ABSENT-app web fallback only (field evidence 2026-10-13: `m.me`
+    /// is not captured by the Messenger app on current iOS — the link
+    /// fired Safari, whose m.me page redirects to the App Store). Used
+    /// only when the bare-scheme probe says Messenger is not installed;
+    /// the opener reports `.fellBackToWeb` for it, honestly. Nil when
+    /// the handle normalizes to empty.
     static func messengerWebURL(handle rawHandle: String) -> URL? {
         let handle = messengerHandle(rawHandle)
         guard !handle.isEmpty else { return nil }
@@ -433,13 +449,17 @@ final class CallLinks {
     /// started" is never claimed by anyone.
     ///
     /// URL form by handle shape (field report 2026-10-12: "call maiya"
-    /// opened Messenger's home, not her thread — the id-keyed form was
-    /// used for a username handle): the id-keyed `user-thread` form is
-    /// opened only for the numeric handle form (see messengerThreadURL);
-    /// every username handle opens Meta's official `m.me` universal
-    /// link, which resolves into the app when Messenger is installed
-    /// (the outcome is `.openedThread` then) and into Safari's web chat
-    /// when it is not (`.fellBackToWeb` — the probe's honest signal).
+    /// opened Messenger's home, not her thread; field evidence
+    /// 2026-10-13: the first fix's `m.me` link was NOT captured by the
+    /// installed app — Safari opened and redirected to the App Store,
+    /// while the code still claimed `.openedThread`): the id-keyed
+    /// `user-thread` scheme is opened only for the numeric handle form
+    /// (see messengerThreadURL); a username handle opens the
+    /// `messenger.com/t` universal link on the app's OWN domain when
+    /// Messenger is installed (`.openedThread`; the device probe
+    /// verifies the app actually captures the link), and the `m.me` web
+    /// fallback only when the bare-scheme probe says the app is absent
+    /// (`.fellBackToWeb` — the honest web disclosure).
     func openMessengerThread(handle rawHandle: String) -> MessengerOutcome {
         let handle = Self.messengerHandle(rawHandle)
         guard !handle.isEmpty else { return .invalidHandle }
@@ -448,10 +468,14 @@ final class CallLinks {
             opener.open(threadURL)
             return .openedThread
         }
+        if installed, let usernameURL = Self.messengerUsernameThreadURL(handle: handle) {
+            opener.open(usernameURL)
+            return .openedThread
+        }
         if let webURL = Self.messengerWebURL(handle: handle) {
             opener.open(webURL)
         }
-        return installed ? .openedThread : .fellBackToWeb
+        return .fellBackToWeb
     }
 
     /// Opens Messenger for a per-contact call button (contact-call-

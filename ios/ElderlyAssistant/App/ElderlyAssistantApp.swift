@@ -41,6 +41,13 @@ struct ElderlyAssistantApp: App {
             // backgrounding does not open a new one).
             .onAppear {
                 StartupSignposts.end(.firstMeaningfulFrame)
+                #if DEBUG
+                // Device-verification hook (2026-10-13): drives the
+                // Messenger open path from launch arguments so the
+                // verification lanes need no on-device taps; inert
+                // without `-probeMessengerHandle`.
+                MessengerProbe.runIfRequested(on: appCoordinator)
+                #endif
             }
             .environmentObject(appCoordinator)
             .environmentObject(appCoordinator.voiceSession)
