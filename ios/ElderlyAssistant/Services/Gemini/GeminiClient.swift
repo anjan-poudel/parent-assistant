@@ -165,11 +165,16 @@ final class GeminiClient {
     /// model-specific (e.g. `NepaliCalendarPlugin`) — costs more (a real
     /// search per call) and adds latency, so it stays opt-in per call,
     /// never a blanket default.
-    func generateJSON(prompt: String, useSearchGrounding: Bool = false) async throws -> String {
+    func generateJSON(prompt: String,
+                      useSearchGrounding: Bool = false,
+                      systemInstruction: String? = nil) async throws -> String {
         let request = GeminiRequest(
             contents: [.init(parts: [.text(prompt)])],
             generationConfig: .init(responseMimeType: "application/json"),
-            tools: useSearchGrounding ? [.init(googleSearch: .init())] : nil
+            tools: useSearchGrounding ? [.init(googleSearch: .init())] : nil,
+            systemInstruction: systemInstruction.map {
+                .init(parts: [.text($0)])
+            }
         )
         return try await send(request)
     }
@@ -667,6 +672,11 @@ struct GeminiRequest: Encodable {
     let contents: [Content]
     var generationConfig: GenerationConfig?
     var tools: [Tool]?
+    /// [REPLY-POLISH] (2026-10-14) The persona rides the API's own
+    /// system-instruction slot, so the pinned intent prompt stays
+    /// byte-identical — the reply-style contract travels beside it,
+    /// not inside it.
+    var systemInstruction: Content?
 }
 
 struct GeminiResponse: Decodable {

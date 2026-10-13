@@ -4523,8 +4523,18 @@ final class CommandRouter {
     /// (`llama_response_rejected_sanity`, reason in errorCode).
     private func deliverModelReply(_ text: String) {
         if let safe = sanitisedModelReply(text) {
-            coordinator?.noteGenericReply(safe)
-            speak(text: safe)
+            // [REPLY-POLISH] The deterministic polisher runs AFTER the
+            // sanity gate: gibberish is rejected as gibberish, clean text
+            // is polished — whitespace, punctuation runs, enumeration
+            // artifacts, stutters, and the brevity ceiling — before it
+            // reaches a human ear, whichever model produced it.
+            let polished = SpokenReplyPolisher.polish(safe)
+            guard !polished.isEmpty else {
+                speakWithVisibleOutcome(key: "router.modelReplyUnclear")
+                return
+            }
+            coordinator?.noteGenericReply(polished)
+            speak(text: polished)
         } else {
             speakWithVisibleOutcome(key: "router.modelReplyUnclear")
         }
