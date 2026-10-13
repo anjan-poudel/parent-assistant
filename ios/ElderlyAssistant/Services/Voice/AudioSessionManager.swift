@@ -278,8 +278,11 @@ final class AudioSessionManager {
     private func emitPlaybackFailure(step: String, error: Error,
                                      outcome: String = "failed") {
         let ns = error as NSError
+        // The bare numeric OSStatus survives LogSanitiser (its charset
+        // pattern accepts digits); the domain+code form is redacted on
+        // the console. The step rides metadata for the analytics bus.
         emit(eventType: "audio_response_playback", outcome: outcome,
-             errorCode: "\(ns.domain) \(ns.code)",
+             errorCode: "\(ns.code)",
              metadata: ["step": step])
     }
 
