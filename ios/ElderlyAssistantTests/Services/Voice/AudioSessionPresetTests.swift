@@ -45,6 +45,8 @@ final class AudioSessionPresetTests: XCTestCase {
         private(set) var categoryCalls: [CategoryCall] = []
         private(set) var activeCalls: [(Bool, AVAudioSession.SetActiveOptions)] = []
         private(set) var voiceProcessingCalls: [Bool] = []
+        /// [LOUD-TTS-CATEGORY] Every engine stop/start, in order.
+        private(set) var engineRunningCalls: [Bool] = []
         private(set) var permissionRequests = 0
 
         func requestRecordPermission(_ callback: @escaping (Bool) -> Void) {
@@ -68,6 +70,10 @@ final class AudioSessionPresetTests: XCTestCase {
                        options: AVAudioSession.SetActiveOptions) throws {
             activeCalls.append((active, options))
             if let activeError { throw activeError }
+        }
+
+        func setEngineRunning(_ running: Bool) throws {
+            engineRunningCalls.append(running)
         }
 
         func setVoiceProcessingEnabled(_ enabled: Bool) throws {
@@ -406,6 +412,11 @@ final class AudioSessionPresetTests: XCTestCase {
                        "setCategory on an ACTIVE session throws on iOS 26 "
                        + "(Anzaan field test) — the switch must cycle active "
                        + "off → category → active on")
+        XCTAssertEqual(session.engineRunningCalls, [false],
+                       "the engine stops FIRST — a live input tap is what "
+                       + "the category change refuses to service, and "
+                       + "cycling under a running engine deadens the next "
+                       + "turn's capture (Anzaan: whisperkit_stt samples=0)")
 
         manager.endResponsePlayback()
         XCTAssertEqual(session.categoryCalls.last,
@@ -417,6 +428,9 @@ final class AudioSessionPresetTests: XCTestCase {
                        "restore uses the same deactivate-first cycle and "
                        + "leaves the session active (deactivating it would "
                        + "strand the voice pipeline's engine)")
+        XCTAssertEqual(session.engineRunningCalls, [false, true],
+                       "the engine returns LAST, once the capture category "
+                       + "is in place — no path may leave the mic dead")
     }
 
     func testNestedResponsePlaybackRestoresOnlyAtOutermostEnd() {
@@ -476,5 +490,9 @@ final class AudioSessionPresetTests: XCTestCase {
         XCTAssertEqual(session.categoryCalls.count, 2,
                        "end still restores the capture preset (the reply "
                        + "played, just quieter)")
+        XCTAssertEqual(session.engineRunningCalls, [false, true, true],
+                       "the failed switch rearms the engine, and restore "
+                       + "re-arms again — idempotent in the real controller, "
+                       + "the mic must never stay stopped")
     }
 }

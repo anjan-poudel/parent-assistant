@@ -29,6 +29,20 @@ protocol AudioSessionControlling: AnyObject {
     /// engine is stopped, never in manual rendering mode). Throws when
     /// the current route/session configuration cannot do it.
     func setVoiceProcessingEnabled(_ enabled: Bool) throws
+    /// [LOUD-TTS-CATEGORY] Starts/stops the shared engine (idempotent —
+    /// a running engine is left running and vice versa). The playback
+    /// category switch must run with the engine STOPPED: a live input
+    /// tap is what makes the switch fail on iOS 26, and cycling the
+    /// session under a running engine left the NEXT turn's capture dead
+    /// (Anzaan field test 2026-10-14: whisperkit_stt samples=0 after
+    /// every cycle).
+    func setEngineRunning(_ running: Bool) throws
+}
+
+extension AudioSessionControlling {
+    /// Default no-op — fakes and non-engine configurations inherit the
+    /// pre-seam behavior without change.
+    func setEngineRunning(_ running: Bool) throws {}
 }
 
 enum AudioSessionControllingError: Error {
@@ -79,6 +93,16 @@ private final class SystemAudioSessionController: AudioSessionControlling {
     func setActive(_ active: Bool,
                    options: AVAudioSession.SetActiveOptions) throws {
         try session.setActive(active, options: options)
+    }
+
+    func setEngineRunning(_ running: Bool) throws {
+        if running {
+            guard !audioEngine.isRunning else { return }
+            try audioEngine.start()
+        } else {
+            guard audioEngine.isRunning else { return }
+            audioEngine.stop()
+        }
     }
 
     func setVoiceProcessingEnabled(_ enabled: Bool) throws {
@@ -203,17 +227,25 @@ final class AudioSessionManager {
     }
 
     /// The bell-config switch, one step at a time so a failure says
-    /// WHICH step and WHICH OSStatus — setCategory on an ACTIVE session
+    /// WHICH step — field history: setCategory on an ACTIVE session
     /// threw NSOSStatusErrorDomain on Anzaan (iOS 26, 2026-10-14), and
-    /// the deactivate-first cycle still failed at one specific step.
-    /// Each step's catch reactivates the session (never leave it
-    /// deactivated — the mic pipeline is the invariant) and reports.
+    /// the deactivate-first cycle under a RUNNING engine left the next
+    /// turn's capture dead (whisperkit_stt samples=0). The engine stops
+    /// FIRST — a live input tap is what the category change refuses to
+    /// service — and every failure path rearms it (the mic pipeline is
+    /// the invariant; no path may leave it stopped or inactive).
     private func switchToPlaybackCategory() {
+        do {
+            try session.setEngineRunning(false)
+        } catch {
+            emitPlaybackFailure(step: "engine_stop", error: error)
+            return
+        }
         do {
             try session.setActive(false, options: [.notifyOthersOnDeactivation])
         } catch {
             emitPlaybackFailure(step: "deactivate", error: error)
-            try? session.setActive(true, options: [])
+            rearmCaptureSession()
             return
         }
         do {
@@ -222,17 +254,25 @@ final class AudioSessionManager {
                                     options: Self.playbackOptions)
         } catch {
             emitPlaybackFailure(step: "category", error: error)
-            try? session.setActive(true, options: [])
+            rearmCaptureSession()
             return
         }
         do {
             try session.setActive(true, options: [])
         } catch {
             emitPlaybackFailure(step: "activate", error: error)
-            try? session.setActive(true, options: [])
+            rearmCaptureSession()
             return
         }
         emit(eventType: "audio_response_playback", outcome: "began")
+    }
+
+    /// Failure recovery for the playback switch: reactivate the session
+    /// and restart the engine — a failed switch must cost the reply's
+    /// loudness, never the mic.
+    private func rearmCaptureSession() {
+        try? session.setActive(true, options: [])
+        try? session.setEngineRunning(true)
     }
 
     private func emitPlaybackFailure(step: String, error: Error,
@@ -264,29 +304,38 @@ final class AudioSessionManager {
         } catch {
             emitPlaybackFailure(step: "restore_deactivate", error: error,
                                 outcome: "restore_failed")
+            try? session.setEngineRunning(true)
             return
         }
         if voiceProcessingEnabled {
             do {
+                // Re-runs the full activate-time sequence (category →
+                // node enable, honest measurement fallback) because the
+                // node's voice-processing flag is not guaranteed to
+                // survive the category round-trip. The engine is still
+                // stopped here — VPIO enable requires it.
                 try configureVoiceProcessingPreset()
             } catch {
-                // configureVoiceProcessingPreset's own fallback
-                // reactivates the session; this catch is the case where
-                // even its category step threw — re-arm activation.
-                try? session.setActive(true, options: [.notifyOthersOnDeactivation])
                 emitPlaybackFailure(step: "restore_vpio", error: error,
                                     outcome: "restore_failed")
             }
-            return
+        } else {
+            do {
+                try session.setCategory(Self.measurementCategory,
+                                        mode: Self.measurementMode,
+                                        options: Self.measurementOptions)
+            } catch {
+                emitPlaybackFailure(step: "restore_category", error: error,
+                                    outcome: "restore_failed")
+            }
         }
+        // Activate (idempotent — the VPIO path already did), then bring
+        // the engine back LAST, once the capture category is in place.
+        try? session.setActive(true, options: [.notifyOthersOnDeactivation])
         do {
-            try session.setCategory(Self.measurementCategory,
-                                    mode: Self.measurementMode,
-                                    options: Self.measurementOptions)
-            try session.setActive(true, options: [.notifyOthersOnDeactivation])
+            try session.setEngineRunning(true)
         } catch {
-            try? session.setActive(true, options: [.notifyOthersOnDeactivation])
-            emitPlaybackFailure(step: "restore_category", error: error,
+            emitPlaybackFailure(step: "engine_start", error: error,
                                 outcome: "restore_failed")
         }
     }
