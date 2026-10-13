@@ -594,10 +594,21 @@ struct CorrectionClarification: Equatable, Sendable {
         -> CorrectionClarification? {
         guard result.mode == .apply,
               let item = result.judgeItems.first else { return nil }
+        // [PLAUSIBLE-ONLY] The heard surface is NEVER offered back as an
+        // answer (owner rule 2026-10-12: "why even ask that useless
+        // question" — the premise of the correction is that the heard
+        // word is wrong). Options are the plausible alternatives only,
+        // capped at the top two — one plausible alternative means the
+        // single "did you mean X" question.
+        let heardKey = STTCorrector.lexiconKey(of: item.surface)
+        let plausible = item.top.filter {
+            STTCorrector.lexiconKey(of: $0) != heardKey
+        }.prefix(2)
+        guard let first = plausible.first else { return nil }
         return CorrectionClarification(
             readings: [Reading(tokenRange: item.tokenRange,
                                surface: item.surface,
-                               options: item.top)],
+                               options: Array(plausible))],
             reason: reason)
     }
 }

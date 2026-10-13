@@ -1518,7 +1518,7 @@ final class AppCoordinator: ObservableObject {
                                                // 40% sure of is not worth
                                                // stating as fact.
                                                chatConfidenceFloor: 0.6,
-                                               judgeTimeoutSeconds: 1.5),
+                                               judgeTimeoutSeconds: 8.0),
         pluginRegistry: pluginRegistry,
         // [TURN-TIMING-BREAKDOWN] Nil on every build but an
         // `INTENT_ENCODER` one — the picker brain's prompt-build and
@@ -1864,15 +1864,16 @@ final class AppCoordinator: ObservableObject {
             onEscalated: { [weak self] reason in
                 self?.emitEncoderEscalatedToPickerBrain(reason)
             })
-        // [JUDGE-PRE-INTERPRET] The semantic judge rides the chain it
-        // judges for: the resident 4B brain, consulted BEFORE the
-        // interpreter runs whenever the banded gate marked a token
-        // judge-eligible (measured 79.5% top-1 on the error corpus vs
-        // the lexicographical scorer's 2.1%). `LlamaSemanticJudge.isReady`
-        // gates on the lifecycle's CURRENT residency — never a load.
-        (router.localBrain as? LocalBrainChain)?.semanticJudge =
-            LlamaSemanticJudge(brain: llamaCommandInterpreter,
-                               lifecycle: ModelLifecycleManager.shared)
+        // [JUDGE-PRE-INTERPRET] DELIBERATELY NOT WIRED (device field
+        // report 2026-10-12): the pre-interpret judge serialised TWO 4B
+        // inferences per uncertain turn and its short budget timed out
+        // on-device, so every such turn landed in the mechanical
+        // question. The judge now runs ONLY on the failure path
+        // (`CommandRouter.attemptCorrectionRescue`), where the turn has
+        // already failed and the 8 s budget is free latency — the same
+        // silent correction, one inference, no double wait. The chain
+        // hook stays for a future faster judge model.
+        _ = (router.localBrain as? LocalBrainChain)
     }
 
     /// [ENCODER-RUNTIME-CASCADE] The A/B evidence for a cascade turn: the
@@ -2003,7 +2004,14 @@ final class AppCoordinator: ObservableObject {
     // `resolveBrainModelID` below — on a 6 GB class this entry is
     // `over_class_budget` beside a warm ANE STT, so the automatic path steps
     // down to the 1.7B while this constant stays the catalogue's claim.
-    static let defaultBrainModelID = ModelCatalog.intentQwen4BSlotCanon
+    // [ON-DEVICE-LATENCY] The 1.7B slim brain, not the 4B (device field
+    // report 2026-10-12): the 4B slotcanon takes 15-30 s per turn on the
+    // 14 Pro Max — every turn timed out of the 10 s budget and fell to
+    // the correction question. The 1.7B (closed 0.941 / emergency 1.000,
+    // "best available on-device brain" per the catalog) fits the same
+    // turns into ~5-8 s on Metal. The 4B stays pickable in Settings for
+    // anyone who prefers its quality over the latency.
+    static let defaultBrainModelID = ModelCatalog.intentQwenS43
 
     /// The brain model the interpreter actually uses: the stored
     /// preference when it names a real catalog entry, else what
@@ -11092,16 +11100,18 @@ extension AppCoordinator: VoiceCommandCoordinating {
             ?? false
     }
 
-    /// [CORRECTION-REVIVE] The pluggable semantic judge, wired over the
-    /// llama.cpp interpreter. The `lazy` access CREATES the interpreter if
-    /// needed — creation loads nothing (the model loads on first
-    /// inference), and `LlamaSemanticJudge.isReady` gates on the
-    /// lifecycle's CURRENT residency, so a not-yet-loaded brain reads as
-    /// not-ready and the router falls through to the spoken clarification
-    /// (the judge never triggers a load — the [VOICE-OOM] invariant).
+    /// [CORRECTION-REVIVE] The pluggable semantic judge.
+    ///
+    /// NOT WIRED to the 4B (device field report 2026-10-12): the 4B takes
+    /// ~15 s per inference on the phone — every judge call timed out even
+    /// at 8 s, and the pre-interpret hook doubled the wait. The 4B judge
+    /// is architecturally resident-only AND fast-model-pending: it
+    /// returns when the trained correction model (in training on the
+    /// server) slots into this same seam. Until then the failure path
+    /// goes STRAIGHT to the conversational yes-first clarification —
+    /// fast, and never a numbered list.
     var correctionJudge: SemanticJudge {
-        LlamaSemanticJudge(brain: llamaCommandInterpreter,
-                           lifecycle: ModelLifecycleManager.shared)
+        NoSemanticJudge()
     }
 
     /// [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1 — the router's

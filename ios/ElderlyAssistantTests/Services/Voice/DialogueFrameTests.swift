@@ -372,7 +372,7 @@ final class DialogueFrameTests: XCTestCase {
                                                     retry: false, locale: ne)
 
         XCTAssertEqual(probe,
-                       "मैले बुझिन। के तपाईंको मतलब दुर्गा भजन बजाउने हो?, युट्युबमा bhajan हेर्ने हो?, समाचार सुनाउने हो? हो?")
+                       "मैले बुझिन। तपाईंले दुर्गा भजन बजाउने हो?, युट्युबमा bhajan हेर्ने हो?, समाचार सुनाउने हो? भन्नुभएको हो?")
         // The fourth candidate is over `maxCandidates` — never spoken.
         XCTAssertFalse(probe.contains("क्यामेरा"))
     }

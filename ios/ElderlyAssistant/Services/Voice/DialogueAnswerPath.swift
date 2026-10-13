@@ -131,6 +131,10 @@ enum DialogueAnswerVocabulary {
     static let probeEchoWords: [String] = [
         "कस्तो", "कुन", "के", "what", "which", "kind"
     ]
+
+    /// [CORRECTION-REVIVE] The bare affirmations that answer the
+    /// yes-first correction question with the top reading.
+    static let yesTokens: [String] = ["हो", "हजुर", "yes", "हुन्छ"]
 }
 
 /// The pure answer brain (design-l2 §9/§22). See the file header for the
@@ -396,6 +400,20 @@ enum DialogueAnswerPath {
         // S1 — normalize; nothing at all.
         let allTokens = tokens(in: canonical(value))
         guard !allTokens.isEmpty else { return .invalid(.emptyAfterStrip) }
+
+        // [CORRECTION-REVIVE] S1.5 — the conversational YES answer: a
+        // bare affirmation to a correctionChoice frame picks the FIRST
+        // reading (the one the yes-first probe asked about). Checked
+        // before the index words, which could never answer "हो".
+        if frame.probeKind == .correctionChoice,
+           DialogueAnswerVocabulary.yesTokens.contains(allTokens[0]),
+           allTokens.count == 1 {
+            guard let reading = frame.correctionReadings.first,
+                  reading.options.count >= 1 else {
+                return .invalid(.emptyAfterStrip)
+            }
+            return .correctionPick(index: 1, capture: .optionName)
+        }
 
         // S2 — the leading index word.
         var working = allTokens

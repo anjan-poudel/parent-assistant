@@ -4013,7 +4013,7 @@
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "के तपाईंको मतलब %@ हो?"
+            "value": "तपाईंले %@ भन्नुभएको हो?"
           }
         }
       }
@@ -23503,19 +23503,19 @@
         }
       }
     },
-    "dialogue.correction.ask": {
+    "dialogue.correction.or": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "I heard «%@». Did you mean %@?"
+            "value": "Did you mean %@ or %@?"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "मैले «%@» सुनें। के तपाईंले %@ भन्न खोज्नुभएको थियो?"
+            "value": "तपाईंले %@ वा %@ भन्नुभएको हो?"
           }
         }
       }

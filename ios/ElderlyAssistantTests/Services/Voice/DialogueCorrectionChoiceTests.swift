@@ -40,18 +40,26 @@ final class DialogueCorrectionChoiceTests: XCTestCase {
         XCTAssertTrue(frame.candidates.isEmpty)
     }
 
-    // MARK: - Probe text (string equality — never model text)
+    // MARK: - Probe text (owner copy spec: "did you mean X / X or Y")
 
-    func testTheProbeComposesTheHeardSurfaceAndNumberedReadings() {
+    func testTheProbeIsExactlyTheOwnersCopy() {
+        // Owner spec 2026-10-12: "did you mean X", "did you mean X or Y"
+        // — no lead, no quoting of the heard word, no numbering, nothing
+        // appended. String equality against the shipped templates.
         let text = DialogueProbeComposer.probeText(for: frame(),
                                                    catalog: nil,
                                                    retry: false,
                                                    locale: ne)
-        XCTAssertTrue(text.hasPrefix("मैले बुझिन।"),
-                      "the honest lead opens the question")
-        XCTAssertTrue(text.contains("«गइ»"), "the heard surface is quoted")
-        XCTAssertTrue(text.contains("1) गइए"), "the readings are numbered")
-        XCTAssertTrue(text.contains("2) गर"))
+        XCTAssertEqual(text, "तपाईंले गइए वा गर भन्नुभएको हो?")
+        let single = DialogueProbeComposer.probeText(
+            for: DialogueFrame.correctionChoice(
+                readings: [CorrectionClarification.Reading(tokenRange: 0..<2,
+                                                           surface: "गइ",
+                                                           options: ["गइए"])],
+                original: "गइ",
+                sourceTranscript: "गइ"),
+            catalog: nil, retry: false, locale: ne)
+        XCTAssertEqual(single, "तपाईंले गइए भन्नुभएको हो?")
     }
 
     func testTheRetryProbePrefixesTheRetryLine() {

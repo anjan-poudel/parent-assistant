@@ -484,7 +484,7 @@ final class DialogueCandidateBuilderTests: XCTestCase {
         let probe = DialogueProbeComposer.probeText(for: frame, catalog: nil,
                                                     retry: false, locale: ne)
 
-        XCTAssertEqual(probe, "मैले बुझिन। के तपाईंको मतलब दशैं दुर्गा बजाउने हो? हो?")
+        XCTAssertEqual(probe, "मैले बुझिन। तपाईंले दशैं दुर्गा बजाउने हो? भन्नुभएको हो?")
     }
 
     /// The app-launch candidate without a query renders its primary match
@@ -496,7 +496,7 @@ final class DialogueCandidateBuilderTests: XCTestCase {
         let probe = DialogueProbeComposer.probeText(for: frame, catalog: nil,
                                                     retry: false, locale: ne)
 
-        XCTAssertEqual(probe, "मैले बुझिन। के तपाईंको मतलब युट्युब खोल्ने हो? हो?")
+        XCTAssertEqual(probe, "मैले बुझिन। तपाईंले युट्युब खोल्ने हो? भन्नुभएको हो?")
     }
 
     /// Every compose form's label key resolves in both languages (the

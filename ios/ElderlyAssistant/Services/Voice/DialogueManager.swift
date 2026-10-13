@@ -360,7 +360,7 @@ enum DialogueProbeComposer {
         static let anyPlay = "dialogue.option.anyPlay"
         static let understoodNo = "dialogue.understood.no"
         static let didYouMean = "dialogue.didYouMean"
-        static let correctionAsk = "dialogue.correction.ask"
+        static let correctionOr = "dialogue.correction.or"
     }
 
     /// slotFill: the group's question key with `%@` = the capped option
@@ -420,22 +420,25 @@ enum DialogueProbeComposer {
             String(format: L10n.str(Key.didYouMean, locale: locale), labels)
     }
 
-    /// [CORRECTION-REVIVE] The correction question: the honest lead, then
-    /// the heard surface and the numbered readings — "१) «X», २) «Y»" —
-    /// so the elder answers with the index words the answer path already
-    /// understands ("पहिलो" / "दोस्रो" / "तेस्रो"). The readings are the
-    /// user's own words; never model text.
+    /// [CORRECTION-REVIVE] The correction question — the OWNER'S copy
+    /// spec (2026-10-12): "did you mean X" / "did you mean X or Y" and
+    /// NOTHING else. No lead line, no heard-surface quoting, no
+    /// numbered list, no appendix. One reading → the existing
+    /// `dialogue.didYouMean` template; two → the X-or-Y template with
+    /// the top two readings; beyond two the rest are simply not offered.
+    /// Answer "हो" for the first, echo the second, "होइन" to close.
     private static func correctionChoiceProbe(for frame: DialogueFrame,
                                               locale: Locale) -> String {
-        guard let reading = frame.correctionReadings.first else {
+        guard let reading = frame.correctionReadings.first,
+              let top = reading.options.first else {
             return L10n.str(Key.understoodNo, locale: locale)
         }
-        let numbered = reading.options.enumerated()
-            .map { index, option in "\(index + 1)) \(option)" }
-            .joined(separator: ", ")
-        return L10n.str(Key.understoodNo, locale: locale) + " " +
-            String(format: L10n.str(Key.correctionAsk, locale: locale),
-                   reading.surface, numbered)
+        if reading.options.count >= 2,
+           let second = reading.options.dropFirst().first {
+            return String(format: L10n.str(Key.correctionOr, locale: locale),
+                          top, second)
+        }
+        return String(format: L10n.str(Key.didYouMean, locale: locale), top)
     }
 
     /// A candidate's spoken label: its template key resolved in the
