@@ -140,7 +140,7 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// counts are 17 keys, not the 16 the §16 prose still says). Two keys
     /// post-date §16: `dialogue.option.conjunction` (the "or" joiner the
     /// narrowed choice probes speak with, owner feedback 2026-10-11) and
-    /// `dialogue.correction.ask` (correction-revive, PR #162), making the
+    /// `dialogue.correction.or` (correction-revive, PR #162), making the
     /// family 19.
     private static let dialogueKeys: [String] = [
         "dialogue.cancelled",
@@ -148,7 +148,7 @@ final class L10nCatalogCoverageTests: XCTestCase {
         "dialogue.candidate.music",
         "dialogue.candidate.news",
         "dialogue.candidate.youtube",
-        "dialogue.correction.ask",
+        "dialogue.correction.or",
         "dialogue.didYouMean",
         "dialogue.escape",
         "dialogue.exhausted",
@@ -174,7 +174,7 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// (PR #171) and +21 family-contacts keys (T-147) land on the same
     /// 1,389 base — the T-144 merge re-measured the combined catalog at
     /// 1,415, and this pin is the total minus the dialogue family's 19 keys
-    /// (the 18 design-l2 §16 entries plus `dialogue.correction.ask`, moved
+    /// (the 18 design-l2 §16 entries plus `dialogue.correction.or`, moved
     /// into the family block at this rebase). The dialogue family adds
     /// exactly its keys and removes none, so the total is pinned (the
     /// Spotify-localisation suite's count discipline).
@@ -388,7 +388,7 @@ final class L10nCatalogCoverageTests: XCTestCase {
                              + "catalog layout changed and this pin is blind")
 
         // Family membership, not a prefix sweep: the family is the
-        // pinned inventory (19 keys incl. `dialogue.correction.ask`,
+        // pinned inventory (19 keys incl. `dialogue.correction.or`,
         // moved into the block at the rebase), so a bare prefix filter
         // would let an unpinned `dialogue.*` key pass silently.
         let family = Set(Self.dialogueKeys)
