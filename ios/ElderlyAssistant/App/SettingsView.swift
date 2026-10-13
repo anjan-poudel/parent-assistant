@@ -1925,6 +1925,9 @@ private struct FamilyContactWizardSheet: View {
     // list round-trips through `normalizedNicknames` at the coordinator.
     @State private var nicknames: [String] = []
     @State private var nicknameDraft = ""
+    /// [PER-CONTACT-OVERRIDE] (2026-10-14) The contact's dialer
+    /// override draft: nil = follow the global primary/secondary.
+    @State private var dialerOverride: CallApp?
     // Home address for voice navigation (directions task, 2026-09-07) —
     // free-form text; blank saves as nil (no address = not a navigation
     // target).
@@ -3102,7 +3105,50 @@ private struct FamilyContactWizardSheet: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             handleHints
+            // [PER-CONTACT-OVERRIDE] (2026-10-14) The contact's dialer
+            // override — Default follows the global primary/secondary;
+            // a pick wins the voice call chain for this contact (its
+            // fallback is the global primary when the pick is the
+            // secondary — never a repeat).
+            dialerOverridePicker
         }
+    }
+
+    /// The dialer-override row: Default (nil) plus the four call apps,
+    /// in the chain's canonical order.
+    private var dialerOverridePicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.str("family.dialerOverride.title",
+                          locale: coordinator.activeLocale))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                .foregroundStyle(appearance.colors.textSecondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    dialerOverrideChip(nil, labelKey: "family.dialerOverride.default")
+                    ForEach([CallApp.phone, .whatsApp, .messenger, .faceTime], id: \.self) { app in
+                        dialerOverrideChip(app, labelKey: CallChannelChain.nameKey(for: app))
+                    }
+                }
+            }
+        }
+    }
+
+    private func dialerOverrideChip(_ app: CallApp?, labelKey: String) -> some View {
+        let isSelected = dialerOverride == app
+        return Button {
+            dialerOverride = app
+        } label: {
+            Text(L10n.str(labelKey, locale: coordinator.activeLocale))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(isSelected ? appearance.colors.accentForeground
+                                            : appearance.colors.textPrimary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .appSurface(role: isSelected ? .accent : .control,
+                            cornerRadius: DesignTokens.bubbleCornerRadius)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("family.dialerOverride.\(app?.rawValue ?? "default")")
     }
 
     /// The "where to look" lines — the same numbered hints the call
@@ -3378,6 +3424,9 @@ private struct FamilyContactWizardSheet: View {
         // what the family will actually be invited at (calendar & family
         // sharing task, 2026-09-16).
         email = contact.email ?? ""
+        // [PER-CONTACT-OVERRIDE] (2026-10-14) The stored override
+        // round-trips into the draft; nil shows the Default option.
+        dialerOverride = contact.dialerOverride
         // The stored flag shows in the step-2 toggle (family-emergency
         // task, 2026-09-07) — an edit opens with it pre-set.
         isEmergencyContact = contact.isEmergencyContact
@@ -3477,7 +3526,8 @@ private struct FamilyContactWizardSheet: View {
                 // T-159 (design-l2 §2.6): the draft link is the ONLY
                 // link write this flow makes; nil leaves any stored
                 // claim unchanged (clearing is the unlink path only).
-                link: draftLink)
+                link: draftLink,
+                dialerOverride: dialerOverride)
         } else {
             succeeded = coordinator.addFamilyContact(
                 id: savedID, name: trimmedName, phone: phone,
@@ -3486,7 +3536,8 @@ private struct FamilyContactWizardSheet: View {
                 nicknames: nicknames,
                 address: homeAddress, email: contactEmail,
                 isEmergencyContact: isEmergencyContact,
-                link: draftLink)
+                link: draftLink,
+                dialerOverride: dialerOverride)
         }
         // A failed store write keeps the draft on screen — Save again to
         // retry; nothing was claimed that didn't happen, and no system

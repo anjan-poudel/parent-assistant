@@ -2235,11 +2235,34 @@ final class AppCoordinator: ObservableObject {
                                     whatsAppInstalled: Bool,
                                     vocabulary: CallChannelVocabulary = .anyChannel)
                                     -> CallChannelChain.Result {
-        resolveChannel(preferred: explicit ?? defaultApp,
-                       secondaryApp: secondaryApp,
-                       messengerHandleAvailable: messengerHandleAvailable,
-                       whatsAppInstalled: whatsAppInstalled,
-                       vocabulary: vocabulary)
+        resolveChannel(order: CallChannelChain.attemptOrder(
+            preferred: explicit ?? defaultApp,
+            secondary: secondaryApp),
+            messengerHandleAvailable: messengerHandleAvailable,
+            whatsAppInstalled: whatsAppInstalled,
+            vocabulary: vocabulary)
+    }
+
+    /// [PER-CONTACT-OVERRIDE] (2026-10-14) The seam for a contact's
+    /// explicit dialer override: the chain is [override, (override ==
+    /// secondary ? primary : secondary), phone] — the override is
+    /// attempted exactly once, and its fallback is never a repeat of
+    /// itself (the owner's rule: an override that IS the secondary
+    /// falls back to the PRIMARY).
+    static func resolvedCallChannelWithOverride(override: CallApp,
+                                                defaultApp: CallApp,
+                                                secondaryApp: CallApp,
+                                                messengerHandleAvailable: Bool,
+                                                whatsAppInstalled: Bool,
+                                                vocabulary: CallChannelVocabulary = .anyChannel)
+                                                -> CallChannelChain.Result {
+        resolveChannel(order: CallChannelChain.attemptOrderForOverride(
+            override: override,
+            primary: defaultApp,
+            secondary: secondaryApp),
+            messengerHandleAvailable: messengerHandleAvailable,
+            whatsAppInstalled: whatsAppInstalled,
+            vocabulary: vocabulary)
     }
 
     /// The shared seam algorithm (ADR-CDP-03 steps 1–3), one
@@ -2252,15 +2275,15 @@ final class AppCoordinator: ObservableObject {
     /// provenance: `fellBackFrom` keeps only the feasibility-skipped
     /// channels and is unchanged by it. The terminal is always feasible,
     /// so the seam is total and the route never dead-ends.
-    private static func resolveChannel(preferred: CallApp,
-                                       secondaryApp: CallApp,
+    private static func resolveChannel(order: [CallApp],
                                        messengerHandleAvailable: Bool,
                                        whatsAppInstalled: Bool,
                                        vocabulary: CallChannelVocabulary)
                                        -> CallChannelChain.Result {
+        var normalized = order
+        normalized[0] = vocabulary.normalized(normalized[0])
         let routed = CallChannelChain.route(
-            preferred: vocabulary.normalized(preferred),
-            secondary: secondaryApp,
+            in: normalized,
             feasibility: CallChannelChain.Feasibility(
                 messengerHandleAvailable: messengerHandleAvailable,
                 whatsAppInstalled: whatsAppInstalled))
@@ -7245,7 +7268,8 @@ self.noteTalkContractChanged()
                           address: String? = nil,
                           email: String? = nil,
                           isEmergencyContact: Bool = false,
-                          link: SystemContactLink? = nil) -> Bool {
+                          link: SystemContactLink? = nil,
+                          dialerOverride: CallApp? = nil) -> Bool {
         guard !Self.isDuplicateLinkClaim(link, in: familyContacts, excluding: nil) else {
             emitDuplicateLinkClaimRefusal()
             return false
@@ -7253,6 +7277,7 @@ self.noteTalkContractChanged()
         let filename = photo.flatMap { contactPhotoStore.save($0) }
         let contact = FamilyContact(id: id, name: name, phone: phone, relationship: relationship,
                                     messengerHandle: messengerHandle,
+                                    dialerOverride: dialerOverride,
                                     photoFilename: filename,
                                     nicknames: FamilyContact.normalizedNicknames(nicknames),
                                     address: Self.normalizedOptionalText(address),
@@ -7311,7 +7336,8 @@ self.noteTalkContractChanged()
                              address: String? = nil,
                              email: String? = nil,
                              isEmergencyContact: Bool = false,
-                             link: SystemContactLink? = nil) -> Bool {
+                             link: SystemContactLink? = nil,
+                             dialerOverride: CallApp? = nil) -> Bool {
         // The duplicate-claim guard runs FIRST: a refused write persists
         // nothing, so no photo is saved and no orphan can be created.
         guard !Self.isDuplicateLinkClaim(link, in: familyContacts, excluding: id) else {
@@ -7328,6 +7354,10 @@ self.noteTalkContractChanged()
         // link UNCHANGED (unlink is `setFamilyContactLink` only, T-158).
         if let link { contact.systemContact = link }
         contact.isEmergencyContact = isEmergencyContact
+        // [PER-CONTACT-OVERRIDE] (2026-10-14) The editor's pick passes
+        // through: nil clears the override (back to the globals), a pick
+        // sets it. The chain consumes it at call time.
+        contact.dialerOverride = dialerOverride
         // The editor passes the CURRENT text each save; blank clears the
         // stored address (nil), so "remove the address" is an edit, not a
         // separate affordance (directions task, 2026-09-07).
@@ -8414,13 +8444,39 @@ self.noteTalkContractChanged()
         // that can only fail.
         let intentIsVideo = resolved.method == .facetimeVideo
             || resolved.method == .messengerVideo
-        let preferred = CallChannelChain.channel(for: resolved.method)
-        let route = Self.resolvedCallChannel(
-            explicit: preferred,
-            defaultApp: defaultCallApp,
-            secondaryApp: secondaryCallApp,
-            messengerHandleAvailable: hasUsableMessengerHandle(contact.messengerHandle),
-            whatsAppInstalled: whatsAppInstalledNow)
+        // [PER-CONTACT-OVERRIDE] (2026-10-14) A contact's explicit
+        // dialer override wins the audio-class chain: [override,
+        // (override == secondary ? primary : secondary), phone]. The
+        // override is attempted exactly once; its fallback is never a
+        // repeat of itself. Video-class calls keep the method-resolved
+        // channel (the contact's video preference owns that path).
+        let override = intentIsVideo ? nil : contact.dialerOverride
+        let preferred: CallApp
+        let hopOrder: [CallApp]
+        let route: CallChannelChain.Result
+        if let override {
+            preferred = override
+            hopOrder = CallChannelChain.attemptOrderForOverride(
+                override: override,
+                primary: defaultCallApp,
+                secondary: secondaryCallApp)
+            route = Self.resolvedCallChannelWithOverride(
+                override: override,
+                defaultApp: defaultCallApp,
+                secondaryApp: secondaryCallApp,
+                messengerHandleAvailable: hasUsableMessengerHandle(contact.messengerHandle),
+                whatsAppInstalled: whatsAppInstalledNow)
+        } else {
+            preferred = CallChannelChain.channel(for: resolved.method)
+            hopOrder = CallChannelChain.attemptOrder(preferred: preferred,
+                                                     secondary: secondaryCallApp)
+            route = Self.resolvedCallChannel(
+                explicit: preferred,
+                defaultApp: defaultCallApp,
+                secondaryApp: secondaryCallApp,
+                messengerHandleAvailable: hasUsableMessengerHandle(contact.messengerHandle),
+                whatsAppInstalled: whatsAppInstalledNow)
+        }
         let action = PendingCallAction(contact: contact,
                                        method: CallChannelChain.method(for: route.channel,
                                                                        isVideo: intentIsVideo),
@@ -8429,8 +8485,7 @@ self.noteTalkContractChanged()
                                        sourceCommand: sourceCommand,
                                        fellBackFrom: route.fellBackFrom,
                                        hopCandidates: CallChannelChain.hopCandidates(
-                                           preferred: preferred,
-                                           secondary: secondaryCallApp,
+                                           in: hopOrder,
                                            routed: route.channel))
         pendingCallAction = action
         // Dementia-loop guard (spec §7.2): same target called again
@@ -9479,11 +9534,12 @@ self.noteTalkContractChanged()
         // semantics ARE this seam's vocabulary (`.audio`): a FaceTime
         // preference on an audio path still routes to `.phone`, exactly
         // as today.
-        resolveChannel(preferred: familyContact?.resolvedAudioApp ?? defaultApp,
-                       secondaryApp: secondaryApp,
-                       messengerHandleAvailable: messengerHandleAvailable,
-                       whatsAppInstalled: whatsAppInstalled,
-                       vocabulary: .audio)
+        resolveChannel(order: CallChannelChain.attemptOrder(
+            preferred: familyContact?.resolvedAudioApp ?? defaultApp,
+            secondary: secondaryApp),
+            messengerHandleAvailable: messengerHandleAvailable,
+            whatsAppInstalled: whatsAppInstalled,
+            vocabulary: .audio)
     }
 
     /// What a missed-call row's tap resolves to (missed-calls fix,

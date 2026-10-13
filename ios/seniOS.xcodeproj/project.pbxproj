@@ -185,6 +185,7 @@
 		374D750511389F70858A0612 /* EventsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40CEC0F6B2E9FE0B1EF96F9B /* EventsView.swift */; };
 		377C7455BD7DCB0331E37176 /* GeminiClient+PointAsk.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4D6FDA9969BA206BE532ED0 /* GeminiClient+PointAsk.swift */; };
 		37BD4D9598593990C23B396D /* RepetitionGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 788D1FDD5EE237D36E52AD69 /* RepetitionGuard.swift */; };
+		383B7D88E6E78D193F0ABF0E /* CallDialerOverrideTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4994BD670EFD037A3075A140 /* CallDialerOverrideTests.swift */; };
 		386358312426B814486FFCDB /* SpeakerEmbeddingMathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C66F1336A7C9BE3F3D4AAC7 /* SpeakerEmbeddingMathTests.swift */; };
 		3908094C5955879645F25C6F /* ConfirmationChallenge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6192FE81FC913309F899E19 /* ConfirmationChallenge.swift */; };
 		3993DE9B6ABABF6A8BD8F8A6 /* LiveTranslateTestCipherKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF51E75EEEB19879204E9EF6 /* LiveTranslateTestCipherKeyStore.swift */; };
@@ -1125,6 +1126,7 @@
 		47D847BAD3741C86BAE6AC14 /* LiveTranslateOverlayViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateOverlayViewTests.swift; sourceTree = "<group>"; };
 		489494A7B9DC30CA378A3B17 /* MedicalAppointmentParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicalAppointmentParser.swift; sourceTree = "<group>"; };
 		48E41870A25876BAF075748D /* FamilyNotifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyNotifierTests.swift; sourceTree = "<group>"; };
+		4994BD670EFD037A3075A140 /* CallDialerOverrideTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallDialerOverrideTests.swift; sourceTree = "<group>"; };
 		49B372CC505A3162D8144A79 /* SwitchableCommandInterpreterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwitchableCommandInterpreterTests.swift; sourceTree = "<group>"; };
 		4A083FB7F06DFAF094F70C86 /* FreeFormEventFireHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeFormEventFireHandler.swift; sourceTree = "<group>"; };
 		4A0BC8A975514DA67FF1B8FF /* FamilyListLinkChipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyListLinkChipTests.swift; sourceTree = "<group>"; };
@@ -2433,6 +2435,7 @@
 				A1BB67C8B82ED45D27FEF36E /* BrainModelSelectionTests.swift */,
 				E108C082D6831FDD80FA44AA /* CalculatorToolTests.swift */,
 				365282A34BA338A9BB151269 /* CallChannelResolutionTests.swift */,
+				4994BD670EFD037A3075A140 /* CallDialerOverrideTests.swift */,
 				0E32D3CD98FA6DD8D58DF9EC /* ChatConfidenceFloorTests.swift */,
 				CA8C8BCBEC8903B3640CC61F /* ChatResponseShapeTests.swift */,
 				7F63BE0F70F8D66B3FF4F28F /* CloudFallbackTests.swift */,
@@ -3824,6 +3827,7 @@
 				C2E96A87DFF35557D8E4E41A /* CalendarSyncServiceTests.swift in Sources */,
 				99A22F7C4DAE5CDF9E66063A /* CallChannelResolutionTests.swift in Sources */,
 				C11BBC69B846050CB439CE40 /* CallConfirmationWordingTests.swift in Sources */,
+				383B7D88E6E78D193F0ABF0E /* CallDialerOverrideTests.swift in Sources */,
 				A3F93701994B8D36E72EB24B /* CallLinksTests.swift in Sources */,
 				2A45E70C7594AF54C85ADEA6 /* CallOverrideParserTests.swift in Sources */,
 				65ED87EB301C44308CE6FB10 /* CallViewFacesAndCaptionTests.swift in Sources */,

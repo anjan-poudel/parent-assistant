@@ -49,6 +49,23 @@ enum CallChannelChain {
         return order
     }
 
+    /// [PER-CONTACT-OVERRIDE] (2026-10-14) The attempt order when a
+    /// contact carries an explicit dialer override. The override is
+    /// attempted FIRST and EXACTLY ONCE; its fallback is the global
+    /// dialer that is NOT the override — when the override IS the
+    /// secondary, the fallback is the PRIMARY (naively appending the
+    /// secondary would repeat the override). `.phone` closes the chain
+    /// when absent, like the standard order.
+    static func attemptOrderForOverride(override: CallApp,
+                                        primary: CallApp,
+                                        secondary: CallApp) -> [CallApp] {
+        var order: [CallApp] = [override]
+        let fallback = (override == secondary) ? primary : secondary
+        if fallback != override { order.append(fallback) }
+        if !order.contains(.phone) { order.append(.phone) }
+        return order
+    }
+
     // MARK: routing
 
     /// The chain (frozen §3 shape, implemented verbatim). Never
@@ -58,8 +75,16 @@ enum CallChannelChain {
     static func route(preferred: CallApp,
                       secondary: CallApp,
                       feasibility: Feasibility) -> Result {
+        route(in: attemptOrder(preferred: preferred, secondary: secondary),
+              feasibility: feasibility)
+    }
+
+    /// The same walk over an explicit order (the override chain passes
+    /// `attemptOrderForOverride`'s result here).
+    static func route(in order: [CallApp],
+                      feasibility: Feasibility) -> Result {
         var skipped: [CallApp] = []
-        for candidate in attemptOrder(preferred: preferred, secondary: secondary) {
+        for candidate in order {
             if isFeasible(candidate, feasibility: feasibility) {
                 return Result(channel: candidate, fellBackFrom: skipped)
             }
@@ -81,7 +106,16 @@ enum CallChannelChain {
                               secondary: CallApp,
                               routed: CallApp,
                               vocabulary: CallChannelVocabulary = .anyChannel) -> [CallApp] {
-        let order = attemptOrder(preferred: preferred, secondary: secondary)
+        hopCandidates(in: attemptOrder(preferred: preferred, secondary: secondary),
+                      routed: routed,
+                      vocabulary: vocabulary)
+    }
+
+    /// The hop candidates for an explicit order (the override chain's
+    /// suffix after `routed`, same filtering and terminal rules).
+    static func hopCandidates(in order: [CallApp],
+                              routed: CallApp,
+                              vocabulary: CallChannelVocabulary = .anyChannel) -> [CallApp] {
         var remaining = order.firstIndex(of: routed).map { Array(order[($0 + 1)...]) } ?? []
         remaining = remaining.filter { vocabulary.permits($0) }
         if remaining.isEmpty, vocabulary.terminal != routed {
