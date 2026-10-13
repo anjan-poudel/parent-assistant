@@ -138,6 +138,13 @@ enum DesignTokens {
     /// ever changes, the progress ring animates over this same value, so
     /// ring completion and the reset stay in sync automatically.
     static let talkResetHoldSeconds: TimeInterval = 2.0
+    /// [HERO-LAYOUT] (2026-10-13) The sub-hero region's FIXED height —
+    /// the hint carousel and the settings-recovery button share one
+    /// constant slot so the hero never moves or resizes between states
+    /// (owner: "the button size and positions are different for
+    /// different states"). Fits the carousel's two caption lines + pill
+    /// + page dots with headroom for wrapped Nepali copy.
+    static let talkSubHeroSlotHeight: CGFloat = 128
     static let chipHeight: CGFloat = 60
     /// Two-row Home dock: two 56pt rows, divider and vertical padding.
     static let dockHeight: CGFloat = 152

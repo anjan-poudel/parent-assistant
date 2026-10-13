@@ -511,6 +511,7 @@
 		9D562603E3D5DF1C3CC30DF6 /* CommandRouterYouTubeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E9E90B47A12C2406E4569D5 /* CommandRouterYouTubeTests.swift */; };
 		9D9B1293775CA119A5152382 /* LiveTextDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA9706D1E82290044EBC4FCB /* LiveTextDetector.swift */; };
 		9E6286BCADDBBC9D4396BC9C /* NepaliOutputGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81254CF022A8E5C2F4030E25 /* NepaliOutputGateTests.swift */; };
+		9ED9C088EECAF3D55D833266 /* TalkStageVisualsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4481210E7708A1D7E313F49 /* TalkStageVisualsTests.swift */; };
 		9F6092895BFDE9E5D50C22E2 /* PointAskConsentGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DABC3572B08562A22CE7497 /* PointAskConsentGate.swift */; };
 		9F628E5F4ECB527982816C2C /* XlmrUnigramTokenizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2635340C10BBF8F75E445C53 /* XlmrUnigramTokenizerTests.swift */; };
 		9F94BE7B52A48377F0F70521 /* SystemContactLinkService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B85C5B658C619355127BEC6D /* SystemContactLinkService.swift */; };
@@ -1473,6 +1474,7 @@
 		B2AF20C8BDF1A0617AA30A48 /* LlamaSemanticJudgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaSemanticJudgeTests.swift; sourceTree = "<group>"; };
 		B341C38BF8987E2068992D93 /* MapsLinksTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapsLinksTests.swift; sourceTree = "<group>"; };
 		B35D3E07AFBBF9D7C57654F7 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		B4481210E7708A1D7E313F49 /* TalkStageVisualsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkStageVisualsTests.swift; sourceTree = "<group>"; };
 		B4B31C0E64A3D428A47C9C6F /* DialogueOptionCatalog.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = DialogueOptionCatalog.json; sourceTree = "<group>"; };
 		B555D1865437DD24FF2D56ED /* SpeakerVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerVerifier.swift; sourceTree = "<group>"; };
 		B5779257A295AEBB75EDBA5D /* MemoryProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryProbe.swift; sourceTree = "<group>"; };
@@ -2351,6 +2353,7 @@
 				4565222B482D35D3233C2498 /* StartupDataBatchTests.swift */,
 				DF715886271093CBABF8E880 /* StartupDegradationTests.swift */,
 				884A6DDFF2AD69915DB478F1 /* StartupSignpostsTests.swift */,
+				B4481210E7708A1D7E313F49 /* TalkStageVisualsTests.swift */,
 				A59B88E7B8E4645E0F2C3575 /* ToolLogKindMappingTests.swift */,
 				77D68E8B6164782253FEEC63 /* TranslateTestModelTests.swift */,
 				FBFB5064750DE4B1073059D3 /* VoiceSessionBindingTests.swift */,
@@ -4129,6 +4132,7 @@
 				A71CB9964BC96FEDE42530BD /* TTSVoiceCatalogTests.swift in Sources */,
 				670296484F8953CB54D6DDF9 /* TTSVoiceInstallTests.swift in Sources */,
 				2B316D781843502CD1CE6039 /* TalkBootContractTests.swift in Sources */,
+				9ED9C088EECAF3D55D833266 /* TalkStageVisualsTests.swift in Sources */,
 				11ADC2EC60681C984DBA6FB7 /* TextRegionDeclutterTests.swift in Sources */,
 				B6B999AFE38EF4A6AC845526 /* TextRegionStabilizerTests.swift in Sources */,
 				826BFEEED44EFF8ACBB41E46 /* TimeSlotProvenanceTests.swift in Sources */,

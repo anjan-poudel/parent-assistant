@@ -235,6 +235,12 @@ struct TalkStage: View {
     let session: VoiceSessionStateMachine
     /// [P0-2] Manual Talk readiness + the labels the stage shows.
     let voice: VoicePresentationState
+    /// [HERO-STATES] The speaking overlay: true while any reply audio
+    /// plays (the probe's own speech, the reply after resolution).
+    let isSpeaking: Bool
+    /// [HERO-STATES] True exactly while the auto-listen answer capture
+    /// is live; a closed-capture window shows the talk affordance.
+    let slotAnswerCaptureActive: Bool
     /// Idle hero tap — the manual wake-word simulation that starts a
     /// cycle.
     let onStart: () -> Void
@@ -246,7 +252,11 @@ struct TalkStage: View {
 
     @Environment(\.locale) private var locale
 
-    private var visuals: TalkStageVisuals { state.talkVisuals }
+    private var visuals: TalkStageVisuals {
+        TalkStageVisuals.resolved(state: state,
+                                  isSpeaking: isSpeaking,
+                                  slotAnswerCaptureActive: slotAnswerCaptureActive)
+    }
 
     var body: some View {
         Group {
@@ -259,6 +269,10 @@ struct TalkStage: View {
                 // Separate the button, its status and the suggested phrase.
                 VStack(spacing: 24) {
                     TalkButton(session: session,
+                               // [HERO-STATES] The overlays flow down
+                               // from the coordinator through the stage.
+                               isSpeaking: isSpeaking,
+                               slotAnswerCaptureActive: slotAnswerCaptureActive,
                                // [P0-2] Manual Talk readiness — the shared
                                // `VoicePipelineReadiness` contract, driven
                                // by the pipeline's own start callback and
@@ -295,12 +309,26 @@ struct TalkStage: View {
                                // therefore never "recover" merely because
                                // startup has not completed.
                                onRecover: onRecover)
-                    if visuals.showsHintCarousel {
+                    // [HERO-LAYOUT] (2026-10-13) The sub-hero region is
+                    // a FIXED slot: the hint carousel and the settings
+                    // recovery share one constant-height, top-aligned
+                    // frame and each is only VISIBLE in its own state —
+                    // a state flip can only swap the slot's content,
+                    // never the layout around it. The hero therefore
+                    // stays at the same position and size in every
+                    // state.
+                    ZStack(alignment: .top) {
                         HintCarousel()
-                    }
-                    if visuals.isError, voice.showsOpenSettings {
+                            .opacity(visuals.showsHintCarousel ? 1 : 0)
+                            .allowsHitTesting(visuals.showsHintCarousel)
+                            .accessibilityHidden(!visuals.showsHintCarousel)
                         openSettingsButton
+                            .opacity(visuals.isError && voice.showsOpenSettings ? 1 : 0)
+                            .allowsHitTesting(visuals.isError && voice.showsOpenSettings)
+                            .accessibilityHidden(!(visuals.isError && voice.showsOpenSettings))
                     }
+                    .frame(height: DesignTokens.talkSubHeroSlotHeight,
+                           alignment: .top)
                 }
             }
         }

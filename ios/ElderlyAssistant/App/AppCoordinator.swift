@@ -1264,6 +1264,19 @@ final class AppCoordinator: ObservableObject {
     /// is derived, not a pipeline state.
     private var lastPipelineState: VoicePipeline.State = .stopped
     private var speakingCount = 0
+    /// [HERO-STATES] (2026-10-13) Published overlays for the hero. The
+    /// slot window keeps the session machine in `.awaitingSlotAnswer`
+    /// through three visually different moments — the probe speaking,
+    /// the auto-listen capture live, and the closed-capture wait — which
+    /// the raw state cannot tell apart. `isSpeaking` is true exactly
+    /// while any reply audio plays (the machine state is untouched: the
+    /// transition table stays the contract); `slotAnswerCaptureActive`
+    /// is true exactly while the auto-listen capture is live, so a
+    /// closed-capture window shows the talk affordance instead of a
+    /// false "listening". Both settable by the wiring tests via
+    /// @testable; the coordinator owns their lifecycle.
+    @Published var isSpeaking = false
+    @Published var slotAnswerCaptureActive = false
     private var voiceWatchdog: DispatchWorkItem?
     /// Guards `VoicePipeline.start`: its only async gap is the
     /// mic-permission callback, which can silently never fire — leaving
@@ -3277,7 +3290,14 @@ final class AppCoordinator: ObservableObject {
         // almost every session transition.
         dialogueSessionExitCancellable = voiceSession.$state
             .removeDuplicates()
-            .sink { [weak self] _ in
+            .sink { [weak self] newState in
+                // [HERO-STATES] Leaving the slot window closes the
+                // auto-listen claim in the same hop that the exit is
+                // published — the hero can never keep showing "listening"
+                // once the window has resolved.
+                if newState != .awaitingSlotAnswer {
+                    self?.slotAnswerCaptureActive = false
+                }
                 DispatchQueue.main.async {
                     self?.resolveDialogueFrameOnSessionExit()
                 }
@@ -5010,7 +5030,18 @@ self.noteTalkContractChanged()
         // is published directly by the pipeline start callback.
         updateVoiceReadiness()
         guard voiceSession.state != .awaitingConfirmation,
-              voiceSession.state != .awaitingSlotAnswer else { return }
+              voiceSession.state != .awaitingSlotAnswer else {
+            // [HERO-STATES] The auto-listen capture has closed (or never
+            // opened) once the pipeline settles back to idle mid-window
+            // — the hero stops claiming "listening" for the remainder of
+            // the 45 s window. The re-open hook in `noteSpeakingEnded`
+            // re-arms the flag right after (its call order is
+            // handlePipelineState first, hook second).
+            if voiceSession.state == .awaitingSlotAnswer, state == .idle {
+                slotAnswerCaptureActive = false
+            }
+            return
+        }
         switch state {
         case .stopped:
             voiceSession.transition(to: .stopped)
@@ -5439,6 +5470,7 @@ self.noteTalkContractChanged()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.speakingCount += 1
+            self.isSpeaking = true
             self.wakeWordActivityGate.setSpeaking(true)
             // Promote straight to .speaking when TTS starts during the
             // busy pre-speech states (call-ui fix, 2026-09-07): the old
@@ -5473,6 +5505,7 @@ self.noteTalkContractChanged()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.speakingCount = max(0, self.speakingCount - 1)
+            self.isSpeaking = self.speakingCount > 0
             self.wakeWordActivityGate.setSpeaking(self.speakingCount > 0)
             self.handlePipelineState(self.lastPipelineState)
             self.openAnswerCaptureIfProbeJustSpoken()
@@ -5513,6 +5546,7 @@ self.noteTalkContractChanged()
             frameLive: dialogueManager.liveFrame != nil,
             pipelineState: voicePipeline?.state) else { return }
         voicePipeline?.beginAnswerCapture()
+        slotAnswerCaptureActive = true
         observabilityBus.emit(ObservabilityEvent(
             component: "app_coordinator",
             eventType: "dialogue_answer_capture",

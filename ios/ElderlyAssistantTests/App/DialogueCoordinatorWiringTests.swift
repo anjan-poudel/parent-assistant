@@ -820,6 +820,45 @@ final class DialogueCoordinatorWiringTests: XCTestCase {
             "the yes/no chips own the confirmation window — never auto-listen")
     }
 
+    func testHeroOverlayFlagsFollowSpeechAndTheWindowLifecycle() {
+        let coordinator = makeCoordinator()
+        XCTAssertFalse(coordinator.isSpeaking)
+
+        // The speaking overlay follows the speech count, queued
+        // utterances included.
+        coordinator.noteSpeakingStarted()
+        coordinator.noteSpeakingStarted()
+        drainMainQueue()
+        XCTAssertTrue(coordinator.isSpeaking)
+        coordinator.noteSpeakingEnded()
+        drainMainQueue()
+        XCTAssertTrue(coordinator.isSpeaking, "one utterance still playing")
+        coordinator.noteSpeakingEnded()
+        drainMainQueue()
+        XCTAssertFalse(coordinator.isSpeaking)
+
+        // A mid-window pipeline idle closes the capture claim — the
+        // closed-capture wait must not keep showing "listening". The
+        // window opens via legal edges only (.stopped → .idle →
+        // .awaitingSlotAnswer), and the early-return guard keeps it open.
+        coordinator.voiceSession.transition(to: .idle)
+        coordinator.voiceSession.transition(to: .awaitingSlotAnswer)
+        coordinator.slotAnswerCaptureActive = true
+        coordinator.handlePipelineState(.idle)
+        XCTAssertFalse(coordinator.slotAnswerCaptureActive,
+                       "the pipeline settling to idle mid-window closes the "
+                       + "auto-listen claim")
+        XCTAssertEqual(coordinator.voiceSession.state, .awaitingSlotAnswer,
+                       "the early-return guard keeps the window open")
+
+        // Leaving the window (a legal exit) also closes the claim.
+        coordinator.slotAnswerCaptureActive = true
+        coordinator.voiceSession.transition(to: .idle)
+        drainMainQueue()
+        XCTAssertFalse(coordinator.slotAnswerCaptureActive,
+                       "a session exit out of the slot window closes the claim")
+    }
+
     func testLateMidCyclePipelineEventsAfterResolutionAreTolerated() {
         // Device crash 2026-10-11 (ElderlyAssistant-2026-10-11-223011.ips,
         // iPhone 17 Pro Max): the answer interception resolves the frame
