@@ -186,27 +186,25 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// one rather than a drift.
     private static let dialogueCopy: [(key: String, en: String, ne: String)] = [
         ("dialogue.cancelled", "OK.", "ठीक छ।"),
-        ("dialogue.candidate.appLaunch", "Open %@?", "%@ खोल्ने हो?"),
-        ("dialogue.candidate.music", "Play %@?", "%@ बजाउने हो?"),
-        ("dialogue.candidate.news", "The news?", "समाचार सुनाउने हो?"),
-        ("dialogue.candidate.youtube", "Watch %@ on YouTube?", "युट्युबमा %@ हेर्ने हो?"),
-        ("dialogue.correction.ask", "I heard «%@». Did you mean %@?",
-         "मैले «%@» सुनें। के तपाईंले %@ भन्न खोज्नुभएको थियो?"),
-        ("dialogue.didYouMean", "Did you mean %@?", "के तपाईंको मतलब %@ हो?"),
-        ("dialogue.escape", "OK, tell me again.", "ठीक छ, फेरि भन्नुहोस्।"),
-        ("dialogue.exhausted", "I didn't understand. Try again later.",
-         "मैले बुझिन। पछि फेरि भन्नुहोस्।"),
+        ("dialogue.candidate.appLaunch", "open %@", "%@ खोल्ने"),
+        ("dialogue.candidate.music", "play %@", "%@"),
+        ("dialogue.candidate.news", "the news", "समाचार"),
+        ("dialogue.candidate.youtube", "%@ on YouTube", "युट्युबमा %@"),
+        ("dialogue.correction.ask", "I heard «%@» — %@?",
+         "«%@» सुनें। %@ भन्ने?"),
+        ("dialogue.didYouMean", "You mean %@?", "तपाईंले %@ भन्नुभयो?"),
+        ("dialogue.escape", "Go ahead, say it again.", "फेरि भन्नुस् न।"),
+        ("dialogue.exhausted", "Didn't get it — we'll try again later.",
+         "बुझिन, पछि फेरि भन्नुहोस् न।"),
         ("dialogue.option.anyPlay", "just play anything", "जे पनि बजाऊ"),
         ("dialogue.option.bhajan.bishnu", "bishnu", "विष्णु"),
         ("dialogue.option.bhajan.devi", "devi", "देवी"),
         ("dialogue.option.bhajan.durga", "durga", "दुर्गा"),
         ("dialogue.option.bhajan.shiva", "shiva", "शिव"),
         ("dialogue.option.conjunction", " or ", " वा "),
-        ("dialogue.probe.bhajanKind", "What kind of bhajan? %@ … or say it yourself",
-         "कस्तो भजन? %@ … वा आफैँ भन्नुहोस्"),
-        ("dialogue.probe.musicAny", "What kind of music? Say the name.",
-         "कस्तो संगीत चाहियो? नाम भन्नुहोस्।"),
-        ("dialogue.retry", "Let me ask again —", "फेरि सोध्छु —"),
+        ("dialogue.probe.bhajanKind", "Whose bhajan?", "कसको भजन लगाऊ?"),
+        ("dialogue.probe.musicAny", "What shall I play?", "के सुन्ने हो?"),
+        ("dialogue.retry", "One more time.", "फेरि भन्नुस् न।"),
         ("dialogue.understood.no", "I didn't understand.", "मैले बुझिन।"),
     ]
 
@@ -232,9 +230,18 @@ final class L10nCatalogCoverageTests: XCTestCase {
                               "\(key) resolves to the SAME string in en and ne "
                               + "— the Nepali copy is missing (or the key was "
                               + "forgotten in one language)")
-            XCTAssertTrue(Self.containsDevanagari(ne),
+            XCTAssertTrue(Self.isDevanagariOrPlaceholderOnly(ne),
                           "\(key) resolves to non-Devanagari Nepali copy: \(ne)")
         }
+    }
+
+    /// A Nepali value must be Devanagari — unless it is placeholder-only
+    /// (`%@`, the casual-copy candidate labels that fill from the user's
+    /// own words and carry no translatable text of their own; 2026-10-13).
+    private static func isDevanagariOrPlaceholderOnly(_ value: String) -> Bool {
+        let spoken = value.replacingOccurrences(of: "%@", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return spoken.isEmpty || containsDevanagari(value)
     }
 
     /// Scenario: All dialogue keys exist in both languages — the source
@@ -502,7 +509,7 @@ final class L10nCatalogCoverageTests: XCTestCase {
                               "\(key) resolves to the SAME string in en and ne "
                               + "— the Nepali copy is missing (or the key was "
                               + "forgotten in one language)")
-            XCTAssertTrue(Self.containsDevanagari(ne),
+            XCTAssertTrue(Self.isDevanagariOrPlaceholderOnly(ne),
                           "\(key) resolves to non-Devanagari Nepali copy: \(ne)")
         }
     }
@@ -715,7 +722,7 @@ final class L10nCatalogCoverageTests: XCTestCase {
                         failures.append("\(key): Nepali value carries ASCII "
                                         + "letters — \(value)")
                     }
-                    if !containsDevanagari(value) {
+                    if !isDevanagariOrPlaceholderOnly(value) {
                         failures.append("\(key): Nepali value is not Devanagari "
                                         + "— \(value)")
                     }
@@ -780,7 +787,7 @@ final class L10nCatalogCoverageTests: XCTestCase {
                         failures.append("\(key): Nepali value carries ASCII "
                                         + "letters — \(value)")
                     }
-                    if !containsDevanagari(value) {
+                    if !isDevanagariOrPlaceholderOnly(value) {
                         failures.append("\(key): Nepali value is not Devanagari "
                                         + "— \(value)")
                     }
@@ -1021,7 +1028,7 @@ final class L10nCatalogCoverageTests: XCTestCase {
                               "\(key) resolves to the SAME string in en and ne "
                               + "— the Nepali copy is missing (or the key was "
                               + "forgotten in one language)")
-            XCTAssertTrue(Self.containsDevanagari(ne),
+            XCTAssertTrue(Self.isDevanagariOrPlaceholderOnly(ne),
                           "\(key) resolves to non-Devanagari Nepali copy: \(ne)")
         }
     }
@@ -1408,7 +1415,7 @@ final class L10nCatalogCoverageTests: XCTestCase {
                         failures.append("\(key): Nepali value carries ASCII "
                                         + "letters — \(value)")
                     }
-                    if !containsDevanagari(value) {
+                    if !isDevanagariOrPlaceholderOnly(value) {
                         failures.append("\(key): Nepali value is not Devanagari "
                                         + "— \(value)")
                     }
