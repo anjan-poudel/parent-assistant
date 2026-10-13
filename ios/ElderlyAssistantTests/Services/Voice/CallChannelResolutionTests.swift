@@ -2088,9 +2088,12 @@ final class CallChannelResolutionTests: XCTestCase {
                                              and: "func openMessengerChat(phone", in: links)
         XCTAssertEqual(collapsed(openMessengerThread).trimmingCharacters(in: .whitespacesAndNewlines),
                        "func openMessengerThread(handle rawHandle: String) -> MessengerOutcome { "
-                       + "guard let threadURL = Self.messengerThreadURL(handle: rawHandle) else { return .invalidHandle } "
-                       + "if opener.canOpenURL(threadURL) { opener.open(threadURL) return .openedThread } "
-                       + "if let webURL = Self.messengerWebURL(handle: rawHandle) { opener.open(webURL) } "
+                       + "let handle = Self.messengerHandle(rawHandle) "
+                       + "guard !handle.isEmpty else { return .invalidHandle } "
+                       + "let installed = opener.canOpenURL(Self.messengerProbeURL) "
+                       + "if installed, let threadURL = Self.messengerThreadURL(handle: handle) { opener.open(threadURL) return .openedThread } "
+                       + "if installed, let usernameURL = Self.messengerUsernameThreadURL(handle: handle) { opener.open(usernameURL) return .openedThread } "
+                       + "if let webURL = Self.messengerWebURL(handle: handle) { opener.open(webURL) } "
                        + "return .fellBackToWeb }",
                        "openMessengerThread must refuse an empty handle before probing Messenger")
 
@@ -2118,9 +2121,9 @@ final class CallChannelResolutionTests: XCTestCase {
                        "openWhatsAppCallChat must refuse an empty phone before probing WhatsApp")
 
         // The two refusal families, counted: the nil URL builders behind
-        // the openers' guards (4 handle-based, 2 digit-based).
-        XCTAssertEqual(occurrences(of: "guard !handle.isEmpty else { return nil }", in: links), 4,
-                       "phoneURL/faceTimeURL/messengerThreadURL/messengerWebURL all refuse empty handles")
+        // the openers' guards (5 handle-based, 2 digit-based).
+        XCTAssertEqual(occurrences(of: "guard !handle.isEmpty else { return nil }", in: links), 5,
+                       "phoneURL/faceTimeURL/messengerThreadURL/messengerUsernameThreadURL/messengerWebURL all refuse empty handles")
         XCTAssertEqual(occurrences(of: "guard !digits.isEmpty else { return nil }", in: links), 2,
                        "whatsAppChatURL/whatsAppTextURL both refuse digit-less phones")
 
