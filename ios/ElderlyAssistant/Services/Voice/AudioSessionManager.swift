@@ -197,31 +197,50 @@ final class AudioSessionManager {
 
     func beginResponsePlayback() {
         if playbackModeDepth == 0 {
-            do {
-                // setCategory on an ACTIVE session throws on iOS 26
-                // (NSOSStatusErrorDomain — observed on Anzaan
-                // 2026-10-14, the first device field test: every begin
-                // failed and replies kept call-gain staging). Activation
-                // works because the session is inactive there, so cycle
-                // active off → category → active on. The pipeline's
-                // engine keeps running; its input resumes on the
-                // reactivation (wake processing is gated during replies
-                // anyway — see the MARK header).
-                try session.setActive(false, options: [.notifyOthersOnDeactivation])
-                try session.setCategory(Self.playbackCategory,
-                                        mode: Self.playbackMode,
-                                        options: Self.playbackOptions)
-                try session.setActive(true, options: [])
-                emit(eventType: "audio_response_playback", outcome: "began")
-            } catch {
-                // Never leave the session deactivated after a partial
-                // failure — the mic pipeline is the invariant.
-                try? session.setActive(true, options: [])
-                emit(eventType: "audio_response_playback", outcome: "failed",
-                     errorCode: "\((error as NSError).domain)")
-            }
+            switchToPlaybackCategory()
         }
         playbackModeDepth += 1
+    }
+
+    /// The bell-config switch, one step at a time so a failure says
+    /// WHICH step and WHICH OSStatus — setCategory on an ACTIVE session
+    /// threw NSOSStatusErrorDomain on Anzaan (iOS 26, 2026-10-14), and
+    /// the deactivate-first cycle still failed at one specific step.
+    /// Each step's catch reactivates the session (never leave it
+    /// deactivated — the mic pipeline is the invariant) and reports.
+    private func switchToPlaybackCategory() {
+        do {
+            try session.setActive(false, options: [.notifyOthersOnDeactivation])
+        } catch {
+            emitPlaybackFailure(step: "deactivate", error: error)
+            try? session.setActive(true, options: [])
+            return
+        }
+        do {
+            try session.setCategory(Self.playbackCategory,
+                                    mode: Self.playbackMode,
+                                    options: Self.playbackOptions)
+        } catch {
+            emitPlaybackFailure(step: "category", error: error)
+            try? session.setActive(true, options: [])
+            return
+        }
+        do {
+            try session.setActive(true, options: [])
+        } catch {
+            emitPlaybackFailure(step: "activate", error: error)
+            try? session.setActive(true, options: [])
+            return
+        }
+        emit(eventType: "audio_response_playback", outcome: "began")
+    }
+
+    private func emitPlaybackFailure(step: String, error: Error,
+                                     outcome: String = "failed") {
+        let ns = error as NSError
+        emit(eventType: "audio_response_playback", outcome: outcome,
+             errorCode: "\(ns.domain) \(ns.code)",
+             metadata: ["step": step])
     }
 
     func endResponsePlayback() {
@@ -243,9 +262,8 @@ final class AudioSessionManager {
         do {
             try session.setActive(false, options: [.notifyOthersOnDeactivation])
         } catch {
-            emit(eventType: "audio_response_playback",
-                 outcome: "restore_failed",
-                 errorCode: "\((error as NSError).domain)")
+            emitPlaybackFailure(step: "restore_deactivate", error: error,
+                                outcome: "restore_failed")
             return
         }
         if voiceProcessingEnabled {
@@ -256,9 +274,8 @@ final class AudioSessionManager {
                 // reactivates the session; this catch is the case where
                 // even its category step threw — re-arm activation.
                 try? session.setActive(true, options: [.notifyOthersOnDeactivation])
-                emit(eventType: "audio_response_playback",
-                     outcome: "restore_failed",
-                     errorCode: "\((error as NSError).domain)")
+                emitPlaybackFailure(step: "restore_vpio", error: error,
+                                    outcome: "restore_failed")
             }
             return
         }
@@ -269,9 +286,8 @@ final class AudioSessionManager {
             try session.setActive(true, options: [.notifyOthersOnDeactivation])
         } catch {
             try? session.setActive(true, options: [.notifyOthersOnDeactivation])
-            emit(eventType: "audio_response_playback",
-                 outcome: "restore_failed",
-                 errorCode: "\((error as NSError).domain)")
+            emitPlaybackFailure(step: "restore_category", error: error,
+                                outcome: "restore_failed")
         }
     }
 
