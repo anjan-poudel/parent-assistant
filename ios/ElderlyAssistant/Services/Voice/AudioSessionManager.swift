@@ -277,13 +277,15 @@ final class AudioSessionManager {
 
     private func emitPlaybackFailure(step: String, error: Error,
                                      outcome: String = "failed") {
+        // Console visibility: LogSanitiser drops non-allow-listed
+        // metadata keys and redacts errorCode (digit runs read as phone
+        // numbers), but the allow-listed "state" key passes through —
+        // so the failing STEP rides there for the device console, and
+        // the numeric code stays in errorCode for the analytics bus.
         let ns = error as NSError
-        // The bare numeric OSStatus survives LogSanitiser (its charset
-        // pattern accepts digits); the domain+code form is redacted on
-        // the console. The step rides metadata for the analytics bus.
         emit(eventType: "audio_response_playback", outcome: outcome,
              errorCode: "\(ns.code)",
-             metadata: ["step": step])
+             metadata: ["state": step])
     }
 
     func endResponsePlayback() {
