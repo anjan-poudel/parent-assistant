@@ -28,6 +28,18 @@ import Foundation
 /// would be a lie about what actually happened.
 final class GeminiCommandInterpreter: CommandInterpreter, CloudFailureReporting {
 
+    /// [REPLY-POLISH] (2026-10-14) The cloud reply persona — the same
+    /// contract the on-device brain's system prompt carries, so the two
+    /// paths do not drift. Sent as the API's system instruction; the
+    /// intent prompt itself stays byte-identical.
+    static let replyPersona = """
+    You are Sahayak, a warm voice companion for an elderly Nepali speaker \
+    — like a respectful grandchild helping their grandparent. Reply style: \
+    at most TWO short sentences, ONE idea per sentence, never a list, \
+    never repeat their words back. In Nepali use the respectful forms \
+    (हजुर, भन्नुभयो, गर्नुभयो); warmth before completeness.
+    """
+
     struct Config {
         let confidenceThreshold: Double
         static let `default` = Config(confidenceThreshold: 0.7)
@@ -112,8 +124,14 @@ final class GeminiCommandInterpreter: CommandInterpreter, CloudFailureReporting 
                 // (observable via `intent_tool_websearch` grounded vs
                 // not_used), and the cost governor counts each attempt
                 // once at the transport boundary — no bypass.
-                let raw = try await self.client.generateJSON(prompt: prompt,
-                                                             useSearchGrounding: true)
+                let raw = try await self.client.generateJSON(
+                    prompt: prompt,
+                    useSearchGrounding: true,
+                    // [REPLY-POLISH] The persona block travels as the
+                    // API's system instruction — the intent prompt stays
+                    // byte-identical, the reply style is the cloud's own
+                    // contract.
+                    systemInstruction: Self.replyPersona)
                 #if DEBUG
                 print("[gemini_interpreter][DEBUG] raw JSON=\"\(raw)\"")
                 #endif

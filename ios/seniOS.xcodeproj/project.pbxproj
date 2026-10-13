@@ -742,6 +742,7 @@
 		E1332EE639C8187D8BE48D80 /* ApplianceManualLibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD162BE8935894B1124A7B49 /* ApplianceManualLibraryModel.swift */; };
 		E14BA6F9432B5C7C4E9B1EA6 /* FreeFormEventFormTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 700F321B7A2299C0464EDDA8 /* FreeFormEventFormTests.swift */; };
 		E20F7EA877A6B73C7D38B9DC /* MedicalAppointmentParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8FFFAC3D594982082901DF5 /* MedicalAppointmentParserTests.swift */; };
+		E22ABC0C936BB8B4D0F86AA8 /* SpokenReplyPolisherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 686A6F88F39A3E77B5DD13AE /* SpokenReplyPolisherTests.swift */; };
 		E2757F56CDA190ECC24B55AF /* MedicationLabelScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC9D414619FCC0CF832C8C17 /* MedicationLabelScannerTests.swift */; };
 		E2AF514C664837BBEDCED74D /* ApplianceOverlayMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0097C8F2B89C110C2DE02931 /* ApplianceOverlayMapperTests.swift */; };
 		E426C78685F757F9597B2E31 /* LiveTranslateOverlayViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D847BAD3741C86BAE6AC14 /* LiveTranslateOverlayViewTests.swift */; };
@@ -769,6 +770,7 @@
 		E99129AFF0E37273EC65E817 /* MissedCallContactResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE481BEDD6751C37669EEC46 /* MissedCallContactResolver.swift */; };
 		E99BB069D3725B48516612F5 /* ApplianceHelperLabelSeamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCFE15457FA3C22512615C3A /* ApplianceHelperLabelSeamTests.swift */; };
 		E9D11CFE272978E5149E6EB9 /* NotificationCategoriesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E9561057265F5A51E78A7F0 /* NotificationCategoriesTests.swift */; };
+		EA1412501BC2D376E314578E /* SpokenReplyPolisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBF6744B604304FED8AE0F5A /* SpokenReplyPolisher.swift */; };
 		EA29EE8D1454A4698EB8BBD3 /* Manuals in Resources */ = {isa = PBXBuildFile; fileRef = 08476E0DD062A20C8A89F674 /* Manuals */; };
 		EA62AC5942F1BA36917527D0 /* CalendarShareSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E49353D3EC8CFA49A5CC4C7F /* CalendarShareSettingsView.swift */; };
 		EA8AA7D2290468E2CC236370 /* IntentEncoderTokenizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB7378E6CDE8A5D08B7B28D5 /* IntentEncoderTokenizer.swift */; };
@@ -1230,6 +1232,7 @@
 		66E60E32F2D26CD4CEC694E3 /* SherpaKWSWakeWordEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SherpaKWSWakeWordEngine.swift; sourceTree = "<group>"; };
 		67F77AE246FFB7739B5E5EE7 /* NotificationBellButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationBellButton.swift; sourceTree = "<group>"; };
 		683738780815E5CDFDC8CDC5 /* DialogueOptionCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialogueOptionCatalogTests.swift; sourceTree = "<group>"; };
+		686A6F88F39A3E77B5DD13AE /* SpokenReplyPolisherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpokenReplyPolisherTests.swift; sourceTree = "<group>"; };
 		6897BBBF39D51A14745FB321 /* SystemContactPhotoWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemContactPhotoWriter.swift; sourceTree = "<group>"; };
 		689ADFEECC70A5D7198C51E8 /* SecurityEvidenceBoundaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityEvidenceBoundaryTests.swift; sourceTree = "<group>"; };
 		68D416ADD821076AF9A665C5 /* LiveTranslateCipherStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateCipherStorage.swift; sourceTree = "<group>"; };
@@ -1501,6 +1504,7 @@
 		BA01C382B5FF58B0E4F415A4 /* FamilyWizardPhotoSaveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyWizardPhotoSaveTests.swift; sourceTree = "<group>"; };
 		BA3F4A21863A3F5B7854DA47 /* CommandRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRouter.swift; sourceTree = "<group>"; };
 		BAAF1B0C20D1DC9D7F5CB3D8 /* DeterministicCallRouteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeterministicCallRouteTests.swift; sourceTree = "<group>"; };
+		BBF6744B604304FED8AE0F5A /* SpokenReplyPolisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpokenReplyPolisher.swift; sourceTree = "<group>"; };
 		BC0CE650071C8E619B755C1C /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		BC3B341A004AA71AC8146CDC /* GoogleAccountSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleAccountSessionTests.swift; sourceTree = "<group>"; };
 		BC7BFC6D787AA56831494545 /* CoordinatorLinkUnlinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinatorLinkUnlinkTests.swift; sourceTree = "<group>"; };
@@ -2496,6 +2500,7 @@
 				5FDB7F0CC1472A2939C30BD2 /* SpeakQueueTests.swift */,
 				9716DA6DDE082285F04ED460 /* SpectralGateCoreTests.swift */,
 				6BE6514EAD2F6FF0B0FE782A /* SpectralGateDenoiserTests.swift */,
+				686A6F88F39A3E77B5DD13AE /* SpokenReplyPolisherTests.swift */,
 				88F4888213A3996C8B57BD20 /* SpokenTimeTests.swift */,
 				C39D7E29640FFF2FD2B14A6C /* SttNgramPriorTests.swift */,
 				49B372CC505A3162D8144A79 /* SwitchableCommandInterpreterTests.swift */,
@@ -3060,6 +3065,7 @@
 				1411939748140920CBE9E815 /* SpectralGateCore.swift */,
 				44B0128FB0AC3C6B4C70EDBA /* SpectralGateDenoiser.swift */,
 				8FF78C50B8B5418424D76F16 /* SpeechRecognizer.swift */,
+				BBF6744B604304FED8AE0F5A /* SpokenReplyPolisher.swift */,
 				357BB0A805BFD53734B0F7B4 /* SpokenTime.swift */,
 				A94CF43F779D84A8DE025B65 /* SttErrorCorrector.swift */,
 				4476625DD15275C43E27A3DA /* SwitchableCommandInterpreter.swift */,
@@ -3704,6 +3710,7 @@
 				004600341C5F168D1F52081E /* SpectralGateDenoiser.swift in Sources */,
 				2E22AFD7995CAD2B82E00524 /* SpeechRecognizer.swift in Sources */,
 				ACDE59D994E9EC7497DE6454 /* SpeechSource.swift in Sources */,
+				EA1412501BC2D376E314578E /* SpokenReplyPolisher.swift in Sources */,
 				B0FAA9361B4E1A999B112E34 /* SpokenTime.swift in Sources */,
 				558F504CB852D1316B01DFA6 /* SpotifyAccountSession.swift in Sources */,
 				7BEE2BFCCD71BDD73DCCF7E5 /* SpotifyAuthError.swift in Sources */,
@@ -4118,6 +4125,7 @@
 				82E981F85378A8F5783064FC /* SpectralGateCoreTests.swift in Sources */,
 				C7DBB2B5CA4ACD6CBD3CE28C /* SpectralGateDenoiserTests.swift in Sources */,
 				EDB40322DA71A0CF7DB0EC27 /* SpeechSourceRegistryTests.swift in Sources */,
+				E22ABC0C936BB8B4D0F86AA8 /* SpokenReplyPolisherTests.swift in Sources */,
 				FF1437F51840CE033E800196 /* SpokenTimeTests.swift in Sources */,
 				B6C39AD72EE514C7E7DCC34F /* SpotifyAccountSessionTests.swift in Sources */,
 				4DD3828A322B0B7F3312C83C /* SpotifyAuthFlowTests.swift in Sources */,
