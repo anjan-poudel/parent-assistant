@@ -50,7 +50,7 @@ final class DialogueCorrectionChoiceTests: XCTestCase {
                                                    catalog: nil,
                                                    retry: false,
                                                    locale: ne)
-        XCTAssertEqual(text, "तपाईंले गइए वा गर भन्नुभएको हो?")
+        XCTAssertEqual(text, "तपाईंले गइए वा गर भन्नुभयो?")
         let single = DialogueProbeComposer.probeText(
             for: DialogueFrame.correctionChoice(
                 readings: [CorrectionClarification.Reading(tokenRange: 0..<2,
@@ -59,7 +59,7 @@ final class DialogueCorrectionChoiceTests: XCTestCase {
                 original: "गइ",
                 sourceTranscript: "गइ"),
             catalog: nil, retry: false, locale: ne)
-        XCTAssertEqual(single, "तपाईंले गइए भन्नुभएको हो?")
+        XCTAssertEqual(single, "तपाईंले गइए भन्नुभयो?")
     }
 
     func testTheRetryProbePrefixesTheRetryLine() {
@@ -67,7 +67,7 @@ final class DialogueCorrectionChoiceTests: XCTestCase {
                                                    catalog: nil,
                                                    retry: true,
                                                    locale: ne)
-        XCTAssertTrue(text.hasPrefix("फेरि सोध्छु — "))
+        XCTAssertTrue(text.hasPrefix("फेरि भन्नुस् न। "))
     }
 
     // MARK: - Classification

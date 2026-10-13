@@ -1,6 +1,7 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "·": {},
     "%@": {},
     "%@ / %@": {
       "localizations": {
@@ -345,23 +346,6 @@
         }
       }
     },
-    "alarms.snoozeFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sorry — I couldn't snooze the alarm."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "माफ गर्नुहोस् — अलार्म स्नुज गर्न सकिनँ।"
-          }
-        }
-      }
-    },
     "alarms.snoozed": {
       "extractionState": "manual",
       "localizations": {
@@ -375,6 +359,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ सम्म स्नुज भयो।"
+          }
+        }
+      }
+    },
+    "alarms.snoozeFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sorry — I couldn't snooze the alarm."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस् — अलार्म स्नुज गर्न सकिनँ।"
           }
         }
       }
@@ -868,397 +869,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "जुम"
-          }
-        }
-      }
-    },
-    "appearance.colourSkin": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Colour Skin"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "रङको रूप"
-          }
-        }
-      }
-    },
-    "appearance.independentChoices": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose the surface style and colours separately. Changes apply immediately."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "सतहको शैली र रङ छुट्टाछुट्टै छान्नुहोस्। परिवर्तन तुरुन्तै लागू हुन्छ।"
-          }
-        }
-      }
-    },
-    "appearance.notSelected": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Not selected"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "नछानिएको"
-          }
-        }
-      }
-    },
-    "appearance.preview": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Live preview"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "प्रत्यक्ष झलक"
-          }
-        }
-      }
-    },
-    "appearance.preview.card": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Reminder card"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "सम्झना कार्ड"
-          }
-        }
-      }
-    },
-    "appearance.preview.talk": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Talk control"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "बोल्ने बटन"
-          }
-        }
-      }
-    },
-    "appearance.selected": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Selected"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "छानिएको"
-          }
-        }
-      }
-    },
-    "appearance.skin.cream.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Warm cream, cocoa text and amber-brown accents."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "न्यानो क्रिम, कोको रङको पाठ र खैरो सजावट।"
-          }
-        }
-      }
-    },
-    "appearance.skin.darkRose.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dark plum surfaces with rose controls and warm, bright text."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "गाढा बैजनी सतह, गुलाबी नियन्त्रण र न्यानो उज्यालो अक्षर।"
-          }
-        }
-      }
-    },
-    "appearance.skin.dusk.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pale slate surfaces with deep blue-grey accents."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "हल्का स्लेट सतह र गाढा नीलोखैरो सजावट।"
-          }
-        }
-      }
-    },
-    "appearance.skin.lavender.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Soft lavender with rich purple accents."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "कोमल ल्याभेन्डर र गाढा बैजनी सजावट।"
-          }
-        }
-      }
-    },
-    "appearance.skin.lightPink.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pale rose surfaces with deep berry accents."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "हल्का गुलाबी सतह र गाढा बेरी रङको सजावट।"
-          }
-        }
-      }
-    },
-    "appearance.skin.midnight.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Deep midnight surfaces with crimson controls and soft, bright text."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "गाढा मध्यरात रङका सतह, रातो नियन्त्रण र नरम उज्यालो अक्षर।"
-          }
-        }
-      }
-    },
-    "appearance.skin.sage.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Fresh sage surfaces with deep teal accents."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "हल्का हरियो सतह र गाढा नीलोहरियो सजावट।"
-          }
-        }
-      }
-    },
-    "appearance.skin.sky.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cool sky blue, white cards, navy text and a crimson Talk control."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "शीतल आकाशे नीलो, सेतो कार्ड, गाढा नीलो पाठ र रातो बोल्ने बटन।"
-          }
-        }
-      }
-    },
-    "appearance.style.classic": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Classic"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "परम्परागत"
-          }
-        }
-      }
-    },
-    "appearance.style.classic.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Solid surfaces with quiet, clear edges."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "स्पष्ट किनारा भएका ठोस सतहहरू।"
-          }
-        }
-      }
-    },
-    "appearance.style.glass": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Liquid Glass"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "लिक्विड ग्लास"
-          }
-        }
-      }
-    },
-    "appearance.style.glass.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Native glass on iOS 26. Earlier versions use a frosted material. Accessibility settings keep surfaces solid when needed."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iOS 26 मा वास्तविक ग्लास। पुराना संस्करणमा धमिलो सामग्री प्रयोग हुन्छ। पहुँचयोग्यता सेटिङले आवश्यक हुँदा सतह ठोस राख्छ।"
-          }
-        }
-      }
-    },
-    "appearance.style.soft": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Soft"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "कोमल"
-          }
-        }
-      }
-    },
-    "appearance.style.soft.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Gentle gradients, rounded cards and subtle depth."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "कोमल रङ मिश्रण, गोलाकार कार्ड र हल्का गहिराइ।"
-          }
-        }
-      }
-    },
-    "appearance.textSize": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Text Size"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "अक्षरको आकार"
-          }
-        }
-      }
-    },
-    "appearance.visualStyle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Visual Style"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "दृश्य शैली"
           }
         }
       }
@@ -3150,23 +2760,6 @@
         }
       }
     },
-    "calendarShare.signOut": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sign out of Google"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "गुगलबाट साइन आउट गर्नुहोस्"
-          }
-        }
-      }
-    },
     "calendarShare.signedOut": {
       "extractionState": "manual",
       "localizations": {
@@ -3180,6 +2773,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "गुगल क्यालेन्डर अझै जोडिएको छैन, त्यसैले केही पनि साझा भइरहेको छैन। तपाईंका सम्झनाहरू परिवारको क्यालेन्डरमा राख्न गुगल खाता जोड्नुहोस्।"
+          }
+        }
+      }
+    },
+    "calendarShare.signOut": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign out of Google"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलबाट साइन आउट गर्नुहोस्"
           }
         }
       }
@@ -4397,13 +4007,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open %@?"
+            "value": "open %@"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ खोल्ने हो?"
+            "value": "%@ खोल्ने"
           }
         }
       }
@@ -4414,13 +4024,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Play %@?"
+            "value": "play %@"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ बजाउने हो?"
+            "value": "%@"
           }
         }
       }
@@ -4431,13 +4041,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The news?"
+            "value": "the news"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "समाचार सुनाउने हो?"
+            "value": "समाचार"
           }
         }
       }
@@ -4448,30 +4058,30 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Watch %@ on YouTube?"
+            "value": "%@ on YouTube"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "युट्युबमा %@ हेर्ने हो?"
+            "value": "युट्युबमा %@"
           }
         }
       }
     },
-    "dialogue.correction.or": {
+    "dialogue.correction.ask": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Did you mean %@ or %@?"
+            "value": "I heard «%@» — %@?"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "तपाईंले %@ वा %@ भन्नुभएको हो?"
+            "value": "«%@» सुनें। %@ भन्ने?"
           }
         }
       }
@@ -4482,13 +4092,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Did you mean %@?"
+            "value": "You mean %@?"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "तपाईंले %@ भन्नुभएको हो?"
+            "value": "तपाईंले %@ भन्नुभयो?"
           }
         }
       }
@@ -4499,13 +4109,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "OK, tell me again."
+            "value": "Go ahead, say it again."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "ठीक छ, फेरि भन्नुहोस्।"
+            "value": "फेरि भन्नुस् न।"
           }
         }
       }
@@ -4516,13 +4126,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "I didn't understand. Try again later."
+            "value": "Didn't get it — we'll try again later."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "मैले बुझिन। पछि फेरि भन्नुहोस्।"
+            "value": "बुझिन, पछि फेरि भन्नुहोस् न।"
           }
         }
       }
@@ -4635,13 +4245,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "What kind of bhajan? %@ … or say it yourself"
+            "value": "Whose bhajan?"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "कस्तो भजन? %@ … वा आफैँ भन्नुहोस्"
+            "value": "कसको भजन लगाऊ?"
           }
         }
       }
@@ -4652,13 +4262,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "What kind of music? Say the name."
+            "value": "What shall I play?"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "कस्तो संगीत चाहियो? नाम भन्नुहोस्।"
+            "value": "के सुन्ने हो?"
           }
         }
       }
@@ -4669,13 +4279,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Let me ask again —"
+            "value": "One more time."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "फेरि सोध्छु —"
+            "value": "फेरि भन्नुस् न।"
           }
         }
       }
@@ -4720,13 +4330,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Did you mean %@?"
+            "value": "You mean %@?"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "तपाईंले %@ भन्नुभएको हो?"
+            "value": "तपाईंले %@ भन्नुभयो?"
           }
         }
       }
@@ -12945,23 +12555,6 @@
         }
       }
     },
-    "plugin.routine.noTime": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "I couldn't understand the time. Please say it again with a time, like 'walk at 5'."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "समय बुझिनँ। कृपया समयसहित फेरि भन्नुहोस्, जस्तै 'बेलुका ५ बजे हिँड्ने सम्झना'।"
-          }
-        }
-      }
-    },
     "plugin.routine.noneToday": {
       "extractionState": "manual",
       "localizations": {
@@ -12975,6 +12568,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "आज तपाईंका कुनै सम्झना छैनन्।"
+          }
+        }
+      }
+    },
+    "plugin.routine.noTime": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I couldn't understand the time. Please say it again with a time, like 'walk at 5'."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "समय बुझिनँ। कृपया समयसहित फेरि भन्नुहोस्, जस्तै 'बेलुका ५ बजे हिँड्ने सम्झना'।"
           }
         }
       }
@@ -13540,23 +13150,6 @@
         }
       }
     },
-    "quickApps.addFor": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add %@"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ थप्नुहोस्"
-          }
-        }
-      }
-    },
     "quickApps.added": {
       "extractionState": "manual",
       "localizations": {
@@ -13570,6 +13163,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "थपिएको छ"
+          }
+        }
+      }
+    },
+    "quickApps.addFor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ थप्नुहोस्"
           }
         }
       }
@@ -13846,6 +13456,23 @@
         }
       }
     },
+    "router.chatLowConfidence": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I'm not confident about this — I can't answer that well."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मलाई यसमा विश्वास छैन — म यो राम्ररी जवाफ दिन सक्दिनँ।"
+          }
+        }
+      }
+    },
     "router.calendarEventCalendarUnavailable": {
       "extractionState": "manual",
       "localizations": {
@@ -14033,23 +13660,6 @@
         }
       }
     },
-    "router.call.didYouMeanPrefix": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "I couldn't find %1$@ in your contacts. Did you mean %2$@?"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "मैले %@ लाई सम्पर्कमा भेटिनँ। के तपाईं %@ भन्न खोज्नुभएको हो?"
-          }
-        }
-      }
-    },
     "router.call.disambiguate": {
       "extractionState": "manual",
       "localizations": {
@@ -14063,6 +13673,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ भनेर धेरै जना भेटिए। कृपया पूरा नाम भन्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.call.didYouMeanPrefix": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I couldn't find %1$@ — you mean %2$@?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मैले %@ लाई सम्पर्कमा भेटिनँ — %@ भन्नुभयो?"
+          }
+        }
+      }
+    },
+    "router.call.nameUnclear": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I heard you want to call, but I didn't catch who — please say 'call' and the person's name."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोन गर्ने कुरा त बुझें, तर कोलाई भन्ने बुझिन — कृपया नामसँगै भन्नुहोस्, जस्तै 'छोरालाई फोन गर'।"
           }
         }
       }
@@ -14254,23 +13898,6 @@
         }
       }
     },
-    "router.call.nameUnclear": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "I heard you want to call, but I didn't catch who — please say 'call' and the person's name."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "फोन गर्ने कुरा त बुझें, तर कोलाई भन्ने बुझिन — कृपया नामसँगै भन्नुहोस्, जस्तै 'छोरालाई फोन गर'।"
-          }
-        }
-      }
-    },
     "router.call.recentRepeatNotice": {
       "extractionState": "manual",
       "localizations": {
@@ -14318,23 +13945,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "आजको जेमिनी जवाफको सीमा पुगिसक्यो। परिवारको कसैले सेटिङमा सीमा बढाउन सक्नुहुन्छ, नत्र पूरा जवाफ भोलि फेरि सुरु हुन्छ।"
-          }
-        }
-      }
-    },
-    "router.chatLowConfidence": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "I'm not confident about this — I can't answer that well."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "मलाई यसमा विश्वास छैन — म यो राम्ररी जवाफ दिन सक्दिनँ।"
           }
         }
       }
@@ -18079,23 +17689,6 @@
         }
       }
     },
-    "settings.schemeProbe.openFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Could not open."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "खोल्न सकिएन।"
-          }
-        }
-      }
-    },
     "settings.schemeProbe.opened": {
       "extractionState": "manual",
       "localizations": {
@@ -18109,6 +17702,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "खुल्यो।"
+          }
+        }
+      }
+    },
+    "settings.schemeProbe.openFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not open."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खोल्न सकिएन।"
           }
         }
       }
@@ -21020,6 +20630,23 @@
         }
       }
     },
+    "appearance.textSize": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Text Size"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अक्षरको आकार"
+          }
+        }
+      }
+    },
     "textSize.independentChoices": {
       "extractionState": "manual",
       "localizations": {
@@ -21037,70 +20664,36 @@
         }
       }
     },
-    "textSize.large": {
+    "textSize.system": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Large"
+            "value": "System"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "ठूलो"
+            "value": "सिस्टम"
           }
         }
       }
     },
-    "textSize.large.description": {
+    "textSize.system.description": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Large text in this app, independent of iPhone settings."
+            "value": "Follow your iPhone text size, including larger accessibility sizes."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "आइफोनको सेटिङबाट स्वतन्त्र, यो एपमा ठूला अक्षर।"
-          }
-        }
-      }
-    },
-    "textSize.medium": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Medium"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "मध्यम"
-          }
-        }
-      }
-    },
-    "textSize.medium.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Medium text in this app, independent of iPhone settings."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "आइफोनको सेटिङबाट स्वतन्त्र, यो एपमा मध्यम अक्षर।"
+            "value": "ठूला पहुँचयोग्य आकारहरूसहित आइफोनको अक्षर आकारअनुसार चल्छ।"
           }
         }
       }
@@ -21139,36 +20732,70 @@
         }
       }
     },
-    "textSize.system": {
+    "textSize.medium": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "System"
+            "value": "Medium"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "सिस्टम"
+            "value": "मध्यम"
           }
         }
       }
     },
-    "textSize.system.description": {
+    "textSize.medium.description": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Follow your iPhone text size, including larger accessibility sizes."
+            "value": "Medium text in this app, independent of iPhone settings."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "ठूला पहुँचयोग्य आकारहरूसहित आइफोनको अक्षर आकारअनुसार चल्छ।"
+            "value": "आइफोनको सेटिङबाट स्वतन्त्र, यो एपमा मध्यम अक्षर।"
+          }
+        }
+      }
+    },
+    "textSize.large": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Large"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठूलो"
+          }
+        }
+      }
+    },
+    "textSize.large.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Large text in this app, independent of iPhone settings."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आइफोनको सेटिङबाट स्वतन्त्र, यो एपमा ठूला अक्षर।"
           }
         }
       }
@@ -21258,23 +20885,6 @@
         }
       }
     },
-    "theme.darkRose": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dark Rose"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "गाढा गुलाबी"
-          }
-        }
-      }
-    },
     "theme.dusk": {
       "extractionState": "manual",
       "localizations": {
@@ -21322,23 +20932,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "हल्का गुलाबी"
-          }
-        }
-      }
-    },
-    "theme.midnight": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Midnight"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "मध्यरात"
           }
         }
       }
@@ -22839,40 +22432,6 @@
         }
       }
     },
-    "voiceSettings.correction.caption": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pip quietly corrects words it misheard, and asks you when it isn't sure. Everything stays on this phone."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "पिपले गलत सुनिएका शब्द आफैं सच्याउँछ, र ढुक्क नभए सोध्छ। सबै कुरा यही फोनमा रहन्छ।"
-          }
-        }
-      }
-    },
-    "voiceSettings.correction.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Fix misheard words"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "गलत सुनिएका शब्द सच्याउने"
-          }
-        }
-      }
-    },
     "voiceSettings.explanation": {
       "extractionState": "manual",
       "localizations": {
@@ -24012,7 +23571,448 @@
         }
       }
     },
-    "·": {}
+    "appearance.visualStyle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visual Style"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दृश्य शैली"
+          }
+        }
+      }
+    },
+    "appearance.colourSkin": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Colour Skin"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "रङको रूप"
+          }
+        }
+      }
+    },
+    "appearance.independentChoices": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose the surface style and colours separately. Changes apply immediately."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सतहको शैली र रङ छुट्टाछुट्टै छान्नुहोस्। परिवर्तन तुरुन्तै लागू हुन्छ।"
+          }
+        }
+      }
+    },
+    "appearance.style.classic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Classic"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "परम्परागत"
+          }
+        }
+      }
+    },
+    "appearance.style.soft": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Soft"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कोमल"
+          }
+        }
+      }
+    },
+    "appearance.style.glass": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Liquid Glass"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "लिक्विड ग्लास"
+          }
+        }
+      }
+    },
+    "appearance.style.classic.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Solid surfaces with quiet, clear edges."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "स्पष्ट किनारा भएका ठोस सतहहरू।"
+          }
+        }
+      }
+    },
+    "appearance.style.soft.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gentle gradients, rounded cards and subtle depth."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कोमल रङ मिश्रण, गोलाकार कार्ड र हल्का गहिराइ।"
+          }
+        }
+      }
+    },
+    "appearance.style.glass.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Native glass on iOS 26. Earlier versions use a frosted material. Accessibility settings keep surfaces solid when needed."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iOS 26 मा वास्तविक ग्लास। पुराना संस्करणमा धमिलो सामग्री प्रयोग हुन्छ। पहुँचयोग्यता सेटिङले आवश्यक हुँदा सतह ठोस राख्छ।"
+          }
+        }
+      }
+    },
+    "appearance.skin.cream.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Warm cream, cocoa text and amber-brown accents."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "न्यानो क्रिम, कोको रङको पाठ र खैरो सजावट।"
+          }
+        }
+      }
+    },
+    "appearance.skin.sage.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fresh sage surfaces with deep teal accents."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हल्का हरियो सतह र गाढा नीलोहरियो सजावट।"
+          }
+        }
+      }
+    },
+    "appearance.skin.sky.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cool sky blue, white cards, navy text and a crimson Talk control."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "शीतल आकाशे नीलो, सेतो कार्ड, गाढा नीलो पाठ र रातो बोल्ने बटन।"
+          }
+        }
+      }
+    },
+    "appearance.skin.lavender.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Soft lavender with rich purple accents."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कोमल ल्याभेन्डर र गाढा बैजनी सजावट।"
+          }
+        }
+      }
+    },
+    "appearance.skin.dusk.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pale slate surfaces with deep blue-grey accents."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हल्का स्लेट सतह र गाढा नीलोखैरो सजावट।"
+          }
+        }
+      }
+    },
+    "appearance.skin.lightPink.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pale rose surfaces with deep berry accents."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हल्का गुलाबी सतह र गाढा बेरी रङको सजावट।"
+          }
+        }
+      }
+    },
+    "theme.midnight": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Midnight"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मध्यरात"
+          }
+        }
+      }
+    },
+    "theme.darkRose": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dark Rose"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गाढा गुलाबी"
+          }
+        }
+      }
+    },
+    "appearance.skin.midnight.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deep midnight surfaces with crimson controls and soft, bright text."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गाढा मध्यरात रङका सतह, रातो नियन्त्रण र नरम उज्यालो अक्षर।"
+          }
+        }
+      }
+    },
+    "appearance.skin.darkRose.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dark plum surfaces with rose controls and warm, bright text."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गाढा बैजनी सतह, गुलाबी नियन्त्रण र न्यानो उज्यालो अक्षर।"
+          }
+        }
+      }
+    },
+    "appearance.preview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live preview"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "प्रत्यक्ष झलक"
+          }
+        }
+      }
+    },
+    "appearance.preview.talk": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Talk control"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बोल्ने बटन"
+          }
+        }
+      }
+    },
+    "appearance.preview.card": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reminder card"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्झना कार्ड"
+          }
+        }
+      }
+    },
+    "appearance.selected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "छानिएको"
+          }
+        }
+      }
+    },
+    "appearance.notSelected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not selected"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नछानिएको"
+          }
+        }
+      }
+    },
+    "voiceSettings.correction.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fix misheard words"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गलत सुनिएका शब्द सच्याउने"
+          }
+        }
+      }
+    },
+    "voiceSettings.correction.caption": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pip quietly corrects words it misheard, and asks you when it isn't sure. Everything stays on this phone."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पिपले गलत सुनिएका शब्द आफैं सच्याउँछ, र ढुक्क नभए सोध्छ। सबै कुरा यही फोनमा रहन्छ।"
+          }
+        }
+      }
+    }
   },
   "version": "1.0"
 }

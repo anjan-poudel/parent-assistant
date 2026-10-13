@@ -301,17 +301,19 @@ final class DialogueFrameTests: XCTestCase {
         let probe = DialogueProbeComposer.probeText(for: frame, catalog: catalog,
                                                     retry: false, locale: ne)
 
-        XCTAssertEqual(probe,
-                       "कस्तो भजन? शिव, दुर्गा, विष्णु, देवी, जे पनि बजाऊ … वा आफैँ भन्नुहोस्",
-                       "the group's localized template with the capped labels + anyPlay")
-        // The fifth option is over `maxSlotOptions` — never spoken.
-        XCTAssertFalse(probe.contains("समाचार सुनाउने हो?"),
-                       "labels beyond the cap must not reach the probe")
-        // The fill is exactly the capped labels + the any-option label,
-        // joined ", " (design-l2 §8 join rule).
+        XCTAssertEqual(probe, "कसको भजन लगाऊ?",
+                       "owner dictation 2026-10-13: the question alone, no "
+                       + "option enumeration")
+        // The fifth option is over `maxSlotOptions` — and with the
+        // placeholder-less template NO option is spoken at all.
+        XCTAssertFalse(probe.contains("समाचार"))
+        XCTAssertFalse(probe.contains("शिव"), "no options are spoken")
+        // The template carries no placeholder, so the fill never reaches
+        // the probe — the catalog options stay answerable by name.
         let template = L10n.str("dialogue.probe.bhajanKind", locale: ne)
-        let fill = ["शिव", "दुर्गा", "विष्णु", "देवी", "जे पनि बजाऊ"].joined(separator: ", ")
-        XCTAssertEqual(probe, String(format: template, fill))
+        XCTAssertFalse(template.contains("%@"),
+                       "the dictated question names no fill")
+        XCTAssertEqual(probe, template)
     }
 
     /// Gherkin 7, second half: the retry variant prefixes the localized
@@ -342,7 +344,7 @@ final class DialogueFrameTests: XCTestCase {
 
         let noGroup = DialogueProbeComposer.probeText(for: frame, catalog: catalog,
                                                       retry: false, locale: ne)
-        XCTAssertEqual(noGroup, "कस्तो संगीत चाहियो? नाम भन्नुहोस्।")
+        XCTAssertEqual(noGroup, "के सुन्ने हो?")
 
         let noCatalog = DialogueProbeComposer.probeText(for: frame, catalog: nil,
                                                         retry: false, locale: ne)
@@ -372,7 +374,7 @@ final class DialogueFrameTests: XCTestCase {
                                                     retry: false, locale: ne)
 
         XCTAssertEqual(probe,
-                       "मैले बुझिन। तपाईंले दुर्गा भजन बजाउने हो? वा युट्युबमा bhajan हेर्ने हो? भन्नुभएको हो?")
+                       "मैले बुझिन। तपाईंले दुर्गा भजन वा युट्युबमा bhajan भन्नुभयो?")
         // The third and fourth candidates are over the SPOKEN cap
         // (`maxSpokenCandidates` — narrowed and conversational, owner
         // feedback 2026-10-11) — never spoken.
@@ -415,7 +417,7 @@ final class DialogueFrameTests: XCTestCase {
         let probe = DialogueProbeComposer.probeText(for: frame, catalog: nil,
                                                     retry: false, locale: ne)
 
-        XCTAssertTrue(probe.contains("युट्युबमा युट्युब हेर्ने हो?"),
+        XCTAssertTrue(probe.contains("युट्युबमा युट्युब"),
                       "without a query the primary match key renders")
         XCTAssertFalse(probe.contains("भिडियो"), "only the primary match key renders")
     }

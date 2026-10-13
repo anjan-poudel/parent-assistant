@@ -406,9 +406,17 @@ enum DialogueProbeComposer {
         let optionLabels = group.options
             .prefix(DialogueConfig.maxSlotOptions)
             .map { L10n.str($0.labelKey, locale: locale) }
-        let labels = (optionLabels + [L10n.str(Key.anyPlay, locale: locale)])
-            .joined(separator: ", ")
-        return String(format: L10n.str(group.questionKey, locale: locale), labels)
+        let labels = naturalList(optionLabels + [L10n.str(Key.anyPlay, locale: locale)],
+                                 locale: locale)
+        // [CASUAL-COPY] (owner dictation 2026-10-13: "just say 'कसको भजन
+        // लगाऊ?'") A template without a placeholder is the whole
+        // question — the option enumeration is deliberately NOT spoken
+        // (it was what made the probe mechanical). The catalog options
+        // stay answerable by name regardless; the labels simply stay
+        // silent.
+        let template = L10n.str(group.questionKey, locale: locale)
+        guard template.contains("%@") else { return template }
+        return String(format: template, labels)
     }
 
     private static func candidateChoiceProbe(for frame: DialogueFrame,
@@ -416,10 +424,11 @@ enum DialogueProbeComposer {
         // Narrowed + conversational (owner feedback 2026-10-11): at most
         // two candidates joined with the locale conjunction ("X वा Y?"),
         // never a bare comma list that reads like an IVR menu.
-        let labels = frame.candidates
-            .prefix(DialogueConfig.maxSpokenCandidates)
-            .map { candidateLabel(for: $0, locale: locale) }
-            .joined(separator: L10n.str(Key.conjunction, locale: locale))
+        let labels = naturalList(
+            frame.candidates
+                .prefix(DialogueConfig.maxSpokenCandidates)
+                .map { candidateLabel(for: $0, locale: locale) },
+            locale: locale)
         return L10n.str(Key.understoodNo, locale: locale) + " " +
             String(format: L10n.str(Key.didYouMean, locale: locale), labels)
     }
@@ -438,12 +447,29 @@ enum DialogueProbeComposer {
               let top = reading.options.first else {
             return L10n.str(Key.understoodNo, locale: locale)
         }
-        if reading.options.count >= 2,
-           let second = reading.options.dropFirst().first {
-            return String(format: L10n.str(Key.correctionOr, locale: locale),
-                          top, second)
-        }
-        return String(format: L10n.str(Key.didYouMean, locale: locale), top)
+        // [CORRECTION-REVIVE] The owner's copy spec (2026-10-12): "did
+        // you mean X / X or Y", NO lead line, NO heard-word echo —
+        // joined with the [CASUAL-COPY] naturalList so two readings read
+        // "X वा Y" and never a menu.
+        let options = naturalList(
+            Array(reading.options.prefix(DialogueConfig.maxSpokenCandidates)),
+            locale: locale)
+        return String(format: L10n.str(Key.didYouMean, locale: locale),
+                      options)
+    }
+
+    /// [CASUAL-COPY] (2026-10-13, owner: "doesn't sound like a normal
+    /// conversation") The spoken list join: everything but the last
+    /// item comma-separated, the last joined with the locale
+    /// conjunction — "शिव, दुर्गा, विष्णु वा देवी" reads like a person
+    /// offering choices; a bare comma list or a repeated "वा वा वा"
+    /// chain reads like a menu.
+    private static func naturalList(_ items: [String], locale: Locale) -> String {
+        guard let last = items.last else { return "" }
+        guard items.count > 1 else { return last }
+        return items.dropLast().joined(separator: ", ")
+            + L10n.str(Key.conjunction, locale: locale)
+            + last
     }
 
     /// A candidate's spoken label: its template key resolved in the

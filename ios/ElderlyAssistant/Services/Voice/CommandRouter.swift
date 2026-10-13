@@ -3479,6 +3479,12 @@ final class CommandRouter {
         case .slotFill:
             guard let query = frame.defaultQuery,
                   let group = dialogueCatalog?.groupForMusicQuery(query) else { return 0 }
+            // [CASUAL-COPY] A placeholder-less template (owner dictation
+            // 2026-10-13) speaks no options — the event's count must say
+            // zero, never a list that was not spoken.
+            let template = L10n.str(group.questionKey,
+                                    locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"))
+            guard template.contains("%@") else { return 0 }
             return min(group.options.count, DialogueConfig.maxSlotOptions)
         case .candidateChoice:
             return min(frame.candidates.count, DialogueConfig.maxCandidates)
