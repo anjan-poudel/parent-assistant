@@ -242,6 +242,20 @@ final class CallLinks {
         return handle
     }
 
+    /// Is the handle the NUMERIC form (a Facebook id, or phone digits)?
+    /// The `fb-messenger://user-thread/…` deep link is keyed to numeric
+    /// ids (MessengerHandleStore's doc: "user-thread is keyed to
+    /// Facebook ids"), so the opener gates the id-keyed URL on this
+    /// shape; every username handle rides the official `m.me` form
+    /// instead. ASCII digits only, hand-listed like the handle alphabet
+    /// above (`CharacterSet.decimalDigits` also contains Devanagari
+    /// digits).
+    static func isNumericMessengerHandle(_ handle: String) -> Bool {
+        !handle.isEmpty
+            && handle.unicodeScalars.allSatisfy(
+                CharacterSet(charactersIn: "0123456789").contains)
+    }
+
     /// Does a `requestedApp` slot name WhatsApp? Shared vocabulary with
     /// `MethodResolver` (call path) so the call and message flows agree
     /// on what counts as naming WhatsApp, in either script.
@@ -304,32 +318,51 @@ final class CallLinks {
         return components.url
     }
 
-    /// `fb-messenger://user-thread/<handle>` — deep link INTO the 1:1
-    /// thread, where the audio/video call buttons sit one tap away. This
-    /// is the best feasible Messenger "call" link: no documented scheme
-    /// starts a 1:1 Messenger call directly (research 2026-09; the v2
-    /// spec's "no public API" row for Messenger calls still stands — the
-    /// user's direction was to ship what IS possible, documented here and
-    /// in the outcome strings, never claimed as an auto-started call).
-    /// The audio/video distinction is deliberately NOT a parameter: both
+    /// `fb-messenger://user-thread/<digits>` — deep link INTO the 1:1
+    /// thread for the NUMERIC handle form (a Facebook id, or the
+    /// community-documented phone digits), where the audio/video call
+    /// buttons sit one tap away. This is the best feasible Messenger
+    /// "call" link: no documented scheme starts a 1:1 Messenger call
+    /// directly (research 2026-09; the v2 spec's "no public API" row for
+    /// Messenger calls still stands — the user's direction was to ship
+    /// what IS possible, documented here and in the outcome strings,
+    /// never claimed as an auto-started call). The form is id-KEYED:
+    /// Messenger resolves the person from the numeric id only — a
+    /// username in this slot fires the app WITHOUT navigating (field
+    /// report 2026-10-12: "call maiya" opened Messenger's home, not her
+    /// thread), so a username handle returns nil here and rides the
+    /// official `m.me` form instead (see messengerWebURL). The
+    /// audio/video distinction is deliberately NOT a parameter: both
     /// land on the same thread URL, and a parameter that changes nothing
-    /// would pretend otherwise. Nil when the handle normalizes to empty.
+    /// would pretend otherwise. Nil when the handle normalizes to empty
+    /// or is not the numeric form.
     static func messengerThreadURL(handle rawHandle: String) -> URL? {
         let handle = messengerHandle(rawHandle)
         guard !handle.isEmpty else { return nil }
+        guard isNumericMessengerHandle(handle) else { return nil }
         return URL(string: "fb-messenger://user-thread/\(handle)")
     }
 
-    /// `https://m.me/<handle>` — the app-absent fallback, opened via
-    /// Safari (mirrors the shipped `wa.me` chat link's universal-link
-    /// role: when Messenger IS present the thread deep link wins instead,
-    /// so this only ever fires for the app-absent case). Nil when the
-    /// handle normalizes to empty.
+    /// `https://m.me/<handle>` — Meta's only official thread link, for
+    /// BOTH the installed and the absent case: the universal link
+    /// resolves INTO the app's 1:1 thread when Messenger is installed
+    /// and into Safari's web chat when it is not, and the opener
+    /// discloses which surface appeared from the bare-scheme probe's
+    /// result. This is the form every username handle opens with (see
+    /// messengerThreadURL). Nil when the handle normalizes to empty.
     static func messengerWebURL(handle rawHandle: String) -> URL? {
         let handle = messengerHandle(rawHandle)
         guard !handle.isEmpty else { return nil }
         return URL(string: "https://m.me/\(handle)")
     }
+
+    /// The bare scheme probe — the honest Messenger-installed check
+    /// (`fb-messenger` in LSApplicationQueriesSchemes), the same role
+    /// the bare `whatsapp://` probe plays for WhatsApp. The per-handle
+    /// `user-thread` URL can no longer be the probe: for a username
+    /// handle that form isn't built at all (see messengerThreadURL), and
+    /// `m.me` is https — always "openable", never an installed signal.
+    static let messengerProbeURL = URL(string: "fb-messenger://")!
 
     // MARK: - Openers (decisions + side effects)
 
@@ -391,25 +424,34 @@ final class CallLinks {
 
     /// Opens the Messenger 1:1 thread for the contact's Messenger handle,
     /// or the app-absent fallback — mirrors `openWhatsAppText`'s shape:
-    /// the `fb-messenger` scheme's canOpenURL is the honest installed
-    /// check (requires `fb-messenger` in LSApplicationQueriesSchemes),
-    /// and the fallback is the `m.me` universal link via Safari, which
-    /// the caller discloses out loud. Opens NOTHING for an unusable
-    /// handle. CallLinks stays at the URL level — disclosure is the
-    /// caller's job, and "the call started" is never claimed by anyone.
+    /// the bare `fb-messenger` scheme's canOpenURL is the honest
+    /// installed check (requires `fb-messenger` in
+    /// LSApplicationQueriesSchemes), and the app-absent route is the
+    /// `m.me` universal link via Safari, which the caller discloses out
+    /// loud. Opens NOTHING for an unusable handle. CallLinks stays at
+    /// the URL level — disclosure is the caller's job, and "the call
+    /// started" is never claimed by anyone.
+    ///
+    /// URL form by handle shape (field report 2026-10-12: "call maiya"
+    /// opened Messenger's home, not her thread — the id-keyed form was
+    /// used for a username handle): the id-keyed `user-thread` form is
+    /// opened only for the numeric handle form (see messengerThreadURL);
+    /// every username handle opens Meta's official `m.me` universal
+    /// link, which resolves into the app when Messenger is installed
+    /// (the outcome is `.openedThread` then) and into Safari's web chat
+    /// when it is not (`.fellBackToWeb` — the probe's honest signal).
     func openMessengerThread(handle rawHandle: String) -> MessengerOutcome {
-        guard let threadURL = Self.messengerThreadURL(handle: rawHandle) else {
-            return .invalidHandle
-        }
-        if opener.canOpenURL(threadURL) {
+        let handle = Self.messengerHandle(rawHandle)
+        guard !handle.isEmpty else { return .invalidHandle }
+        let installed = opener.canOpenURL(Self.messengerProbeURL)
+        if installed, let threadURL = Self.messengerThreadURL(handle: handle) {
             opener.open(threadURL)
             return .openedThread
         }
-        // Thread URL was buildable, so the web URL is too (same handle).
-        if let webURL = Self.messengerWebURL(handle: rawHandle) {
+        if let webURL = Self.messengerWebURL(handle: handle) {
             opener.open(webURL)
         }
-        return .fellBackToWeb
+        return installed ? .openedThread : .fellBackToWeb
     }
 
     /// Opens Messenger for a per-contact call button (contact-call-

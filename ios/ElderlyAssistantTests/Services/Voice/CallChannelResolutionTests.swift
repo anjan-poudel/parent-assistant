@@ -2088,10 +2088,12 @@ final class CallChannelResolutionTests: XCTestCase {
                                              and: "func openMessengerChat(phone", in: links)
         XCTAssertEqual(collapsed(openMessengerThread).trimmingCharacters(in: .whitespacesAndNewlines),
                        "func openMessengerThread(handle rawHandle: String) -> MessengerOutcome { "
-                       + "guard let threadURL = Self.messengerThreadURL(handle: rawHandle) else { return .invalidHandle } "
-                       + "if opener.canOpenURL(threadURL) { opener.open(threadURL) return .openedThread } "
-                       + "if let webURL = Self.messengerWebURL(handle: rawHandle) { opener.open(webURL) } "
-                       + "return .fellBackToWeb }",
+                       + "let handle = Self.messengerHandle(rawHandle) "
+                       + "guard !handle.isEmpty else { return .invalidHandle } "
+                       + "let installed = opener.canOpenURL(Self.messengerProbeURL) "
+                       + "if installed, let threadURL = Self.messengerThreadURL(handle: handle) { opener.open(threadURL) return .openedThread } "
+                       + "if let webURL = Self.messengerWebURL(handle: handle) { opener.open(webURL) } "
+                       + "return installed ? .openedThread : .fellBackToWeb }",
                        "openMessengerThread must refuse an empty handle before probing Messenger")
 
         // openMessengerChat: the digit guard first, the probe second.

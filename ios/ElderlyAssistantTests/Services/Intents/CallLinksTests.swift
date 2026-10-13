@@ -247,19 +247,34 @@ final class CallLinksTests: XCTestCase {
 
     // MARK: - Messenger URL construction
 
-    func testMessengerThreadURLIsUserThreadForm() {
-        XCTAssertEqual(CallLinks.messengerThreadURL(handle: "sita.sharma77")?.absoluteString,
-                       "fb-messenger://user-thread/sita.sharma77")
-    }
-
-    func testMessengerThreadURLAcceptsNumericId() {
+    func testMessengerThreadURLIsUserThreadFormForNumericHandles() {
+        // The id-keyed form serves numeric handles only (a Facebook id,
+        // or the community-documented phone digits).
         XCTAssertEqual(CallLinks.messengerThreadURL(handle: "100001234567890")?.absoluteString,
                        "fb-messenger://user-thread/100001234567890")
+        XCTAssertEqual(CallLinks.messengerThreadURL(handle: "9779841000001")?.absoluteString,
+                       "fb-messenger://user-thread/9779841000001")
+    }
+
+    func testMessengerThreadURLNilForUsernameHandle() {
+        // user-thread is keyed to numeric ids (field report 2026-10-12:
+        // "call maiya" opened Messenger's home, not her thread — the
+        // id-keyed form was used for a username). Usernames ride the
+        // official m.me form (see the opener tests).
+        XCTAssertNil(CallLinks.messengerThreadURL(handle: "sita.sharma77"))
     }
 
     func testMessengerThreadURLNilForInvalidHandle() {
         XCTAssertNil(CallLinks.messengerThreadURL(handle: ""))
         XCTAssertNil(CallLinks.messengerThreadURL(handle: "sita sharma"))
+    }
+
+    func testIsNumericMessengerHandleClassifiesShapes() {
+        XCTAssertTrue(CallLinks.isNumericMessengerHandle("100001234567890"))
+        XCTAssertTrue(CallLinks.isNumericMessengerHandle("9779841000001"))
+        XCTAssertFalse(CallLinks.isNumericMessengerHandle("sita.sharma77"))
+        XCTAssertFalse(CallLinks.isNumericMessengerHandle("1000a"))
+        XCTAssertFalse(CallLinks.isNumericMessengerHandle(""))
     }
 
     func testMessengerWebURLIsMMeForm() {
@@ -291,13 +306,36 @@ final class CallLinksTests: XCTestCase {
 
     // MARK: - Messenger open decisions (thread vs web fallback)
 
-    func testOpenMessengerThreadOpensExactThreadURLWhenInstalled() {
+    func testOpenMessengerThreadUsesOfficialMMeFormForUsernameWhenInstalled() {
+        // Field report 2026-10-12 ("call maiya" opened Messenger's home):
+        // the id-keyed user-thread form fires the app WITHOUT navigating
+        // for a username handle. A username opens Meta's official m.me
+        // universal link instead, which resolves INTO the app's thread
+        // when Messenger is installed.
         let opener = FakeCallLinkOpener(canOpen: true)
         let links = CallLinks(opener: opener)
         let outcome = links.openMessengerThread(handle: "sita.sharma77")
         XCTAssertEqual(outcome, .openedThread)
         XCTAssertEqual(opener.opened.map(\.absoluteString),
-                       ["fb-messenger://user-thread/sita.sharma77"])
+                       ["https://m.me/sita.sharma77"])
+        XCTAssertEqual(opener.canOpenChecks.map(\.absoluteString),
+                       ["fb-messenger://"],
+                       "the bare scheme canOpenURL is the honest installed check")
+    }
+
+    func testOpenMessengerThreadKeepsUserThreadFormForNumericWhenInstalled() {
+        // The id-keyed form stays for numeric handles — field-verified
+        // 2026-09-06 on the call-button path for numbers Messenger
+        // holds a thread for.
+        let opener = FakeCallLinkOpener(canOpen: true)
+        let links = CallLinks(opener: opener)
+        let outcome = links.openMessengerThread(handle: "100001234567890")
+        XCTAssertEqual(outcome, .openedThread)
+        XCTAssertEqual(opener.opened.map(\.absoluteString),
+                       ["fb-messenger://user-thread/100001234567890"])
+        XCTAssertEqual(opener.canOpenChecks.map(\.absoluteString),
+                       ["fb-messenger://"],
+                       "the bare scheme canOpenURL is the honest installed check")
     }
 
     func testOpenMessengerThreadFallsBackToMMeWhenAppAbsent() {
@@ -309,8 +347,18 @@ final class CallLinksTests: XCTestCase {
                        ["https://m.me/sita.sharma77"],
                        "the fallback is the m.me universal link via Safari, never the dead scheme")
         XCTAssertEqual(opener.canOpenChecks.map(\.absoluteString),
-                       ["fb-messenger://user-thread/sita.sharma77"],
-                       "the scheme canOpenURL is the honest installed check")
+                       ["fb-messenger://"],
+                       "the bare scheme canOpenURL is the honest installed check")
+    }
+
+    func testOpenMessengerThreadNumericFallsBackToMMeWhenAppAbsent() {
+        let opener = FakeCallLinkOpener(canOpen: false)
+        let links = CallLinks(opener: opener)
+        let outcome = links.openMessengerThread(handle: "100001234567890")
+        XCTAssertEqual(outcome, .fellBackToWeb)
+        XCTAssertEqual(opener.opened.map(\.absoluteString),
+                       ["https://m.me/100001234567890"],
+                       "the dead id-keyed scheme is never opened for an absent app")
     }
 
     func testOpenMessengerThreadInvalidHandleOpensAndChecksNothing() {
