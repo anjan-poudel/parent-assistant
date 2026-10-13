@@ -402,8 +402,10 @@ final class AudioSessionPresetTests: XCTestCase {
                        "speaking must switch to the bell's proven-loud media "
                        + "config — call/voice gain staging under "
                        + ".playAndRecord is the quietness root cause")
-        XCTAssertEqual(session.activeCalls.last?.0, true,
-                       "the session stays active through the switch")
+        XCTAssertEqual(session.activeCalls.map(\.0), [false, true],
+                       "setCategory on an ACTIVE session throws on iOS 26 "
+                       + "(Anzaan field test) — the switch must cycle active "
+                       + "off → category → active on")
 
         manager.endResponsePlayback()
         XCTAssertEqual(session.categoryCalls.last,
@@ -411,8 +413,9 @@ final class AudioSessionPresetTests: XCTestCase {
                              options: measurementOptions),
                        "playback end must restore the capture preset "
                        + "(default OFF = measurement), in place")
-        XCTAssertEqual(session.activeCalls.last?.0, true,
-                       "restore leaves the session active (deactivating would "
+        XCTAssertEqual(session.activeCalls.map(\.0), [false, true, false, true],
+                       "restore uses the same deactivate-first cycle and "
+                       + "leaves the session active (deactivating it would "
                        + "strand the voice pipeline's engine)")
     }
 
