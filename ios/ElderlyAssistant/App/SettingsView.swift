@@ -1896,6 +1896,27 @@ struct FamilyContactsSettingsView: View {
 /// swap) instead of silently re-linking. `.limited` contacts access is
 /// READABLE here: the granted set loads and an honest caption sits
 /// under the field (the T-148b wizard obligation, design-l2 §3.5).
+/// [RESPONSIVENESS] (2026-10-14) One committed nickname DRAFT entry. The
+/// wizard's list used to be `[String]` rendered with
+/// `ForEach(Array(enumerated()), id: \.offset)` and remove closures that
+/// captured the row's index: removing an earlier entry shifted every
+/// later row's identity (SwiftUI saw in-place text swaps, not removals)
+/// and a stale row's closure could then remove the WRONG spelling. A
+/// per-entry UUID fixes both — identity survives removals and removal
+/// addresses the entry itself — while duplicate spellings stay fully
+/// supported (offset ids never collided, and string ids could not
+/// represent the duplicates the editor deliberately preserves).
+private struct NicknameDraftEntry: Identifiable, Equatable {
+    let id: UUID
+    /// The verbatim spelling (validated at entry; never re-trimmed here).
+    let text: String
+
+    init(_ text: String) {
+        self.id = UUID()
+        self.text = text
+    }
+}
+
 private struct FamilyContactWizardSheet: View {
     @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
@@ -1964,7 +1985,10 @@ private struct FamilyContactWizardSheet: View {
     // entries only — `nicknameDraft` is the add field's text. Removes
     // and adds are save-time edits like every other field; the stored
     // list round-trips through `normalizedNicknames` at the coordinator.
-    @State private var nicknames: [String] = []
+    // [RESPONSIVENESS] (2026-10-14) Entries carry their own UUIDs
+    // (`NicknameDraftEntry`) so list identity survives removals; the
+    // save/load seams map to and from the stored `[String]`.
+    @State private var nicknames: [NicknameDraftEntry] = []
     @State private var nicknameDraft = ""
     /// [PER-CONTACT-OVERRIDE] (2026-10-14) The contact's dialer
     /// override draft: nil = follow the global primary/secondary.
@@ -3157,8 +3181,7 @@ private struct FamilyContactWizardSheet: View {
     private func loadPickedPhoto(_ item: PhotosPickerItem?) {
         guard let item else { return }
         Task {
-            guard let data = try? await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: data) else { return }
+            guard let data = try? await item.loadTransferable(type: Data.self) else { return }
             // DESIGN-REVIEW (P2): a picked camera-roll image can be tens
             // of megapixels (~48 MB decoded) and this @State holds it for
             // the wizard's whole lifetime. The store only ever KEEPS
@@ -3166,8 +3189,21 @@ private struct FamilyContactWizardSheet: View {
             // the preview is smaller still — so shrink to that as soon as
             // the bytes arrive: same saved photo, a fraction of the
             // resident memory.
-            pickedPhoto = DownsampledImageCache.downsampled(
-                image, maxPixelEdge: ContactPhotoStore.maxDimension) ?? image
+            //
+            // [RESPONSIVENESS] (2026-10-14) And pay that cost OFF the
+            // main actor: `downsampled(from:)` is ImageIO's thumbnail
+            // decode of the bytes (the full-size bitmap — the ~48 MB
+            // peak this comment warns about — is never materialized),
+            // run on a detached task so the wizard's main thread never
+            // carries it; the same detached-load shape as the
+            // address-book enumerate below. Undecodable bytes yield nil
+            // → no photo, the old `UIImage(data:)` guard's soft failure.
+            let thumb = await Task.detached(priority: .userInitiated) {
+                DownsampledImageCache.downsampled(
+                    from: data, maxPixelEdge: ContactPhotoStore.maxDimension)
+            }.value
+            guard let thumb else { return }
+            pickedPhoto = thumb
             removingStoredPhoto = false
         }
     }
@@ -3321,8 +3357,12 @@ private struct FamilyContactWizardSheet: View {
     private var nicknameList: some View {
         if !nicknames.isEmpty {
             VStack(spacing: 8) {
-                ForEach(Array(nicknames.enumerated()), id: \.offset) { index, entry in
-                    nicknameRow(entry, index: index)
+                // [RESPONSIVENESS] (2026-10-14) Identity is the entry's
+                // own UUID (`NicknameDraftEntry`): removing an earlier
+                // entry removes NODE N, it no longer re-labels every
+                // later row in place.
+                ForEach(nicknames) { entry in
+                    nicknameRow(entry)
                 }
             }
         }
@@ -3333,19 +3373,21 @@ private struct FamilyContactWizardSheet: View {
     /// (`family.nickname.removeLabel`, formatted). Removal is a
     /// save-time edit like every other field — nothing touches the
     /// store until Save.
-    private func nicknameRow(_ entry: String, index: Int) -> some View {
+    private func nicknameRow(_ entry: NicknameDraftEntry) -> some View {
         HStack(spacing: 12) {
-            Text(entry)
+            Text(entry.text)
                 .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             Button {
-                // Defensive bounds: the ForEach index and the array are
-                // the same draft, so this can only trip on a stale row.
-                guard nicknames.indices.contains(index) else { return }
-                nicknames.remove(at: index)
+                // [RESPONSIVENESS] (2026-10-14) Identity-addressed
+                // removal: the row removes the entry it DRAWS, so a stale
+                // row living through a removal animation can never hit a
+                // neighbour (the old index capture could). No-op when the
+                // entry is already gone.
+                nicknames.removeAll { $0.id == entry.id }
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
@@ -3355,7 +3397,7 @@ private struct FamilyContactWizardSheet: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text(L10n.fmt("family.nickname.removeLabel",
-                                              locale: coordinator.activeLocale, entry)))
+                                              locale: coordinator.activeLocale, entry.text)))
         }
         .padding(.horizontal, 12)
         .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -3370,7 +3412,7 @@ private struct FamilyContactWizardSheet: View {
     /// cap), stored as entered within that bound.
     @ViewBuilder
     private var nicknameAddRow: some View {
-        if FamilyWizardNicknamePresentation.canAdd(entries: nicknames) {
+        if FamilyWizardNicknamePresentation.canAdd(entries: nicknames.map(\.text)) {
             HStack(spacing: 8) {
                 TextField("", text: $nicknameDraft,
                           prompt: Text(LocalizedStringKey("family.nickname.entryPlaceholder")))
@@ -3382,7 +3424,7 @@ private struct FamilyContactWizardSheet: View {
                 Button {
                     guard let entry = FamilyWizardNicknamePresentation.newEntry(from: nicknameDraft)
                     else { return }
-                    nicknames.append(entry)
+                    nicknames.append(NicknameDraftEntry(entry))
                     nicknameDraft = ""
                 } label: {
                     Text("family.nickname.add")
@@ -3494,8 +3536,10 @@ private struct FamilyContactWizardSheet: View {
         // design-l2 §2.5): the interim single-field draft that showed
         // only the first entry — and dropped the rest on save — is gone;
         // the complete draft list round-trips through the coordinator's
-        // widened `nicknames:` seam.
-        nicknames = contact.nicknames
+        // widened `nicknames:` seam. [RESPONSIVENESS] (2026-10-14) Each
+        // loaded spelling gets a fresh draft UUID — the draft identity
+        // only needs to be stable across THIS editing session.
+        nicknames = contact.nicknames.map { NicknameDraftEntry($0) }
         address = contact.address ?? ""
         // The stored invitation address, so re-opening the editor shows
         // what the family will actually be invited at (calendar & family
@@ -3597,7 +3641,7 @@ private struct FamilyContactWizardSheet: View {
                 id: contact.id, name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
                 photo: pickedPhoto, removingPhoto: removingPhoto,
-                nicknames: nicknames,
+                nicknames: nicknames.map(\.text),
                 address: homeAddress, email: contactEmail,
                 isEmergencyContact: isEmergencyContact,
                 // T-159 (design-l2 §2.6): the draft link is the ONLY
@@ -3610,7 +3654,7 @@ private struct FamilyContactWizardSheet: View {
                 id: savedID, name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
                 photo: pickedPhoto,
-                nicknames: nicknames,
+                nicknames: nicknames.map(\.text),
                 address: homeAddress, email: contactEmail,
                 isEmergencyContact: isEmergencyContact,
                 link: draftLink,
