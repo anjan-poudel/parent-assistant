@@ -28,8 +28,10 @@ content that must never reach a Release log sink:
      files only (`ENGINE_FILES`); other subsystems' raw-error prints are
      tracked separately and deliberately out of this gate's scope.
 
-and, over the live-camera-translation feature's own roots only
-(`FEATURE_ROOTS`, AM-5):
+and, over each feature's own roots (`FEATURE_ROOTS` — the live-camera-
+translation feature's, AM-5, and later additions for the point-ask,
+profile-interview, Spotify, dialogue, contacts, call-dialer and, at T-185,
+conversational-Nepali-replies features):
 
   3. a Release-compiled console write at all — the feature's events go
      through the sanitising observability bus or not at all;
@@ -38,12 +40,26 @@ and, over the live-camera-translation feature's own roots only
   5. an event metadata key that is not in `LogSanitiser.allowedKeys`;
   6. a text value interpolated or rendered into an event field.
 
+Rules 5-6 are applied to two statement sets (T-185), because a feature's
+emitters do not always live in files the feature owns outright. They judge
+every statement in a feature-root file, and — for the event types listed in
+`FEATURE_EVENT_TYPES` — every statement that emits one, wherever that
+statement lives. The conversational-Nepali-replies feature's consent, guard
+and routing emitters sit in shared router files (`CommandRouter.swift`,
+`IntentRouter.swift`) whose own pre-existing console writes and unlisted
+metadata keys keep them out of `FEATURE_ROOTS`: a whole-file root there would
+fail on defects this feature did not introduce. The event type is the durable
+anchor for those statements — it follows the emitter if the code moves, and
+it is graded against the shipped allow-list exactly as a feature root's
+payload is. Rules 3-4 are deliberately NOT applied by event type (a console
+write elsewhere in a shared file is not this feature's to forbid).
+
 Rule 3 keeps the shipped Release framing (a `#if DEBUG` region cannot be
-compiled into Release). Rules 4-6 do not: NFR-LCT-006 says content must not
-reach a log surface "in any build", and the feature's sources have no
-legitimate content-bearing console write. The two are deliberately
-orthogonal — rule 3 catches the bypass whatever it renders, rule 4 catches
-content even where the Debug exemption would apply — and
+compiled into Release). Rules 4-6 do not: NFR-LCT-006 and NFR-CNR-006 say
+content must not reach a log surface "in any build", and the feature's
+sources have no legitimate content-bearing console write. The two are
+deliberately orthogonal — rule 3 catches the bypass whatever it renders,
+rule 4 catches content even where the Debug exemption would apply — and
 `LiveTranslateSourceHygieneTests` is stricter than both, forbidding any
 console write in `Services/LiveTranslate/` outright. The gate is the
 backstop, not the only arm.
@@ -69,13 +85,14 @@ Detection rules (rules 1-2 skipped when the region is Debug):
   - the statement passes an error object as a bare argument
     (`print(error)`).
 
-Detection rules 3-6 (feature roots, any configuration):
-  - any console write, whatever it renders;
+Detection rules 3-6 (feature roots; rules 5-6 also by event type, any
+configuration):
+  - any console write, whatever it renders (feature-root files only);
   - a console write mentioning recognized/translated text: `text` and any
     `…Text` identifier, `translation(s)` / `translated`, `recognized` /
     `recognised` / `recognition`, `transcript`, `prompt` — as words of
     their own, so the `text_change` / `consent_prompt_shown` event names
-    are not content;
+    are not content (feature-root files only);
   - an event metadata dictionary literal with a string key that is not in
     `LogSanitiser.allowedKeys`, or a `LiveTranslateEvents.MetadataKey`
     case whose raw value is not in that set (the additive allow-list entry
@@ -83,6 +100,16 @@ Detection rules 3-6 (feature roots, any configuration):
   - an event field (`errorCode:` / `error_code:` / a `metadata:` value)
     built from a content-worded or error-derived interpolation, or from
     `String(describing:)` / `.localizedDescription` / `.debugDescription`.
+
+The event-type application of rules 5-6 (T-185) anchors on the literal event
+name in an emission statement — `ObservabilityEvent(eventType: "…")` or the
+bus helper's `emit("…", …)` form — so an emitter keeps its payload grading
+when it moves between files. The `outcome:` field is not judged, as on a
+feature root: the shipped vocabulary carries closed tokens there (and the
+rule set would otherwise change semantics for every existing root). A
+registered event type that no longer appears anywhere is NOT itself a
+violation — but it means the registry entry has gone stale, and the coverage
+self-test (`--self-test`) is what keeps that visible.
 
 **Known limitations, stated rather than implied (AM-5).** These rules are
 static and textual. They cannot see through indirection: a value routed
@@ -101,19 +128,33 @@ reach a sink"; that is why the design's invariant table names the runtime
 tests first and this gate second. Reaching a sink through a path this gate
 cannot see is a documented gap, not a covered case.
 
+Two `FEATURE_ROOTS` limitations belong beside those (T-185). First, the role
+is per file, so a *hunk* a feature adds to a shared file is not graded by
+rules 3-4 at all; where such a hunk renders content, the feature's own unit
+suites and the review carry it, and the audit that accompanies a root
+addition says so file by file. Second, a root that no longer matches any file
+silently grades nothing: `--self-test` checks that every root resolves in the
+shipped tree, and a listed feature event type that stops being emitted makes
+its registry entry stale — the fix is a deliberate registry update, not a
+deleted check (the `ENGINE_FILES` discipline).
+
 Run the guard after changing it: it fails (exit 1) when a listed engine
-file is missing or the log allow-list cannot be read, so it cannot go
-green by having nothing to check.
+file is missing, when a listed feature root or feature event type no longer
+resolves in the shipped tree, or when the log allow-list cannot be read —
+so it cannot go green by having nothing to check.
 
 Usage:
   check-release-log-safety.py [--source-root DIR] [--allow-list PATH]
-                              [--require-engine-files] [--list-rules] [--quiet]
+                              [--require-engine-files] [--list-rules]
+                              [--self-test] [--quiet]
 
 `--source-root` scans a different tree and `--allow-list` reads a different
 allow-list; the fixture harness uses both (the defaults are the project's
 own `ElderlyAssistant/` and its shipped `LogSanitiser.swift`).
 `--require-engine-files` is implied when the default root is used, and can
-be forced on for a fixture tree.
+be forced on for a fixture tree. `--self-test` runs the coverage self-test
+instead of the tree scan (see "Coverage self-test" below); the wrapper runs
+it after the fixture suite on every invocation.
 """
 
 from __future__ import annotations
@@ -121,7 +162,9 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import sys
+import tempfile
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_SOURCE_ROOT = os.path.join(PROJECT_DIR, "ElderlyAssistant")
@@ -202,7 +245,57 @@ FEATURE_ROOTS = [
     # field in any configuration, or an unlisted metadata key in this
     # file fails the gate — numbers and handles never reach a log sink.
     "Services/Calls",
+    # [CONVERSATIONAL-NEPALI-REPLIES T-185 / design-l1 §16, FR-CNR-012]
+    # The cloud-chat feature's own sources: the routing/lane decision, the
+    # consent gate and its prompt/sheet, the activity indicator, the chat
+    # sampling seam, the reply grammar guard, the voice-control family and
+    # the surfaces (Settings row, status-slot host mount). The chat turn's
+    # text, the reply text and the guard's verdict are household content:
+    # a Release console write, a content-bearing console write or event
+    # field in any configuration, or an unlisted metadata key anywhere in
+    # these files fails the gate. The directory entry carries the whole
+    # feature group (including `Views/`, so the consent sheet cannot
+    # bypass it); the per-file entries below are feature-owned files that
+    # live in shared groups, where the rest of the group is not this
+    # feature's code. `Services/Gemini/GeminiClient.swift` is the request
+    # path FR-CNR-012's header-only key discipline names: no key or body
+    # material may be printed or carried into an event field there either.
+    "Services/Intents/CloudChat",
+    "Services/Voice/ChatSampling.swift",
+    "Services/Voice/NepaliGrammarGuard.swift",
+    "Services/Voice/KeywordIntentRule.swift",
+    "Services/Voice/LlamaCommandInterpreter.swift",
+    "Services/Gemini/GeminiClient.swift",
+    "App/SettingsView.swift",
+    "App/HomeSubviews.swift",
 ]
+
+# [CONVERSATIONAL-NEPALI-REPLIES T-185 / design-l1 §16, FR-CNR-012] The
+# feature's event types. These emitters live in shared files
+# (`CommandRouter.swift`, `IntentRouter.swift`,
+# `GeminiCommandInterpreter.swift` — the chat turn's provider seam) that
+# cannot join `FEATURE_ROOTS` whole: each carries pre-existing console writes
+# and unlisted metadata keys of its own, tracked outside this unit. Grading
+# the *statements that emit these event types* — wherever they live — is what
+# keeps a later well-meaning change from adding a content field to the
+# classification-only payloads (design §7.5 / §8.1 / §8.8; NFR-CNR-006).
+# Rules 5-6 apply to those statements; rules 3-4 deliberately do not, so a
+# console write elsewhere in a shared file is never this feature's offence.
+# Removing an entry here (or renaming the event) stops its site being graded
+# and shrinks the gate's claim. The coverage self-test catches the two
+# automatic shapes: a *stale* entry (listed, but no longer emitted anywhere)
+# is reported, and an emptied registry turns the seeded event-type legs red.
+# A single entry deleted outright is caught only by its diff: no duplicated
+# expectation list is kept here, by the same reasoning as `ENGINE_FILES`.
+FEATURE_EVENT_TYPES = {
+    "reply_grammar_flag": "the chat guard's verdict (CommandRouter)",
+    "cloud_chat_fallback": "the chat lane's on-device fallback (IntentRouter)",
+    "cloud_chat_served": "the chat lane's cloud-served success (IntentRouter)",
+    "cloud_chat_voice_control": "the voice revoke / state-query (CommandRouter)",
+    "chat_respond_unusable": "the chat turn's unusable answer (GeminiCommandInterpreter)",
+    "chat_respond_done": "the chat turn's success (GeminiCommandInterpreter)",
+    "chat_respond_failed": "the chat turn's failure (GeminiCommandInterpreter)",
+}
 
 # The shipped allow-list the feature's metadata keys must be declared in.
 # Read out of the source rather than duplicated here: a copy would drift, and
@@ -690,8 +783,39 @@ def judge_console(relative, line_no, text, in_debug, engine, tainted):
     return offences
 
 
+def judge_feature_payload(relative, line_no, text, allowed_keys):
+    """Rules 5-6: the event payload family.
+
+    Split out of `judge_feature` at T-185 because the same judgment applies to
+    two statement sets: every statement in a feature-root file, and every
+    statement that emits a listed feature event type (wherever it lives — the
+    feature's emitters in shared router files are exactly the second set).
+    Rule 5 is the allow-list decision point (AM-2/CL-5): a key that is not
+    declared is silently dropped at the bus boundary, so an unlisted key is
+    lost evidence, and adding one is the deliberate act the gate forces. Rule
+    6 catches a text value interpolated or rendered into a field.
+    """
+    offences = []
+    for key, _value in metadata_entries(text):
+        name = key.lstrip(".")
+        if name not in allowed_keys:
+            offences.append(Violation(
+                relative, line_no, "feature-unlisted-metadata-key",
+                f"event metadata key '{name}' is not in LogSanitiser.allowedKeys"))
+
+    values = field_values(text, ERROR_CODE_FIELD_RE)
+    values += [value for _key, value in metadata_entries(text)]
+    for value in values:
+        reason = content_bearing_value(value)
+        if reason:
+            offences.append(Violation(
+                relative, line_no, "feature-text-interpolated-into-event", reason))
+            break
+    return offences
+
+
 def judge_feature(relative, line_no, text, allowed_keys, in_debug):
-    """Rules 3-6: the feature's content family.
+    """Rules 3-6: the feature's content family over one statement.
 
     Rule 3 keeps the shipped Release framing (`#if DEBUG` is exempt: the
     region cannot be compiled into Release). Rules 4-6 are judged in every
@@ -712,22 +836,13 @@ def judge_feature(relative, line_no, text, allowed_keys, in_debug):
                 relative, line_no, "feature-content-print",
                 "recognized or translated text in a console write"))
 
-    for key, _value in metadata_entries(text):
-        name = key.lstrip(".")
-        if name not in allowed_keys:
-            offences.append(Violation(
-                relative, line_no, "feature-unlisted-metadata-key",
-                f"event metadata key '{name}' is not in LogSanitiser.allowedKeys"))
-
-    values = field_values(text, ERROR_CODE_FIELD_RE)
-    values += [value for _key, value in metadata_entries(text)]
-    for value in values:
-        reason = content_bearing_value(value)
-        if reason:
-            offences.append(Violation(
-                relative, line_no, "feature-text-interpolated-into-event", reason))
-            break
+    offences.extend(judge_feature_payload(relative, line_no, text, allowed_keys))
     return offences
+
+
+def mentions_feature_event_type(text: str) -> bool:
+    """True when the text names one of the feature's registered event types."""
+    return any(name in text for name in FEATURE_EVENT_TYPES)
 
 
 def judge_metadata_key_enum(relative, source, allowed_keys):
@@ -773,7 +888,353 @@ def scan(path: str, role: str, allowed_keys, source_root: str):
         for line_no, text, in_debug, _balance, _tainted in statements(lines, FEATURE_OPENER_RE):
             offences.extend(judge_feature(relative, line_no, text, allowed_keys, in_debug))
         offences.extend(judge_metadata_key_enum(relative, source, allowed_keys))
+    elif mentions_feature_event_type(source):
+        # [CNR T-185] The feature's emission sites that live in shared files:
+        # the file is not a root (its own pre-existing console writes and
+        # unlisted keys are not this feature's), so the *statements* that emit
+        # a registered feature event type carry the payload grading instead.
+        # The whole-source test above keeps this pass off files that cannot
+        # contain such a site.
+        for line_no, text, _in_debug, _balance, _tainted in statements(lines, FEATURE_OPENER_RE):
+            if mentions_feature_event_type(text):
+                offences.extend(judge_feature_payload(relative, line_no, text, allowed_keys))
+
+    # T-185: every violation names the statement it judged, not just the file
+    # and line. Rules 1-2 already did (the reporter prints `source`); the
+    # feature family did not, and its acceptance criterion is "it fails,
+    # naming the file and the statement". The source line is the statement's
+    # first line, the same convention rules 1-2 use.
+    for violation in offences:
+        if not violation.source and 0 < violation.line <= len(lines):
+            violation.source = lines[violation.line - 1].strip()
     return offences
+
+
+# ---------------------------------------------------------------------------
+# Coverage self-test (T-185)
+#
+# The fixture suite (`check-release-log-safety-fixtures.py`) proves each RULE
+# fires; it cannot prove that a root or an event type is really looked at,
+# because its layout is rule-shaped (a directory that is not a declared rule
+# fails the run) and coverage is not a rule. This is the second, smaller
+# discipline, in the shape of the prompt-mirror gate's own `--self-test`
+# (T-170): a temp tree is built from the shipped path shapes, the real engine
+# is run over it as a subprocess, and the real exit code is inspected — never
+# imported, never stubbed. Deleting a leg to get a green build is the one
+# repair that is never available.
+#
+# Three claims are proved, and only these:
+#   1. every `FEATURE_ROOTS` entry resolves to at least one Swift file in the
+#      shipped tree, and every `FEATURE_EVENT_TYPES` entry is still emitted
+#      somewhere there — an empty root or a stale event type grades nothing;
+#   2. a deliberately seeded raw print / content-bearing write in a NEW
+#      feature path is caught by name, with the file AND the statement in the
+#      output — the coverage demonstrated rather than assumed;
+#   3. the same seed at a path outside every root passes — the differential
+#      control that makes the RED above attributable to the root, not to the
+#      seed. That leg fails loudly if a later root swallows the control path,
+#      which is the moment to re-run the "is any content path unscanned?"
+#      audit that every root addition owes.
+# ---------------------------------------------------------------------------
+
+SELF_TEST_SOURCE_DIR = "ElderlyAssistant"
+
+# The seeded statements are constants so the expected-output tokens cannot
+# drift from the seeded source.
+_SEED_RAW_PRINT = 'print("seeded release-compiled print")'
+_SEED_CONTENT_WRITE = r'print("grammar guard: \(replyText)")'
+_SEED_CONTENT_FIELD = r'"\(reason) \(replyText)"'
+
+_CLEAN_ROUTING_FILE = '''import Foundation
+
+// Clean mirror of the feature's router-lane shape (T-185 self-test): the
+// classification-only success event, on the sanitising bus.
+struct SelfTestChatLane {
+    let bus: ObservabilityBus
+
+    func served() {
+        bus.emit(ObservabilityEvent(
+            component: "intent_router",
+            eventType: "cloud_chat_served",
+            durationMs: nil,
+            outcome: "success",
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+}
+'''
+
+_CLEAN_COMMAND_ROUTER_FILE = '''import Foundation
+
+// Clean mirror of the feature's voice-control emitter (T-185 self-test):
+// `metadata: [:]` by design — classification only.
+struct SelfTestCommandRouter {
+    let bus: ObservabilityBus
+
+    func emitCloudChatVoiceControl(_ token: String) {
+        bus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "cloud_chat_voice_control",
+            durationMs: nil,
+            outcome: token,
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+}
+'''
+
+_CLEAN_INTENT_ROUTER_FILE = '''import Foundation
+
+// Clean mirror of the feature's fallback emitter (T-185 self-test): the
+// reason token is the whole payload.
+struct SelfTestFallbackEmitter {
+    let bus: ObservabilityBus
+
+    func emitCloudChatFallback(reason: String) {
+        bus.emit(ObservabilityEvent(
+            component: "intent_router",
+            eventType: "cloud_chat_fallback",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: ["reason": reason]
+        ))
+    }
+}
+'''
+
+_CLEAN_GUARD_FILE = '''import Foundation
+
+// Clean mirror of the feature's grammar-guard source (T-185 self-test): a
+// verdict and nothing on the console.
+struct SelfTestGrammarGuard {
+    func isFlagged(_ reply: String) -> Bool {
+        reply.isEmpty
+    }
+}
+'''
+
+_SEEDED_PRINT_FILE = '''import Foundation
+
+// SEEDED VIOLATION (T-185 self-test): a Release-compiled console write in a
+// feature path — feature-console-write must name this file and statement.
+struct SelfTestSeededPrint {
+    func seeded() {
+        %s
+    }
+}
+''' % _SEED_RAW_PRINT
+
+_SEEDED_CONTENT_WRITE_FILE = '''import Foundation
+
+// SEEDED VIOLATION (T-185 self-test): reply text in a Debug-guarded console
+// write — rules 4-6 are judged in every configuration, so the Debug framing
+// does not excuse it (feature-content-print).
+struct SelfTestSeededContentWrite {
+    func seeded(_ replyText: String) {
+        #if DEBUG
+        %s
+        #endif
+    }
+}
+''' % _SEED_CONTENT_WRITE
+
+_SEEDED_EVENT_KEY_FILE = '''import Foundation
+
+// SEEDED VIOLATION (T-185 self-test): a feature event type emitted from a
+// SHARED file path (not a root) with an unlisted metadata key —
+// feature-unlisted-metadata-key must catch it by the event type, naming this
+// file and the statement. Single-line, like the shipped `cloud_chat_served`
+// emission site.
+struct SelfTestSeededEventKey {
+    let bus: ObservabilityBus
+
+    func seeded(_ token: String) {
+        bus.emit(ObservabilityEvent(component: "command_router", eventType: "cloud_chat_voice_control", durationMs: nil, outcome: token, errorCode: nil, metadata: ["transcript": token]))
+    }
+}
+'''
+
+_SEEDED_EVENT_FIELD_FILE = '''import Foundation
+
+// SEEDED VIOLATION (T-185 self-test): a feature event type whose field
+// renders reply text — feature-text-interpolated-into-event must catch it by
+// the event type, in a shared file path (not a root).
+struct SelfTestSeededEventField {
+    let bus: ObservabilityBus
+
+    func seeded(_ reason: String, replyText: String) {
+        bus.emit(ObservabilityEvent(component: "intent_router", eventType: "cloud_chat_fallback", durationMs: nil, outcome: "info", errorCode: nil, metadata: ["reason": %s]))
+    }
+}
+''' % _SEED_CONTENT_FIELD
+
+
+def self_test_legs():
+    """The coverage self-test's tree legs: (label, files, expected_exit, tokens).
+
+    The pristine leg is the clean half of the differential: the same feature
+    and shared-file paths the seeded legs use, with the shipped shapes — it
+    must pass, or the seeds prove nothing.
+    """
+    pristine = {
+        "Services/Intents/CloudChat/CloudChatRouting.swift": _CLEAN_ROUTING_FILE,
+        "Services/Voice/CommandRouter.swift": _CLEAN_COMMAND_ROUTER_FILE,
+        "Services/Intents/IntentRouter.swift": _CLEAN_INTENT_ROUTER_FILE,
+        "Services/Voice/NepaliGrammarGuard.swift": _CLEAN_GUARD_FILE,
+    }
+    return [
+        ("pristine-feature-paths", pristine, 0, []),
+        (
+            "seeded-raw-print-in-feature-path",
+            {"Services/Intents/CloudChat/CloudChatRouting.swift": _SEEDED_PRINT_FILE},
+            1,
+            ["Services/Intents/CloudChat/CloudChatRouting.swift",
+             "feature-console-write", _SEED_RAW_PRINT],
+        ),
+        (
+            "seeded-content-write-in-feature-path",
+            {"Services/Voice/NepaliGrammarGuard.swift": _SEEDED_CONTENT_WRITE_FILE},
+            1,
+            ["Services/Voice/NepaliGrammarGuard.swift",
+             "feature-content-print", _SEED_CONTENT_WRITE],
+        ),
+        (
+            "seeded-event-type-unlisted-key",
+            {"Services/Voice/CommandRouter.swift": _SEEDED_EVENT_KEY_FILE},
+            1,
+            ["Services/Voice/CommandRouter.swift",
+             "feature-unlisted-metadata-key", "'transcript'"],
+        ),
+        (
+            "seeded-event-type-content-field",
+            {"Services/Intents/IntentRouter.swift": _SEEDED_EVENT_FIELD_FILE},
+            1,
+            ["Services/Intents/IntentRouter.swift",
+             "feature-text-interpolated-into-event", "replyText"],
+        ),
+        (
+            "off-root-control",
+            {"Services/Voice/SelfTestOffRootControl.swift": _SEEDED_PRINT_FILE},
+            0,
+            [],
+        ),
+    ]
+
+
+def shipped_coverage_failures(source_root: str):
+    """A FEATURE_ROOTS / FEATURE_EVENT_TYPES entry that grades nothing."""
+    failures = []
+    for root in FEATURE_ROOTS:
+        path = os.path.join(source_root, root)
+        if os.path.isfile(path):
+            continue
+        if os.path.isdir(path) and any(
+                name.endswith(".swift")
+                for _walk_root, _dirs, files in os.walk(path)
+                for name in files):
+            continue
+        failures.append(
+            f"FEATURE_ROOTS entry '{root}' matches no Swift file under "
+            f"{SOURCE_ROOT_LABEL}/ — the root grades nothing (a moved or "
+            "renamed feature source, or a stale entry: update "
+            "tools/check-release-log-safety.py deliberately)")
+
+    emitted = set()
+    for walk_root, _dirs, files in os.walk(source_root):
+        for name in sorted(files):
+            if not name.endswith(".swift"):
+                continue
+            try:
+                with open(os.path.join(walk_root, name), encoding="utf-8") as handle:
+                    text = handle.read()
+            except OSError:
+                continue
+            for event_type in FEATURE_EVENT_TYPES:
+                if event_type in text:
+                    emitted.add(event_type)
+    for event_type in FEATURE_EVENT_TYPES:
+        if event_type not in emitted:
+            failures.append(
+                f"FEATURE_EVENT_TYPES entry '{event_type}' is emitted nowhere "
+                f"under {SOURCE_ROOT_LABEL}/ — its payload is no longer graded "
+                "(restore the emission, or rename the entry deliberately)")
+    return failures
+
+
+def run_self_test(quiet=False) -> int:
+    """Run the coverage self-test. Exit 0 = every leg behaves."""
+    cases = []
+
+    coverage = shipped_coverage_failures(DEFAULT_SOURCE_ROOT)
+    cases.append((
+        "coverage-registry",
+        not coverage,
+        f"{len(FEATURE_ROOTS)} root(s) and {len(FEATURE_EVENT_TYPES)} event "
+        f"type(s) resolve under {SOURCE_ROOT_LABEL}/" if not coverage
+        else "; ".join(coverage),
+    ))
+
+    for label, files, expected_exit, tokens in self_test_legs():
+        with tempfile.TemporaryDirectory(prefix="log-safety-coverage-") as tmp:
+            source_root = os.path.join(tmp, SELF_TEST_SOURCE_DIR)
+            for relative, content in files.items():
+                path = os.path.join(source_root, relative)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write(content)
+            process = subprocess.run(
+                [sys.executable, os.path.abspath(__file__),
+                 "--source-root", source_root,
+                 "--allow-list", DEFAULT_ALLOW_LIST, "--quiet"],
+                capture_output=True, text=True)
+        output = process.stdout + process.stderr
+        if expected_exit == 0:
+            passed = process.returncode == 0
+            detail = ("exit 0 — nothing seeded was rejected" if passed
+                      else f"expected exit 0, got {process.returncode}: {output.strip()}")
+        else:
+            missing = [token for token in tokens if token not in output]
+            passed = process.returncode != 0 and not missing
+            # The caught violation, verbatim, so the gate's own output is the
+            # demonstration (never a claim about a run nobody can see). The
+            # epilogue paragraph after the violation list is boilerplate and
+            # is cut: this output has already been shown once, by the run.
+            caught = []
+            for line in output.splitlines():
+                if not line.strip():
+                    continue
+                if line.startswith("  ✗") or "Release-log privacy violation" in line:
+                    break
+                caught.append(line.strip())
+            if process.returncode == 0:
+                detail = "the engine passed a tree carrying a seeded violation"
+            elif missing:
+                detail = (f"the engine failed but did not name {missing}: "
+                          f"{output.strip()}")
+            else:
+                detail = "caught by name:\n" + "\n".join(caught)
+        cases.append((label, passed, detail))
+
+    print(f"  log-safety coverage self-test: {len(cases)} leg(s)")
+    for label, passed, detail in cases:
+        print(f"    {'✓' if passed else '✗'} {label}")
+        if not passed or not quiet:
+            for line in detail.split("\n"):
+                print(f"        {line}")
+
+    failed = [label for label, passed, _detail in cases if not passed]
+    if failed:
+        print(f"  ✗ the log-safety gate's coverage self-test failed ({len(failed)} "
+              f"leg(s)): {', '.join(failed)}")
+        print("    A root or an emission site the gate claims to grade is not being")
+        print("    graded. Fix the coverage or the seed — never delete the leg.")
+        return 1
+    print("  ✓ every root and feature event type resolves, every seeded violation "
+          "is caught by name, and the off-root control stays quiet")
+    return 0
 
 
 def main(argv=None) -> int:
@@ -782,6 +1243,13 @@ def main(argv=None) -> int:
     parser.add_argument("--allow-list", default=DEFAULT_ALLOW_LIST)
     parser.add_argument("--require-engine-files", action="store_true")
     parser.add_argument("--list-rules", action="store_true")
+    parser.add_argument(
+        "--self-test", action="store_true",
+        help="run the gate's own coverage self-test — every FEATURE_ROOTS "
+             "entry and FEATURE_EVENT_TYPES entry must resolve in the shipped "
+             "tree, a seeded violation in a new feature path must be caught by "
+             "name, and the same seed outside every root must stay quiet "
+             "(T-185)")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument(
         "--disable-rule", action="append", default=[], metavar="RULE-ID",
@@ -798,6 +1266,9 @@ def main(argv=None) -> int:
         for rule_id in RULES:
             print(f"{rule_id}\t{RULES[rule_id]}")
         return 0
+
+    if args.self_test:
+        return run_self_test(quiet=args.quiet)
 
     for rule_id in args.disable_rule:
         if rule_id not in RULES:
@@ -890,6 +1361,14 @@ def main(argv=None) -> int:
         print("  ✓ no transcript content or raw error object can be printed in a non-Debug")
         print("    configuration, and the live-camera-translation sources carry no console")
         print("    write or content-bearing event field")
+        # [CNR T-185] The line above predates every root added since AM-5 and
+        # is left verbatim (prior units quote it as their gate evidence); the
+        # feature coverage actually checked is the registry, and it says so
+        # here rather than leaving the claim implicit.
+        print(f"    {len(FEATURE_ROOTS)} feature root(s) grade no Release console write, "
+              f"no content-bearing field;")
+        print(f"    {len(FEATURE_EVENT_TYPES)} feature event type(s) are payload-graded at "
+              "every emission site")
     return 0
 
 
