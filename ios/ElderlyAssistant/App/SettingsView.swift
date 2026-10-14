@@ -995,7 +995,7 @@ struct SpotifySettingsView: View {
                 // a console attach (the print-only event died with a jetsam
                 // kill). Remove with the presentation root-cause fix.
                 if case .linkFailed(let error) = session.status {
-                    Text("debug: \(Self.linkErrorName(error))")
+                    Text("debug: \(Self.linkErrorName(error))\(Self.linkErrorExtra(error))")
                         .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                 }
@@ -1116,6 +1116,14 @@ struct SpotifySettingsView: View {
         case .networkUnavailable: return "networkUnavailable"
         case .presentationFailed(let code): return "presentationFailed(\(code))"
         }
+    }
+
+    // [DIAGNOSTIC 2026-10-14 — temporary] The seam's window-state snapshot
+    // appended to presentation failures (anchWin/key/appState/sceneAct/
+    // windows — no PII). Remove with the fix.
+    private static func linkErrorExtra(_ error: SpotifyAuthError) -> String {
+        guard case .presentationFailed = error else { return "" }
+        return " | \(ASWebSpotifyAuthSession.lastPresentationState ?? "no-state")"
     }
 }
 
