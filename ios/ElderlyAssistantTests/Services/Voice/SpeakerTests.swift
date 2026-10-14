@@ -37,9 +37,9 @@ final class SpeakerTests: XCTestCase {
     func testPiperSpeakerCancelDoesNotEndASeamItNeverBegan() throws {
         // [LOUD-TTS-CATEGORY] Seam balance: the ack fast lane may hold an
         // open playback seam while Piper is still synthesizing. A cancel()
-        // during that window must NOT consume the ack's begin — the
-        // shared depth accounting would restore the capture preset under
-        // the ack's tail (audible loudness flip-flop).
+        // [MIC-CONTINUITY] No speaker opens the playback seam anymore, so
+        // a cancel that never began playback can never touch the seam —
+        // the ack (and every other capture-preset audio) is untouched.
         var begins = 0
         var ends = 0
         ResponsePlaybackModeSeam.begin = { begins += 1 }
