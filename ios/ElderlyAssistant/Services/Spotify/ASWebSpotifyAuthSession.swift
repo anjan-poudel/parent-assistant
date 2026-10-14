@@ -119,6 +119,19 @@ final class ASWebSpotifyAuthSession: SpotifyAuthSession {
             throw SpotifyAuthError.noPresenter
         }
 
+        // [FIX 2026-10-14] Resolve a REAL window before the system session
+        // is built: on the 17 Pro Max (iOS 26.6.2) `start()` refused —
+        // presentationFailed(0) — while the provider could fall back to a
+        // detached `UIWindow()`, a window attached to no scene, which the
+        // system will not present on. The chain: the anchor's own window,
+        // the foreground scene's key window, its first window. The
+        // provider below keeps the anchor's live window preferred at
+        // presentation time and only falls back to this resolved one.
+        let resolvedWindow = Self.resolveWindow(anchor: anchor)
+        if resolvedWindow == nil {
+            throw SpotifyAuthError.noPresenter
+        }
+
         let attempt = WebAuthAttempt()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -146,8 +159,13 @@ final class ASWebSpotifyAuthSession: SpotifyAuthSession {
                 }
 
                 let session = systemSessionFactory(url, callbackURLScheme, completion)
-                session.presentationContextProvider = WindowAnchorProvider(anchor: anchor)
+                session.presentationContextProvider = WindowAnchorProvider(anchor: anchor,
+                                                                           fallbackWindow: resolvedWindow)
                 attempt.attach(session)
+                // [DIAGNOSTIC 2026-10-14 — temporary] Snapshot the window
+                // state at the exact moment of the ask, so a refusal can be
+                // attributed on the Settings card. Remove with the fix.
+                Self.lastPresentationState = Self.captureWindowState(anchor: anchor)
                 guard session.start() else {
                     attempt.finish(with: .failure(
                         SpotifyAuthError.presentationFailed(code: Self.unreportedStartFailureCode)))
@@ -211,6 +229,40 @@ final class ASWebSpotifyAuthSession: SpotifyAuthSession {
     /// "the user dismissed".
     private enum ASWebAuthenticationErrorCode {
         static let canceledLogin = ASWebAuthenticationSessionError.canceledLogin.rawValue
+    }
+
+    // MARK: - Window resolution ([FIX 2026-10-14] + temporary state diag)
+
+    /// [DIAGNOSTIC 2026-10-14 — temporary] The window-state snapshot taken
+    /// immediately before the last `start()` — read by the Settings card's
+    /// debug line when the attempt fails as `presentationFailed`. Content:
+    /// whether the anchor has a window, whether it is key, the app state,
+    /// the scene's activation state and its window count. Remove with the
+    /// root-cause fix.
+    static var lastPresentationState: String?
+
+    /// The real scene window the system sheet will present on: the anchor's
+    /// own window when it has one, else the foreground-active scene's key
+    /// window, else its first window. Never a detached window.
+    @MainActor
+    private static func resolveWindow(anchor: UIViewController) -> ASPresentationAnchor? {
+        if let window = anchor.viewIfLoaded?.window ?? anchor.view.window { return window }
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        return scene?.windows.first(where: \.isKeyWindow) ?? scene?.windows.first
+    }
+
+    /// The one-line window-state snapshot for the temporary diagnostic.
+    @MainActor
+    private static func captureWindowState(anchor: UIViewController) -> String {
+        let window = anchor.viewIfLoaded?.window ?? anchor.view.window
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        return "anchWin=\(window != nil ? "y" : "n") "
+             + "key=\(window?.isKeyWindow == true ? "y" : "n") "
+             + "appState=\(UIApplication.shared.applicationState.rawValue) "
+             + "sceneAct=\(scene?.activationState.rawValue ?? -1) "
+             + "windows=\(scene?.windows.count ?? -1)"
     }
 
     // MARK: - Anchor presentation
@@ -283,9 +335,10 @@ private final class LiveSystemWebAuthSession: SystemWebAuthSession {
 /// The context the system sheet anchors to: the presenting controller's own
 /// window.
 ///
-/// A controller that is not in a window cannot anchor a sheet honestly, and
-/// this type does not invent one: the fallback window is detached, the
-/// system rejects it and reports `presentationContextInvalid` (code 3)
+/// [FIX 2026-10-14] The controller's live window is preferred; when it has
+/// none at presentation time, a real scene window resolved at authorize
+/// time stands in. A detached `UIWindow()` is the absolute last resort —
+/// the system rejects it and reports `presentationContextInvalid` (code 3)
 /// through the completion handler, which `authorize` maps to
 /// `.presentationFailed(code: 3)` — a typed, honest answer rather than a
 /// sheet pointed at the wrong place.
@@ -298,15 +351,22 @@ private final class WindowAnchorProvider: NSObject,
     /// context.
     private weak var anchor: UIViewController?
 
-    init(anchor: UIViewController) {
+    /// The scene window resolved at authorize time (the presentation-failure
+    /// fix): used only when the anchor has no live window at presentation
+    /// time. Held strongly — a window in the foreground scene stays valid
+    /// for the attempt's lifetime.
+    private let fallbackWindow: ASPresentationAnchor?
+
+    init(anchor: UIViewController, fallbackWindow: ASPresentationAnchor?) {
         self.anchor = anchor
+        self.fallbackWindow = fallbackWindow
         super.init()
     }
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        anchor?.viewIfLoaded?.window
-            ?? anchor?.view.window
-            ?? UIWindow()
+        if let live = anchor?.viewIfLoaded?.window ?? anchor?.view.window { return live }
+        if let fallbackWindow { return fallbackWindow }
+        return UIWindow()
     }
 }
 
