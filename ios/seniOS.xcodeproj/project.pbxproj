@@ -182,6 +182,7 @@
 		34B820CC55E012D4313ADF27 /* GeminiClientTranslateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A39AD16D9F051A79391905B /* GeminiClientTranslateTests.swift */; };
 		34DFEAB7A06DFCA706E71047 /* SpeakerBiometricTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 277B510740CCCB3BC47555CF /* SpeakerBiometricTestSupport.swift */; };
 		356630B0C960D41A1FD2D0DC /* AppTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C905FB6C0ADD280A5CA2952 /* AppTypography.swift */; };
+		3643C73D8B982CCF8699B111 /* CloudChatActivityIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3DBE0756D92C1AD882C2B25 /* CloudChatActivityIndicator.swift */; };
 		365246D390B116202DCD28D3 /* SpotifyHostileCorpus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E56CDE5C3B92939BE6DD3CC /* SpotifyHostileCorpus.swift */; };
 		36701044EB3087A577870C0B /* ModelPreferenceMemoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89B3C3B7DE00708964619C09 /* ModelPreferenceMemoryTests.swift */; };
 		36BE348CA5BACCC5139BD5E9 /* CloudFallbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F63BE0F70F8D66B3FF4F28F /* CloudFallbackTests.swift */; };
@@ -262,6 +263,7 @@
 		4CD61219095C8B1191AAD44D /* NoIOInInitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68E3D36479D589E2823ED330 /* NoIOInInitTests.swift */; };
 		4CFBAB72E6DD1CF440157E1D /* FeedServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 573576FF9D08E597CC160495 /* FeedServiceTests.swift */; };
 		4D35DCD2E6B0CED4FA39B9A3 /* GoldenCorpus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F4B490AD8898085B8F0895A /* GoldenCorpus.swift */; };
+		4D3CA4F3007A3F9B99772BCA /* CloudChatIndicatorAndRevocationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D943A5E078B2C2D444F11F19 /* CloudChatIndicatorAndRevocationTests.swift */; };
 		4D4904A90B38563561E233D8 /* SpeakQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FDB7F0CC1472A2939C30BD2 /* SpeakQueueTests.swift */; };
 		4DADA7AE33EDA520636C625F /* FeedTopicFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFF49D5E554A84E0DE236313 /* FeedTopicFilterTests.swift */; };
 		4DD3828A322B0B7F3312C83C /* SpotifyAuthFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3121CCE6146F9E0359A0C268 /* SpotifyAuthFlowTests.swift */; };
@@ -1545,6 +1547,7 @@
 		B2AF20C8BDF1A0617AA30A48 /* LlamaSemanticJudgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaSemanticJudgeTests.swift; sourceTree = "<group>"; };
 		B341C38BF8987E2068992D93 /* MapsLinksTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapsLinksTests.swift; sourceTree = "<group>"; };
 		B35D3E07AFBBF9D7C57654F7 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		B3DBE0756D92C1AD882C2B25 /* CloudChatActivityIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudChatActivityIndicator.swift; sourceTree = "<group>"; };
 		B4481210E7708A1D7E313F49 /* TalkStageVisualsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkStageVisualsTests.swift; sourceTree = "<group>"; };
 		B4B31C0E64A3D428A47C9C6F /* DialogueOptionCatalog.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = DialogueOptionCatalog.json; sourceTree = "<group>"; };
 		B555D1865437DD24FF2D56ED /* SpeakerVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerVerifier.swift; sourceTree = "<group>"; };
@@ -1672,6 +1675,7 @@
 		D76F628ABCC9C5E3E82F35F9 /* ExternalReminder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalReminder.swift; sourceTree = "<group>"; };
 		D8B0285F716F7AC375C2C116 /* SystemContactPhotoWriterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemContactPhotoWriterTests.swift; sourceTree = "<group>"; };
 		D94018BD4D7E1D72BAA1650C /* SpeakerEmbedder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerEmbedder.swift; sourceTree = "<group>"; };
+		D943A5E078B2C2D444F11F19 /* CloudChatIndicatorAndRevocationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudChatIndicatorAndRevocationTests.swift; sourceTree = "<group>"; };
 		D9EC29A6348AE783E4B98AFB /* RoutineSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineSettingsView.swift; sourceTree = "<group>"; };
 		DADEB9E22291C8390648B35D /* MessengerProbeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessengerProbeUITests.swift; sourceTree = "<group>"; };
 		DB020579D8CA32E27559B584 /* CloudCascade.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudCascade.swift; sourceTree = "<group>"; };
@@ -3079,6 +3083,7 @@
 			children = (
 				5168F861AB74C47B1445DF3A /* CloudChatConsentGateTests.swift */,
 				760A56DDBBCA9DE48DC49A94 /* CloudChatConsentPromptTests.swift */,
+				D943A5E078B2C2D444F11F19 /* CloudChatIndicatorAndRevocationTests.swift */,
 				4CF65F6A6A0F750D8574E737 /* CloudChatRoutingTests.swift */,
 			);
 			path = CloudChat;
@@ -3254,6 +3259,7 @@
 		F826E67765AA47304F20B824 /* CloudChat */ = {
 			isa = PBXGroup;
 			children = (
+				B3DBE0756D92C1AD882C2B25 /* CloudChatActivityIndicator.swift */,
 				F68A02B33DC8F10D62F16D0E /* CloudChatConsentGate.swift */,
 				845BF9657A19CD53B5E5B6AC /* CloudChatConsentPrompt.swift */,
 				2934ECEF219E535C9FD05451 /* CloudChatRouting.swift */,
@@ -3595,6 +3601,7 @@
 				797E5EE0E22E9731987C19CB /* CloudActivityIndicatorView.swift in Sources */,
 				F218B431712F7F8B7353BDF3 /* CloudBrainProvider.swift in Sources */,
 				91B04D018725BE9EF9859BB2 /* CloudCascade.swift in Sources */,
+				3643C73D8B982CCF8699B111 /* CloudChatActivityIndicator.swift in Sources */,
 				4720088E0A0004EB7AF641B8 /* CloudChatConsentGate.swift in Sources */,
 				7844F07081C944FC32C10C62 /* CloudChatConsentPrompt.swift in Sources */,
 				163D0D617670E81B148D88A6 /* CloudChatConsentSheet.swift in Sources */,
@@ -3999,6 +4006,7 @@
 				09579FC58529C850F2F3A545 /* CloudCascadeTests.swift in Sources */,
 				9AEAAEB0FB5DDF33A957D796 /* CloudChatConsentGateTests.swift in Sources */,
 				993EC7165E4381598CE7E504 /* CloudChatConsentPromptTests.swift in Sources */,
+				4D3CA4F3007A3F9B99772BCA /* CloudChatIndicatorAndRevocationTests.swift in Sources */,
 				99FABEBFAC65EA2F000A94F2 /* CloudChatResponderTests.swift in Sources */,
 				D1F96DC2EC18B51F9950E528 /* CloudChatRoutingTests.swift in Sources */,
 				36BE348CA5BACCC5139BD5E9 /* CloudFallbackTests.swift in Sources */,

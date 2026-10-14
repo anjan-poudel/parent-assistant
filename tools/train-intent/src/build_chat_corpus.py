@@ -82,6 +82,40 @@ Mixture, determinism, and honesty rules
   wall-clock values are written into the corpus or its counters; sampling uses
   the configured seed (config.yaml mixture.seed).
 
+Provenance manifest and the ship-mix assertion (T-180, FR-CNR-018)
+------------------------------------------------------------------
+The same builder that assembles the corpus writes the provenance manifest
+(`build/<run-id>/provenance-manifest.json` per design §11.5 — the run
+directory is the corpus directory's parent, where the gate results also
+land), so it can never describe a build it did not perform. It lists EVERY
+source (the training registry and the tooling inputs, never silently omitted)
+with its licence, licence family, layer, ship/dev classification, counts used
+and the derived artifacts it fed; the held-out chat set and the two eval
+fixtures are recorded as EXCLUDED. Counts, licences and identifiers only —
+no user content.
+
+The ship-mix rule is CODE, not a note: a shipped artifact contaminated by a
+non-commercial source is a compliance event, so `assert_provenance()` runs
+inside every build and FAILS it (no corpus written, `EXIT_PROVENANCE`) when
+
+  * a source with no recorded classification exists (never defaulted into
+    either mix — the missing classification is reported);
+  * a source declared ship-admissible resolves to a non-ship licence family
+    (a registry contradiction);
+  * one of the sources the design names as never ship-admissible (the CC BY-NC
+    layers — IndicDialogue, DailyDialog, PersonaChat, EmpatheticDialogues —
+    and the research-gated call-center transcripts) is present in the ship
+    mix with admitted turns, naming the source and its licence;
+  * a real-transcript source with no consent record contributed turns (it is
+    refused from BOTH mixes at the source level; own-data transcripts arrive
+    with the P2 leg, T-191).
+
+The assertion records the licence registry it used (ids, licences, families
+and a registry hash), and the manifest carries a content hash that is stable
+across re-emissions of the same corpus — the hash that pairs the manifest with
+the gate results ("these gates were run on the artifact built from this
+manifest").
+
 Source interchange formats (what the training box prepares)
 -----------------------------------------------------------
 Every source file is JSONL. The builder reads two shapes:
@@ -112,7 +146,11 @@ CLI (run from tools/train-intent/)::
 Exit codes (pipeline_guards vocabulary): 0 ok; 1 a stage failed; 2 usage;
 3 the run STOPPED (an unavailable filter / held-out guard — a deviation was
 recorded and nothing was admitted unfiltered); 4 the data floors are not met
-(the run completed, the shortfalls are recorded — the caller decides).
+(the run completed, the shortfalls are recorded — the caller decides);
+5 the PROVENANCE check failed (T-180: the ship mix is contaminated, a source
+carries no classification, or the registry contradicts itself — the artifact
+is rejected as a compliance event and the run cannot claim ship-mix
+eligibility; see `EXIT_PROVENANCE`).
 
 No user content anywhere: sources are licensed public corpora, synthetic
 teacher output, or the suite's own synthetic fixtures (FR-CNR-018).
@@ -145,6 +183,12 @@ from build_dataset import lossless_key, normalize  # noqa: E402  (the suite's ke
 
 __all__ = [
     "SCHEMA_ID",
+    "PROVENANCE_SCHEMA",
+    "MANIFEST_NAME",
+    "LICENSE_REGISTRY_ID",
+    "EXIT_PROVENANCE",
+    "SHIP_ADMISSIBLE_LICENSE_FAMILIES",
+    "NON_ADMISSIBLE_SHIP_SOURCE_IDS",
     "LAYERS",
     "CONVERSATION_LAYERS",
     "CLAWBACK_LAYER",
@@ -156,6 +200,18 @@ __all__ = [
     "SOURCE_REGISTRY",
     "TOOLING_SOURCES",
     "sources_for_layer",
+    "sources_by_id",
+    "license_family",
+    "ship_admissible_family",
+    "license_registry_record",
+    "classification_violations",
+    "consent_refusals",
+    "ship_mix_check",
+    "assert_provenance",
+    "provenance_manifest",
+    "manifest_path_for",
+    "write_provenance_manifest",
+    "ProvenanceError",
     "BuildStopped",
     "BuildOptions",
     "HeldOutGuard",
@@ -265,6 +321,35 @@ class BuildStopped(Exception):
     """The run stopped: an unavailable filter / guard. Nothing was admitted."""
 
 
+class ProvenanceError(BuildStopped):
+    """The provenance check FAILED (T-180, FR-CNR-018).
+
+    A contaminated ship mix, a source carrying no classification, a promoted
+    non-admissible source or an unconsented transcript that still contributed
+    turns: the build stops BEFORE any corpus is written, the run cannot claim
+    ship-mix eligibility, and every violation is named (source + licence) for
+    the run record.
+    """
+
+    def __init__(self, violations: Sequence[dict], mix: str = "",
+                 record: Optional[dict] = None) -> None:
+        self.violations = [dict(violation) for violation in violations]
+        self.mix = mix
+        self.record: Dict[str, Any] = dict(record or {})
+        super().__init__(self._message())
+
+    def _message(self) -> str:
+        parts = [
+            str(violation.get("message") or f"{violation.get('kind')}: "
+                                            f"{violation.get('source')}")
+            for violation in self.violations[:6]]
+        extra = len(self.violations) - len(parts)
+        tail = f" (+{extra} more violation(s))" if extra > 0 else ""
+        head = f"provenance check failed ({self.mix} mix): " if self.mix else \
+            "provenance check failed: "
+        return head + "; ".join(parts) + tail
+
+
 # ---------------------------------------------------------------------------
 # The source registry — every named source with its licence and mix class
 # ---------------------------------------------------------------------------
@@ -278,17 +363,24 @@ class SourceSpec:
     (research-only: CC BY-NC sets, research-gated transcripts), ``unclassified``
     (licence not recorded — refused from BOTH mixes) or ``eval-fixture``
     (held-out eval set — refused from both mixes, with the recorded reason).
+    ``tooling`` marks a non-training input (classified, never a mix input).
+
+    ``requires_consent`` / ``consent`` are the real-transcript rule (FR-CNR-029,
+    T-191): a source set requires_consent is REFUSED from both mixes while its
+    ``consent`` record is empty — no silent harvest, even into the dev mix.
     """
     id: str
     layer: str
     license: str
-    admissibility: str          # ship | dev | unclassified | eval-fixture
-    kind: str                   # dialogue | intent | generated | tooling
+    admissibility: str          # ship | dev | unclassified | eval-fixture | tooling
+    kind: str                   # dialogue | intent | generated | fixture | tooling
     default_path: str           # relative to ROOT; "" for generated sources
     provenance: str             # synthetic | own | third-party | tooling
     component: str = ""         # L4 component id
     refusal_reason: str = ""
     notes: str = ""
+    requires_consent: bool = False   # real-transcript source (P2 leg)
+    consent: str = ""                # the recorded consent record id ("" = none)
 
 
 SOURCE_REGISTRY: Tuple[SourceSpec, ...] = (
@@ -455,6 +547,127 @@ def sources_for_layer(layer: str) -> Tuple[SourceSpec, ...]:
 
 
 # ---------------------------------------------------------------------------
+# Provenance: the licence registry, the ship-mix rule and the manifest (T-180)
+# ---------------------------------------------------------------------------
+#: The manifest is a JSON document beside the run's corpus (design-l1 §11.5)
+#: written by the same builder that assembled the corpus.
+PROVENANCE_SCHEMA = "chat_corpus_provenance/v1"
+MANIFEST_NAME = "provenance-manifest.json"
+LICENSE_REGISTRY_ID = "chat_corpus_license_registry/v1"
+
+#: This module's exit code for a provenance / ship-mix failure. The suite's
+#: shared vocabulary is 0–4 (pipeline_guards): a contaminated ship mix is
+#: neither a floor miss nor a guard stop — the artifact is REJECTED as a
+#: compliance event, and the run cannot claim ship-mix eligibility.
+EXIT_PROVENANCE = 5
+
+#: FR-CNR-018 / design §11.5 — the ship mix may contain ONLY these families.
+SHIP_ADMISSIBLE_LICENSE_FAMILIES: Tuple[str, ...] = (
+    "CC-BY", "Apache-2.0", "MIT", "synthetic", "own data")
+
+#: The full family vocabulary the classifier may return (the non-admissible
+#: families are recorded, never defaulted away).
+LICENSE_FAMILIES: Tuple[str, ...] = SHIP_ADMISSIBLE_LICENSE_FAMILIES + (
+    "CC BY-NC", "research-gated", "unclassified", "proprietary", "unknown")
+
+#: The classifier's table — DATA, not code: lowercased substrings, FIRST match
+#: wins. `CC BY-NC` is matched before `CC-BY` (the NC layers carry both tags)
+#: and `research-gated` before `CC-BY` (the call-center corpus's licence string
+#: carries both; the gate is the operative restriction).
+LICENSE_FAMILY_PATTERNS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("CC BY-NC", ("cc by-nc", "cc-by-nc", "non-commercial")),
+    ("research-gated", ("research-gated",)),
+    ("unclassified", ("unclassified", "not recorded")),
+    ("Apache-2.0", ("apache",)),
+    ("MIT", ("mit",)),
+    ("CC-BY", ("cc-by",)),
+    ("synthetic", ("synthetic",)),
+    ("own data", ("own data",)),
+    ("proprietary", ("proprietary",)),
+)
+
+#: The sources the design names as NEVER admissible to ship (FR-CNR-018;
+#: design §11.5: IndicDialogue, DailyDialog, PersonaChat, EmpatheticDialogues
+#: are CC BY-NC; the Nepali call-center transcripts are research-gated).
+#: Ids only — licence and family are read from the registry, so a registry
+#: mutation moves the check instead of silently outdating a copied string.
+NON_ADMISSIBLE_SHIP_SOURCE_IDS: Tuple[str, ...] = (
+    "indic_dialogue_ne", "dailydialog", "personachat_convai2",
+    "empathetic_dialogues", "call_center_transcripts")
+
+#: Every recorded classification value. A source carrying anything else (or
+#: nothing) has NO classification and FAILS the build — it is never defaulted
+#: into either mix (`unclassified` is a recorded value with the recorded
+#: meaning "licence not recorded => refused from both mixes").
+CLASSIFICATIONS: Tuple[str, ...] = ("ship", "dev", "unclassified",
+                                    "eval-fixture", "tooling")
+
+#: The manifest key under which the pair of gate results is bound (design
+#: §11.5: "its sha256 is recorded with the gate results").
+MANIFEST_PAIRING_NOTE = (
+    "record provenance.content_hash beside the gate results (T-181/T-182): it "
+    "binds 'these gates were run on the artifact built from this manifest' and "
+    "is stable across re-emissions of the same corpus")
+
+#: The recorded refusal for a real-transcript source with no consent record
+#: (FR-CNR-029): refused from BOTH mixes — no silent harvest, even into dev.
+CONSENT_REFUSAL_REASON = (
+    "refused from both mixes: a real-transcript source with no consent record — "
+    "no silent harvest, even into the dev mix (FR-CNR-029; own-data transcripts "
+    "arrive with the P2 leg, T-191, so the refusal stands until then)")
+
+
+def sources_by_id() -> Dict[str, SourceSpec]:
+    """A fresh id -> source index over the training registry + tooling inputs.
+
+    Fresh (not a module-level cache): a registry mutation must move every check
+    that reads it — the data-not-code discipline the provenance tests pin.
+    """
+    return {s.id: s for s in (*SOURCE_REGISTRY, *TOOLING_SOURCES)}
+
+
+def license_family(license_text: str) -> str:
+    """The recorded licence family of one licence string (data-driven table).
+
+    ``unknown`` when nothing matches: an unrecognised licence is never treated
+    as ship-admissible.
+    """
+    lowered = str(license_text or "").lower()
+    for family, patterns in LICENSE_FAMILY_PATTERNS:
+        if any(pattern in lowered for pattern in patterns):
+            return family
+    return "unknown"
+
+
+def ship_admissible_family(family: str) -> bool:
+    return family in SHIP_ADMISSIBLE_LICENSE_FAMILIES
+
+
+def source_consent_missing(source: SourceSpec) -> bool:
+    """A real-transcript source without its consent record (FR-CNR-029)."""
+    return bool(source.requires_consent) and not str(source.consent or "").strip()
+
+
+def license_registry_record(sources: Optional[Sequence[SourceSpec]] = None) -> dict:
+    """The licence registry the ship-mix check cites (the data it read)."""
+    registry = tuple(sources) if sources is not None else tuple(sources_by_id().values())
+    entries = [
+        {"id": source.id, "layer": source.layer, "license": source.license,
+         "license_family": license_family(source.license),
+         "classification": source.admissibility,
+         "admissible_to_ship": ship_admissible_family(license_family(source.license))}
+        for source in registry]
+    return {
+        "id": LICENSE_REGISTRY_ID,
+        "ship_admissible_families": list(SHIP_ADMISSIBLE_LICENSE_FAMILIES),
+        "families": list(LICENSE_FAMILIES),
+        "sources": entries,
+        "sha256": guards.sha256_bytes(
+            guards.canonical_json(entries).encode("utf-8")),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
 
@@ -476,6 +689,7 @@ class BuildOptions:
     teacher_transport: str = "gemini"  # gemini | openrouter | teacher-fixture
     teacher_fixture: Optional[Path] = None
     execute: bool = True               # False: plan/counters only, no stages
+    manifest_path: Optional[Path] = None   # provenance manifest (T-180); None = run dir
 
     def resolved_out_dir(self) -> Path:
         return Path(self.out_dir)
@@ -824,6 +1038,8 @@ class Counters:
     shortfalls: List[dict] = field(default_factory=list)
     deviations: List[dict] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
+    provenance: Dict[str, Any] = field(default_factory=dict)
+    manifest: Dict[str, Any] = field(default_factory=dict)
 
     def bump(self, bucket: Dict[str, int], key: str) -> None:
         bucket[key] = bucket.get(key, 0) + 1
@@ -1279,14 +1495,261 @@ def _source_entry(counters: Counters, source: SourceSpec, path: Path) -> dict:
 
 
 def _check_source_refusal(source: SourceSpec, path: Path) -> Optional[str]:
-    """The source-level refusal: eval fixtures and unclassified admissibility."""
+    """The source-level refusal: eval fixtures and unconsented transcripts."""
     if source.admissibility == "eval-fixture":
         return (f"refused: {source.refusal_reason or 'held-out eval fixture'}")
+    if source_consent_missing(source):
+        return CONSENT_REFUSAL_REASON
     try:
         guards.assert_not_golden_input(path, f"source {source.id}")
     except guards.GuardError as exc:
         return f"refused: {exc}"
     return None
+
+
+# ---------------------------------------------------------------------------
+# The provenance checks: classification, consent, and the ship-mix assertion
+# ---------------------------------------------------------------------------
+
+def classification_violations(
+        sources: Optional[Sequence[SourceSpec]] = None) -> List[dict]:
+    """Sources with NO recorded classification (or a broken one) — fatal.
+
+    Nothing is defaulted into either mix: a source carrying no classification
+    (or no licence) FAILS the build and the missing classification is reported
+    (T-180 failure path). A source DECLARED ship whose licence resolves to a
+    non-ship family is the same class of error — the registry contradicts
+    itself and the assertion cannot be trusted.
+    """
+    registry = tuple(sources) if sources is not None \
+        else tuple(sources_by_id().values())
+    violations: List[dict] = []
+    for source in registry:
+        classification = source.admissibility
+        if classification not in CLASSIFICATIONS:
+            violations.append({
+                "kind": "missing_classification",
+                "source": source.id,
+                "field": "admissibility",
+                "value": None if classification is None else str(classification),
+                "license": source.license,
+                "message": (f"source {source.id} carries no recorded "
+                            f"classification (admissibility={classification!r}) — "
+                            "it is defaulted into NEITHER mix and the build fails "
+                            "(FR-CNR-018)"),
+            })
+            continue
+        if not str(source.license or "").strip():
+            violations.append({
+                "kind": "missing_classification",
+                "source": source.id,
+                "field": "license",
+                "value": "",
+                "license": "",
+                "message": (f"source {source.id} carries no licence record — no "
+                            "classification can be derived, nothing is defaulted "
+                            "into either mix, and the build fails (FR-CNR-018)"),
+            })
+            continue
+        family = license_family(source.license)
+        if classification == "ship" and not ship_admissible_family(family):
+            violations.append({
+                "kind": "registry_contradiction",
+                "source": source.id,
+                "license": source.license,
+                "license_family": family,
+                "message": (f"source {source.id} is classified ship but its licence "
+                            f"{source.license!r} resolves to {family} — not a "
+                            "ship-admissible family; the ship-mix assertion cannot "
+                            "be satisfied"),
+            })
+    return violations
+
+
+def non_admissible_ship_sources(
+        sources: Optional[Sequence[SourceSpec]] = None) -> dict:
+    """The registry's own record of the never-ship-admissible sources.
+
+    The ids are the design's (NON_ADMISSIBLE_SHIP_SOURCE_IDS); licence, family
+    and classification are read from the CURRENT registry, and the check FAILS
+    when one of them has been promoted to a ship-admissible family or to the
+    ship classification — the placement is verified, never remembered.
+    """
+    registry = {s.id: s for s in (tuple(sources) if sources is not None
+                                 else tuple(sources_by_id().values()))}
+    entries: List[dict] = []
+    violations: List[dict] = []
+    for source_id in NON_ADMISSIBLE_SHIP_SOURCE_IDS:
+        source = registry.get(source_id)
+        if source is None:
+            violations.append({
+                "kind": "non_admissible_source_missing",
+                "source": source_id,
+                "license": "",
+                "message": (f"the registry no longer lists {source_id}, which the "
+                            "design names as never ship-admissible — the pin "
+                            "cannot be verified"),
+            })
+            continue
+        family = license_family(source.license)
+        entries.append({"id": source.id, "license": source.license,
+                        "license_family": family,
+                        "classification": source.admissibility,
+                        "admissible_to_ship": ship_admissible_family(family)})
+        if source.admissibility == "ship" or ship_admissible_family(family):
+            violations.append({
+                "kind": "non_admissible_source_promoted",
+                "source": source.id,
+                "license": source.license,
+                "license_family": family,
+                "message": (f"{source.id} is named as never ship-admissible but the "
+                            f"registry classifies it {source.admissibility!r} with "
+                            f"licence {source.license!r} ({family}) — the ship-mix "
+                            "rule cannot be verified"),
+            })
+    return {"sources": entries, "violations": violations}
+
+
+def consent_refusals(sources: Optional[Sequence[SourceSpec]] = None) -> List[dict]:
+    """Real-transcript sources without a consent record — refused, never used."""
+    registry = tuple(sources) if sources is not None \
+        else tuple(sources_by_id().values())
+    return [{"id": source.id, "layer": source.layer, "license": source.license,
+             "requires_consent": True,
+             "consent_record": source.consent or None,
+             "mix": "none", "status": "refused",
+             "reason": CONSENT_REFUSAL_REASON}
+            for source in registry if source_consent_missing(source)]
+
+
+def ship_mix_check(admitted_by_source: Dict[str, int], *, mix: str = SHIP_MIX,
+                   sources: Optional[Sequence[SourceSpec]] = None,
+                   license_registry: Optional[dict] = None) -> dict:
+    """The ship-mix assertion: only CC-BY/Apache/MIT/synthetic/own may ship.
+
+    Returns the full assertion record — verdict, the registry it used, every
+    evaluated source (licence, family, classification, admitted turns) and the
+    named violations. The rule governs the SHIP mix; a dev build records
+    ``not_applicable`` while still recording every family it evaluated.
+    """
+    registry = tuple(sources) if sources is not None else tuple(SOURCE_REGISTRY)
+    admitted_by_source = dict(admitted_by_source or {})
+    evaluated: List[dict] = []
+    violations: List[dict] = []
+    for source in registry:
+        if source.admissibility == "tooling":
+            continue                      # tooling never contributes mix turns
+        family = license_family(source.license)
+        admitted = int(admitted_by_source.get(source.id, 0))
+        eligible = ship_admissible_family(family)
+        evaluated.append({
+            "id": source.id, "layer": source.layer, "license": source.license,
+            "license_family": family, "classification": source.admissibility,
+            "admitted": admitted, "eligible_to_ship": eligible,
+        })
+        if mix == SHIP_MIX and admitted and not eligible:
+            violations.append({
+                "kind": "non_admissible_source_in_ship_mix",
+                "source": source.id,
+                "license": source.license,
+                "license_family": family,
+                "admitted": admitted,
+                "message": (f"SHIP MIX VIOLATION: {source.id} contributed "
+                            f"{admitted} turn(s) under licence {source.license!r} "
+                            f"({family}) — the ship mix admits only CC-BY / "
+                            "Apache / MIT / synthetic / own data (FR-CNR-018)"),
+            })
+    if mix == SHIP_MIX:
+        verdict = "fail" if violations else "pass"
+        reason = ("the ship mix contains every admissible family and nothing else"
+                  if not violations else
+                  "; ".join(violation["message"] for violation in violations))
+    else:
+        verdict = "not_applicable"
+        reason = ("the dev mix is not a shipped artifact: the ship-mix licence rule "
+                  "is evaluated for the ship mix only — every source's family is "
+                  "still recorded here")
+    return {
+        "check": "ship_mix_license_families",
+        "applies_to": SHIP_MIX,
+        "mix": mix,
+        "rule": ("the ship mix may contain only CC-BY, Apache-2.0, MIT, synthetic "
+                 "and own data (FR-CNR-018; design-l1 §11.5)"),
+        "verdict": verdict,
+        "reason": reason,
+        "ship_mix_eligible": verdict == "pass",
+        "evaluated": evaluated,
+        "violations": violations,
+        "license_registry": license_registry or license_registry_record(),
+    }
+
+
+def assert_provenance(opts: BuildOptions, counters: Counters,
+                      sources: Optional[Sequence[SourceSpec]] = None) -> dict:
+    """Run the T-180 gate inside the build; raise when it fails.
+
+    The classification/consent/pin checks run in EVERY build (both mixes — a
+    broken registry is fatal wherever it is used); the licence-family admission
+    check governs the ship mix. The returned record is stored on the counters
+    (`counters.provenance`) and consumed by the manifest — one computation,
+    cited by both.
+    """
+    registry = tuple(sources) if sources is not None \
+        else tuple(sources_by_id().values())
+    training = tuple(s for s in registry if s.admissibility != "tooling")
+    missing = classification_violations(registry)
+    pin = non_admissible_ship_sources(registry)
+    consent = consent_refusals(registry)
+    bypassed = [
+        {"kind": "unconsented_transcript_in_mix", "source": source.id,
+         "license": source.license, "license_family": license_family(source.license),
+         "admitted": int(counters.admitted["per_source"].get(source.id, 0)),
+         "message": (f"source {source.id} is a real-transcript source with no "
+                     f"consent record ({source.license!r}) yet contributed "
+                     f"{counters.admitted['per_source'].get(source.id, 0)} turn(s) "
+                     "— refused from BOTH mixes")}
+        for source in registry
+        if source_consent_missing(source)
+        and counters.admitted["per_source"].get(source.id, 0)]
+    registry_record = license_registry_record(registry)
+    assertion = ship_mix_check(counters.admitted["per_source"], mix=opts.mix,
+                               sources=training, license_registry=registry_record)
+    violations = missing + pin["violations"] + bypassed + assertion["violations"]
+    #: Run-level eligibility: every check must pass for the artifact to claim
+    #: ship-mix eligibility — a registry that fails the classification or
+    #: consent check never yields an eligible artifact, whatever the
+    #: licence-family assertion says on its own.
+    eligible = bool(assertion["ship_mix_eligible"]
+                    and not (missing or pin["violations"] or bypassed))
+    record = {
+        "schema": PROVENANCE_SCHEMA,
+        "run_id": opts.run_id,
+        "mix": opts.mix,
+        "license_registry": registry_record,
+        "classification_check": {
+            "check": "every source carries a recorded classification",
+            "rule": ("a source without a recorded classification is refused from "
+                     "both mixes and FAILS the build — nothing is defaulted "
+                     "(FR-CNR-018)"),
+            "verdict": "fail" if missing else "pass",
+            "missing": missing,
+        },
+        "consent_check": {
+            "check": "real-transcript sources carry their consent record",
+            "rule": CONSENT_REFUSAL_REASON,
+            "verdict": "fail" if bypassed else "pass",
+            "refused": consent,
+        },
+        "non_admissible_ship_sources": pin["sources"],
+        "ship_mix_assertion": assertion,
+        "ship_mix_eligible": eligible,
+        "pairing": MANIFEST_PAIRING_NOTE,
+    }
+    counters.provenance = dict(record, verdict=("fail" if violations else "pass"),
+                               violations=violations)
+    if violations:
+        raise ProvenanceError(violations, opts.mix, record=counters.provenance)
+    return counters.provenance
 
 
 def _pre_gates(candidate: Candidate, mix: str, counters: Counters) -> bool:
@@ -1333,6 +1796,8 @@ def _stage_l1_l2(opts: BuildOptions, spec: style_spec.StyleSpec, counters: Count
             entry["refused"] = refusal
             if source.admissibility == "eval-fixture":
                 counters.reject("held_out_eval_fixture_source")
+            if source_consent_missing(source):
+                counters.reject("unconsented_transcript")
             continue
         rows = _read_jsonl(path, opts.limit_per_source)
         candidates, problems = _dialogue_candidates(rows, source, path)
@@ -1618,7 +2083,10 @@ def _stage_l4(opts: BuildOptions, counters: Counters, teacher, log) -> List[Cand
         refusal = _check_source_refusal(source, path)
         if refusal:
             entry["refused"] = refusal
-            counters.reject("held_out_eval_fixture_source")
+            if source.admissibility == "eval-fixture":
+                counters.reject("held_out_eval_fixture_source")
+            if source_consent_missing(source):
+                counters.reject("unconsented_transcript")
             continue
         if not path.is_file():
             counters.notes.append(f"source {source.id} absent at {path} — recorded, "
@@ -1805,6 +2273,17 @@ def build_chat_corpus(opts: BuildOptions, *, spec: Optional[style_spec.StyleSpec
     if opts.mix not in MIXES:
         raise BuildStopped(f"unknown mix {opts.mix!r} (expected one of {MIXES})")
     counters = Counters()
+    # Provenance preflight (T-180): a registry that carries no classification —
+    # or that has promoted a source the design names as never ship-admissible —
+    # FAILS the build before any source is read or any turn reaches the teacher.
+    # The full assertion (with the admitted-turn counts) runs after admission.
+    preflight = classification_violations() + non_admissible_ship_sources()["violations"]
+    if preflight:
+        counters.provenance = {"schema": PROVENANCE_SCHEMA, "run_id": opts.run_id,
+                               "mix": opts.mix, "phase": "preflight",
+                               "verdict": "fail", "ship_mix_eligible": False,
+                               "violations": preflight}
+        raise ProvenanceError(preflight, opts.mix, record=counters.provenance)
     try:
         resolved_spec = _spec(spec)
     except style_spec.StyleSpecError as exc:
@@ -2005,10 +2484,18 @@ def build_chat_corpus(opts: BuildOptions, *, spec: Optional[style_spec.StyleSpec
             f"{counters.rejections['dev_only_source']} turn(s) from dev-only sources "
             "excluded from the SHIP mix (CC BY-NC / research-gated)")
 
+    # -- provenance: the ship-mix assertion, in the build (T-180) ------------
+    # CODE, not a note: a contaminated ship mix, a source with no
+    # classification, a promoted non-admissible source or an unconsented
+    # transcript REFUSES the build here — before any corpus is written.
+    assert_provenance(opts, counters)
+
     # -- outputs -------------------------------------------------------------
     _write_outputs(opts, counters, selected, admitted, resolved_spec, held_out)
+    manifest = write_provenance_manifest(opts, counters, resolved_spec, held_out,
+                                         selected=selected, admitted=admitted)
     report = _counters_dict(opts, counters, resolved_spec, held_out, mixture,
-                            selected, admitted)
+                            selected, admitted, manifest=manifest)
     guards.write_json(Path(opts.resolved_out_dir()) / "chat-corpus-counters.json",
                       report)
     _print_summary(counters, mixture, log=log)
@@ -2103,10 +2590,383 @@ def _write_outputs(opts: BuildOptions, counters: Counters, selected: List[Candid
                     "turn(s) — dev-only sources can never enter the ship mix")
 
 
+# ---------------------------------------------------------------------------
+# The provenance manifest (T-180; FR-CNR-018; design-l1 §11.5)
+# ---------------------------------------------------------------------------
+
+def manifest_path_for(opts: BuildOptions) -> Path:
+    """Where this build's manifest is written.
+
+    An explicit ``manifest_path`` (CLI ``--manifest-out``) wins; otherwise the
+    RUN directory — the corpus directory's parent, which is the design's
+    ``build/<run-id>/provenance-manifest.json`` in the CLI layout, i.e. the
+    directory the gate results land in, so the manifest travels beside them.
+    The dev mix writes a mix-qualified name: a dev build can never overwrite
+    the ship compliance artifact.
+    """
+    if opts.manifest_path:
+        return Path(opts.manifest_path)
+    name = MANIFEST_NAME if opts.mix == SHIP_MIX \
+        else f"provenance-manifest.{opts.mix}.json"
+    return Path(opts.resolved_out_dir()).parent / name
+
+
+def artifact_records(out_dir: Path, mix: str) -> List[dict]:
+    """Every corpus artifact this build wrote, with its content hash.
+
+    Names are run-relative and rows are counts — no content, and nothing that
+    varies between two emissions of the same corpus.
+    """
+    names = [f"chat-corpus-{mix}.jsonl",
+             *(f"layers/{layer}.jsonl" for layer in LAYERS),
+             "l3-generated.jsonl", "l2-review.json", "gec-cache.jsonl"]
+    records: List[dict] = []
+    for name in names:
+        path = Path(out_dir) / name
+        if not path.is_file():
+            continue
+        rows = None
+        if name.endswith(".jsonl"):
+            rows = sum(1 for line in path.read_text(encoding="utf-8").splitlines()
+                       if line.strip())
+        records.append({"name": name, "sha256": guards.sha256_file(path),
+                        "bytes": path.stat().st_size, "rows": rows})
+    return records
+
+
+def _selected_by_source(selected: Sequence[Candidate]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for candidate in selected:
+        counts[candidate.source_id] = counts.get(candidate.source_id, 0) + 1
+    return counts
+
+
+def _source_derived_artifacts(source: SourceSpec, counts: dict,
+                              artifact_names: Sequence[str],
+                              corpus_name: str) -> List[str]:
+    names = set(artifact_names)
+    derived: List[str] = []
+    if source.layer == "L3" and counts["admitted"] and "l3-generated.jsonl" in names:
+        derived.append("l3-generated.jsonl")
+    layer_file = f"layers/{source.layer}.jsonl"
+    if counts["admitted"] and layer_file in names:
+        derived.append(layer_file)
+    if counts["selected"] and corpus_name in names:
+        derived.append(corpus_name)
+    return derived
+
+
+def _source_status(source: SourceSpec, entry: Optional[dict], counts: dict,
+                   ) -> Tuple[str, Optional[str]]:
+    """(status, reason) for one training source — explicit, never defaulted."""
+    if source.admissibility == "eval-fixture":
+        return ("excluded", source.refusal_reason or "held-out eval fixture")
+    if source_consent_missing(source):
+        return ("refused", CONSENT_REFUSAL_REASON)
+    if source.admissibility == "unclassified":
+        return ("refused", "refused from both mixes: licence not recorded "
+                           "(unclassified) — the manifest never defaults it into "
+                           "a mix")
+    if entry is not None and entry.get("refused"):
+        return ("refused", str(entry["refused"]))
+    if source.kind == "generated":
+        if counts["candidates"]:
+            return ("used", None)
+        return ("not_generated", "the L3 stage generated no turns in this run "
+                                 "(recorded in stages.l3_generation)")
+    if entry is None:
+        return ("not_read", "this run did not read the source (a dry run skips "
+                            "the L1/L2 reads — execute=False)")
+    if counts["candidates"] or counts["admitted"]:
+        return ("used", None)
+    if source.default_path and not entry.get("present"):
+        return ("absent", f"absent at {source.default_path} — recorded, not "
+                          "substituted (T-183 training-box item)")
+    return ("available", None)
+
+
+def _source_entry_record(source: SourceSpec, *, entry: Optional[dict],
+                         counts: dict, derived: Sequence[str],
+                         status: str, reason: Optional[str]) -> dict:
+    family = license_family(source.license)
+    return {
+        "id": source.id,
+        "layer": source.layer,
+        "kind": source.kind,
+        "component": source.component or None,
+        "license": source.license,
+        "license_family": family,
+        "classification": source.admissibility,
+        #: The classification's home — except a REFUSED (or EXCLUDED) source:
+        #: it belongs to neither mix, and "none" is the faithful record (the
+        #: status + reason carry the refusal; consent_refusals() records the
+        #: same source with the same "none").
+        "mix": ("none" if status in ("refused", "excluded") else
+                {SHIP_MIX: SHIP_MIX, DEV_MIX: DEV_MIX}.get(source.admissibility,
+                                                           "none")),
+        "admissible_to_ship": ship_admissible_family(family),
+        "provenance": source.provenance,
+        "source_path": source.default_path or None,
+        "present": None if entry is None else bool(entry.get("present")),
+        "status": status,
+        "reason": reason,
+        "counts": counts,
+        "derived_artifacts": list(derived),
+        "requires_consent": bool(source.requires_consent),
+        "consent_record": source.consent or None,
+    }
+
+
+def _tooling_record(source: SourceSpec, counters: Counters,
+                    admitted_by_source: Dict[str, int],
+                    artifact_names: Sequence[str], corpus_name: str) -> dict:
+    """One tooling input, classified — never silently omitted (FR-CNR-018)."""
+    stages = counters.stages
+    names = set(artifact_names)
+    gec = stages.get("teacher_gec") or {}
+    l3 = stages.get("l3_generation") or {}
+    postedit = stages.get("l2_post_edit") or {}
+    noise = stages.get("stt_noise") or {}
+    derived: List[str] = []
+    counts: Dict[str, Any] = {}
+    reason: Optional[str] = None
+    if source.admissibility == "eval-fixture":
+        return {
+            "id": source.id, "layer": source.layer, "kind": source.kind,
+            "classification": source.admissibility, "mix": "none",
+            "license": source.license, "license_family": license_family(source.license),
+            "provenance": source.provenance,
+            "source_path": source.default_path or None,
+            "status": "excluded", "reason": source.refusal_reason
+            or "held-out eval fixture — never a mix input",
+            "counts": {}, "derived_artifacts": [], "inputs_classified": [],
+        }
+    if source.id == "teacher_gemini_flash_lite":
+        postedit_batches = sum(int(v.get("batches") or 0)
+                               for v in postedit.values()) if isinstance(postedit, dict) else 0
+        postedit_turns = sum(int(v.get("turns_post_edited") or 0)
+                             for v in postedit.values()) if isinstance(postedit, dict) else 0
+        counts = {"gec_calls": int(gec.get("calls") or 0),
+                  "gec_cache_hits": int(gec.get("cache_hits") or 0),
+                  "gec_cache_entries": int(gec.get("cache_entries") or 0),
+                  "l3_turns_generated": int(l3.get("turns_generated") or 0),
+                  "l2_post_edit_batches": postedit_batches,
+                  "l2_turns_post_edited": postedit_turns}
+        executed = bool(gec.get("executed") or l3.get("executed") or postedit)
+        if (counts["gec_calls"] or counts["gec_cache_entries"]) \
+                and "gec-cache.jsonl" in names:
+            derived.append("gec-cache.jsonl")
+        if counts["l3_turns_generated"] and "l3-generated.jsonl" in names:
+            derived.append("l3-generated.jsonl")
+        if postedit and "l2-review.json" in names:
+            derived.append("l2-review.json")
+        if sum(admitted_by_source.values()) and corpus_name in names:
+            derived.append(corpus_name)
+        if not executed:
+            reason = ("not exercised in this run — the teacher's L2/L3/GEC stages "
+                      "recorded no calls (recorded, never fabricated)")
+    elif source.id == "translation_tier_qwen":
+        counts = {"sources_post_edited": len(postedit) if isinstance(postedit, dict) else 0,
+                  "turns_post_edited": sum(int(v.get("turns_post_edited") or 0)
+                                           for v in postedit.values())
+                  if isinstance(postedit, dict) else 0}
+        if postedit and "l2-review.json" in names:
+            derived.append("l2-review.json")
+        if any(admitted_by_source.get(s.id, 0) for s in sources_for_layer("L2")) \
+                and f"layers/L2.jsonl" in names:
+            derived.append("layers/L2.jsonl")
+        if not postedit:
+            reason = ("the translation tier did not run in this build (no L2 "
+                      "post-edit batch was produced — recorded in the run notes)")
+    elif source.id == "style_spec_artifact":
+        counts = {"admitted_turns": sum(admitted_by_source.values())}
+        if counts["admitted_turns"] and corpus_name in names:
+            derived.append(corpus_name)
+    elif source.id == "stt_noise_roundtrip":
+        counts = {"eligible": int(noise.get("eligible") or 0),
+                  "variants": int(noise.get("variants") or 0),
+                  "rate_achieved": noise.get("rate_achieved"),
+                  "backend": noise.get("backend")}
+        if counts["variants"] and "layers/L4.jsonl" in names:
+            derived.append("layers/L4.jsonl")
+        if counts["variants"] and corpus_name in names:
+            derived.append(corpus_name)
+        if not noise.get("executed"):
+            reason = ("the STT-noise round trip did not execute in this build "
+                      "(backend unavailable or disabled — recorded, never "
+                      "approximated)")
+    else:
+        reason = ("classified tooling input: no run evidence is mapped to this "
+                  "entry (appears here rather than being silently omitted)")
+    return {
+        "id": source.id, "layer": source.layer, "kind": source.kind,
+        "classification": source.admissibility, "mix": "none",
+        "license": source.license, "license_family": license_family(source.license),
+        "provenance": source.provenance,
+        "source_path": source.default_path or None,
+        "status": "used" if derived else "not_exercised",
+        "reason": reason,
+        "counts": counts,
+        "derived_artifacts": derived,
+        "inputs_classified": [
+            {"id": entry["id"], "classification": entry["classification"],
+             "license_family": entry["license_family"]}
+            for entry in sorted(
+                ({"id": s.id, "classification": s.admissibility,
+                  "license_family": license_family(s.license)}
+                 for s in SOURCE_REGISTRY
+                 if s.admissibility != "tooling" and admitted_by_source.get(s.id, 0)),
+                key=lambda item: item["id"])],
+    }
+
+
+def held_out_record(held_out: HeldOutGuard) -> dict:
+    """The held-out record: the chat set and the eval fixtures are EXCLUDED."""
+    registry = sources_by_id()
+    chat = registry.get("chat_golden_fixture")
+    fixtures = [registry.get("golden_corpus_fixture"),
+                registry.get("emergency_nearmiss_fixture")]
+    return {
+        "chat_golden": {
+            "source_id": "chat_golden_fixture",
+            "path": (chat.default_path if chat is not None
+                     else "eval/chat_golden.jsonl"),
+            "status": "excluded",
+            "revision": held_out.chat_golden_revision,
+            "turns": held_out.chat_golden_turns,
+            "sha256": held_out.chat_golden_sha256,
+            "exact_dedupe_keys": len(held_out.exact_user_keys),
+            "reason": ("the held-out chat set is the admission-dedupe input; it is "
+                       "EXCLUDED from both mixes and never trained on (FR-CNR-019)"),
+        },
+        "eval_fixtures": [
+            {"source_id": source.id, "path": source.default_path,
+             "status": "excluded",
+             "reason": source.refusal_reason or "held-out eval fixture"}
+            for source in fixtures if source is not None],
+        "dedupe_policy": {"jaccard": NEAR_DUP_JACCARD,
+                          "min_tokens": NEAR_DUP_MIN_TOKENS},
+    }
+
+
+def provenance_manifest(opts: BuildOptions, counters: Counters,
+                        spec: style_spec.StyleSpec, held_out: HeldOutGuard, *,
+                        selected: Sequence[Candidate],
+                        admitted: Sequence[Candidate],
+                        artifacts: Optional[Sequence[dict]] = None) -> dict:
+    """Assemble the provenance manifest (T-180; FR-CNR-018; design §11.5).
+
+    Written by the SAME builder that assembled the corpus, so it can never
+    describe a build it did not perform. Every source — training and tooling —
+    appears with its licence, family, layer, classification, counts used and
+    the derived artifacts it fed; the held-out set is recorded as EXCLUDED.
+    Counts, licences and identifiers only: no user content.
+    """
+    out_dir = Path(opts.resolved_out_dir())
+    records = list(artifacts) if artifacts is not None else artifact_records(out_dir, opts.mix)
+    artifact_names = [record["name"] for record in records]
+    corpus_name = f"chat-corpus-{opts.mix}.jsonl"
+    admitted_by_source = dict(counters.admitted["per_source"])
+    selected_by_source = _selected_by_source(selected)
+    entries_by_id = {entry["id"]: entry for entry in counters.sources}
+
+    sources: List[dict] = []
+    for source in SOURCE_REGISTRY:
+        entry = entries_by_id.get(source.id)
+        if entry is not None:
+            candidates = int(entry.get("candidates") or 0)
+        else:
+            candidates = int(counters.candidates["per_layer"].get(source.layer, 0))
+        counts = {"candidates": candidates,
+                  "admitted": int(admitted_by_source.get(source.id, 0)),
+                  "selected": int(selected_by_source.get(source.id, 0))}
+        status, reason = _source_status(source, entry, counts)
+        derived = _source_derived_artifacts(source, counts, artifact_names, corpus_name)
+        if status in ("refused", "excluded"):
+            derived = []
+        sources.append(_source_entry_record(source, entry=entry, counts=counts,
+                                            derived=derived, status=status,
+                                            reason=reason))
+
+    tooling = [_tooling_record(source, counters, admitted_by_source,
+                               artifact_names, corpus_name)
+               for source in TOOLING_SOURCES]
+
+    corpus_sha = next((record["sha256"] for record in records
+                       if record["name"] == corpus_name), None)
+    provenance = dict(counters.provenance or {})
+    body: Dict[str, Any] = {
+        "schema": PROVENANCE_SCHEMA,
+        "run_id": opts.run_id,
+        "mix": opts.mix,
+        "seed": opts.seed,
+        "builder": "tools/train-intent/src/build_chat_corpus.py",
+        "style_spec": {"version": spec.version, "sha256": spec.sha256},
+        "corpus": {"file": corpus_name, "turns": len(selected),
+                   "admitted": sum(admitted_by_source.values()),
+                   "sha256": corpus_sha, "written": corpus_sha is not None},
+        "held_out": held_out_record(held_out),
+        "license_registry": provenance.get("license_registry")
+        or license_registry_record(),
+        "classification_check": provenance.get("classification_check"),
+        "consent_check": provenance.get("consent_check"),
+        "non_admissible_ship_sources": provenance.get("non_admissible_ship_sources"),
+        "ship_mix_assertion": provenance.get("ship_mix_assertion"),
+        "ship_mix_eligible": bool(provenance.get("ship_mix_eligible")),
+        "sources": sources,
+        "tooling": tooling,
+        "artifacts": records,
+        "pairing": MANIFEST_PAIRING_NOTE,
+    }
+    body["content_hash"] = guards.sha256_bytes(
+        guards.canonical_json(body).encode("utf-8"))
+    body["content_hash_scope"] = (
+        "sha256 over this document without the content_hash / content_hash_scope "
+        "fields, canonical JSON (sorted keys, UTF-8, no insignificant space) — "
+        "stable across re-emissions of the same corpus")
+    return body
+
+
+def write_provenance_manifest(opts: BuildOptions, counters: Counters,
+                              spec: style_spec.StyleSpec, held_out: HeldOutGuard, *,
+                              selected: Sequence[Candidate],
+                              admitted: Sequence[Candidate],
+                              artifacts: Optional[Sequence[dict]] = None) -> dict:
+    """Emit the manifest for this build and record it on the counters."""
+    manifest = provenance_manifest(opts, counters, spec, held_out,
+                                   selected=selected, admitted=admitted,
+                                   artifacts=artifacts)
+    guards.write_json(manifest_path_for(opts), manifest)
+    counters.manifest = manifest
+    return manifest
+
+
+def _provenance_counters_block(opts: BuildOptions, counters: Counters,
+                               manifest: Optional[dict]) -> dict:
+    """The counters' view of the provenance record (the run record's half).
+
+    The manifest's content hash is what pairs the artifact with the gate
+    results; the manifest itself is named relative to the run directory so two
+    emissions of the same corpus keep byte-identical counters.
+    """
+    record = dict(counters.provenance or {})
+    record["manifest"] = (manifest_path_for(opts).name if opts.manifest_path is None
+                          else str(manifest_path_for(opts)))
+    record["manifest_location"] = (
+        "run directory (the corpus directory's parent — design-l1 §11.5 "
+        "build/<run-id>/)" if opts.manifest_path is None else
+        "explicit manifest path (--manifest-out)")
+    record["content_hash"] = (manifest or {}).get("content_hash")
+    record["content_hash_scope"] = (manifest or {}).get("content_hash_scope")
+    record["ship_mix_eligible"] = bool(record.get("ship_mix_eligible"))
+    return record
+
+
 def _counters_dict(opts: BuildOptions, counters: Counters,
                    spec: style_spec.StyleSpec, held_out: HeldOutGuard,
                    mixture: dict, selected: List[Candidate],
-                   admitted: List[Candidate]) -> dict:
+                   admitted: List[Candidate],
+                   manifest: Optional[dict] = None) -> dict:
     return {
         "schema": SCHEMA_ID,
         "run_id": opts.run_id,
@@ -2114,6 +2974,7 @@ def _counters_dict(opts: BuildOptions, counters: Counters,
         "seed": opts.seed,
         "style_spec": spec.evidence(),
         "held_out_guard": held_out.evidence(),
+        "provenance": _provenance_counters_block(opts, counters, manifest),
         "layers": {
             layer: {
                 "title": LAYER_TITLE[layer],
@@ -2204,6 +3065,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--teacher-fixture", type=Path, default=None,
                         help="recorded teacher responses (prompt_sha256 -> response) "
                              "for offline replay; recorded as a transport substitution")
+    parser.add_argument("--manifest-out", type=Path, default=None,
+                        help="provenance manifest path (default: the run "
+                             "directory, provenance-manifest.json beside the "
+                             "corpus directory — design §11.5)")
     parser.add_argument("--plan", action="store_true",
                         help="print the source registry and layer plan, then exit")
     parser.add_argument("--record-spot-check", metavar="BATCH", default=None)
@@ -2239,9 +3104,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         noise_rate=args.noise_rate, noise_backend=args.noise_backend,
         noise_pairs=args.noise_pairs, translation_command=args.translation_command,
         teacher_transport=args.teacher_transport, teacher_fixture=args.teacher_fixture,
+        manifest_path=Path(args.manifest_out) if args.manifest_out else None,
     )
     try:
         report = build_chat_corpus(opts, log=lambda line: print(line))
+    except ProvenanceError as exc:
+        # A provenance failure is a COMPLIANCE event, not a data shortfall: the
+        # artifact is rejected, the run cannot claim ship-mix eligibility, and
+        # the recorded stop names every source and licence involved.
+        print(f"[provenance] FAILED: {exc}", file=sys.stderr)
+        print("[provenance] the artifact is REJECTED — it does not enter the "
+              "catalog and the run cannot claim ship-mix eligibility "
+              "(FR-CNR-018)", file=sys.stderr)
+        _record_stop(opts, str(exc), extra={
+            "provenance": dict(exc.record, verdict="fail",
+                               ship_mix_eligible=False,
+                               violations=exc.violations)})
+        return EXIT_PROVENANCE
     except BuildStopped as exc:
         print(f"[guard] STOPPED: {exc}", file=sys.stderr)
         _record_stop(opts, str(exc))
@@ -2256,17 +3135,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     return guards.EXIT_OK
 
 
-def _record_stop(opts: BuildOptions, reason: str) -> None:
-    """A stopped run still records why (the deviation for the run notes)."""
+def _record_stop(opts: BuildOptions, reason: str,
+                 extra: Optional[dict] = None) -> None:
+    """A stopped run still records why (the deviation for the run notes).
+
+    ``extra`` carries a block for the stop's own class — the provenance
+    failure record names the violating sources and licences (T-180).
+    """
     out_dir = Path(opts.resolved_out_dir())
     out_dir.mkdir(parents=True, exist_ok=True)
-    guards.write_json(out_dir / "chat-corpus-counters.json", {
+    record = {
         "schema": SCHEMA_ID, "run_id": opts.run_id, "mix": opts.mix,
         "stopped": True,
         "stop_reason": reason,
-        "deviation": ("a run that cannot execute its filters / held-out guard STOPS "
-                      "rather than admitting unfiltered turns (T-179 failure path)"),
-    })
+    }
+    if extra:
+        record.update(extra)
+    else:
+        record["deviation"] = ("a run that cannot execute its filters / held-out "
+                               "guard STOPS rather than admitting unfiltered turns "
+                               "(T-179 failure path)")
+    guards.write_json(out_dir / "chat-corpus-counters.json", record)
 
 
 def _print_plan() -> int:
@@ -2284,9 +3173,18 @@ def _print_plan() -> int:
     print("\ntooling inputs (classified for the provenance manifest):")
     for source in TOOLING_SOURCES:
         print(f"  {source.id:32s} {source.license}")
-    print(f"\nmixture: conversation {CONVERSATION_SHARE:.0%} / claw-back "
+    print("\nship mix — admissible licence families (FR-CNR-018):")
+    print("  " + ", ".join(SHIP_ADMISSIBLE_LICENSE_FAMILIES))
+    print("  never admissible to ship (dev-mix only; the check names source + licence):")
+    for entry in non_admissible_ship_sources()["sources"]:
+        flag = "OK" if not entry["admissible_to_ship"] else "PROMOTED?"
+        print(f"    {entry['id']:32s} {flag:9s} {entry['license']}")
+    print(f"mixture: conversation {CONVERSATION_SHARE:.0%} / claw-back "
           f"{CLAWBACK_SHARE:.0%} (total target {TOTAL_TURNS_TARGET} turns; "
           f"eval-fixture dedupe vs chat golden; filters from the style spec)")
+    print(f"provenance: {MANIFEST_NAME} beside the corpus directory "
+          f"(design §11.5); exit {EXIT_PROVENANCE} = ship-mix / classification "
+          "failure")
     return guards.EXIT_OK
 
 

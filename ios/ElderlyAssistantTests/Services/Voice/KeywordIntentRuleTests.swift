@@ -959,4 +959,181 @@ final class KeywordIntentRuleTests: XCTestCase {
         let freeText = "दशैं दुर्गा भजन".split(separator: " ").map(String.init)
         XCTAssertEqual(freeText.filter { !KeywordIntentRule.isMusicScaffoldToken($0) }, freeText)
     }
+
+    // MARK: - [CLOUD-CHAT] Voice controls (T-177, design-l1 §8.6)
+
+    /// Scenario — "one deterministic voice revoke keyword rule and one
+    /// spoken state query, with no model/NLU/classifier widening": the
+    /// revoke family resolves every authored utterance by keyword
+    /// co-occurrence alone (the internet word ∧ a stop verb), in both
+    /// languages, including the honorific and inflected verb forms.
+    func testTheRevokeFamilyResolvesEveryAuthoredUtteranceDataDriven() {
+        let utterances = [
+            "इन्टरनेटबाट जवाफ बन्द गर",
+            "इन्टरनेटबाट जवाफ बन्द गर्नुहोस्",
+            "इन्टर्नेटबाट जवाफ बन्द गर",
+            "अनलाइन जवाफ बन्द गर्नुहोस्",
+            "इन्टरनेटबाट जवाफ नल्याउ",
+            "इन्टरनेटबाट जवाफ नल्याउनुहोस्",
+            "इन्टरनेटबाट जवाफ नपठाऊ",
+            "इन्टरनेटबाट जवाफ रोक्नुहोस्",
+            "हजुर, इन्टरनेटबाट जवाफ बन्द गर न",
+            "turn off answers from the internet",
+            "switch off internet answers",
+            "shut off answers from the internet",
+            "stop the internet answers",
+            "disable internet answers"
+        ]
+        for utterance in utterances {
+            XCTAssertEqual(KeywordIntentRule.cloudChatVoiceRequest(transcript: utterance),
+                           .revoke,
+                           "\(utterance) must withdraw — keyword co-occurrence, not form")
+        }
+    }
+
+    /// Scenario — "the spoken state query answered truthfully from the
+    /// gate's decision": the query family is the internet word ∧ a state
+    /// marker (a question shape), in both languages. "बन्द छ" is a
+    /// question; "बन्द गर" (the revoke verb) is an imperative — the two
+    /// are deliberately different markers.
+    func testTheStateQueryFamilyResolvesEveryAuthoredUtteranceDataDriven() {
+        let utterances = [
+            "इन्टरनेटबाट जवाफ आउँदैछ?",
+            "इन्टरनेटबाट जवाफ आउँछ?",
+            "इन्टरनेट चालु छ?",
+            "इन्टरनेट खुला छ?",
+            "इन्टरनेटबाट जवाफ बन्द छ?",
+            "इन्टरनेटबाट जवाफ बन्द छैन?",
+            "अनलाइन जवाफ अन छ?",
+            "हजुर, इन्टरनेटबाट जवाफ आउँदैछ?",
+            "is the internet on?",
+            "is the internet off?",
+            "are answers coming from the internet?",
+            "are internet answers active?",
+            "internet enabled?"
+        ]
+        for utterance in utterances {
+            XCTAssertEqual(KeywordIntentRule.cloudChatVoiceRequest(transcript: utterance),
+                           .stateQuery,
+                           "\(utterance) must be answered from the gate — never by a model")
+        }
+    }
+
+    /// The ordering contract: the revoke reading is checked before the
+    /// query reading. An utterance carrying both a stop verb and a state
+    /// word is the elder asking to stop it, and the English pair shares
+    /// the token "off" — without the ordering, "turn off answers from the
+    /// internet" would be answered with a state line instead of obeyed.
+    func testTheRevokeReadingIsCheckedBeforeTheQueryReading() {
+        XCTAssertEqual(
+            KeywordIntentRule.cloudChatVoiceRequest(
+                transcript: "इन्टरनेटबाट जवाफ आउँदैछ, बन्द गर"),
+            .revoke,
+            "a stop verb wins over the state word in the same breath")
+        XCTAssertEqual(
+            KeywordIntentRule.cloudChatVoiceRequest(
+                transcript: "turn off answers from the internet"),
+            .revoke,
+            "the shared 'off' token cannot claim the revoke as a query")
+        XCTAssertEqual(
+            KeywordIntentRule.cloudChatVoiceRequest(
+                transcript: "is the internet off?"),
+            .stateQuery,
+            "…and a bare 'off' question with no stop verb stays a query")
+    }
+
+    /// The conjunction rule is the whole safety story: an internet word
+    /// alone is never a control of either kind.
+    func testAnInternetWordAloneIsNeverAControl() {
+        for utterance in ["इन्टरनेट", "इन्टरनेटमा", "इन्टरनेटको कुरा",
+                          "internet", "online", "internet please"] {
+            XCTAssertNil(KeywordIntentRule.cloudChatVoiceRequest(transcript: utterance),
+                         "\(utterance): the internet word alone fires nothing")
+        }
+    }
+
+    /// A stop verb without the internet word never fires this family — the
+    /// alarm, timer, music and every other pre-existing stop utterance keep
+    /// their own rules.
+    func testAStopVerbWithoutTheInternetWordNeverFiresThisFamily() {
+        for utterance in ["अलार्म बन्द गर", "टाइमर रोक", "गीत बन्द गर",
+                          "बन्द गर", "रोक", "कृपया बन्द गर", "stop", "turn off"] {
+            XCTAssertNil(KeywordIntentRule.cloudChatVoiceRequest(transcript: utterance),
+                         "\(utterance): no internet word, no claim")
+        }
+    }
+
+    /// An internet mention with neither a stop verb nor a state marker is
+    /// not a control: it falls through to every stage below unchanged
+    /// (weather, music, the interpreter).
+    func testAnInternetMentionWithNeitherVerbNorStateMarkerFallsThrough() {
+        for utterance in ["इन्टरनेटबाट मौसम कस्तो छ", "इन्टरनेटमा गीत बजाऊ",
+                          "इन्टरनेटबाट जवाफ", "internet weather"] {
+            XCTAssertNil(KeywordIntentRule.cloudChatVoiceRequest(transcript: utterance),
+                         "\(utterance): a mention is not a control")
+        }
+        // The music rule still owns its utterance, byte for byte.
+        XCTAssertEqual(KeywordIntentRule.match(transcript: "इन्टरनेटमा गीत बजाऊ")?.domain, .music,
+                       "the cloud family placed after every existing claim changes none of them")
+    }
+
+    /// Deterministic under noise and case: canonicalization (case fold,
+    /// whitespace collapse) is the same one `match` uses, and two identical
+    /// transcripts always resolve identically — no state, no dynamic
+    /// vocabulary, no clock.
+    func testTheFamilyIsDeterministicUnderNoiseAndCase() {
+        XCTAssertEqual(KeywordIntentRule.cloudChatVoiceRequest(
+            transcript: "इन्टरनेटबाट   जवाफ   बन्द गर।"), .revoke)
+        XCTAssertEqual(KeywordIntentRule.cloudChatVoiceRequest(
+            transcript: "TURN OFF ANSWERS FROM THE INTERNET"), .revoke)
+        XCTAssertEqual(KeywordIntentRule.cloudChatVoiceRequest(
+            transcript: "  Internet answers active?  "), .stateQuery)
+        for utterance in ["इन्टरनेटबाट जवाफ बन्द गर", "इन्टरनेटबाट जवाफ आउँदैछ?",
+                          "turn off answers from the internet", "is the internet on?"] {
+            XCTAssertEqual(KeywordIntentRule.cloudChatVoiceRequest(transcript: utterance),
+                           KeywordIntentRule.cloudChatVoiceRequest(transcript: utterance),
+                           "\(utterance): two identical transcripts resolve identically")
+        }
+        XCTAssertNil(KeywordIntentRule.cloudChatVoiceRequest(transcript: ""))
+        XCTAssertNil(KeywordIntentRule.cloudChatVoiceRequest(transcript: "   "))
+    }
+
+    /// Scenario — "every pre-existing KeywordIntentRule behaviour pinned
+    /// unchanged": for a fixture from each domain of the table, the rule
+    /// resolves exactly as before AND the cloud-chat family stays out of
+    /// the way. The family is placed after every existing claim, so no
+    /// utterance an existing rule owns can ever be claimed by it.
+    func testTheCloudFamilyNeverClaimsAnUtteranceAnExistingRuleClaims() {
+        let pinned: [(utterance: String, domain: KeywordIntentRule.Domain)] = [
+            ("नमस्ते, समाचार", .news),
+            ("आजको समाचार सुनाइदिनुस् न", .news),
+            ("search songs on youtube", .youtube),
+            ("हाम्लाई युट्युबमा नेपाली न्युज चलाइदिनुस् न है त", .youtube),
+            ("भजन बजाउनुस्", .music),
+            ("play a song", .music)
+        ]
+        for (utterance, domain) in pinned {
+            XCTAssertEqual(KeywordIntentRule.match(transcript: utterance)?.domain, domain,
+                           "\(utterance) must keep its pre-existing resolution")
+            XCTAssertNil(KeywordIntentRule.cloudChatVoiceRequest(transcript: utterance),
+                         "\(utterance) belongs to an existing rule — the cloud family must not claim it")
+        }
+        // The family lives OUTSIDE the `Domain` table (its own API), so the
+        // domain table declines a revoke utterance and no existing
+        // exhaustive switch over `Domain` sees the feature at all.
+        XCTAssertNil(KeywordIntentRule.match(transcript: "इन्टरनेटबाट जवाफ बन्द गर"),
+                     "a revoke utterance is not a command — no domain owns it")
+        XCTAssertNil(KeywordIntentRule.match(transcript: "इन्टरनेटबाट जवाफ आउँदैछ?"))
+    }
+
+    /// The observability token is a closed vocabulary — the router's
+    /// `cloud_chat_voice_control` event carries one of exactly two names and
+    /// nothing from the utterance.
+    func testTheControlTokensAreTheClosedVocabulary() {
+        XCTAssertEqual(KeywordIntentRule.CloudChatVoiceRequest.revoke.eventToken, "revoke")
+        XCTAssertEqual(KeywordIntentRule.CloudChatVoiceRequest.stateQuery.eventToken, "state_query")
+        XCTAssertNotEqual(KeywordIntentRule.CloudChatVoiceRequest.revoke.eventToken,
+                          KeywordIntentRule.CloudChatVoiceRequest.stateQuery.eventToken,
+                          "the two controls are distinguishable in the event vocabulary")
+    }
 }

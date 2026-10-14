@@ -480,6 +480,37 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// reached (the exact failure mode the [INTENT-TOOLS] doc warns
     /// about).
     var profilePersonalization: ProfilePersonalizationReading? { get }
+
+    /// [CLOUD-CHAT T-177] (2026-10-14) True while the cloud-chat consent
+    /// question is up and its spoken answer is expected — the
+    /// coordinator's consent capture is the pended flow. Widens the
+    /// router's confirmation path exactly like
+    /// `isAwaitingAppLaunchConfirmation`: the yes/no on the next
+    /// transcript goes to `handleConfirmationResponse` (whose cloud-chat
+    /// block hands it to the prompt's one writer) and the medication-flavored
+    /// generic yes/no speech is skipped — the coordinator speaks the
+    /// state line itself, and a plain "yes" here is not a dose
+    /// acknowledgement. LOWEST priority of every pending flow: a call,
+    /// navigation, calendar-event, app-launch or dose confirmation keeps
+    /// its own claim on a yes/no (the coordinator's
+    /// `handleConfirmationResponse` checks every one of them first).
+    /// Requirement-with-extension-default pattern like the members above
+    /// (the router holds the coordinator as a protocol reference, so an
+    /// extension-only member would bind statically and `AppCoordinator`'s
+    /// implementation could never be reached).
+    var isAwaitingCloudChatConsentConfirmation: Bool { get }
+
+    /// [CLOUD-CHAT T-177] (2026-10-14) A deterministic cloud-chat voice
+    /// control was matched by `KeywordIntentRule.cloudChatVoiceRequest`:
+    /// the coordinator performs the withdrawal through the gate's ONE
+    /// writer (revoke) or answers the state query from the gate's
+    /// current decision, and owns every spoken line — the router adds no
+    /// speech and no card of its own, exactly like the briefing and news
+    /// stages. The router never writes consent and never reads the gate;
+    /// it only tells the coordinator what the keyword family resolved.
+    /// Same requirement-with-extension-default pattern as the members
+    /// above.
+    func handleCloudChatVoiceRequest(_ request: KeywordIntentRule.CloudChatVoiceRequest)
 }
 
 /// [INTENT-TOOLS] (2026-09-07) Tool-capability default. The default keeps
@@ -607,6 +638,18 @@ extension VoiceCommandCoordinating {
     func prepareDialogueAnswerText(_ raw: String) -> String {
         InputSanitiser.sanitise(raw, level: .quarantine)
     }
+    // [CLOUD-CHAT T-177] (2026-10-14) Inert defaults — a conformer that
+    // does not opt in (every mock/double) never has the consent question
+    // up (so the confirmation path behaves exactly as it did before this
+    // member) and performs no withdrawal (the deterministic revoke stage
+    // consumes the utterance — the phrasing is unambiguous — and a
+    // non-opted-in coordinator answers with silence rather than letting
+    // it fall into the interpreter as small talk, the
+    // `readFullFeedArticle()` rule). Only a coordinator that explicitly
+    // implements the members (AppCoordinator, and the scripted mock
+    // under test) asks or revokes anything.
+    var isAwaitingCloudChatConsentConfirmation: Bool { false }
+    func handleCloudChatVoiceRequest(_ request: KeywordIntentRule.CloudChatVoiceRequest) {}
 }
 
 // MARK: - [CNR T-174] Chat guard seam (flag resolution at the dispatch seam)
@@ -1120,8 +1163,20 @@ final class CommandRouter {
             // was recorded for a plain "हो" answered to "क्यामेरा खोल्ने हो?".
             let isAppLaunchConfirmation =
                 coordinator?.isAwaitingAppLaunchConfirmation == true
+            // [CLOUD-CHAT T-177] (2026-10-14) The consent question's
+            // spoken answer rides the same capture: its own block in
+            // `handleConfirmationResponse` hands the yes/no to the
+            // prompt's one writer, and the coordinator speaks the state
+            // line itself — the generic catalog yes/no would claim a
+            // dose. Checked LAST of every pending flow, so a call,
+            // navigation, calendar or launch confirmation keeps its own
+            // claim on the answer (T-177's own precedence rule; the
+            // coordinator's block enforces the same order).
+            let isCloudChatConsentConfirmation =
+                coordinator?.isAwaitingCloudChatConsentConfirmation == true
             let speaksItsOwnYesNo = isCallConfirmation || isNavigationDisambiguation
                 || isCalendarEventConfirmation || isAppLaunchConfirmation
+                || isCloudChatConsentConfirmation
             // [APP-LAUNCHER F3] A dose acknowledgement is never a yes/no
             // answer to an app-launch question. The safety net that owns
             // this vocabulary runs BELOW this block, so without this the
@@ -1147,6 +1202,12 @@ final class CommandRouter {
                 if isCallConfirmation { return .callConfirmed }
                 if isCalendarEventConfirmation { return .calendarEventConfirmed }
                 if isAppLaunchConfirmation { return .appLaunchConfirmed }
+                // [CLOUD-CHAT T-177] The consent question's yes reports
+                // plainly that the turn was consumed; it is not a
+                // medication acknowledgement and not any of the typed
+                // confirmations above (checked after them, matching the
+                // coordinator's precedence).
+                if isCloudChatConsentConfirmation { return .unrecognised(transcript: raw) }
                 return isNavigationDisambiguation ? .navigationRequested : .acknowledgedMedication
             }
             if Self.isNoResponse(raw) {
@@ -1753,6 +1814,26 @@ final class CommandRouter {
             }
         }
 
+        // [CLOUD-CHAT T-177] (2026-10-14) Deterministic cloud-chat voice
+        // controls (design-l1 §8.6): the revoke phrase ("इन्टरनेटबाट जवाफ
+        // बन्द गर" / "turn off answers from the internet") and the spoken
+        // state query ("इन्टरनेटबाट जवाफ आउँदैछ?" / "are answers coming
+        // from the internet?"). The family is the same pure keyword table
+        // as the rules above (`KeywordIntentRule.cloudChatVoiceRequest` —
+        // no model, no NLU, no classifier widening), placed AFTER every
+        // existing claim so each pre-existing rule keeps its exact
+        // priority, and BEFORE the topic pre-answers and the interpreter
+        // so a state question is answered from the gate's recorded
+        // decision — never by a model — and a revoke never reaches one.
+        // The coordinator owns every consequence: the gate's one writer,
+        // the spoken lines, the surfaces. This stage only reports what
+        // the keyword family resolved.
+        if let request = KeywordIntentRule.cloudChatVoiceRequest(transcript: preText) {
+            emitCloudChatVoiceControl(request)
+            coordinator?.handleCloudChatVoiceRequest(request)
+            return .unrecognised(transcript: raw)
+        }
+
         // [NO-GIBBERISH] Deterministic TOPIC PRE-ANSWERS (2026-09-07): the
         // most common Q&A topics — weather, time, date, greetings — are
         // answered from a pre-written, honest table (`TopicPreAnswer`)
@@ -1990,6 +2071,25 @@ final class CommandRouter {
                 "domain": match.domain.rawValue,
                 "matched_keys": match.matchedKeys.joined(separator: ",")
             ]
+        ))
+    }
+
+    /// [CLOUD-CHAT T-177] (2026-10-14) The cloud-chat voice-control
+    /// event: provenance only ("this turn was resolved by the voice
+    /// keyword family, as a revoke / as a state query"). No metadata at
+    /// all — the consent write itself is the gate's own catalogue
+    /// (`consent_recorded` / `consent_revoked` / `consent_write_failed`),
+    /// so there is nothing content-bearing or identity-bearing for this
+    /// event to add (NFR-CNR-006), and no transcript, matched key or
+    /// device fact is available to it in the first place.
+    private func emitCloudChatVoiceControl(_ request: KeywordIntentRule.CloudChatVoiceRequest) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "cloud_chat_voice_control",
+            durationMs: nil,
+            outcome: request.eventToken,
+            errorCode: nil,
+            metadata: [:]
         ))
     }
 

@@ -356,6 +356,14 @@ struct TalkStage: View {
     @ViewBuilder
     private var slotContent: some View {
         VStack(spacing: 8) {
+            // [CNR T-177] (2026-10-14) The cloud-chat surfaces — the
+            // activity badge and the consent question (design-l1 §8.5:
+            // "the existing status-slot surface; no new screen"). The
+            // host is parameterless and resolves the coordinator from
+            // the environment (the root injects it), so `TalkStage`'s
+            // stored fields and its `Equatable` are untouched; the badge
+            // renders nothing at all outside a cloud-active window.
+            CloudChatSurfacesHost()
             if dynamicTypeSize.isAccessibilitySize {
                 Text(accessibilityCaption)
                     .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .bold))
