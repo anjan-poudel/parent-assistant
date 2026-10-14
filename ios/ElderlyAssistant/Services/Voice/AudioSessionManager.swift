@@ -212,12 +212,29 @@ final class AudioSessionManager {
 
     private var playbackModeDepth = 0
 
-    /// The loud playback configuration — the bell's exact config
-    /// (`TimerAlarmBellPlayer`), the app's proven-loud audio path.
-    private static let playbackCategory: AVAudioSession.Category = .playback
-    private static let playbackMode: AVAudioSession.Mode = .default
-    private static let playbackOptions: AVAudioSession.CategoryOptions =
-        [.duckOthers, .defaultToSpeaker]
+    /// [LOUD-TTS-CATEGORY] One media-volume candidate, with the state
+    /// token that identifies it in console events.
+    private struct PlaybackCategoryCandidate {
+        let state: String
+        let category: AVAudioSession.Category
+        let mode: AVAudioSession.Mode
+        let options: AVAudioSession.CategoryOptions
+    }
+
+    /// The loud playback category chain in preference order — the bell's
+    /// exact config first (`TimerAlarmBellPlayer`, the app's
+    /// proven-loud path), then the other media-volume-scale categories.
+    /// All three play at media gain staging (the thing that makes other
+    /// apps loud); Anzaan's iOS 26 refuses `.playback` outright, so the
+    /// chain walks them until the OS accepts one.
+    private static let playbackCategoryChain: [PlaybackCategoryCandidate] = [
+        .init(state: "playback", category: .playback, mode: .default,
+              options: [.duckOthers, .defaultToSpeaker]),
+        .init(state: "soloAmbient", category: .soloAmbient, mode: .default,
+              options: [.duckOthers, .defaultToSpeaker]),
+        .init(state: "ambient", category: .ambient, mode: .default,
+              options: [.duckOthers, .defaultToSpeaker]),
+    ]
 
     func beginResponsePlayback() {
         if playbackModeDepth == 0 {
@@ -234,6 +251,14 @@ final class AudioSessionManager {
     /// FIRST — a live input tap is what the category change refuses to
     /// service — and every failure path rearms it (the mic pipeline is
     /// the invariant; no path may leave it stopped or inactive).
+    ///
+    /// Category candidates: Anzaan's iOS 26 REFUSES setCategory(.playback)
+    /// outright (step="category" in the field log, even with the engine
+    /// stopped and the session inactive — the simulator accepts it).
+    /// The chain therefore walks the media-volume-scale categories —
+    /// all three play at media gain staging, the thing that makes other
+    /// apps loud — and the first one the OS accepts wins. All refused →
+    /// rearm + failed (the reply plays at the old quiet staging).
     private func switchToPlaybackCategory() {
         do {
             try session.setEngineRunning(false)
@@ -248,23 +273,27 @@ final class AudioSessionManager {
             rearmCaptureSession()
             return
         }
-        do {
-            try session.setCategory(Self.playbackCategory,
-                                    mode: Self.playbackMode,
-                                    options: Self.playbackOptions)
-        } catch {
-            emitPlaybackFailure(step: "category", error: error)
-            rearmCaptureSession()
-            return
+        for candidate in Self.playbackCategoryChain {
+            do {
+                try session.setCategory(candidate.category,
+                                        mode: candidate.mode,
+                                        options: candidate.options)
+                try session.setActive(true, options: [])
+                emit(eventType: "audio_response_playback", outcome: "began",
+                     metadata: ["state": candidate.state])
+                return
+            } catch {
+                // Temporary field-diagnostic print (2026-10-14): the
+                // console bus redacts errorCode; the raw OSStatus pins
+                // the refusal reason for the upstream iOS 26 report.
+                print("[audio_session] playback switch candidate \(candidate.state) "
+                      + "failed: \((error as NSError).domain) "
+                      + "\(String((error as NSError).code))")
+                emitPlaybackFailure(step: "category_\(candidate.state)",
+                                    error: error)
+            }
         }
-        do {
-            try session.setActive(true, options: [])
-        } catch {
-            emitPlaybackFailure(step: "activate", error: error)
-            rearmCaptureSession()
-            return
-        }
-        emit(eventType: "audio_response_playback", outcome: "began")
+        rearmCaptureSession()
     }
 
     /// Failure recovery for the playback switch: reactivate the session
