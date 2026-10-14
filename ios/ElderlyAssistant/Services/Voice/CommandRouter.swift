@@ -3482,6 +3482,14 @@ final class CommandRouter {
         switch search {
         case .success(let track):
             if product == .premium { return .spotifyRemote(track) }
+            // [FIX 2026-10-15] A linked non-Premium (or unknown-product)
+            // account goes to the app's own SEARCH handoff when possible —
+            // the user sees results for the query, not a single opaque
+            // track link (device finding: the track link just opened the
+            // Spotify app with nothing usable on screen). The single-track
+            // deep link remains the fallback when the search handoff is
+            // not available.
+            if spotifySearchOpenerPresent { return .spotifySearchHandoff }
             if deepLinkCapable { return .spotifyDeepLink(track) }
             // Usable track but not remote-capable and the app cannot
             // open it: row 4's "not capable" leg.

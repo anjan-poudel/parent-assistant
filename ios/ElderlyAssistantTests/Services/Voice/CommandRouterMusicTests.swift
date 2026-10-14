@@ -324,17 +324,22 @@ final class CommandRouterMusicTests: XCTestCase {
     // MARK: - Matrix row 3: free tier, usable → deep link, no remote attempt
 
     @MainActor
-    func testRow3FreeTierOpensTheTrackDeepLinkWithoutARemoteAttempt() {
+    func testRow3FreeTierHandsOffTheSearchWithoutARemoteAttempt() {
+        // [FIX 2026-10-15] A linked free tier now hands the QUERY to the
+        // app's own search — the user sees results, not one opaque track
+        // link (device finding: the track link just opened the Spotify
+        // app with nothing usable on screen).
         let world = makeWorld(searchReply: .body(Self.trackJSON, 200),
                               product: "free",
                               spotifyProbes: [true, true])
         world.router.route(transcript: musicTranscript)
         waitForDelivery()
 
-        XCTAssertEqual(world.coordinator.assistantSpoken.last, L10n.str("spotify.openApp", locale: ne))
+        XCTAssertEqual(world.coordinator.assistantSpoken.last,
+                       L10n.str("spotify.openSearch", locale: ne))
         XCTAssertEqual(world.spotifyOpener?.opened.count, 1)
         XCTAssertEqual(world.spotifyOpener?.opened.first,
-                       SpotifyTool.trackURI(id: Self.trackID))
+                       SpotifyTool.searchURI(query: extractedQuery))
         XCTAssertEqual(world.spotifyOpener?.canOpenChecks.count, 2,
                        "probed at selection AND at the open attempt")
         XCTAssertEqual(world.spotifyEventPairs,
