@@ -80,6 +80,12 @@ final class VoicePipeline {
     var wakeAcknowledger: WakeAcknowledging?
     private var speechRecognizer: SpeechRecognizerProtocol
     private var vad: VoiceActivityDetector?
+    /// [AUDIO-REACTIVE-HERO] (2026-10-14) The Talk hero's live level feed:
+    /// the capture fan-out slices the SAME enhanced 16 kHz frames the VAD
+    /// consumes and pushes them to this model, which drives the hero's
+    /// signal-reactive disc bounce and equalizer bars. nil (tests, minimal
+    /// constructions) is byte-identical: no frames sliced, no analysis.
+    var audioVisualization: AudioLevelPublisher?
     /// [NOISE-FILTER] Denoising stage applied to the capture stream only
     /// (P1 front-end — docs/research-sections/noise-filter.md). Nil (or a
     /// null stage) by default: byte-identical legacy behavior. The idle
@@ -182,6 +188,16 @@ final class VoicePipeline {
     private var wakeFrameBuffer: [Int16] = []
     private var vadFrameBuffer: [Int16] = []
     private var vadFrameConsumed = 0
+    /// [AUDIO-REACTIVE-HERO] The visualization feed's own 512-sample
+    /// slicer. Deliberately SEPARATE from `vadFrameBuffer`: the VAD frame
+    /// loop is the [VAD-RT]-pinned hot path (`vad_frame_latency` test
+    /// pins its cost), so the meter tap must never add work to it — it
+    /// walks its own carry buffer over the same `enhanced` samples.
+    private var vizFrameBuffer: [Int16] = []
+    private var vizFrameConsumed = 0
+    /// 512 samples = 32 ms at 16 kHz — the VAD frame length, matching
+    /// `AudioLevelExtraction.fftLength`.
+    private static let visualizationFrameLength = 512
     /// Compaction threshold: below this many consumed samples the cursor
     /// just walks forward; at/above it the consumed prefix is dropped in
     /// one amortized move (a capture pushes ~500 samples/s, so compaction
@@ -497,6 +513,10 @@ final class VoicePipeline {
         }
         wakeWordEngine.stop()
         vad?.stop()
+        // [AUDIO-REACTIVE-HERO] A capture that dies with stop() (reset /
+        // teardown) ends its meter epoch here — the completion tail
+        // above never runs for it (its generation is stale by design).
+        audioVisualization?.captureEnded()
         speechRecognizer.cancel()
         if audioEngine.isRunning { audioEngine.stop() }
         // inputNode aborts the whole process when the audio server is
@@ -663,6 +683,13 @@ final class VoicePipeline {
         // doc), so the STT buffer is rebuilt from the enhanced samples
         // instead of mutating the converter's buffer.
         let enhanced = enhanceCaptureSamples(samples)
+        // [AUDIO-REACTIVE-HERO] (2026-10-14) Feed the hero's live meter
+        // from the SAME enhanced stream the STT push and the VAD consume
+        // (the single-choke-point doctrine above): the meter shows
+        // exactly what the pipeline hears, noise suppression included.
+        // Runs on this processing queue — never an audio render thread —
+        // and is a no-op (zero cost) when no visualization is attached.
+        feedVisualization(enhanced)
         // Push to STT — the STT is in push mode when a VAD is present.
         if !speechRecognizer.ownsAudioCapture {
             if noiseSuppressor != nil {
@@ -699,6 +726,27 @@ final class VoicePipeline {
         if vadFrameConsumed >= Self.vadFrameCompactionThreshold {
             vadFrameBuffer.removeFirst(vadFrameConsumed)
             vadFrameConsumed = 0
+        }
+    }
+
+    /// [AUDIO-REACTIVE-HERO] The meter tap's frame slicer — the same
+    /// cursor + amortized compaction shape as the VAD loop above, on its
+    /// OWN carry buffer so the [VAD-RT] hot path is untouched. Runs on
+    /// the processing queue (the publisher's FFT + analyzer are confined
+    /// to it — see `AudioLevelPublisher.ingestCaptureFrame`).
+    func feedVisualization(_ samples: [Int16]) {
+        guard let audioVisualization else { return }
+        vizFrameBuffer.append(contentsOf: samples)
+        let frameLength = Self.visualizationFrameLength
+        while vizFrameBuffer.count - vizFrameConsumed >= frameLength {
+            let start = vizFrameConsumed
+            let frame = Array(vizFrameBuffer[start..<(start + frameLength)])
+            vizFrameConsumed += frameLength
+            audioVisualization.ingestCaptureFrame(frame)
+        }
+        if vizFrameConsumed >= Self.vadFrameCompactionThreshold {
+            vizFrameBuffer.removeFirst(vizFrameConsumed)
+            vizFrameConsumed = 0
         }
     }
 
@@ -828,6 +876,14 @@ final class VoicePipeline {
         // [NOISE-FILTER] Capture bookend (start) — see
         // `beginNoiseFilterCapture` for the contract.
         beginNoiseFilterCapture()
+        // [AUDIO-REACTIVE-HERO] Capture epoch began: the hero's meter
+        // switches to the mic (owner rule — mic wins while capturing)
+        // and its slicer starts from a clean slate. Called BEFORE the
+        // `.capturingCommand` flip below, so the first frame can never
+        // be dropped by the publisher's capture guard.
+        vizFrameBuffer.removeAll(keepingCapacity: true)
+        vizFrameConsumed = 0
+        audioVisualization?.captureStarted()
         if speechRecognizer.ownsAudioCapture {
             // Legacy path: STT owns the input node. Tear down our tap and
             // let it install its own. This is what happens when no VAD is
@@ -942,6 +998,11 @@ final class VoicePipeline {
             // [NOISE-FILTER] Capture bookend (end) — see
             // `endNoiseFilterCapture` for the contract.
             self.endNoiseFilterCapture()
+            // [AUDIO-REACTIVE-HERO] Capture epoch ended: the hero's meter
+            // lets its last real readings fall to rest (see the
+            // publisher's ballistic release tail) or hands the meter to
+            // a still-playing speaker.
+            self.audioVisualization?.captureEnded()
             // [REST-DIP-FIX] Requirement 3 — `.processing` (the session's
             // writing/transcribing state) must precede `.routing` for
             // EVERY live capture, not just wedge-forced ones: `.processing`

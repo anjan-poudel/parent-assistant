@@ -48,6 +48,15 @@ final class AppCoordinator: ObservableObject {
         }
         return .other
     }
+    /// [AUDIO-REACTIVE-HERO] (2026-10-14) The Talk hero's live level
+    /// model (see AudioVisualization.swift) — ONE instance for the whole
+    /// app. `buildAndStartVoicePipeline` attaches it to the pipeline
+    /// (the mic feed) and `start()` attaches it to `PiperVoiceSpeaker`
+    /// (the reply feed); Home reads it straight into the hero. Created
+    /// at declaration because the UI may render before `start()` runs —
+    /// the model simply reports "no signal" (rest) until one exists.
+    let audioVisualization = AudioLevelPublisher()
+
     /// Catalog KEY naming the active STT — resolved in the UI's locale
     /// (spec §3.2; no hardcoded English labels).
     @Published var activeSTTNameKey: String = "stt.name.sfs"
@@ -3771,7 +3780,7 @@ final class AppCoordinator: ObservableObject {
         // time (see `maybeStartAckCacheWarm`), the player below reads
         // the cached WAVs on the ack path. Files are the shared state.
         let ackAudioCache = AckAudioCache()
-        let speaker: Speaker = PiperVoiceSpeaker(
+        let piperSpeaker = PiperVoiceSpeaker(
             fallback: systemSpeaker,
             observabilityBus: observabilityBus,
             modelStore: modelStore,
@@ -3783,6 +3792,12 @@ final class AppCoordinator: ObservableObject {
             traceRecorder: pipelineTraceRecorder,
             ackCache: ackAudioCache
         )
+        // [AUDIO-REACTIVE-HERO] (2026-10-14) The reply side of the hero's
+        // live meter: Piper playbacks feed it metering + a played-file
+        // band track; its system-speech fallbacks report the meterless
+        // (no-signal) path so the UI keeps honest idle motion there.
+        piperSpeaker.audioVisualization = audioVisualization
+        let speaker: Speaker = piperSpeaker
         let ackFastLanePlayer = AckFastLanePlayer(cache: ackAudioCache,
                                                   observabilityBus: observabilityBus)
         self.speaker = speaker
@@ -4907,6 +4922,10 @@ self.noteTalkContractChanged()
         // [NOISE-FILTER] Attach the restored A/B stage (nil when OFF —
         // the hot-swap seam emits the honest engine name either way).
         voicePipeline?.setNoiseSuppressor(makeNoiseSuppressor())
+        // [AUDIO-REACTIVE-HERO] (2026-10-14) The hero's live meter: the
+        // capture fan-out slices the enhanced frames it already produces
+        // and pushes them to this model (VoicePipeline.feedVisualization).
+        voicePipeline?.audioVisualization = audioVisualization
         // [PROFILE-INTERVIEW T-096] Hand the wake ack to the pipeline it
         // belongs to (C05, §5.4). This is the pipeline's single
         // construction site, and the service exists by the time this

@@ -234,6 +234,14 @@ struct TalkStage: View {
     /// Handed to the hero, which observes it for its own live updates
     /// (icon, caption, hold eligibility).
     let session: VoiceSessionStateMachine
+    /// [AUDIO-REACTIVE-HERO] (2026-10-14) The live audio-level model the
+    /// hero observes for its signal-driven motion (disc bounce, equalizer
+    /// bars, state-glyph breathing). Crosses the stage like `session`
+    /// does — by reference, so the hero's own `@ObservedObject`
+    /// subscription carries every ~30 Hz publish without re-running the
+    /// stage (identity is constant; deliberately NOT part of `==`, see
+    /// the extension below).
+    let audioLevels: AudioLevelPublisher
     /// [P0-2] Manual Talk readiness + the labels the stage shows.
     let voice: VoicePresentationState
     /// [HERO-STATES] The speaking overlay: true while any reply audio
@@ -270,6 +278,10 @@ struct TalkStage: View {
                 // Separate the button, its status and the suggested phrase.
                 VStack(spacing: 16) {
                     TalkButton(session: session,
+                               // [AUDIO-REACTIVE-HERO] The hero's live
+                               // signal feed — observed by the hero
+                               // itself, never redrawing the stage.
+                               audioLevels: audioLevels,
                                // [HERO-STATES] The overlays flow down
                                // from the coordinator through the stage.
                                isSpeaking: isSpeaking,
@@ -419,8 +431,12 @@ struct TalkStage: View {
 extension TalkStage: Equatable {
     /// Session identity (never a fold of it), the state that decides the
     /// branch and the tap behavior, and the two [P0-2] value models. The
-    /// hero's own live updates ride its `@ObservedObject` subscription;
-    /// this comparison exists so HOME's re-render (a feed translation, a
+    /// hero's own live updates ride its `@ObservedObject` subscription —
+    /// for `session` AND, since [AUDIO-REACTIVE-HERO] (2026-10-14), for
+    /// `audioLevels`, whose object identity is the app-constant model on
+    /// the coordinator: comparing it would be constant-equal, so it is
+    /// deliberately left out of `==` exactly as the closures are. This
+    /// comparison exists so HOME's re-render (a feed translation, a
     /// model-download tick, a settings change) cannot re-run the stage.
     static func == (lhs: TalkStage, rhs: TalkStage) -> Bool {
         ObjectIdentifier(lhs.session) == ObjectIdentifier(rhs.session)
