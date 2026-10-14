@@ -468,7 +468,6 @@ final class AudioSessionPresetTests: XCTestCase {
         XCTAssertEqual(session.categoryCalls.last?.category, .playAndRecord,
                        "restore returns to the capture preset")
     }
-    }
 
     func testNestedResponsePlaybackRestoresOnlyAtOutermostEnd() {
         let session = RecordingSession()
