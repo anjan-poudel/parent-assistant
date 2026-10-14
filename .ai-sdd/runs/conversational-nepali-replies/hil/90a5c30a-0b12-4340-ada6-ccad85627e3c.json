@@ -1,0 +1,14 @@
+{
+  "id": "90a5c30a-0b12-4340-ada6-ccad85627e3c",
+  "task_id": "define-requirements",
+  "workflow_id": "conversational-nepali-replies",
+  "status": "RESOLVED",
+  "reason": "HIL triggered for task 'define-requirements'",
+  "context": {
+    "task_description": "Elicit and document project requirements. Produce a structured folder of\nrequirements: one file per FR, one file per NFR, with Gherkin acceptance\ncriteria embedded in each file, and index files at each folder level.\nAfter stakeholder HIL sign-off, produce a requirements lock file that\ncaptures a stable snapshot for downstream drift detection.\n",
+    "risk_tier": "T1",
+    "agent": "ba"
+  },
+  "created_at": "2026-10-14T07:01:09.032Z",
+  "resolved_at": "2026-10-14T07:25:00.241Z"
+}

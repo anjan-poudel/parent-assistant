@@ -35,7 +35,7 @@ Closes the feature: the five ne/en catalogue keys with the family coverage tests
 - **Requirements:** [FR-CDP-017](../../define-requirements/FR/FR-CDP-017-localisation-new-strings.md), [NFR-CDP-007](../../define-requirements/NFR/NFR-CDP-007-localisation-completeness.md)
 
 ## Description
-Add exactly five user-visible strings in both languages with the frozen binding parameter contracts, and extend the catalogue coverage suite with the calling family so parity, placeholder counts and the no-literal rule are enforced by test.
+Add exactly five user-visible strings in both languages with the frozen binding parameter contracts, and extend the catalogue coverage suite with the calling family so parity, format-specifier counts and the no-literal rule are enforced by test.
 
 ## Acceptance criteria
 
@@ -60,12 +60,12 @@ Feature: Calling feature localisation
 
 ## Implementation notes
 - Owned files: `ios/ElderlyAssistant/Resources/` `Localizable.xcstrings`, `ios/ElderlyAssistantTests/App/` `L10nCatalogCoverageTests.swift`.
-- Exactly five keys with the frozen contracts: settings.calling.primaryTitle, settings.calling.secondaryTitle, router.call.fallbackDisclosure (binds the skipped-channel label), call.announce.fallbackRouted (binds the routed-channel label), call.announce.launchFailedFallback (binds the failed and next labels). Values in Nepali and English, placeholder counts equal across languages, entries placed alphabetically and contiguously as the file convention requires (the suite asserts this for existing families; extend the same discipline).
-- Extend L10nCatalogCoverageTests.swift in the house family pattern: a calling-family resolution test, a placeholder-parity test, and keep the existing families untouched so their baselines stay green. The suite already automates the ne/en parity sweep; the new keys must be covered by it and by an explicit named assertion.
+- Exactly five keys with the frozen contracts: settings.calling.primaryTitle, settings.calling.secondaryTitle, router.call.fallbackDisclosure (binds the skipped-channel label), call.announce.fallbackRouted (binds the routed-channel label), call.announce.launchFailedFallback (binds the failed and next labels). Values in Nepali and English, format-specifier counts equal across languages, entries placed alphabetically and contiguously as the file convention requires (the suite asserts this for existing families; extend the same discipline).
+- Extend L10nCatalogCoverageTests.swift in the house family pattern: a calling-family resolution test, a format-specifier-parity test, and keep the existing families untouched so their baselines stay green. The suite already automates the ne/en parity sweep; the new keys must be covered by it and by an explicit named assertion.
 - No user-visible literal may appear in the feature's views or coordinator — labels route through the catalogue keys only.
 
 ## Definition of done
-- [ ] Exactly five keys added; ne and en values complete; placeholder counts equal
+- [ ] Exactly five keys added; ne and en values complete; format-specifier counts equal
 - [ ] Coverage suite extended and green: `ios/build.sh test:unit L10nCatalogCoverageTests`
 - [ ] No sixth user-visible string; no literal copy in views or coordinator
 - [ ] Code reviewed and merged

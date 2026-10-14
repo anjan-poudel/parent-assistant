@@ -887,6 +887,67 @@ final class AppCoordinator: ObservableObject {
     /// design §1 item 2). A plain `UserDefaults` preference, read by the
     /// session at every attempt decision.
     private let pointAskSettings = PointAskSettings()
+
+    // MARK: - [CNR T-177] Cloud-chat wiring state (2026-10-14)
+
+    /// [CNR T-177] The cloud-chat consent gate — the feature's ONE consent
+    /// writer and the routing decision's consent input (design-l1 §8.3:
+    /// reuse of the shipped consent shape, not a fork). Constructed in
+    /// init over the same cipher storage as the two gates above, one
+    /// instance for the process lifetime; every reachable path that puts a
+    /// chat turn on the wire reads THIS decision per turn (never cached),
+    /// and the Settings row, the voice revoke and the consent question's
+    /// answers all write through it.
+    private let cloudChatConsentGate: CloudChatConsentGate
+    /// [CNR T-177] The chat lane's reachability input (T-173 `Inputs.online`)
+    /// — the same `NetworkReachability` discipline the LiveTranslate tier
+    /// uses (conservative: false until the first path update). One
+    /// instance, constructed in init.
+    private let cloudChatReachability: NetworkReachability
+    /// [CNR T-177] The provenance of the reply being dispatched: true when
+    /// the wrapped responder settled a `.chat` command from the cloud this
+    /// turn. Written at the attempt's settle, read once by the chat
+    /// guard's `servingPath` (T-174), cleared at every attempt's begin,
+    /// every window close and every chat-turn decide — so no turn can
+    /// inherit a previous turn's provenance.
+    private var cloudChatReplyServedFromCloud = false
+    /// [CNR T-177] Whether the badge window is open (design-l1 §8.5: the
+    /// routing decision of a cloud turn until its reply is spoken). One
+    /// open site (the attempt's begin), four close funnels (speech end,
+    /// revocation, the next chat-turn decide, and a decision change).
+    private var cloudChatIndicatorWindowOpen = false
+    /// [CNR T-177] Whether the attempt that opened the window has settled
+    /// (its completion ran). The window may close only after both the
+    /// settle and the reply's speech end have happened.
+    private var cloudChatAttemptSettled = false
+    /// [CNR T-177] The once-per-session flag of the first cloud-active
+    /// turn's spoken notice (design-l1 §8.5; FR-CNR-008): the elder hears
+    /// it at the first turn and never again in this app session.
+    private var cloudChatNoticeSpoken = false
+    /// [CNR T-177] Whether the consent question's spoken answer is pended:
+    /// true while the question is on screen and the shipped spoken yes/no
+    /// capture owns the next yes/no (the router's confirmation path). The
+    /// flag is cleared by an answer, by a decision change, and by the
+    /// window's own timeout (which re-offers rather than expires).
+    private var pendingCloudChatConsentCapture = false
+    /// [CNR T-177] The badge's model — view state, born on the main actor
+    /// on first use (the `liveTranslateConsentController` pattern), one
+    /// instance. Its publishes are forwarded through the coalescing seam
+    /// so the status slot and the Settings leaf re-render.
+    private var cloudChatIndicatorModelStorage: CloudChatActivityIndicatorModel?
+    /// [CNR T-177] The consent question's state (T-176) — view state, born
+    /// on the main actor on first use, one instance. Its publishes are
+    /// forwarded through the coalescing seam (the question appearing or
+    /// closing must invalidate every HomeView observer).
+    private var cloudChatConsentPromptStorage: CloudChatConsentPrompt?
+    private var cloudChatPromptCancellable: AnyCancellable?
+    private var cloudChatIndicatorCancellable: AnyCancellable?
+    /// [CNR T-177] The wrapped cloud chat responder — the ONE instance the
+    /// lane's cloud leg (T-175) and the guard's escalation (T-174) share,
+    /// so every cloud attempt, whichever door issued it, drives the same
+    /// badge window and the same once-per-session notice. Nil until the
+    /// router wiring runs.
+    private var cloudChatCloudResponder: CloudChatIndicatorResponder?
     /// [LIVE-TRANSLATE T-015] The prompt/control state shared by the session
     /// view's prompt and the Settings leaf. Created on the main actor on
     /// first use — it is view state, so it is born where views live.
@@ -2842,6 +2903,19 @@ final class AppCoordinator: ObservableObject {
         // consent (design §5 / OD-14).
         self.pointAskConsentGate = PointAskConsentGate(storage: liveTranslateStorage,
                                                        observabilityBus: bus)
+        // [CNR T-177] (2026-10-14) The cloud-chat consent gate, on the
+        // same encrypted consent channel under its own key
+        // (`plugin.cloud_chat.consent.v1`, T-172): one instance for the
+        // process lifetime, the only thing in the app that records or
+        // revokes cloud-chat consent. Construction performs no I/O — the
+        // record is read per turn, never held.
+        self.cloudChatConsentGate = CloudChatConsentGate(storage: liveTranslateStorage,
+                                                         observabilityBus: bus)
+        // [CNR T-177] The chat lane's reachability input, constructed here
+        // like the other long-lived inputs. `PathMonitorReachability` is
+        // conservative (false until the first path update), which is the
+        // fail-closed reading the routing decision expects.
+        self.cloudChatReachability = PathMonitorReachability()
         // [TURN-TIMING] The turn tracer lives as long as the app: every
         // voice component (pipeline, router, speaker, recognizers) shares
         // it. Its finalize callback (the transcript caption) is wired in
@@ -3297,6 +3371,18 @@ final class AppCoordinator: ObservableObject {
                 // a verdict too — the one that says "this question was
                 // too hard / too slow to answer", which is what the
                 // accept-band and the 45 s budget are tuned against.
+                //
+                // [CNR T-177] The cloud-chat consent question's capture
+                // is read BEFORE the clears below: if it was the pended
+                // flow, the window lapsed but the QUESTION did not (T-176:
+                // "the capture's window can lapse unanswered — that
+                // lapses the window, never the question"), so the answer
+                // is re-offered instead of the generic timeout line, and
+                // nothing here records a verdict (the consent capture
+                // records nothing — `recordConfirmationTimeout`'s own
+                // contract).
+                let reofferCloudChatConsent = self.pendingCloudChatConsentCapture
+                self.pendingCloudChatConsentCapture = false
                 self.recordConfirmationTimeout()
                 self.pendingConfirmationEntryId = nil
                 self.pendingRephrase = nil
@@ -3329,8 +3415,16 @@ final class AppCoordinator: ObservableObject {
                                     text: L10n.str(Self.LaunchTimeout.speechKey,
                                                    locale: self.activeLocale))
                 }
-                self.speak(key: pendedLaunchID != nil ? Self.LaunchTimeout.speechKey
-                                                      : "router.confirmationTimeout")
+                if reofferCloudChatConsent {
+                    // [CNR T-177] The question is still on screen; the
+                    // generic "I didn't hear an answer" line would speak
+                    // about a request that is still live. Listen again
+                    // instead — the elder answers by saying yes or no.
+                    self.reofferCloudChatConsentAfterTimeout()
+                } else {
+                    self.speak(key: pendedLaunchID != nil ? Self.LaunchTimeout.speechKey
+                                                          : "router.confirmationTimeout")
+                }
             }
         }
 
@@ -4080,6 +4174,33 @@ final class AppCoordinator: ObservableObject {
             self?.geminiCostGovernor.allowsCall() ?? false
         }
         self.intentRouter = router3
+        // [CNR T-177] (2026-10-14) The chat lane's seam (T-175), filled
+        // here AFTER construction with the coordinator's per-turn reads —
+        // the same post-construction fill the key/cost closures above use.
+        // Every input is READ PER TURN and none is cached (T-173's
+        // discipline): the consent closure reads the gate on each call,
+        // which is also where the consent question's one precise trigger
+        // lives (a chat-classified turn whose missing answer is the
+        // reason — never a launch, never Settings).
+        router3.cloudChatLane.routingInputs = CloudChatRouting.Inputs(
+            consent: { [weak self] in self?.cloudChatConsentInput() },
+            online: { [weak self] in self?.cloudChatReachability.isReachable },
+            keyConfigured: { [weak self] in self?.geminiConfigStore.isConfigured ?? false },
+            costAllows: { [weak self] in self?.geminiCostGovernor.allowsCall() ?? false }
+        )
+        // [CNR T-177] The ONE wrapped cloud responder: the lane's cloud
+        // leg and the guard's escalation share this instance, so every
+        // cloud attempt — whichever door issued it — opens the badge
+        // window, speaks the once-per-session notice and records the
+        // served-path provenance through the same two hooks.
+        let cloudChatResponder = CloudChatIndicatorResponder(
+            wrapping: geminiInterpreter,
+            onAttemptBegan: { [weak self] in self?.cloudChatCloudAttemptBegan() },
+            onAttemptSettled: { [weak self] command in
+                self?.cloudChatCloudAttemptSettled(command)
+            })
+        cloudChatCloudResponder = cloudChatResponder
+        router3.cloudChatLane.cloudResponder = cloudChatResponder
         // Collapse #1 (spec §4): when the Gemini recognizer is the active
         // STT, ONE understand call does STT + intent; the command half is
         // waiting in `intentRouter` when the transcript half routes.
@@ -4140,7 +4261,32 @@ final class AppCoordinator: ObservableObject {
             // [LAT-M2] Ack fast lane: cached-WAV playback on the pre-ack
             // path (miss → synthesis fallback + `ack_cache_miss`).
             preAckPlayer: ackFastLanePlayer,
-            turnTracer: turnTracer
+            turnTracer: turnTracer,
+            // [CNR T-177] (2026-10-14) The chat dispatch's guard seam
+            // (T-174), filled from the coordinator's live sources:
+            // `servingPath` reports the provenance the wrapped responder
+            // recorded at this turn's attempt settle (the design's
+            // path field, §7.5), `cloudAllowed` asks T-173's `decide`
+            // through the SAME lane inputs the chat lane consults —
+            // the one chokepoint, so consent can never be bypassed at
+            // the escalation door — and `respondToChat` is the cloud
+            // chat call, through the same wrapped responder, with the
+            // turn's context built here (the escalation has no caller
+            // to build it for it).
+            chatGuard: ChatGuardSeam(
+                servingPath: { [weak self] in self?.cloudChatServingPath() ?? .onDevice },
+                cloudAllowed: { [weak self] in self?.cloudChatGuardAllowsCloud() ?? false },
+                respondToChat: { [weak self] transcript, completion in
+                    guard let self else {
+                        // The completion contract is exactly-once: a
+                        // teardown must settle the attempt, not strand
+                        // the guard's pending-reply token.
+                        completion(nil)
+                        return
+                    }
+                    self.cloudChatGuardRespondToChat(transcript: transcript,
+                                                     completion: completion)
+                })
         )
         // [STARTUP-PERF] Retained for the boot's pipeline build.
         commandRouter = router
@@ -5595,6 +5741,13 @@ self.noteTalkContractChanged()
             self.wakeWordActivityGate.setSpeaking(self.speakingCount > 0)
             self.handlePipelineState(self.lastPipelineState)
             self.openAnswerCaptureIfProbeJustSpoken()
+            // [CNR T-177] The badge window's speech-end funnel: a cloud
+            // turn's window closes when its reply (or the notice that
+            // rode the wait) is the last utterance and the attempt has
+            // settled — the design's "until its reply is spoken". A
+            // local-only turn's speech never closes anything: no window
+            // exists to close.
+            self.cloudChatCloseWindowIfSpeechEnded()
         }
     }
 
@@ -5649,6 +5802,439 @@ self.noteTalkContractChanged()
         DispatchQueue.main.async { [weak self] in
             self?.lastAssistantReply = text
             self?.appendHistory(.assistant, text)
+        }
+    }
+
+    // MARK: - [CNR T-177] Cloud-chat surfaces, indicator and revocation (2026-10-14)
+
+    /// [CNR T-177] The badge's surface for the status slot (design-l1
+    /// §8.5): the model's window AND the gate's current decision, both
+    /// re-read per render — the badge "also reflects the enabled state in
+    /// Settings", so a revoked device shows nothing even if a window were
+    /// still open, and nothing here is cached. Main-confined (every
+    /// reader is a view body).
+    var cloudChatIndicatorSurface: CloudChatActivityIndicatorSurface {
+        MainActor.assumeIsolated {
+            CloudChatActivityIndicatorSurface(
+                isActive: cloudChatIndicatorModel().isActive,
+                cloudChatEnabled: cloudChatConsentGate.currentDecision().allowsEgress,
+                locale: activeLocale)
+        }
+    }
+
+    /// [CNR T-177] Whether the consent question is on screen. Never builds
+    /// the prompt: an unbuilt prompt is an unasked question.
+    var cloudChatConsentPromptIsPresented: Bool {
+        MainActor.assumeIsolated {
+            cloudChatConsentPromptStorage?.isPromptPresented ?? false
+        }
+    }
+
+    /// [CNR T-177] The consent sheet's content, in the active language
+    /// (T-176's surface; every string is a T-171 catalogue key).
+    var cloudChatConsentSheetSurface: CloudChatConsentSheetSurface {
+        MainActor.assumeIsolated { cloudChatConsentPrompt().sheetSurface }
+    }
+
+    /// [CNR T-177] The Settings row's state: whether cloud chat is enabled
+    /// — the gate's current decision, read fresh (T-177: "the enabled
+    /// state is read from the gate's current decision"), never a mirrored
+    /// preference.
+    var cloudChatEnabled: Bool {
+        cloudChatConsentGate.currentDecision().allowsEgress
+    }
+
+    /// [CNR T-177] The Settings row's write path (design-l1 §8.6: the row
+    /// toggles cloud chat off "through the gate's one writer"). ON is the
+    /// explicit re-enable — the gate records a grant, which is how a
+    /// withdrawn record goes back to "not decided" without a reset; OFF
+    /// is the revocation itself (`revoke()`, deny-first and verified). The
+    /// write is SILENT, like every other Settings control: the surfaces
+    /// are the feedback — the badge stops appearing (or resumes), the
+    /// next chat turn routes accordingly, and a failed write leaves the
+    /// gate denying, so the toggle reads back off rather than showing a
+    /// state that is not on disk.
+    func setCloudChatEnabledFromSettings(_ enabled: Bool) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.setCloudChatEnabledFromSettings(enabled)
+            }
+            return
+        }
+        if enabled {
+            _ = cloudChatConsentGate.record(granted: true)
+        } else {
+            _ = cloudChatConsentGate.revoke()
+        }
+        cloudChatDecisionDidChange()
+    }
+
+    /// [CNR T-177] The sheet's two controls — the same answer path the
+    /// spoken capture uses, so both surfaces write through one gate call.
+    func answerCloudChatConsentFromSheet(_ kind: CloudChatConsentAction.Kind) {
+        switch kind {
+        case .allow: answerCloudChatConsent(granted: true)
+        case .notNow: answerCloudChatConsent(granted: false)
+        }
+    }
+
+    // MARK: The routing seam (T-173's Inputs / T-174's guard inputs)
+
+    /// [CNR T-177] The lane's consent input (T-173's `Inputs.consent`) —
+    /// the gate's decision, read per call — and the ONE precise trigger
+    /// of the consent question. Called once per chat-classified turn
+    /// (consent is the decision's first input, so a `.notRecorded` read
+    /// is by construction the reason the turn is local), and again by the
+    /// guard's re-decide for the same turn, where the prompt's own
+    /// idempotence keeps the question singular. Never at launch, never in
+    /// Settings, never speculatively: no chat turn, no call.
+    ///
+    /// The pending turn's local-answer seam is the EMPTY closure, and
+    /// that is a declaration, not a stub: this call happens INSIDE the
+    /// routing evaluation, before the lane has chosen its branch, and the
+    /// lane's `.local` arm answers the turn on-device through its own
+    /// `answerChatOnDevice` — running anything here would serve the turn
+    /// twice. The turn's answer is owned one frame below, by the lane.
+    private func cloudChatConsentInput() -> CloudChatConsentGate.Decision {
+        let decision = cloudChatConsentGate.currentDecision()
+        // The routing decision is main-confined by construction (the
+        // lane runs inside `CommandRouter.route`); the window reset and
+        // the question trigger are main-actor work. The explicit check
+        // makes a hypothetical off-main read degrade to the fail-closed
+        // decision instead of a trap — and the question is never raised
+        // off-main.
+        guard Thread.isMainThread else { return decision }
+        // A fresh chat-turn decision supersedes any open window and any
+        // stale provenance: whatever the previous turn left behind, this
+        // turn's routing starts clean.
+        cloudChatCloseIndicatorWindow()
+        if decision == .notRecorded {
+            MainActor.assumeIsolated {
+                cloudChatConsentPrompt().consentNeedDetected(
+                    answerPendingTurnLocally: {})
+            }
+        }
+        return decision
+    }
+
+    /// [CNR T-177] The guard's cloud-permission read (T-174): T-173's
+    /// `decide` over the lane's own inputs, so the escalation door asks
+    /// the identical question the lane asked — one chokepoint, one
+    /// answer, no second consent path to keep in sync.
+    private func cloudChatGuardAllowsCloud() -> Bool {
+        let inputs = intentRouter?.cloudChatLane.routingInputs ?? CloudChatRouting.Inputs()
+        return CloudChatRouting.decide(inputs) == .cloud
+    }
+
+    /// [CNR T-177] The provenance read (T-174's `servingPath`): the
+    /// wrapped responder recorded whether this turn's settled attempt
+    /// produced a `.chat` reply from the cloud.
+    private func cloudChatServingPath() -> ChatGuardSeam.ServingPath {
+        cloudChatReplyServedFromCloud ? .cloud : .onDevice
+    }
+
+    /// [CNR T-177] The escalation's cloud chat call (T-174's
+    /// `respondToChat`): the SAME wrapped responder the lane uses, with
+    /// the turn's context built here — the guard seam carries no context,
+    /// and this is the router's own context shape (empty pending
+    /// medications, the language hint, the guarded address-as term).
+    private func cloudChatGuardRespondToChat(
+        transcript: String,
+        completion: @escaping (InterpretedCommand?) -> Void) {
+        guard let responder = cloudChatCloudResponder else {
+            // No wired responder: settle the attempt honestly (nil = no
+            // reply) so the guard's exactly-once contract resolves.
+            completion(nil)
+            return
+        }
+        let context = InterpreterContext(
+            pendingMedications: [],
+            userLanguageHint: activeLocale.languageCode ?? "en",
+            addressAs: profilePersonalization?.addressAsForPrompt)
+        responder.respondToChat(transcript: transcript,
+                                context: context,
+                                completion: completion)
+    }
+
+    // MARK: The attempt lifecycle (the badge window's one open site)
+
+    /// [CNR T-177] A cloud attempt has begun — the ONE site that opens the
+    /// badge window (design-l1 §8.5: presented from the routing decision
+    /// of a cloud turn). A turn that routes local never reaches this
+    /// hook, which is what makes "the badge never shows for a local-only
+    /// turn" structural rather than a rendering condition. The
+    /// once-per-session notice rides the wait here, committed before the
+    /// network call is awaited (the `speakPreAck` discipline): the elder
+    /// hears it during the wait, the reply — committed later on the
+    /// router's own lane — is never delayed by it, and if the answer
+    /// arrives mid-notice the answer takes the speaker.
+    private func cloudChatCloudAttemptBegan() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.cloudChatCloudAttemptBegan()
+            }
+            return
+        }
+        cloudChatReplyServedFromCloud = false
+        cloudChatAttemptSettled = false
+        cloudChatIndicatorWindowOpen = true
+        MainActor.assumeIsolated { cloudChatIndicatorModel().requestBegan() }
+        cloudChatSpeakNoticeOnce()
+    }
+
+    /// [CNR T-177] The attempt settled (its completion ran). Records the
+    /// provenance and marks the settle; the window closes later — at the
+    /// reply's speech end, or at the next decide that supersedes it. A
+    /// nil command (failure/abstention) settles with no provenance: the
+    /// fallback line that follows is served on-device.
+    private func cloudChatCloudAttemptSettled(_ command: InterpretedCommand?) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.cloudChatCloudAttemptSettled(command)
+            }
+            return
+        }
+        cloudChatAttemptSettled = true
+        cloudChatReplyServedFromCloud = (command?.action == .chat)
+    }
+
+    /// [CNR T-177] The speech-end funnel, run at every speech end
+    /// (`noteSpeakingEnded`): the window closes when the attempt has
+    /// settled AND nothing is speaking any more — the badge belongs to
+    /// the window that ends with the reply's utterance. A notice or
+    /// pre-ack still playing keeps the window open; the funnel simply
+    /// asks again at that utterance's end.
+    private func cloudChatCloseWindowIfSpeechEnded() {
+        guard cloudChatIndicatorWindowOpen, cloudChatAttemptSettled,
+              speakingCount == 0 else { return }
+        cloudChatCloseIndicatorWindow()
+    }
+
+    /// [CNR T-177] Closes the badge window if open, clears the turn's
+    /// provenance and settle marks, and drops the model's registration —
+    /// the one close, shared by every funnel.
+    private func cloudChatCloseIndicatorWindow() {
+        cloudChatAttemptSettled = false
+        cloudChatReplyServedFromCloud = false
+        guard cloudChatIndicatorWindowOpen else { return }
+        cloudChatIndicatorWindowOpen = false
+        MainActor.assumeIsolated { cloudChatIndicatorModel().requestEnded() }
+    }
+
+    /// [CNR T-177] The first cloud-active turn's notice (FR-CNR-008,
+    /// design-l1 §8.5): one short sentence in the elder's language, from
+    /// T-171's `cloud.chat.indicatorSpoken` — no technical terminology,
+    /// no format slot, no content from the turn. Spoken exactly once per
+    /// app session; a local turn never reaches this (its only caller is
+    /// the attempt's own begin), and it never replaces the reply: it
+    /// rides the wait.
+    private func cloudChatSpeakNoticeOnce() {
+        guard !cloudChatNoticeSpoken, speaker != nil else { return }
+        cloudChatNoticeSpoken = true
+        speak(key: "cloud.chat.indicatorSpoken")
+    }
+
+    // MARK: The voice controls (design-l1 §8.6)
+
+    /// [CNR T-177] A deterministic cloud-chat voice control resolved by
+    /// the router's keyword family. The coordinator owns every
+    /// consequence — the withdrawal through the gate's ONE writer, or the
+    /// truthful state answer read from that gate — and every spoken line;
+    /// the router only reports what the keywords matched (no model, no
+    /// NLU, no classifier widening).
+    func handleCloudChatVoiceRequest(_ request: KeywordIntentRule.CloudChatVoiceRequest) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.handleCloudChatVoiceRequest(request)
+            }
+            return
+        }
+        switch request {
+        case .revoke:
+            // The withdrawal, through the one writer — deny-first, so a
+            // failed write still denies this session, and a failure is
+            // never reported as success (the gate's own rule). The line
+            // that follows is the truth of the state either way:
+            // "answers come from this phone now" holds for a landed
+            // revoke, a failed one (the deny mirror is in force) and a
+            // repeat revoke (idempotent).
+            _ = cloudChatConsentGate.revoke()
+            cloudChatDecisionDidChange()
+            replyHonestly(key: "cloud.chat.revoke.done")
+        case .stateQuery:
+            // Answered truthfully from the gate's decision, in the
+            // elder's language: the ON line exactly when egress is in
+            // force for the current record, the OFF line otherwise (a
+            // revoked record, a decline, an unreadable store — the
+            // fail-closed reading is "answers come from this phone").
+            let key = cloudChatConsentGate.currentDecision().allowsEgress
+                ? "cloud.chat.state.spoken.on"
+                : "cloud.chat.state.spoken.off"
+            replyHonestly(key: key)
+        }
+    }
+
+    /// [CNR T-177] Shared aftermath of a decision change (any writer): the
+    /// badge window closes, the consent capture stops being the pended
+    /// flow, the question refreshes against the gate (T-176's rule: a
+    /// question with an answer is closed, and presentation has exactly
+    /// one entry), and the Settings leaf re-renders.
+    private func cloudChatDecisionDidChange() {
+        cloudChatCloseIndicatorWindow()
+        pendingCloudChatConsentCapture = false
+        MainActor.assumeIsolated {
+            cloudChatConsentPromptStorage?.refreshAfterDecisionChange()
+        }
+        if !isAwaitingConfirmation, voiceSession.state == .awaitingConfirmation {
+            DispatchQueue.main.async { [weak self] in
+                self?.voiceSession.transition(to: .idle)
+            }
+        }
+        noteForwardedStateChanged()
+    }
+
+    // MARK: The consent question's spoken answer
+
+    /// [CNR T-177] Whether the consent question's spoken answer is
+    /// pended — the router's `isAwaitingCloudChatConsentConfirmation`.
+    /// Lowest-priority confirmation flow: the router widens the yes/no
+    /// path for it, and the coordinator's `handleConfirmationResponse`
+    /// block yields to a simultaneous dose challenge.
+    var isAwaitingCloudChatConsentConfirmation: Bool {
+        pendingCloudChatConsentCapture
+    }
+
+    /// [CNR T-177] The spoken capture's arming — the prompt's
+    /// `startSpokenCapture` seam (called when the question appears and
+    /// again on every re-offer) and nothing else's: the question's
+    /// lifetime is the prompt's, the CAPTURE's window is the shipped 45 s
+    /// confirmation window, and a lapsed window re-offers rather than
+    /// expiring the question.
+    private func beginCloudChatConsentCapture() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.beginCloudChatConsentCapture()
+            }
+            return
+        }
+        pendingCloudChatConsentCapture = true
+        openConfirmationWindow()
+    }
+
+    /// [CNR T-177] The one answer path both surfaces share (the sheet's
+    /// controls and the spoken yes/no): hands the answer to the prompt,
+    /// speaks the state line read from the gate AFTER the write — the
+    /// truthful state, never the requested one — and resolves the
+    /// capture. An answer outside a live question is not an answer: no
+    /// write happens, nothing is said, and the capture resolves.
+    private func answerCloudChatConsent(granted: Bool) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.answerCloudChatConsent(granted: granted)
+            }
+            return
+        }
+        MainActor.assumeIsolated {
+            let prompt = cloudChatConsentPrompt()
+            let outcome = prompt.submitSpokenAnswer(granted ? .yes : .no)
+            if case .questionNotLive = outcome {
+                // Nothing was written and nothing is said (T-176's own
+                // reading: a yes/no outside the live question was
+                // addressed to something else). The capture is resolved
+                // below.
+            } else {
+                let key = cloudChatConsentGate.currentDecision().allowsEgress
+                    ? "cloud.chat.state.spoken.on"
+                    : "cloud.chat.state.spoken.off"
+                replyHonestly(key: key)
+            }
+        }
+        cloudChatCloseConsentCaptureIfResolved()
+    }
+
+    /// [CNR T-177] Resolves the capture after an answer (or a decision
+    /// change): a question still on screen (a failed grant) keeps the
+    /// capture pended and re-offers the spoken answer — the retry is
+    /// never more than saying yes again; a resolved one clears the flag
+    /// and closes the 45 s window when nothing else claims it (the
+    /// `resolveLaunchQuestion` close rule, stated once).
+    private func cloudChatCloseConsentCaptureIfResolved() {
+        let stillPresented = MainActor.assumeIsolated {
+            cloudChatConsentPromptStorage?.isPromptPresented ?? false
+        }
+        if stillPresented {
+            pendingCloudChatConsentCapture = true
+            MainActor.assumeIsolated {
+                cloudChatConsentPromptStorage?.reofferSpokenAnswer()
+            }
+            noteForwardedStateChanged()
+            return
+        }
+        pendingCloudChatConsentCapture = false
+        if !isAwaitingConfirmation, voiceSession.state == .awaitingConfirmation {
+            DispatchQueue.main.async { [weak self] in
+                self?.voiceSession.transition(to: .idle)
+            }
+        }
+        noteForwardedStateChanged()
+    }
+
+    /// [CNR T-177] The confirmation window's timeout landed while the
+    /// consent question's capture was the pended flow: the WINDOW lapses,
+    /// never the QUESTION (T-176's contract) — the spoken answer is
+    /// re-offered and the medication-flavored generic timeout line is
+    /// suppressed (there is no unanswered request to give up on; the
+    /// question is still on screen, so the honest next step is to listen
+    /// again).
+    private func reofferCloudChatConsentAfterTimeout() {
+        MainActor.assumeIsolated {
+            cloudChatConsentPromptStorage?.reofferSpokenAnswer()
+        }
+    }
+
+    // MARK: The main-actor factories (view state, born where views live)
+
+    /// [CNR T-177] The badge's model — one instance, main-confined, built
+    /// on first use with its publishes forwarded through the coalescing
+    /// seam (installed at the first build, before any window can open).
+    private func cloudChatIndicatorModel() -> CloudChatActivityIndicatorModel {
+        MainActor.assumeIsolated {
+            if let model = cloudChatIndicatorModelStorage { return model }
+            let model = CloudChatActivityIndicatorModel()
+            cloudChatIndicatorModelStorage = model
+            cloudChatIndicatorCancellable = model.objectWillChange
+                .sink { [weak self] _ in
+                    self?.noteForwardedStateChanged()
+                }
+            return model
+        }
+    }
+
+    /// [CNR T-177] The consent question's state (T-176) — one instance,
+    /// main-confined, built on first use. The locale is re-applied on
+    /// every access, so a language change re-resolves every string the
+    /// question and its sheet show; the publishes are forwarded through
+    /// the coalescing seam (the question appearing or closing must
+    /// invalidate every HomeView observer). The spoken-capture seam
+    /// handed to it is this coordinator's own arming.
+    private func cloudChatConsentPrompt() -> CloudChatConsentPrompt {
+        MainActor.assumeIsolated {
+            if let prompt = cloudChatConsentPromptStorage {
+                prompt.updateLocale(activeLocale)
+                return prompt
+            }
+            let prompt = CloudChatConsentPrompt(
+                gate: cloudChatConsentGate,
+                locale: activeLocale,
+                startSpokenCapture: { [weak self] in
+                    self?.beginCloudChatConsentCapture()
+                })
+            cloudChatConsentPromptStorage = prompt
+            cloudChatPromptCancellable = prompt.objectWillChange
+                .sink { [weak self] _ in
+                    self?.noteForwardedStateChanged()
+                }
+            return prompt
         }
     }
 
@@ -12283,6 +12869,21 @@ self.noteTalkContractChanged()
             }
             return
         }
+        // [CNR T-177] (2026-10-14) The cloud-chat consent question's
+        // spoken answer — additive block, the LAST of the flowed
+        // confirmations: every block above (navigation, call, calendar,
+        // app launch) has already returned early, so none of them can be
+        // stolen by this one, and the medication challenge below keeps
+        // its claim on a simultaneous yes/no the same way it outranks
+        // the launch (`ConfirmationArbitration`'s rule): the question
+        // outlives a missed answer, a dose does not.
+        if pendingCloudChatConsentCapture, pendingConfirmationEntryId == nil {
+            switch response {
+            case .yes: answerCloudChatConsent(granted: true)
+            case .no: answerCloudChatConsent(granted: false)
+            }
+            return
+        }
         guard let entryId = pendingConfirmationEntryId else { return }
 
         _ = medicationScheduler.acknowledgeWithConfirmation(
@@ -12317,6 +12918,10 @@ self.noteTalkContractChanged()
             || pendingCalendarEvent != nil
             || !pendingNavigationWalk.isEmpty
             || pendingAppLaunch != nil
+            // [CNR T-177] The cloud-chat consent question's spoken answer
+            // rides the same window (the router's confirmation path owns
+            // the yes/no while it is pended).
+            || pendingCloudChatConsentCapture
     }
 
     /// Used by `CommandRouter` to identify what "I took my medication" refers

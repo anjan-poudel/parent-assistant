@@ -165,12 +165,23 @@ final class GeminiClient {
     /// model-specific (e.g. `NepaliCalendarPlugin`) — costs more (a real
     /// search per call) and adds latency, so it stays opt-in per call,
     /// never a blanket default.
+    /// `temperature`: [CNR T-168 / OD-5] the explicit cloud chat sampling
+    /// temperature (design-l1 §9). Optional and `nil` by default, and a nil
+    /// value encodes as ABSENT from `GenerationConfig`
+    /// (`encodeIfPresent`), so every pre-feature call site — voice
+    /// transcription, the translation tier, the command `interpret` path,
+    /// plugins, vision — sends its shipped request shape byte-for-byte.
+    /// ONLY the cloud chat call site passes a value
+    /// (`GeminiChatConfig.temperature`); FR-CNR-011 makes that scoping the
+    /// requirement, not a convention.
     func generateJSON(prompt: String,
                       useSearchGrounding: Bool = false,
-                      systemInstruction: String? = nil) async throws -> String {
+                      systemInstruction: String? = nil,
+                      temperature: Double? = nil) async throws -> String {
         let request = GeminiRequest(
             contents: [.init(parts: [.text(prompt)])],
-            generationConfig: .init(responseMimeType: "application/json"),
+            generationConfig: .init(responseMimeType: "application/json",
+                                    temperature: temperature),
             tools: useSearchGrounding ? [.init(googleSearch: .init())] : nil,
             systemInstruction: systemInstruction.map {
                 .init(parts: [.text($0)])
@@ -658,6 +669,13 @@ struct GeminiRequest: Encodable {
 
     struct GenerationConfig: Encodable {
         var responseMimeType: String?
+        /// [CNR T-168 / OD-5, design-l1 §9] The explicit cloud chat
+        /// temperature — `0.3` at the one call site that sets it (see
+        /// `generateJSON`). `nil` at every other call site and encodable
+        /// as ABSENT (`encodeIfPresent`), which is what keeps the
+        /// transcription, translation and command-interpretation request
+        /// bodies byte-identical to their shipped shape (FR-CNR-011).
+        var temperature: Double? = nil
     }
 
     struct Tool: Encodable {

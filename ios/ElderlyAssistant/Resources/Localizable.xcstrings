@@ -3831,6 +3831,261 @@
         }
       }
     },
+    "chat.safeTemplate.danglingParticle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I enjoy listening to you. Tell me that again, please."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्दा रमाइलो लाग्छ हजुर। फेरि भन्नुहोस् न।"
+          }
+        }
+      }
+    },
+    "chat.safeTemplate.devanagariPurity": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Say that once more — I'm listening carefully."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फेरि एक चोटि सुनाउनुहोस् न हजुर। म ध्यान दिएर सुन्छु।"
+          }
+        }
+      }
+    },
+    "chat.safeTemplate.generic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tell me that again, please."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हजुर, त्यो कुरा फेरि भन्नुहोस् न।"
+          }
+        }
+      }
+    },
+    "chat.safeTemplate.honorificAgreement": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "My words came out muddled. Tell me that again, please."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेरो कुरा अलि अलमल भयो। फेरि भन्नुहोस् न हजुर।"
+          }
+        }
+      }
+    },
+    "cloud.chat.consent.allow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yes, use the internet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हो, इन्टरनेट प्रयोग गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "cloud.chat.consent.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What you say to me is sent to the internet. The answer comes from there. Everything else stays on this phone. It's fine to say no. Even if you say no, I keep answering on this phone."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हजुरले मसँग भन्नुभएको कुरा इन्टरनेटमा पठाइन्छ। जवाफ त्यही इन्टरनेटबाट आउँछ। बाँकी सबै कुरा यही फोनमै रहन्छ। होइन भन्नुभए पनि हुन्छ। त्यसो भन्नुभए पनि म यही फोनमै जवाफ दिइरहन्छु।"
+          }
+        }
+      }
+    },
+    "cloud.chat.consent.notNow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No, keep it on this phone"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "होइन, यही फोनमै राख्नुहोस्"
+          }
+        }
+      }
+    },
+    "cloud.chat.consent.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Get answers from the internet?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कुराको जवाफ इन्टरनेटबाट ल्याउने?"
+          }
+        }
+      }
+    },
+    "cloud.chat.indicator": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answering online"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनलाइन जवाफ आउँदैछ"
+          }
+        }
+      }
+    },
+    "cloud.chat.indicatorSpoken": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This answer is coming from the internet."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हजुर, यो जवाफ इन्टरनेटबाट आउँदैछ।"
+          }
+        }
+      }
+    },
+    "cloud.chat.revoke.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answers come from this phone again. Chat keeps working just as before. Nothing is lost."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जवाफ फेरि यही फोनबाट आउँछ। कुराकानी पहिलेजस्तै चलिरहन्छ। केही गुम्दैन।"
+          }
+        }
+      }
+    },
+    "cloud.chat.revoke.done": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Done — answers come from this phone now."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भयो हजुर — जवाफ अब यही फोनबाट आउँछ।"
+          }
+        }
+      }
+    },
+    "cloud.chat.revoke.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn off answers from the internet?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "इन्टरनेटबाट जवाफ ल्याउन बन्द गर्ने?"
+          }
+        }
+      }
+    },
+    "cloud.chat.state.spoken.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No — answers come from this phone right now."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "होइन हजुर — अहिले जवाफ यही फोनबाट आउँछ।"
+          }
+        }
+      }
+    },
+    "cloud.chat.state.spoken.on": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yes — answers are coming from the internet right now."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हो हजुर — अहिले जवाफ इन्टरनेटबाट आउँदैछ।"
+          }
+        }
+      }
+    },
     "cloudCascade.holdCue": {
       "extractionState": "manual",
       "localizations": {
@@ -15220,6 +15475,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "खुला हुँदा, तल देखाइएको विश्वासभन्दा कम भएको स्थानीय जवाफ क्लाउडमा जान्छ — पहिले 'एक छिन' भनिन्छ; बन्द हुँदा स्थानीय जवाफ नै रहन्छ। क्लाउड मिलाइएको नभए यसले केही गर्दैन।"
+          }
+        }
+      }
+    },
+    "settings.cloudChat.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answers from the internet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "इन्टरनेटबाट आउने जवाफ"
+          }
+        }
+      }
+    },
+    "settings.cloudChat.toggleLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Get answers from the internet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "इन्टरनेटबाट जवाफ ल्याउने"
+          }
+        }
+      }
+    },
+    "settings.cloudChat.toggleNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When this is on, the answers to our talks come from the internet. When it is off, answers come from this phone. Chat keeps working just as before."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खुला हुँदा कुराको जवाफ इन्टरनेटबाट आउँछ। बन्द हुँदा जवाफ यही फोनबाट आउँछ, र कुराकानी पहिलेजस्तै चलिरहन्छ।"
           }
         }
       }

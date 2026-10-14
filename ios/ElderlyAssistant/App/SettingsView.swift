@@ -156,6 +156,15 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 12) {
                 ForEach(tab.rows) { destination in
+                    // [CNR T-177] (2026-10-14) The cloud-chat consent row
+                    // (design-l1 §8.6 "family/caregiver paths") sits
+                    // immediately above `.privacy` in the System tab —
+                    // where the privacy-shaped household controls live,
+                    // the same placement rationale the LiveTranslate row
+                    // records for its own branch.
+                    if tab == .system, destination == .privacy {
+                        cloudChatSettingsRow
+                    }
                     SettingsSectionRow(destination: destination)
                 }
                 // [ENCODER-RUNTIME-TOGGLE] Visible door to the internal AI
@@ -188,6 +197,34 @@ struct SettingsView: View {
         HiddenSettingsSheetUsage.markUsed()
         hiddenSheetUsed = true
         showHiddenSheet = true
+    }
+
+    /// [CNR T-177] (2026-10-14) The cloud-chat consent row — the Settings
+    /// revocation surface (design-l1 §8.6: the row toggles cloud chat off
+    /// and the write goes "through the gate's one writer"). The switch is
+    /// the shipped `LiveTranslateToggleRow` (usage only — the row type and
+    /// its leaf are untouched), with the cloud-chat family's own words
+    /// (`settings.cloudChat.toggleLabel` / `.toggleNote`, T-171; both are
+    /// zero-format-slot catalogue values, so nothing here mints copy).
+    ///
+    /// The binding reads the gate's CURRENT decision through the
+    /// coordinator on every render and writes through the coordinator's
+    /// one Settings entry point — deliberately no `@State` mirror and no
+    /// `onAppear` re-read (the LiveTranslate leaf's pattern): the gate is
+    /// the single source of truth, a mirror could go stale against a voice
+    /// revoke, and a failed write must read back as what is actually on
+    /// disk. The `toggleNote` is the visible disclosure, so the flip is
+    /// silent here like every other Settings control.
+    @ViewBuilder
+    private var cloudChatSettingsRow: some View {
+        LiveTranslateToggleRow(
+            title: L10n.str("settings.cloudChat.toggleLabel", locale: locale),
+            note: L10n.str("settings.cloudChat.toggleNote", locale: locale),
+            identifier: "settings.cloudChat.toggleLabel",
+            isOn: Binding(
+                get: { coordinator.cloudChatEnabled },
+                set: { coordinator.setCloudChatEnabledFromSettings($0) }
+            ))
     }
 
     /// [BOOT-REVIEW, design item] Capability-specific diagnostics — the

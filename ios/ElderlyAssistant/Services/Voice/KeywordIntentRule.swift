@@ -66,6 +66,21 @@ import Foundation
 /// path and `mentionsMusic(_:)` is the contact-search veto's predicate
 /// (C-SP-08) — both pure statics, no model, no prompt tokens
 /// (constraint 3).
+///
+/// [CLOUD-CHAT] (2026-10-14, T-177) The cloud-chat voice controls live in
+/// this file but OUTSIDE the `Domain` table: `cloudChatVoiceRequest(
+/// transcript:)` answers two questions — "revoke the internet answers"
+/// and "are the answers coming from the internet right now?" — from
+/// keyword co-occurrence alone, with no model, no NLU and no classifier
+/// widening (design-l1 §8.6). They are a separate API for a structural
+/// reason: `Domain` is switched exhaustively by two consumers
+/// (`CommandRouter`'s relaxed stage and `DialogueCandidateBuilder`), so a
+/// new domain would change that dialogue behaviour; a request taken from
+/// this function by the router's own stage changes nothing that existed
+/// before it. The conjunction rules carry the whole safety story — an
+/// internet word alone is never a revoke, and a stop verb alone is never
+/// one either — and every pre-existing rule keeps its exact priority:
+/// this family is consulted only after every rule above has declined.
 enum KeywordIntentRule {
 
     /// Safe domains the relaxed rules may claim.
@@ -1001,6 +1016,179 @@ enum KeywordIntentRule {
             }
         }
         return matches
+    }
+
+    // MARK: - [CLOUD-CHAT] Voice controls (T-177)
+
+    /// What a deterministic cloud-chat voice control asked for
+    /// (design-l1 §8.6): one revoke family and one spoken state query.
+    /// Both are resolved by keyword co-occurrence alone — no model
+    /// involvement, no NLU, no classifier change — so a revoke works on a
+    /// device whose interpreter is unavailable, exactly like the other
+    /// safety-net rules of this table.
+    enum CloudChatVoiceRequest: Equatable {
+
+        /// "इन्टरनेटबाट जवाफ बन्द गर" / "turn off answers from the
+        /// internet": withdraw consent through the gate's one writer
+        /// (the router hands this to the coordinator, which owns the
+        /// write — this file never touches storage).
+        case revoke
+
+        /// "इन्टरनेटबाट जवाफ आउँदैछ?" / "are answers coming from the
+        /// internet?": answer truthfully from the gate's current
+        /// decision, in the elder's language.
+        case stateQuery
+
+        /// The observability outcome token, from this closed vocabulary —
+        /// the router's `cloud_chat_voice_control` event carries it and
+        /// nothing else (no transcript, no identity; NFR-CNR-006).
+        var eventToken: String {
+            switch self {
+            case .revoke: return "revoke"
+            case .stateQuery: return "state_query"
+            }
+        }
+    }
+
+    /// The internet referent every variant requires: the feature's own
+    /// subject word. Devanagari entries are `.phrase` (postpositions fuse
+    /// onto the stem — "इन्टरनेटबाट", "इन्टरनेटमा" — the grapheme rule of
+    /// 2026-09-07); the Latin entries are `.token` (whole-word only, so
+    /// "internet" cannot be found inside another word). Both ordinary
+    /// Devanagari spellings are carried: "इन्टरनेट" is the catalogue's,
+    /// "इन्टर्नेट" is the common थ/ट्र rendering STT produces.
+    private static let cloudChatInternetWords: Group = [
+        .phrase("इन्टरनेट"),
+        .phrase("इन्टर्नेट"),
+        .phrase("अनलाइन"),
+        .phrase("अनलाईन"),
+        .token("internet"),
+        .token("online")
+    ]
+
+    /// The revoke verbs. Each is a phrase whose containment covers its
+    /// honorific and inflected forms ("बन्द गर" ⊃ "बन्द गर्नुहोस्";
+    /// "रोक" ⊃ "रोक्नुहोस्"; "नल्याउ" ⊃ "नल्याउनुहोस्") — under the
+    /// family's scalar-level phrase reading (`cloudChatPhraseContained`),
+    /// because the honorific's virama conjunct ("गर्नु", "रोक्नु") has no
+    /// Character boundary inside the stem's final consonant. "नपठाउ" and
+    /// "नपठाऊ" are both carried: the उ/ऊ spellings are distinct scalars
+    /// and STT produces both (the internet group's variant-pair
+    /// convention). Bare "बन्द" is deliberately NOT here: "इन्टरनेट
+    /// बन्द छ?" is a state question, and an utterance like "इन्टरनेट
+    /// बन्द" (no verb) must fall through to the interpreter rather than
+    /// be guessed at.
+    private static let cloudChatStopWords: Group = [
+        .phrase("बन्द गर"),
+        .phrase("रोक"),
+        .phrase("नल्याउ"),
+        .phrase("नपठाउ"),
+        .phrase("नपठाऊ"),
+        .phrase("turn off"),
+        .phrase("switch off"),
+        .phrase("shut off"),
+        .token("stop"),
+        .token("disable")
+    ]
+
+    /// The state-query markers: the shapes that make an internet-word
+    /// utterance a QUESTION about the current state. Verb forms are
+    /// deliberately narrower than the revoke verbs: "चालु छ"/"बन्द छ"
+    /// are questions, "चालु गर"/"बन्द गर" are imperatives — and only the
+    /// latter is in `cloudChatStopWords`.
+    private static let cloudChatStateWords: Group = [
+        .phrase("आउँदैछ"),
+        .phrase("आउँछ"),
+        .phrase("चालु छ"),
+        .phrase("खुला छ"),
+        .phrase("चल्छ"),
+        .phrase("बन्द छ"),
+        .phrase("बन्द छैन"),
+        .phrase("अन छ"),
+        .phrase("chalu"),
+        .phrase("khula"),
+        .phrase("coming from"),
+        .token("come"),
+        .token("on"),
+        .token("off"),
+        .token("active"),
+        .token("enabled")
+    ]
+
+    /// Every way the family can fire, in evaluation order. Revoke is
+    /// FIRST and that order is the contract: an utterance carrying both a
+    /// stop verb and a state word ("इन्टरनेटबाट जवाफ आउँदैछ, बन्द गर") is
+    /// the elder asking to stop it, and the English revoke/query pair
+    /// shares the token "off" ("turn off answers from the internet" ⊃
+    /// "off") — the revoke reading is checked before the query reading
+    /// can claim it.
+    private static let cloudChatVoiceVariants: [(CloudChatVoiceRequest, [Group])] = [
+        (.revoke, [cloudChatInternetWords, cloudChatStopWords]),
+        (.stateQuery, [cloudChatInternetWords, cloudChatStateWords])
+    ]
+
+    /// [CLOUD-CHAT] Scalar-level phrase containment, scoped to THIS
+    /// family — deliberately NOT a change to `Alternative.matches`.
+    /// Swift's `String.contains` compares Characters (grapheme clusters),
+    /// and a Devanagari stem loses its final consonant to the honorific's
+    /// virama conjunct: "गर" + "्नुहोस्" has no Character boundary inside
+    /// "गर्नुहोस्", so "बन्द गर" would fail Character containment exactly
+    /// where the authored contract ("'बन्द गर' ⊃ 'बन्द गर्नुहोस्'" —
+    /// wave-close rework, 2026-10-15) requires it to hold. Comparing
+    /// unicode scalars sees the letters themselves, which is the right
+    /// primitive for a phrase whose inflection fuses onto its stem. The
+    /// house pin that Search's Character-cluster matching is left as-is
+    /// (2026-09-07) is unaffected: nothing here changes shared semantics
+    /// — this helper serves `cloudChatVoiceRequest` only.
+    private static func cloudChatPhraseContained(_ text: String, _ phrase: String) -> Bool {
+        let haystack = Array(text.unicodeScalars)
+        let needle = Array(phrase.unicodeScalars)
+        guard !needle.isEmpty, needle.count <= haystack.count else { return false }
+        for start in 0...(haystack.count - needle.count)
+        where Array(haystack[start..<(start + needle.count)]) == needle {
+            return true
+        }
+        return false
+    }
+
+    /// [CLOUD-CHAT] `Alternative.matches` with the phrase arm widened to
+    /// scalar containment (see `cloudChatPhraseContained`); the token arm
+    /// keeps the shared whole-word semantics byte-for-byte.
+    private static func cloudChatMatches(_ alternative: Alternative,
+                                         in text: String) -> Bool {
+        switch alternative {
+        case .token(let word):
+            return tokens(in: text).contains(word)
+        case .phrase(let phrase):
+            return cloudChatPhraseContained(text, phrase)
+        }
+    }
+
+    /// [CLOUD-CHAT] (2026-10-14, T-177) Resolves a deterministic
+    /// cloud-chat voice control from the utterance, or nil. The
+    /// conjunction rule is the whole safety story: every variant needs
+    /// the internet word AND its own verb/marker group, so an internet
+    /// word alone ("इन्टरनेट चल्छ?", a state question) is never a
+    /// revoke, and a bare stop verb ("अलार्म बन्द गर", "गीत बन्द गर")
+    /// never fires this family at all. Phrase reads are scalar-level for
+    /// this family (`cloudChatMatches`); canonicalization mirrors
+    /// `match`; this function consults no dynamic vocabulary and holds
+    /// no state, so two identical transcripts always resolve
+    /// identically.
+    static func cloudChatVoiceRequest(transcript raw: String) -> CloudChatVoiceRequest? {
+        let text = canonical(raw)
+        guard !text.isEmpty else { return nil }
+        for (request, groups) in cloudChatVoiceVariants {
+            var complete = true
+            for group in groups {
+                guard group.contains(where: { cloudChatMatches($0, in: text) }) else {
+                    complete = false
+                    break
+                }
+            }
+            if complete { return request }
+        }
+        return nil
     }
 
     // MARK: - Helpers

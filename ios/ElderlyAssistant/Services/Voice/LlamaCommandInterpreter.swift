@@ -25,6 +25,19 @@ import LLM
 /// router (`ReplySanityGate`) — untrustworthy output is NEVER spoken raw;
 /// it falls back to an honest re-prompt.
 ///
+/// [CHAT-SAMPLING] (2026-10-14, T-167, `conversational-nepali-replies`) The
+/// two shapes this interpreter answers now carry their own DECODE
+/// PARAMETERS, re-asserted per turn on the ONE resident handle
+/// (`ChatSampling`): the command shape keeps temperature 0 + the fixed seed
+/// + the command GBNF schema (the NO-GIBBERISH invariant, FR-CNR-004), the
+/// chat shape decodes at the reviewed chat temperature (~0.3, design-l1
+/// OD-1) at the same fixed seed (reproducible, NFR-CNR-001), and the judge
+/// path re-asserts determinism under its own schema. Every decode path
+/// records its REQUESTED parameters in `lastDecodeParameters` before it
+/// runs, so "a chat turn cannot leak temperature into a command decode" is
+/// an assertion a test (and DV-5 on device) can make without inspecting
+/// llama.cpp.
+///
 /// The interpreter sits BEHIND `CommandRouter`. Router calls it first;
 /// falls back to keyword matching on:
 ///   - interpreter unavailable (model not cached, runtime not linked)
@@ -514,6 +527,18 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// consults it after a nil result to escalate to the cloud instead
     /// of a bare apology. Cleared at the start of each interpret.
     private(set) var lastInferenceFailureReason: String?
+    /// [CHAT-SAMPLING] (T-167) The decode parameters REQUESTED for the last
+    /// decode this interpreter ran — temperature, seed and the GBNF schema
+    /// string — written at the START of every decode path (command, chat and
+    /// the judge; the test seam included), nil before the first decode.
+    ///
+    /// It records what a turn ASKED FOR, not what the handle happened to hold
+    /// (a `setParameters` that never ran would be a mismatch this record
+    /// makes visible), which is what makes "a command decode after a chat
+    /// turn requested temperature 0" — and DV-5 on device — assertable
+    /// without inspecting llama.cpp. Read-only outside: nothing configures a
+    /// turn's sampling through it.
+    private(set) var lastDecodeParameters: ChatSampling.DecodeParameters?
     /// Optional — retained for wiring compatibility (`AppCoordinator`
     /// passes the shared registry). Plugin capability fragments are NOT
     /// composed into the on-device prompt: this runtime's context is
@@ -532,6 +557,12 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// Last requested LoRA — Phase-1 skeleton only.
     private var activeLoRA: ModelID?
 
+    /// [CHAT-SAMPLING] (T-167) Internal (not `private`) so the chat-sampling
+    /// suite can pin the COMMAND shape's system slot byte-for-byte — the
+    /// local persona change applies to the chat shape ONLY, and a constant a
+    /// test cannot read cannot be pinned. (The T-170 mirror script reads the
+    /// source text, so its extraction is unaffected by the access level.)
+    ///
     /// The single template-level system prompt used for BOTH the
     /// `Template(systemPrompt:)` handed to `LLM(from:)` and the manually
     /// formatted chat header in `runInference` — previously duplicated as
@@ -549,7 +580,7 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// parser) stays untouched. Kept SHORT on purpose: the on-device
     /// context is 1,024 tokens and the intent prompt already spends
     /// ~640 of them.
-    private static let chatSystemPrompt = """
+    static let chatSystemPrompt = """
     You are Sahayak, a warm voice companion for an elderly Nepali speaker \
     — like a respectful grandchild helping their grandparent. Reply with \
     ONLY one JSON object (no fences, no other text); its "response" must \
@@ -560,6 +591,33 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     money and percents as words, never symbols: "15 degrees Celsius", \
     "8 am", "50 percent", "500 rupees" — never "15°C", "15c", "8:00 AM", \
     "50%", "Rs. 500".
+    """
+
+    /// [CHAT-PERSONA] (T-167) The CHAT shape's own system slot — the local
+    /// persona, authored from the style spec and nothing else.
+    ///
+    /// `tools/train-intent/seeds/nepali-chat-style-spec` is the single source
+    /// of truth (FR-CNR-001), and this constant carries its canonical
+    /// `persona_clause` byte-identically inside a minimal transport wrapper
+    /// (who is speaking + the JSON wire contract). No style rule is authored
+    /// here: a rule changes in the spec first, and T-170's prompt-mirror
+    /// check fails the build if these bytes and the spec's diverge.
+    ///
+    /// The clause, cited the way the spec's own drift check reads it (run
+    /// `python3 tools/train-intent/src/style_spec.py --check-consumers
+    /// <this file>`):
+    ///
+    /// @style-spec-section: persona_clause
+    /// तपाईं with honorific verbs (हजुर, भन्नुभयो, गर्नुभयो) — never तिमी; at most TWO short sentences, ONE idea each; at most one particle (है, नि, ल, ला, अनि, हुन्छ नि); health and tech nouns stay as spoken in Nepali (प्रेसर, डाक्टर, मेडिसिन); numbers, times, money and percents as words, never symbols; never a list, never repeat their words, never speak as an AI, no canned service phrases.
+    /// @style-spec-section-end: persona_clause
+    ///
+    /// The COMMAND shape keeps `chatSystemPrompt` above byte-untouched (its
+    /// assembled prompt, system included, stays byte-identical → its temp-0
+    /// output stays byte-identical); this text is applied to the chat shape
+    /// only, through `ResponseShape.systemPrompt`.
+    static let chatPersonaSystemPrompt = """
+    You are Sahayak, a voice companion for an elderly Nepali speaker. Reply with ONLY one JSON object (no fences, no other text) whose "reply" is the spoken reply in their language.
+    तपाईं with honorific verbs (हजुर, भन्नुभयो, गर्नुभयो) — never तिमी; at most TWO short sentences, ONE idea each; at most one particle (है, नि, ल, ला, अनि, हुन्छ नि); health and tech nouns stay as spoken in Nepali (प्रेसर, डाक्टर, मेडिसिन); numbers, times, money and percents as words, never symbols; never a list, never repeat their words, never speak as an AI, no canned service phrases.
     """
 
     /// Test seam: replaces the llama.cpp call entirely (same pattern as
@@ -579,6 +637,20 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// it exists to test around.
     var generateOverride: ((String, String) async throws -> String)?
 
+    /// [CHAT-SAMPLING] (T-167) The parameter-carrying variant of the same
+    /// seam: `(prompt, schema, requestedTemperature)`. Set by a test that
+    /// needs to observe what sampling a turn ASKED FOR — the schema it
+    /// decodes against AND the temperature it re-asserts — without a model.
+    ///
+    /// Default compatible: the pre-feature two-argument seam above keeps
+    /// working exactly as before (the judge path and every existing test
+    /// drive it), and when BOTH are set this variant wins — it is the more
+    /// specific observation, and a test that sets it should not be silently
+    /// served by the older closure. `lastDecodeParameters` is written on both
+    /// seam paths, so even the two-argument seam exposes the requested
+    /// temperature.
+    var generateOverrideWithParameters: ((String, String, Float) async throws -> String)?
+
     /// [MODEL-LIFECYCLE] The residency owner for the brain slot. The brain
     /// is the model that made the 6 GB devices die: at ~3.4 GB live for a
     /// 4B it is over the class budget on its own, and until now the only
@@ -592,6 +664,9 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
 
     var isAvailable: Bool {
         if generateOverride != nil { return true }
+        // [CHAT-SAMPLING] (T-167) …and the parameter-carrying variant stands
+        // in for the runtime just the same.
+        if generateOverrideWithParameters != nil { return true }
         guard modelStore.isCached(preferredBaseId) else { return false }
         #if canImport(LLM)
         return true
@@ -754,13 +829,25 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             return
         }
         #if canImport(LLM)
+        // [CHAT-SAMPLING] (T-167) The judge decodes on the same ONE
+        // resident handle, and its verdicts must be as deterministic as a
+        // command — so it re-asserts determinism ITSELF (temperature 0 +
+        // the fixed seed, under its own pick schema) instead of inheriting
+        // whatever the previous turn left behind. Without this, a judge
+        // run following a chat turn would sample at 0.3 — the same leak
+        // the command path's re-assertion exists to close (design-l1
+        // §5.2). Recorded first, like every decode path.
+        let parameters = ChatSampling.deterministicParameters(
+            schema: LlamaGrammar.judgeJSONSchema)
+        lastDecodeParameters = parameters
         // The seam mirrors the real call: the same prompt and schema reach
         // the override, so a test observes what llama.cpp is handed.
-        if let generateOverride {
+        if let seam = decodeSeam() {
             Task {
                 do {
-                    let output = try await generateOverride(
-                        Self.judgePrompt(for: batch), LlamaGrammar.judgeJSONSchema)
+                    let output = try await seam(
+                        Self.judgePrompt(for: batch), parameters.schema,
+                        parameters.temperature)
                     guard !output.isEmpty else {
                         emit("judge_empty_output", outcome: "failure")
                         abstain()
@@ -792,9 +879,13 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                             self.lifecycle.endUse(of: .brain)
                             self.lifecycle.noteUse(of: .brain)
                         }
+                        // [CHAT-SAMPLING] (T-167) Determinism goes back on
+                        // the resident handle, awaited, immediately before
+                        // the judge's own decode (see the note above).
+                        await ChatSampling.apply(parameters, to: llm.core)
                         let output = try await llm.core.generateWithConstraints(
                             from: formattedPrompt,
-                            jsonSchema: LlamaGrammar.judgeJSONSchema)
+                            jsonSchema: parameters.schema)
                         return output.isEmpty ? .failed : .success(output)
                     } catch {
                         return .failed
@@ -862,22 +953,51 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         }
     }
 
-    /// Which of the brain's two response shapes a turn is asked for. The
-    /// ONLY thing a shape changes is the prompt and the decode schema —
-    /// every other part of the turn below (sanitise, guard, infer, gate,
-    /// trace, events) is shared, so the two shapes cannot drift on the
-    /// parts that are not the shape itself.
+    /// Which of the brain's two response shapes a turn is asked for. A
+    /// shape changes the prompt, the decode schema, the system slot and the
+    /// decode PARAMETERS — every other part of the turn below (sanitise,
+    /// guard, infer, gate, trace, events) is shared, so the two shapes
+    /// cannot drift on the parts that are not the shape itself.
     private enum ResponseShape {
         /// The shipped intent-slot contract.
         case command
         /// The free-text conversational reply.
         case chat
 
-        /// The schema llama.cpp's sampler decodes against.
-        var schema: String {
+        /// [CHAT-SAMPLING] (T-167) The decode parameters this shape's turn
+        /// RE-ASSERTS on the resident handle immediately before it decodes:
+        /// temperature, seed and the GBNF schema, as one value from
+        /// `ChatSampling`'s named constants. Per turn, never set once — the
+        /// handle persists across turns, so the command shape's temperature
+        /// 0 goes back on after a chat turn at 0.3 (FR-CNR-004, design-l1
+        /// §5.2). The command value is the shipped invariant set
+        /// (`OnDeviceSampling` + the command schema); the chat value is the
+        /// reviewed chat temperature at the same fixed seed.
+        var decodeParameters: ChatSampling.DecodeParameters {
             switch self {
-            case .command: return LlamaGrammar.commandJSONSchema
-            case .chat: return LlamaGrammar.chatJSONSchema
+            case .command: return ChatSampling.commandParameters
+            case .chat: return ChatSampling.chatParameters
+            }
+        }
+
+        /// The temperature this shape's decode asks for (design-l1 OD-1).
+        var temperature: Float { decodeParameters.temperature }
+
+        /// The schema llama.cpp's sampler decodes against — derived from
+        /// `decodeParameters.schema`, so the parameters record always names
+        /// the schema the decode really ran under (one source, no drift).
+        var schema: String { decodeParameters.schema }
+
+        /// [CHAT-PERSONA] (T-167) The system slot for THIS shape. The
+        /// COMMAND shape keeps the shipped `chatSystemPrompt` bytes — its
+        /// assembled prompt stays byte-identical, so its temp-0 output does
+        /// too — while the chat shape carries the spec persona
+        /// (`chatPersonaSystemPrompt`). One shape changes its persona; the
+        /// other is pinned.
+        var systemPrompt: String {
+            switch self {
+            case .command: return LlamaCommandInterpreter.chatSystemPrompt
+            case .chat: return LlamaCommandInterpreter.chatPersonaSystemPrompt
             }
         }
 
@@ -980,7 +1100,7 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             let traceSpan = self?.traceRecorder?.start(
                 .pickerInference,
                 input: PipelineTraceSummary.estimatedPromptTokens(prompt))
-            self?.runInference(prompt: prompt, schema: shape.schema) { json in
+            self?.runInference(prompt: prompt, shape: shape) { json in
                 inferenceSpan?.finish()
                 let parsed = Self.parse(json: json)
                 let failure = self?.lastInferenceFailureReason
@@ -1213,7 +1333,10 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             completion(.failed(reason: "model_not_cached"))
             return
         }
-        if generateOverride != nil {
+        // [CHAT-SAMPLING] (T-167) EITHER seam stands in for the whole
+        // runtime — the parameter-carrying variant included — so a seam
+        // test reports `.ready` without touching llama.cpp.
+        if generateOverride != nil || generateOverrideWithParameters != nil {
             completion(.ready)
             return
         }
@@ -1408,26 +1531,61 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     }
     #endif
 
-    /// `schema` is the decode constraint for THIS turn's shape — the
-    /// command schema by default (every pre-chat call site is unchanged),
-    /// `LlamaGrammar.chatJSONSchema` for a chat turn. It reaches both the
-    /// test seam and the real sampler call, so what the seam observes is
-    /// what llama.cpp is handed.
+    /// [CHAT-SAMPLING] (T-167) The decode seam a turn runs on, if one is
+    /// set. The parameter-carrying variant wins when BOTH are set — it is
+    /// the more specific observation, and a test that sets it must not be
+    /// silently served by the older two-argument closure; the legacy seam
+    /// (every pre-feature test and the judge suite) is adapted with the
+    /// turn's requested temperature, so its callers compile and behave
+    /// unchanged.
+    private func decodeSeam() -> ((String, String, Float) async throws -> String)? {
+        if let generateOverrideWithParameters { return generateOverrideWithParameters }
+        if let generateOverride {
+            return { prompt, schema, _ in try await generateOverride(prompt, schema) }
+        }
+        return nil
+    }
+
+    /// [CHAT-SAMPLING] (T-167) `shape` supplies THIS turn's whole decode
+    /// contract: the schema, the system slot and the sampling parameters.
+    /// The parameters are RECORDED in `lastDecodeParameters` first — before
+    /// the seam and before any real decode — and re-asserted on the
+    /// resident handle immediately before `generateWithConstraints`. Both
+    /// the schema and the parameters reach the seam and the real sampler
+    /// call alike, so what the seam observes is what llama.cpp is handed.
+    ///
+    /// `shape.systemPrompt` (not one fixed constant) picks the system slot:
+    /// the command shape's bytes are unchanged, the chat shape's carries
+    /// the spec persona (FR-CNR-002).
     private func runInference(prompt: String,
-                              schema: String = LlamaGrammar.commandJSONSchema,
+                              shape: ResponseShape,
                               completion: @escaping (String?) -> Void) {
+        // [CHAT-SAMPLING] The record of what this turn ASKS FOR, written at
+        // the START of every decode path — the seam included, so a test
+        // sees the requested parameters with no model present. The command
+        // value here is the re-assertion the determinism guarantee rests
+        // on: whatever the previous turn left on the handle, this turn's
+        // record (and the handle write below) put its own parameters back.
+        let parameters = shape.decodeParameters
+        lastDecodeParameters = parameters
         // Test seam — mirrors `LocalIntentInterpreter.generateOverride`.
         // The returned string still runs through the SAME empty-output
         // guard as the real runtime below, so the seam cannot mask the
         // overflow failure mode it exists to test around.
-        if let generateOverride {
+        if let seam = decodeSeam() {
             Task {
                 do {
                     // [NO-GIBBERISH] (2026-09-07) The seam receives the
                     // same schema the real runtime call receives below, so
                     // the grammar-wiring tests can assert the schema
                     // reaches the point of the llama.cpp call.
-                    let out = try await generateOverride(prompt, schema)
+                    // [CHAT-SAMPLING] (T-167) The parameter-carrying seam
+                    // also observes the temperature the turn REQUESTED, so
+                    // "the chat turn asked for 0.3, and the command turn
+                    // after it asked for 0 again" is assertable without a
+                    // handle in the test process.
+                    let out = try await seam(prompt, parameters.schema,
+                                             parameters.temperature)
                     if out.isEmpty {
                         emit("inference_empty_output", outcome: "failure")
                         completion(nil)
@@ -1467,16 +1625,19 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         // per-model template — LLaMA 3.2 and Qwen3 schemes both live
         // here). The runtime's `generateWithConstraints` consumes the raw
         // string, exactly like `getCompletion(from:)` did.
+        // [CHAT-PERSONA] (T-167) The system slot comes from the SHAPE: the
+        // command shape formats the shipped constant (unchanged bytes), the
+        // chat shape the spec persona.
         let formattedPrompt = Self.formattedPrompt(
             prompt: prompt,
-            system: Self.chatSystemPrompt,
+            system: shape.systemPrompt,
             format: format
         )
 
         Task {
             // [NO-GIBBERISH] (2026-09-07) Grammar-constrained generation:
-            // the turn's decode schema (`schema` — the canonical command
-            // schema, or the chat schema on a chat turn) is converted by
+            // the turn's decode schema (`parameters.schema` — the canonical
+            // command schema, or the chat schema on a chat turn) is converted by
             // llama.cpp to a GBNF grammar and the sampler is chained
             // through it (see
             // `LLMCore.generateWithConstraints`) — the canonical JSON
@@ -1505,9 +1666,24 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                             self.lifecycle.endUse(of: .brain)
                             self.lifecycle.noteUse(of: .brain)
                         }
+                        // [CHAT-SAMPLING] (T-167) THIS turn's parameters
+                        // go back on the ONE resident handle, AWAITED,
+                        // immediately before the decode — the actor runs
+                        // the write and `generateWithConstraints` in
+                        // order, so no other path can interleave a field
+                        // change mid-decode. This is the re-assertion a
+                        // command turn performs after a chat turn at 0.3
+                        // (FR-CNR-004); it is deliberately NOT skipped
+                        // when the values look unchanged (see
+                        // `ChatSampling.apply`). The write also rebuilds
+                        // the sampler chain, which restarts the dist RNG
+                        // at the fixed seed — the same prompt therefore
+                        // decodes byte-identically on turn N and turn 1
+                        // (NFR-CNR-001).
+                        await ChatSampling.apply(parameters, to: llm.core)
                         let output = try await llm.core.generateWithConstraints(
                             from: formattedPrompt,
-                            jsonSchema: schema)
+                            jsonSchema: parameters.schema)
                         return output.isEmpty ? .failed : .success(output)
                     } catch {
                         return .failed
@@ -1747,3 +1923,24 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         ))
     }
 }
+
+#if canImport(LLM)
+/// [CHAT-SAMPLING] (T-167) The resident handle IS llama.cpp's `LLMCore`
+/// actor, and that is what makes the per-turn override both safe and
+/// ordered: the awaited write rides the actor's serialized execution and is
+/// completed before `generateWithConstraints` is enqueued on the same actor
+/// (design-l1 §5.2). The wrapper's `LLM.temp` setter is the
+/// `configure {}`-chained, fire-and-forget alternative and is deliberately
+/// NOT used — it cannot be awaited before the decode.
+///
+/// `setParameters` rebuilds the sampler chain (penalties → top-k → top-p →
+/// temp → dist(seed)) on every write, which is also what makes a repeated
+/// prompt decode byte-identically: each turn's decode restarts the dist RNG
+/// at the fixed seed instead of continuing the previous turn's stream
+/// (NFR-CNR-001).
+extension LLMCore: ChatSampling.ParameterHandle {
+    func setDecodeParameters(temperature: Float, seed: UInt32) async {
+        setParameters(seed: seed, temp: temperature)
+    }
+}
+#endif

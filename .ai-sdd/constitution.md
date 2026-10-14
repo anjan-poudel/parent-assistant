@@ -7,12 +7,12 @@
 | implement | `specs/implement-notes.md` | `—` | COMPLETED | 2026-10-11 |
 | review-implementation | `specs/review-implementation.md` | `—` | COMPLETED | 2026-10-11 |
 | security-test | `specs/security-test.md` | `—` | COMPLETED | 2026-10-11 |
-| define-requirements | `specs/define-requirements.lock.yaml` | `—` | COMPLETED | 2026-10-11 |
-| define-requirements | `specs/define-requirements.md` | `—` | COMPLETED | 2026-10-11 |
-| design-l1 | `specs/design-l1.md` | `—` | COMPLETED | 2026-10-11 |
+| define-requirements | `specs/define-requirements.lock.yaml` | `—` | COMPLETED | 2026-10-14 |
+| define-requirements | `specs/define-requirements.md` | `—` | COMPLETED | 2026-10-14 |
+| design-l1 | `specs/design-l1.md` | `architecture_l1` | COMPLETED | 2026-10-14 |
+| plan-tasks | `specs/plan-tasks/plan.md` | `task_breakdown_l3` | COMPLETED | 2026-10-14 |
+| plan-tasks | `specs/plan-tasks/tasks/index.md` | `—` | COMPLETED | 2026-10-14 |
 | design-l2 | `specs/design-l2.md` | `—` | COMPLETED | 2026-10-11 |
-| plan-tasks | `specs/plan-tasks/plan.md` | `—` | COMPLETED | 2026-10-11 |
-| plan-tasks | `specs/plan-tasks/tasks/index.md` | `—` | COMPLETED | 2026-10-11 |
 | review-l2 | `specs/review-l2.md` | `—` | COMPLETED | 2026-10-11 |
 | security-design-review | `specs/security-design-review.md` | `—` | COMPLETED | 2026-10-11 |
 | final-sign-off | `specs/final-sign-off.md` | `—` | COMPLETED | 2026-10-10 |

@@ -65,6 +65,47 @@ enum L10n {
     }
 }
 
+// MARK: - Cloud-chat safe templates (T-171; design-l1 §17)
+
+extension L10n {
+    /// The bounded, spec-authored safe-template set (design-l1 §17:
+    /// `chat.safeTemplate.<class>` plus a generic entry; FR-CNR-006). The
+    /// guard's check classes (T-169's `GrammarCheckClass` raw values, the
+    /// style spec's `guard_checks` ids) map 1:1 onto the class cases. The
+    /// set is CLOSED on purpose: the fallback text spoken when a flagged
+    /// reply cannot be escalated is always one of these catalogue values —
+    /// never free-form text generated at runtime, and never the flagged
+    /// reply itself.
+    enum SafeTemplate: String, CaseIterable {
+        case generic
+        case honorificAgreement
+        case devanagariPurity
+        case danglingParticle
+
+        /// The catalogue key that carries this template's copy.
+        var catalogKey: String { "chat.safeTemplate.\(rawValue)" }
+    }
+
+    /// Deterministic selection keyed by the guard's flagging check classes
+    /// (T-174 consumes this at the dispatch seam): the FIRST known class
+    /// wins — the guard reports classes in its own fixed order — and a
+    /// flag with no known class resolves to `generic`. Unknown names are
+    /// dropped, never echoed into a key: the set stays bounded.
+    static func safeTemplate(forCheckClasses classes: [String]) -> SafeTemplate {
+        for name in classes {
+            if let template = SafeTemplate(rawValue: name) { return template }
+        }
+        return .generic
+    }
+
+    /// Resolves a safe template's copy in `locale` (the `str` contract:
+    /// a total miss yields "" — callers treat that as nothing-to-say; the
+    /// catalogue coverage suite is what keeps a miss from shipping).
+    static func safeTemplate(_ template: SafeTemplate, locale: Locale) -> String {
+        str(template.catalogKey, locale: locale)
+    }
+}
+
 extension ModelCatalogEntry {
     /// Localized model display name: catalog key `model.name.<id>`
     /// resolved in `locale`; falls back to the English `displayName` for
