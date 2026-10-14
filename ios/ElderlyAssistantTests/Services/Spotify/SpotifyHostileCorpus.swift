@@ -121,7 +121,7 @@ enum SpotifyHostileCorpus {
         Entry(name: "scheme-text-spotify-prefix", value: "spotify:track:01AbCdEfGhIjKlMnOpQrSt", category: .schemeText),
         Entry(name: "scheme-text-spotify-uppercase", value: "SPOTIFY:TRACK:01ABCDEFGHIJKLMNOPQRST", category: .schemeText),
         Entry(name: "scheme-text-open-spotify-https", value: "https://open.spotify.com/track/01AbCdEfGhIjKlMnOpQrSt", category: .schemeText),
-        Entry(name: "scheme-text-auth-callback", value: "sahayak-spotify://callback?code=AQD-test", category: .schemeText),
+        Entry(name: "scheme-text-auth-callback", value: "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=AQD-test", category: .schemeText),
         Entry(name: "scheme-text-embedded-colon", value: "01AbCdEfGhIjKlMnOpQrS:track", category: .schemeText),
 
         // Double slash: authority-shaped text.

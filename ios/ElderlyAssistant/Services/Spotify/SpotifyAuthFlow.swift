@@ -51,15 +51,23 @@ enum SpotifyAuthFlow {
     /// validator below. If the Dashboard refuses the scheme, the change is
     /// this constant plus the plist entry, and the validator and its tests
     /// move with them.
-    static let callbackScheme = "sahayak-spotify"
+    ///
+    /// [V-2 re-shape, 2026-10-14] The original `sahayak-spotify` form was
+    /// refused by the Spotify Dashboard at registration (OD-S2 step 2), the
+    /// contingency the L1 §15 scheme note pre-authorizes: the constant is
+    /// re-shaped to the SDK-style `spotify-<clientid>` form and WHICH scheme
+    /// is registered is the only thing that changes — the validator's
+    /// exact-match discipline is untouched. The Dashboard must register the
+    /// matching `spotify-1aa5ca19720646e4bc46dea1acac5d37://callback`.
+    static let callbackScheme = "spotify-1aa5ca19720646e4bc46dea1acac5d37"
 
-    /// The registered callback host. `sahayak-spotify://callback` — any other
-    /// host is refused before a single query value is read.
+    /// The registered callback host. `spotify-1aa5ca19720646e4bc46dea1acac5d37://callback`
+    /// — any other host is refused before a single query value is read.
     static let callbackHost = "callback"
 
     /// The registered redirect URI, spelled exactly as it must be registered
     /// and compared.
-    static let redirectURI = "sahayak-spotify://callback"
+    static let redirectURI = "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback"
 
     // MARK: - Scopes (M-3: the pinned least-privilege set)
 

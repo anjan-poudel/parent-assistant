@@ -169,19 +169,19 @@ final class SpotifyAuthFlowTests: XCTestCase {
     // MARK: - Callback accept matrix
 
     func testCallbackAcceptsTheExactRegisteredRedirectAndReturnsTheCode() {
-        let url = URL(string: "sahayak-spotify://callback?code=AQD-test-code-1&state=\(attemptState)")!
+        let url = URL(string: "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=AQD-test-code-1&state=\(attemptState)")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(url, expectedState: attemptState),
                        .success("AQD-test-code-1"))
 
         // Extra query parameters are tolerated (the provider may append its
         // own), and percent-encoded code characters decode exactly.
         let extended = URL(string:
-            "sahayak-spotify://callback?code=AQD-test-code-2&state=\(attemptState)&extra=1")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=AQD-test-code-2&state=\(attemptState)&extra=1")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(extended, expectedState: attemptState),
                        .success("AQD-test-code-2"))
 
         let encoded = URL(string:
-            "sahayak-spotify://callback?code=AQD%2Btest%2Fcode&state=\(attemptState)")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=AQD%2Btest%2Fcode&state=\(attemptState)")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(encoded, expectedState: attemptState),
                        .success("AQD+test/code"))
     }
@@ -195,14 +195,14 @@ final class SpotifyAuthFlowTests: XCTestCase {
 
     func testCallbackRejectsAWrongSchemeBeforeItParsesAnything() {
         let url = URL(string:
-            "sahayak-spotify-evil://callback?code=AQD-test-code-1&state=\(attemptState)")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37-evil://callback?code=AQD-test-code-1&state=\(attemptState)")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(url, expectedState: attemptState),
                        .failure(.redirectMismatch))
     }
 
     func testCallbackRejectsAWrongHostBeforeItParsesAnything() {
         let url = URL(string:
-            "sahayak-spotify://not-callback?code=AQD-test-code-1&state=\(attemptState)")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://not-callback?code=AQD-test-code-1&state=\(attemptState)")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(url, expectedState: attemptState),
                        .failure(.redirectMismatch))
     }
@@ -215,14 +215,14 @@ final class SpotifyAuthFlowTests: XCTestCase {
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(upperScheme, expectedState: attemptState),
                        .failure(.redirectMismatch))
         let upperHost = URL(string:
-            "sahayak-spotify://CALLBACK?code=AQD-test-code-1&state=\(attemptState)")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://CALLBACK?code=AQD-test-code-1&state=\(attemptState)")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(upperHost, expectedState: attemptState),
                        .failure(.redirectMismatch))
     }
 
     func testCallbackRejectsANonEmptyPath() {
         let url = URL(string:
-            "sahayak-spotify://callback/extra?code=AQD-test-code-1&state=\(attemptState)")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback/extra?code=AQD-test-code-1&state=\(attemptState)")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(url, expectedState: attemptState),
                        .failure(.redirectMismatch))
     }
@@ -232,34 +232,34 @@ final class SpotifyAuthFlowTests: XCTestCase {
         // `callback:8080` as host `callback` with a port; both are refused so
         // the accepted URL space is exactly the registered redirect.
         let userinfo = URL(string:
-            "sahayak-spotify://someone@callback?code=AQD-test-code-1&state=\(attemptState)")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://someone@callback?code=AQD-test-code-1&state=\(attemptState)")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(userinfo, expectedState: attemptState),
                        .failure(.redirectMismatch))
         let port = URL(string:
-            "sahayak-spotify://callback:8080?code=AQD-test-code-1&state=\(attemptState)")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback:8080?code=AQD-test-code-1&state=\(attemptState)")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(port, expectedState: attemptState),
                        .failure(.redirectMismatch))
     }
 
     func testCallbackRejectsAFragment() {
         let url = URL(string:
-            "sahayak-spotify://callback?code=AQD-test-code-1&state=\(attemptState)#frag")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=AQD-test-code-1&state=\(attemptState)#frag")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(url, expectedState: attemptState),
                        .failure(.redirectMismatch))
     }
 
     func testCallbackRejectsAMissingState() {
-        let withoutQuery = URL(string: "sahayak-spotify://callback")!
+        let withoutQuery = URL(string: "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(withoutQuery, expectedState: attemptState),
                        .failure(.stateMismatch))
-        let withoutState = URL(string: "sahayak-spotify://callback?code=AQD-test-code-1")!
+        let withoutState = URL(string: "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=AQD-test-code-1")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(withoutState, expectedState: attemptState),
                        .failure(.stateMismatch))
     }
 
     func testCallbackRejectsAMismatchedState() {
         let url = URL(string:
-            "sahayak-spotify://callback?code=AQD-test-code-1&state=someone-elses-state")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=AQD-test-code-1&state=someone-elses-state")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(url, expectedState: attemptState),
                        .failure(.stateMismatch))
     }
@@ -272,7 +272,7 @@ final class SpotifyAuthFlowTests: XCTestCase {
         // there is nothing left to complete the exchange with even if it were
         // accepted.
         let captured = URL(string:
-            "sahayak-spotify://callback?code=AQD-attempt-one-code&state=attempt-one-state")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=AQD-attempt-one-code&state=attempt-one-state")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(captured, expectedState: "attempt-two-state"),
                        .failure(.stateMismatch))
     }
@@ -280,16 +280,16 @@ final class SpotifyAuthFlowTests: XCTestCase {
     func testCallbackRejectsAnEmptyExpectedNonceEvenForAMatchingDelivery() {
         // A caller with no nonce in hand never accepts one: an empty
         // expectation is a bug, not a wildcard.
-        let url = URL(string: "sahayak-spotify://callback?code=AQD-test-code-1&state=")!
+        let url = URL(string: "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=AQD-test-code-1&state=")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(url, expectedState: ""),
                        .failure(.stateMismatch))
     }
 
     func testCallbackRejectsAMissingOrEmptyCode() {
-        let missing = URL(string: "sahayak-spotify://callback?state=\(attemptState)")!
+        let missing = URL(string: "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?state=\(attemptState)")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(missing, expectedState: attemptState),
                        .failure(.malformedResponse))
-        let empty = URL(string: "sahayak-spotify://callback?code=&state=\(attemptState)")!
+        let empty = URL(string: "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=&state=\(attemptState)")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(empty, expectedState: attemptState),
                        .failure(.malformedResponse))
     }
@@ -298,11 +298,11 @@ final class SpotifyAuthFlowTests: XCTestCase {
         // The caregiver's own decision — its own outcome for the UI copy, not
         // a provider failure.
         let bare = URL(string:
-            "sahayak-spotify://callback?error=access_denied&state=\(attemptState)")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?error=access_denied&state=\(attemptState)")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(bare, expectedState: attemptState),
                        .failure(.userCancelled))
         let described = URL(string:
-            "sahayak-spotify://callback?error=access_denied&error_description=denied&state=\(attemptState)")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?error=access_denied&error_description=denied&state=\(attemptState)")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(described, expectedState: attemptState),
                        .failure(.userCancelled))
     }
@@ -312,7 +312,7 @@ final class SpotifyAuthFlowTests: XCTestCase {
         XCTAssertFalse(providerCodes.isEmpty, "the registry cannot be empty or this proves nothing")
         for code in providerCodes {
             let url = URL(string:
-                "sahayak-spotify://callback?error=\(code)&state=\(attemptState)")!
+                "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?error=\(code)&state=\(attemptState)")!
             XCTAssertEqual(SpotifyAuthFlow.parseCallback(url, expectedState: attemptState),
                            .failure(.providerError(code: code)),
                            "registry code \(code) must keep its typed case")
@@ -333,7 +333,7 @@ final class SpotifyAuthFlowTests: XCTestCase {
         ]
         for raw in unknown {
             let url = URL(string:
-                "sahayak-spotify://callback?error=\(raw)&state=\(attemptState)")!
+                "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?error=\(raw)&state=\(attemptState)")!
             let result = SpotifyAuthFlow.parseCallback(url, expectedState: attemptState)
             XCTAssertEqual(result, .failure(.malformedResponse), "unknown code \(raw)")
             XCTAssertNotEqual(result, .failure(.providerError(code: raw)),
@@ -344,14 +344,14 @@ final class SpotifyAuthFlowTests: XCTestCase {
     func testRejectedCallbacksNeverRetainTheProviderErrorDescription() {
         let sentinel = "provider-body-text-that-must-not-be-retained"
         let denied = URL(string:
-            "sahayak-spotify://callback?error=access_denied&error_description=\(sentinel)&state=\(attemptState)")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?error=access_denied&error_description=\(sentinel)&state=\(attemptState)")!
         let deniedResult = SpotifyAuthFlow.parseCallback(denied, expectedState: attemptState)
         XCTAssertEqual(deniedResult, .failure(.userCancelled))
         XCTAssertFalse(String(describing: deniedResult).contains(sentinel),
                        "the provider's description must not survive into the error value")
 
         let unknown = URL(string:
-            "sahayak-spotify://callback?error=unknown_provider_code&error_description=\(sentinel)&state=\(attemptState)")!
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?error=unknown_provider_code&error_description=\(sentinel)&state=\(attemptState)")!
         let unknownResult = SpotifyAuthFlow.parseCallback(unknown, expectedState: attemptState)
         XCTAssertEqual(unknownResult, .failure(.malformedResponse))
         XCTAssertFalse(String(describing: unknownResult).contains(sentinel),
@@ -365,18 +365,18 @@ final class SpotifyAuthFlowTests: XCTestCase {
         // rejection cannot hand the session anything to store.
         let rejections: [(String, String, SpotifyAuthError)] = [
             ("opaque://callback?code=x&state=\(attemptState)", attemptState, .redirectMismatch),
-            ("sahayak-spotify://evil?code=x&state=\(attemptState)", attemptState, .redirectMismatch),
-            ("sahayak-spotify://callback/", attemptState, .redirectMismatch),
-            ("sahayak-spotify://callback?code=x", attemptState, .stateMismatch),
-            ("sahayak-spotify://callback?code=x&state=wrong", attemptState, .stateMismatch),
-            ("sahayak-spotify://callback?state=\(attemptState)", attemptState, .malformedResponse),
-            ("sahayak-spotify://callback?error=access_denied&state=\(attemptState)",
+            ("spotify-1aa5ca19720646e4bc46dea1acac5d37://evil?code=x&state=\(attemptState)", attemptState, .redirectMismatch),
+            ("spotify-1aa5ca19720646e4bc46dea1acac5d37://callback/", attemptState, .redirectMismatch),
+            ("spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=x", attemptState, .stateMismatch),
+            ("spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=x&state=wrong", attemptState, .stateMismatch),
+            ("spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?state=\(attemptState)", attemptState, .malformedResponse),
+            ("spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?error=access_denied&state=\(attemptState)",
              attemptState, .userCancelled),
-            ("sahayak-spotify://callback?error=server_error&state=\(attemptState)",
+            ("spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?error=server_error&state=\(attemptState)",
              attemptState, .providerError(code: "server_error")),
-            ("sahayak-spotify://callback?error=nonsense&state=\(attemptState)",
+            ("spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?error=nonsense&state=\(attemptState)",
              attemptState, .malformedResponse),
-            ("sahayak-spotify://callback?code=replayed&state=attempt-one-state",
+            ("spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=replayed&state=attempt-one-state",
              "attempt-two-state", .stateMismatch),
         ]
         for (raw, expectedState, expectedError) in rejections {
@@ -406,7 +406,7 @@ final class SpotifyAuthFlowTests: XCTestCase {
         XCTAssertEqual(body,
                        "grant_type=authorization_code"
                        + "&code=AQD-test-code-1"
-                       + "&redirect_uri=sahayak-spotify%3A%2F%2Fcallback"
+                       + "&redirect_uri=spotify-1aa5ca19720646e4bc46dea1acac5d37%3A%2F%2Fcallback"
                        + "&client_id=client-123"
                        + "&code_verifier=test-verifier-value-43-chars")
     }
