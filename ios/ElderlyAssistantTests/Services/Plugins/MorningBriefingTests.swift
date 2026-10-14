@@ -309,10 +309,10 @@ final class MorningBriefingTests: XCTestCase {
         XCTAssertEqual(announcement.sourceID, "morning_briefing")
         XCTAssertEqual(announcement.text,
                        "Good morning, Today is Sunday, September 6, 2026\n" +
-                       "Your routines today: Morning walk — 7 am, Morning walk — 9 am\n" +
-                       "Your medications today: Amlodipine — 5 mg — 8 am\n" +
-                       "Your events today: Doctor — 10:30 AM, Lunch with Maya — 12:00 PM\n" +
-                       "The weather today: Sunny and 22 degrees")
+                       "Your routines today. Morning walk — 7 am, Morning walk — 9 am\n" +
+                       "Your medications today. Amlodipine — 5 mg — 8 am\n" +
+                       "Your events today. Doctor — 10:30 AM, Lunch with Maya — 12:00 PM\n" +
+                       "The weather today. Sunny and 22 degrees")
         // Outcome card mirrors the spoken text; body is never log metadata.
         let card = try XCTUnwrap(announcement.card)
         XCTAssertEqual(card.title, "Good morning")
@@ -440,7 +440,7 @@ final class MorningBriefingTests: XCTestCase {
         let briefing = harness.briefing(now: { self.day(6, 7, 0) })
         await briefing.fire()
         let lines = harness.queue.enqueued.first!.text.components(separatedBy: "\n")
-        XCTAssertEqual(lines.last, "The weather today: Rain expected later")
+        XCTAssertEqual(lines.last, "The weather today. Rain expected later")
     }
 
     func testUnavailableWeatherProducesHonestLineWhenProviderMissing() async {

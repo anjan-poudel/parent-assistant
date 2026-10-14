@@ -25,8 +25,15 @@ enum L10n {
         if let value = lookup(key, lproj: locale.identifier) {
             return value
         }
-        // 3. Last resort: the standard API (system language).
-        return String(localized: String.LocalizationValue(key), locale: locale)
+        // 3. Last resort: the standard API (system language). A total
+        //    miss returns the KEY itself — [AUDIT-SPOKEN] never let that
+        //    reach a synthesizer or a card: return "" instead, so the
+        //    emptiness guards at the speech seams (CommandRouter.speak,
+        //    NotificationReader) turn a miss into silence rather than
+        //    reading the key aloud, and display callers fall back to
+        //    their own defaults instead of rendering "router.x.y".
+        let fallback = String(localized: String.LocalizationValue(key), locale: locale)
+        return fallback == key ? "" : fallback
     }
 
     private static func lookup(_ key: String, lproj name: String) -> String? {
@@ -49,7 +56,9 @@ enum L10n {
     }
 
     /// Resolves `key` and applies `arguments` with `String(format:)`.
-    /// Used for keys containing %@ / %lld placeholders.
+    /// Used for keys containing %@ / %lld placeholders. A total miss
+    /// yields "" (see `str`) — callers must treat empty as
+    /// nothing-to-say, not as a format string.
     static func fmt(_ key: String, locale: Locale, _ arguments: CVarArg...) -> String {
         let format = str(key, locale: locale)
         return String(format: format, arguments: arguments)
@@ -64,6 +73,9 @@ extension ModelCatalogEntry {
     func displayName(locale: Locale) -> String {
         let key = "model.name.\(id.rawValue)"
         let value = L10n.str(key, locale: locale)
-        return value == key ? displayName : value
+        // `L10n.str` returns "" on a total miss (never the raw key); an
+        // empty resolution or a literal key-shaped value both mean "no
+        // catalog entry" and fall back to the English displayName.
+        return value.isEmpty || value == key ? displayName : value
     }
 }

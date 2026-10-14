@@ -4526,9 +4526,13 @@ final class CommandRouter {
             // [REPLY-POLISH] The deterministic polisher runs AFTER the
             // sanity gate: gibberish is rejected as gibberish, clean text
             // is polished — whitespace, punctuation runs, enumeration
-            // artifacts, stutters, and the brevity ceiling — before it
-            // reaches a human ear, whichever model produced it.
-            let polished = SpokenReplyPolisher.polish(safe)
+            // artifacts, stutters, spoken-form units (temperature tokens
+            // like "15°C"/"15c" become "15 degrees Celsius", see
+            // `SpokenUnits`) and the brevity ceiling — before it reaches a
+            // human ear, whichever model produced it. The active locale
+            // picks the Nepali/English spoken convention.
+            let polished = SpokenReplyPolisher.polish(
+                safe, locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"))
             guard !polished.isEmpty else {
                 speakWithVisibleOutcome(key: "router.modelReplyUnclear")
                 return

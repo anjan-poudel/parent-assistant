@@ -142,6 +142,38 @@ final class PiperVoiceSpeakerTests: XCTestCase {
         XCTAssertTrue(bus.emittedEvents.map(\.eventType).contains("speak"))
     }
 
+    // MARK: - [AUDIT-SPOKEN] speaker-boundary normalization seam
+
+    /// The shared normalization pass runs INSIDE speak() — the one stop
+    /// every spoken producer funnels through. A raw composition (dose
+    /// unit, percent, prose dash) reaches the engine as spoken words
+    /// without any producer changing: this is the seam contract.
+    func testSpeakNormalizesSpokenTextAtTheSeam() async throws {
+        try installFakeVoice(ModelCatalog.piperNepali)
+
+        await speaker.speak("औषधि Amlodipine 500 mg — 50% छ।",
+                            locale: Locale(identifier: "ne-NP"))
+
+        XCTAssertEqual(engine.calls.count, 1)
+        XCTAssertEqual(engine.calls[0].text,
+                       "औषधि Amlodipine ५०० मिलीग्राम, ५० प्रतिशत छ।")
+        XCTAssertTrue(bus.emittedEvents.map(\.eventType).contains("speak"),
+                      "normalization must not disturb voice resolution")
+    }
+
+    /// The English path: the reported "15c" field case plus percent and
+    /// hostname, normalized in one pass at the seam.
+    func testSeamNormalizesEnglishMechanicals() async throws {
+        try installFakeVoice(ModelCatalog.piperEnglishUS)
+
+        await speaker.speak("It's 15c and 50% off at bbc.com.",
+                            locale: Locale(identifier: "en-US"))
+
+        XCTAssertEqual(engine.calls.count, 1)
+        XCTAssertEqual(engine.calls[0].text,
+                       "It's 15 degrees Celsius and 50 percent off at bbc.")
+    }
+
     // MARK: - Warm-start seam (boot warm phase)
 
     func testWarmPreloadsInstalledVoice() throws {
