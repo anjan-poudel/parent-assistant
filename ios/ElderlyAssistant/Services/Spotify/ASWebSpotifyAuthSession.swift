@@ -147,14 +147,22 @@ final class ASWebSpotifyAuthSession: SpotifyAuthSession {
                     return
                 }
 
-                let completion: (URL?, Error?) -> Void = { callback, error in
+                // [FIX 2026-10-14] The completion captures `attempt` WEAKLY:
+                // a strong capture made attempt → live session →
+                // ASWebAuthenticationSession → completion → attempt a
+                // retain cycle, so a refused attempt stayed alive forever
+                // and the system — which allows ONE web-auth session at a
+                // time — refused every later `start()`. The attempt's
+                // lifetime is held by the task's cancellation handler
+                // instead. The callback URL is only ever read here and
+                // handed on — never logged, described or retained
+                // (NFR-SP-002).
+                let completion: (URL?, Error?) -> Void = { [weak attempt] callback, error in
                     // The completion's thread is undocumented; every touch of
                     // the attempt's state happens on the main actor, so the
-                    // report hops first. The callback URL is only ever read
-                    // here and handed on — never logged, described or
-                    // retained (NFR-SP-002).
+                    // report hops first.
                     Task { @MainActor in
-                        attempt.finish(with: Self.outcome(callback: callback, error: error))
+                        attempt?.finish(with: Self.outcome(callback: callback, error: error))
                     }
                 }
 
@@ -167,6 +175,10 @@ final class ASWebSpotifyAuthSession: SpotifyAuthSession {
                 // attributed on the Settings card. Remove with the fix.
                 Self.lastPresentationState = Self.captureWindowState(anchor: anchor)
                 guard session.start() else {
+                    // The refused session must not linger either: cancel it
+                    // so the system releases any claim on the one-session
+                    // slot before the attempt ends.
+                    session.cancel()
                     attempt.finish(with: .failure(
                         SpotifyAuthError.presentationFailed(code: Self.unreportedStartFailureCode)))
                     return
