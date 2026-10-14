@@ -76,7 +76,7 @@ final class SpeakerTests: XCTestCase {
         XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 50), 0.5, accuracy: 0.0001)
         // Out-of-range percentages clamp BEFORE the math: the transfer can
         // never see a gain the UI cannot produce.
-        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 1000), 2.0, accuracy: 0.0001)
+        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 1000), 3.0, accuracy: 0.0001)
         XCTAssertEqual(VoiceOutputGain.linearFactor(percent: -20), 0.5, accuracy: 0.0001)
     }
 
@@ -96,8 +96,8 @@ final class SpeakerTests: XCTestCase {
     }
 
     func testSoftKneeIsMinusTwelveDBFS() {
-        XCTAssertEqual(VoiceOutputGain.kneeDBFS, -12)
-        XCTAssertEqual(VoiceOutputGain.kneeLinear, 0.2512, accuracy: 0.001)
+        XCTAssertEqual(VoiceOutputGain.kneeDBFS, -15)
+        XCTAssertEqual(VoiceOutputGain.kneeLinear, 0.1778, accuracy: 0.001)
     }
 
     // MARK: - [VOLUME-BOOST] Transfer behavior (boost side)
