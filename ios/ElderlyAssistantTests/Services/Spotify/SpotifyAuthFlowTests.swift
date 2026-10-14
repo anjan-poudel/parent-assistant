@@ -184,6 +184,13 @@ final class SpotifyAuthFlowTests: XCTestCase {
             "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=AQD%2Btest%2Fcode&state=\(attemptState)")!
         XCTAssertEqual(SpotifyAuthFlow.parseCallback(encoded, expectedState: attemptState),
                        .success("AQD+test/code"))
+
+        // [FIX 2026-10-14] The OS/browser-normalized spelling with the
+        // trailing slash is the same callback and parses the same.
+        let rootPath = URL(string:
+            "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback/?code=AQD-test-code-3&state=\(attemptState)")!
+        XCTAssertEqual(SpotifyAuthFlow.parseCallback(rootPath, expectedState: attemptState),
+                       .success("AQD-test-code-3"))
     }
 
     // MARK: - Callback reject matrix (evidence obligation 3)
@@ -366,7 +373,10 @@ final class SpotifyAuthFlowTests: XCTestCase {
         let rejections: [(String, String, SpotifyAuthError)] = [
             ("opaque://callback?code=x&state=\(attemptState)", attemptState, .redirectMismatch),
             ("spotify-1aa5ca19720646e4bc46dea1acac5d37://evil?code=x&state=\(attemptState)", attemptState, .redirectMismatch),
-            ("spotify-1aa5ca19720646e4bc46dea1acac5d37://callback/", attemptState, .redirectMismatch),
+            // [FIX 2026-10-14] "/" is the OS-normalized spelling of the
+            // registered callback, not a rejection: this row now falls
+            // through to the state gate (no query at all).
+            ("spotify-1aa5ca19720646e4bc46dea1acac5d37://callback/", attemptState, .stateMismatch),
             ("spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=x", attemptState, .stateMismatch),
             ("spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?code=x&state=wrong", attemptState, .stateMismatch),
             ("spotify-1aa5ca19720646e4bc46dea1acac5d37://callback?state=\(attemptState)", attemptState, .malformedResponse),
