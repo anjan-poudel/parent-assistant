@@ -4,9 +4,10 @@ import SwiftUI
 @testable import ElderlyAssistant
 
 /// [LAT-M2] Tests for the flag-gated VAD hangover trim: the pure policy
-/// (700 ms by default, 900 ms when explicitly OFF), the EnergyVAD's
-/// frame-level end latency at the trimmed value, and the pipeline seam
-/// that hands the policy's value to the detector per capture.
+/// ([VAD-HANGOVER-DEFAULT]: 1200 ms by default, 700 ms when the trim
+/// flag is explicitly ON), the EnergyVAD's frame-level end latency at
+/// the trimmed value, and the pipeline seam that hands the policy's
+/// value to the detector per capture.
 /// The existing EnergyVADTests pin the 900 ms world with explicit
 /// values — untouched, they stay green alongside these.
 final class VADHangoverTrimTests: XCTestCase {
@@ -17,17 +18,20 @@ final class VADHangoverTrimTests: XCTestCase {
         UserDefaults(suiteName: "vad-hangover-\(UUID().uuidString)")!
     }
 
-    func testDefaultIsTrimmed700() {
+    func testDefaultIsLegacy900() {
         XCTAssertEqual(VADHangoverPolicy.hangoverMs(defaults: freshDefaults()),
-                       VADHangoverPolicy.trimmedMs,
-                       "the trim is ON by default (the plan's default-ON contract)")
+                       VADHangoverPolicy.elderlyMs,
+                       "1200 ms by default ([VAD-HANGOVER-DEFAULT]: the "
+                       + "700 ms trim cut elderly mid-sentence pauses in "
+                       + "half — field evidence 2026-10-14; console shows a cut at "
+                       + "a 2.7 s natural pause)")
     }
 
-    func testExplicitFalseRestores900() {
+    func testExplicitFalseKeeps1200() {
         let defaults = freshDefaults()
         defaults.set(false, forKey: VADHangoverPolicy.trim700DefaultsKey)
         XCTAssertEqual(VADHangoverPolicy.hangoverMs(defaults: defaults),
-                       VADHangoverPolicy.legacyMs,
+                       VADHangoverPolicy.elderlyMs,
                        "the field can restore the pre-trim hangover without a release")
     }
 
@@ -214,21 +218,30 @@ final class VADHangoverTrimTests: XCTestCase {
         return (pipeline, vad, defaults)
     }
 
-    func testPipelineStartsVADWithTrimmed700ByDefault() {
+    func testPipelineStartsVADWith1200ByDefault() {
         let h = makeHarness()
         h.pipeline.debugEnterIdleForTesting()
         h.pipeline.simulateWakeWordDetection()
-        XCTAssertEqual(h.vad.startedMs, [VADHangoverPolicy.trimmedMs],
-                       "the capture hands the trimmed hangover to the VAD by default")
+        XCTAssertEqual(h.vad.startedMs, [VADHangoverPolicy.elderlyMs],
+                       "the capture hands the 1200 ms hangover to the VAD by default ([VAD-HANGOVER-DEFAULT])")
     }
 
-    func testPipelineStartsVADWith900WhenFlagOff() {
+    func testPipelineStartsVADWith1200WhenFlagOff() {
         let h = makeHarness()
         h.defaults.set(false, forKey: VADHangoverPolicy.trim700DefaultsKey)
         h.pipeline.debugEnterIdleForTesting()
         h.pipeline.simulateWakeWordDetection()
-        XCTAssertEqual(h.vad.startedMs, [VADHangoverPolicy.legacyMs],
-                       "the flag OFF restores the pre-trim hangover per capture")
+        XCTAssertEqual(h.vad.startedMs, [VADHangoverPolicy.elderlyMs],
+                       "the flag OFF keeps the 1200 ms hangover per capture")
+    }
+
+    func testPipelineStartsVADWith700WhenTrimExplicitlyOn() {
+        let h = makeHarness()
+        h.defaults.set(true, forKey: VADHangoverPolicy.trim700DefaultsKey)
+        h.pipeline.debugEnterIdleForTesting()
+        h.pipeline.simulateWakeWordDetection()
+        XCTAssertEqual(h.vad.startedMs, [VADHangoverPolicy.trimmedMs],
+                       "the explicitly-enabled trim hands 700 ms to the VAD")
     }
 
     func testPipelineReadsTheFlagPerCapture() {
@@ -236,11 +249,11 @@ final class VADHangoverTrimTests: XCTestCase {
         h.pipeline.debugEnterIdleForTesting()
         h.pipeline.simulateWakeWordDetection()
         h.pipeline.stop()
-        // Flip the flag mid-session: the NEXT capture picks it up.
-        h.defaults.set(false, forKey: VADHangoverPolicy.trim700DefaultsKey)
+        // Flip the trim ON mid-session: the NEXT capture picks it up.
+        h.defaults.set(true, forKey: VADHangoverPolicy.trim700DefaultsKey)
         h.pipeline.debugEnterIdleForTesting()
         h.pipeline.simulateWakeWordDetection()
-        XCTAssertEqual(h.vad.startedMs, [700, 900],
+        XCTAssertEqual(h.vad.startedMs, [VADHangoverPolicy.elderlyMs, VADHangoverPolicy.trimmedMs],
                        "the hangover is read at capture start, not cached at launch")
     }
 }

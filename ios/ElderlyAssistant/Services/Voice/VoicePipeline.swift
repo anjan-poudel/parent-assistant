@@ -157,13 +157,15 @@ final class VoicePipeline {
     /// Long enough is cheap here: the VAD only fires once per capture,
     /// and the recognizer simply transcribes everything up to that point.
     ///
-    /// [LAT-M2] (2026-09-11) Now flag-gated: 700 ms by default (the
-    /// latency-compliance trim — a finished utterance ends ~200 ms
-    /// earlier), 900 ms when `vadHangoverTrim700` is explicitly OFF.
-    /// The elderly-pause trade-off, and the protections that remain
-    /// (EnergyVAD band hold + 3 s force end + clear-speech reset), are
-    /// documented at `VADHangoverPolicy` — the trim touches ONLY this
-    /// quiet-run hangover, never the force end or the capture cap.
+    /// [LAT-M2] (2026-09-11) Flag-gated: [VAD-HANGOVER-DEFAULT]
+    /// (2026-10-14) now 900 ms by default — the 700 ms latency trim
+    /// closed the capture on elderly mid-sentence pauses and cut
+    /// instructions in half (field evidence), so the trim is opt-in
+    /// (`vadHangoverTrim700` explicitly true). The elderly-pause
+    /// trade-off, and the protections that remain (EnergyVAD band hold
+    /// + 3 s force end + clear-speech reset), are documented at
+    /// `VADHangoverPolicy` — the trim touches ONLY this quiet-run
+    /// hangover, never the force end or the capture cap.
     private var endOfUtteranceMs: Int {
         VADHangoverPolicy.hangoverMs(defaults: vadHangoverDefaults)
     }
