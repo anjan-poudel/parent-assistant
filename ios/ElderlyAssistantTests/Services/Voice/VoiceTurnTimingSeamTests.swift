@@ -90,7 +90,7 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
         /// first process) and the frame-latency event math.
         private(set) var calls: [String] = []
         private(set) var frames: [[Int16]] = []
-        func start(endOfUtteranceMs: Int) { calls.append("start") }
+        func start(policy: AdaptiveEndpointPolicy) { calls.append("start") }
         func stop() { calls.append("stop") }
         func reset() { calls.append("reset") }
         func process(_ pcm: [Int16]) {

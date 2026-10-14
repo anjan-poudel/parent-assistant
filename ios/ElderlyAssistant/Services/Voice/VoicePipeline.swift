@@ -157,17 +157,15 @@ final class VoicePipeline {
     /// Long enough is cheap here: the VAD only fires once per capture,
     /// and the recognizer simply transcribes everything up to that point.
     ///
-    /// [LAT-M2] (2026-09-11) Flag-gated: [VAD-HANGOVER-DEFAULT]
-    /// (2026-10-14) now 900 ms by default — the 700 ms latency trim
-    /// closed the capture on elderly mid-sentence pauses and cut
-    /// instructions in half (field evidence), so the trim is opt-in
-    /// (`vadHangoverTrim700` explicitly true). The elderly-pause
-    /// trade-off, and the protections that remain (EnergyVAD band hold
-    /// + 3 s force end + clear-speech reset), are documented at
-    /// `VADHangoverPolicy` — the trim touches ONLY this quiet-run
-    /// hangover, never the force end or the capture cap.
-    private var endOfUtteranceMs: Int {
-        VADHangoverPolicy.hangoverMs(defaults: vadHangoverDefaults)
+    /// [ADAPTIVE-ENDPOINT] (2026-10-14) The trailing-silence policy is
+    /// no longer a fixed millisecond value: the detector self-calibrates
+    /// to the speaker's observed pauses (floor 900 ms, 1.6x their p75,
+    /// capped at the 3 s force end, 1200 ms before the first pause).
+    /// The 700 ms latency trim remains an explicit opt-in
+    /// (`vadHangoverTrim700` true). Band hold, force end and
+    /// clear-speech reset are unchanged.
+    private var endpointPolicy: AdaptiveEndpointPolicy {
+        VADHangoverPolicy.hangoverPolicy(defaults: vadHangoverDefaults)
     }
 
     /// [LAT-M2] Injected UserDefaults for the hangover flag — the same
@@ -921,7 +919,7 @@ final class VoicePipeline {
             // the first frames — benign but sloppy; the first turn paid
             // it most often, right after launch).
             vad?.reset()
-            vad?.start(endOfUtteranceMs: endOfUtteranceMs)
+            vad?.start(policy: endpointPolicy)
             wireVADCallbacks()
             captureChunkCount = 0
         }
