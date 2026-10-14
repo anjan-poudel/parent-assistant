@@ -103,7 +103,7 @@ final class ExternalCalendarService: ObservableObject {
     /// (same shape as `CalendarSyncService`).
     var isEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(isEnabled, forKey: Self.enabledDefaultsKey)
+            defaults.set(isEnabled, forKey: Self.enabledDefaultsKey)
         }
     }
 
@@ -113,7 +113,7 @@ final class ExternalCalendarService: ObservableObject {
     var leadMinutes: Int {
         didSet {
             leadMinutes = min(max(leadMinutes, 0), Self.maxLeadMinutes)
-            UserDefaults.standard.set(leadMinutes, forKey: Self.leadDefaultsKey)
+            defaults.set(leadMinutes, forKey: Self.leadDefaultsKey)
             // Self-assignment inside didSet does not re-trigger the
             // observer, so the clamp above is recursion-free.
             guard isEnabled, leadMinutes != oldValue else { return }
@@ -148,13 +148,19 @@ final class ExternalCalendarService: ObservableObject {
     /// the main queue (observer queue + the async reset below).
     private var isScanning = false
 
+    /// [SETTINGS-PERSIST] The settings seam (keychain-durable with
+    /// a UserDefaults fallback); production default, tests inject
+    /// their own scratch suite.
+    private let defaults: UserDefaults
+
     init(
         scanner: NativeCalendarScanning = EKCalendarScanner(),
         alarmScheduler: ExternalAlarmScheduling = UNExternalReminderScheduler(),
         opener: ExternalItemOpening = SystemExternalItemOpener(),
         observabilityBus: ObservabilityBus,
         now: @escaping () -> Date = Date.init,
-        submitRefreshRequest: @escaping () -> Void = ExternalCalendarService.submitBackgroundRefreshRequest
+        submitRefreshRequest: @escaping () -> Void = ExternalCalendarService.submitBackgroundRefreshRequest,
+        defaults: UserDefaults = SettingsPersistence.shared
     ) {
         self.scanner = scanner
         self.alarmScheduler = alarmScheduler
@@ -162,12 +168,13 @@ final class ExternalCalendarService: ObservableObject {
         self.observabilityBus = observabilityBus
         self.now = now
         self.submitRefreshRequest = submitRefreshRequest
-        let restoredStatus = UserDefaults.standard
+        self.defaults = defaults
+        let restoredStatus = defaults
             .string(forKey: Self.statusDefaultsKey)
             .flatMap(ExternalAccessStatus.init(rawValue:)) ?? .notRequested
         self.status = restoredStatus
-        self.isEnabled = UserDefaults.standard.bool(forKey: Self.enabledDefaultsKey)
-        let storedLead = UserDefaults.standard.object(forKey: Self.leadDefaultsKey) as? Int
+        self.isEnabled = defaults.bool(forKey: Self.enabledDefaultsKey)
+        let storedLead = defaults.object(forKey: Self.leadDefaultsKey) as? Int
             ?? Self.defaultLeadMinutes
         self.leadMinutes = min(max(storedLead, 0), Self.maxLeadMinutes)
     }
@@ -523,7 +530,7 @@ final class ExternalCalendarService: ObservableObject {
 
     @MainActor
     private func persistStatus(_ value: ExternalAccessStatus) {
-        UserDefaults.standard.set(value.rawValue, forKey: Self.statusDefaultsKey)
+        defaults.set(value.rawValue, forKey: Self.statusDefaultsKey)
         status = value
     }
 

@@ -180,9 +180,9 @@ final class CalendarSyncService: NSObject {
     /// mode OF the mirror: turning the mirror off clears it too (an
     /// on-state that can never act is a lie).
     var isEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: Self.enabledDefaultsKey) }
+        get { defaults.bool(forKey: Self.enabledDefaultsKey) }
         set {
-            UserDefaults.standard.set(newValue, forKey: Self.enabledDefaultsKey)
+            defaults.set(newValue, forKey: Self.enabledDefaultsKey)
             if !newValue {
                 if twoWayEnabled { twoWayEnabled = false }
                 status = .notRequested
@@ -196,8 +196,8 @@ final class CalendarSyncService: NSObject {
     /// `isEnabled`; the OS's permission truth gates every two-way pass
     /// through `twoWaySyncDecision`.
     var twoWayEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: Self.twoWayEnabledDefaultsKey) }
-        set { UserDefaults.standard.set(newValue, forKey: Self.twoWayEnabledDefaultsKey) }
+        get { defaults.bool(forKey: Self.twoWayEnabledDefaultsKey) }
+        set { defaults.set(newValue, forKey: Self.twoWayEnabledDefaultsKey) }
     }
     private static let twoWayEnabledDefaultsKey = "calendarSync.twoWayEnabled"
 
@@ -231,23 +231,30 @@ final class CalendarSyncService: NSObject {
     /// persistence fix): every transition writes through here.
     @Published private(set) var status: SyncStatus {
         didSet {
-            UserDefaults.standard.set(Self.storageKey(for: status),
+            defaults.set(Self.storageKey(for: status),
                                       forKey: Self.statusDefaultsKey)
         }
     }
+
+    /// [SETTINGS-PERSIST] The settings seam (keychain-durable with
+    /// a UserDefaults fallback); production default, tests inject
+    /// their own scratch suite.
+    private let defaults: UserDefaults
 
     init(
         gateway: EventKitCalendarGateway = EKCalendarGateway(),
         linkStore: ExternalEventLinkStore = ExternalEventLinkStore(),
         observabilityBus: ObservabilityBus,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        defaults: UserDefaults = SettingsPersistence.shared
     ) {
         self.gateway = gateway
         self.linkStore = linkStore
         self.observabilityBus = observabilityBus
         self.now = now
+        self.defaults = defaults
         self.status = Self.restoredStatus(fromStored:
-            UserDefaults.standard.string(forKey: Self.statusDefaultsKey))
+            defaults.string(forKey: Self.statusDefaultsKey))
         super.init()
 
         // Native-change observation (two-way): a family edit in the

@@ -37,13 +37,13 @@ enum ModelPreferenceMemory {
 
     /// The STT engines the household has EXPLICITLY picked, keyed by the
     /// app language they were picked in (ISO 639-1, lowercased).
-    static func rememberedSTT(defaults: UserDefaults = .standard) -> [String: ModelID] {
+    static func rememberedSTT(defaults: UserDefaults = SettingsPersistence.shared) -> [String: ModelID] {
         decode(key: sttKey, defaults: defaults)
     }
 
     /// The assistant brains the household has EXPLICITLY picked, keyed the
     /// same way.
-    static func rememberedBrain(defaults: UserDefaults = .standard) -> [String: ModelID] {
+    static func rememberedBrain(defaults: UserDefaults = SettingsPersistence.shared) -> [String: ModelID] {
         decode(key: brainKey, defaults: defaults)
     }
 
@@ -58,7 +58,7 @@ enum ModelPreferenceMemory {
     @discardableResult
     static func rememberSTT(_ id: ModelID,
                             for language: String,
-                            defaults: UserDefaults = .standard) -> Bool {
+                            defaults: UserDefaults = SettingsPersistence.shared) -> Bool {
         remember(id, kind: .whisperBase, key: sttKey,
                  language: language, defaults: defaults)
     }
@@ -68,14 +68,14 @@ enum ModelPreferenceMemory {
     @discardableResult
     static func rememberBrain(_ id: ModelID,
                               for language: String,
-                              defaults: UserDefaults = .standard) -> Bool {
+                              defaults: UserDefaults = SettingsPersistence.shared) -> Bool {
         remember(id, kind: .llamaBase, key: brainKey,
                  language: language, defaults: defaults)
     }
 
     /// Test seam: drops BOTH memories (the live preferences are not
     /// touched — the picker keeps its selection).
-    static func clear(defaults: UserDefaults = .standard) {
+    static func clear(defaults: UserDefaults = SettingsPersistence.shared) {
         defaults.removeObject(forKey: sttKey)
         defaults.removeObject(forKey: brainKey)
     }
