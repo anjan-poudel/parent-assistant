@@ -115,6 +115,26 @@ final class ASWebSpotifyAuthSession: SpotifyAuthSession {
     /// returned uninspected (the flow validates it), and every failure is a
     /// `SpotifyAuthError` this seam throws — never an untyped system error.
     func authorize(url: URL, callbackURLScheme: String) async throws -> URL {
+        do {
+            return try await presentWithSystemSession(url: url,
+                                                     callbackURLScheme: callbackURLScheme)
+        } catch SpotifyAuthError.presentationFailed(let code)
+                    where code == Self.unreportedStartFailureCode {
+            // [iOS 26.6.2 workaround, 2026-10-14] The system refused
+            // `start()` with no reason of its own (presentationFailed(0)
+            // with a perfect window state). Fall back to the in-app Safari
+            // consent seam — a different presentation mechanism the system
+            // does not refuse — before the attempt is reported failed.
+            return try await safariFallback.authorize(url: url,
+                                                     callbackURLScheme: callbackURLScheme)
+        }
+    }
+
+    /// The fallback consent seam (same presenter resolution), created
+    /// lazily so injected presenters in tests still drive it.
+    private lazy var safariFallback = SafariSpotifyAuthSession(presenter: self.presenter)
+
+    private func presentWithSystemSession(url: URL, callbackURLScheme: String) async throws -> URL {
         guard let anchor = presenter() else {
             throw SpotifyAuthError.noPresenter
         }

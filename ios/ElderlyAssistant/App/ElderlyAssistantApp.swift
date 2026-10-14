@@ -47,7 +47,18 @@ struct ElderlyAssistantApp: App {
                 // verification lanes need no on-device taps; inert
                 // without `-probeMessengerHandle`.
                 MessengerProbe.runIfRequested(on: appCoordinator)
+                // Spotify link probe (2026-10-14): drives the link flow
+                // from launch arguments so the consent presentation can be
+                // verified without taps; inert without `-spotifyLink`.
+                SpotifyLinkProbe.runIfRequested(on: appCoordinator)
                 #endif
+            }
+            // The OAuth callback bridge for the in-app Safari consent
+            // seam (the iOS 26.6.2 ASWebAuthenticationSession workaround):
+            // callback-scheme URLs are consumed by a pending attempt and
+            // nothing else; all other URLs are not this handler's concern.
+            .onOpenURL { url in
+                _ = SafariSpotifyAuthSession.handleOpenURL(url)
             }
             .environmentObject(appCoordinator)
             .environmentObject(appCoordinator.voiceSession)
