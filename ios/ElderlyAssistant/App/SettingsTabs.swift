@@ -308,6 +308,15 @@ struct SettingsSectionRow: View {
                               status: statusBadge)
         }
         .buttonStyle(.plain)
+        // [RESPONSIVENESS] Press confirmation for every settings row —
+        // the hub's and the hidden sheet's alike, since both render
+        // through this one row (SettingsRowChrome's own doc: "one
+        // implementation, so the tab rows and the hidden sheet's rows
+        // cannot drift apart"). The push animation is the visual half;
+        // the light tap is the half an elder feels while still looking
+        // at the row they pressed. See `Haptics` for the accessibility
+        // gates (reduceMotion/VoiceOver suppress it wholesale).
+        .hapticOnTap()
         .accessibilityIdentifier("settings.\(destination.rawValue)")
     }
 
@@ -376,6 +385,14 @@ struct SettingsTabBar: View {
                     let selected = tab == selection
                     let title = L10n.str(tab.titleKey, locale: locale)
                     Button {
+                        // [RESPONSIVENESS] The selection tick fires only
+                        // on a REAL change — re-tapping the pill already
+                        // selected must stay silent, or the tick stops
+                        // meaning "the tab changed" and starts meaning
+                        // "something was touched" (see `Haptics` for the
+                        // reduceMotion/VoiceOver gates).
+                        guard tab != selection else { return }
+                        Haptics.play(.selection)
                         selection = tab
                     } label: {
                         Text(title)
@@ -536,6 +553,11 @@ struct HiddenSettingsSheet: View {
                                           titleKey: "settings.ai.title")
                     }
                     .buttonStyle(.plain)
+                    // [RESPONSIVENESS] Same press confirmation as the
+                    // destination rows above — these three closure links
+                    // are settings rows in everything but their type, so
+                    // they cannot feel different (see `Haptics`).
+                    .hapticOnTap()
 
                     // [SCHEME-PROBE] (2026-09-19) The URL scheme tester —
                     // a diagnostic tool, so it lives here with the other
@@ -547,6 +569,7 @@ struct HiddenSettingsSheet: View {
                                           titleKey: "settings.schemeProbe.title")
                     }
                     .buttonStyle(.plain)
+                    .hapticOnTap()  // [RESPONSIVENESS] see the row above
 
                     // [TRANSLATE-TEST] (2026-09-21) The translation
                     // comparison screen — runs the two shipped translation
@@ -562,6 +585,7 @@ struct HiddenSettingsSheet: View {
                                           titleKey: "settings.translateTest.title")
                     }
                     .buttonStyle(.plain)
+                    .hapticOnTap()  // [RESPONSIVENESS] see above
 
                     // [DEVSCREEN-DOWNLOAD] (2026-09-21) The switch the
                     // translation comparison screen's Download button needs

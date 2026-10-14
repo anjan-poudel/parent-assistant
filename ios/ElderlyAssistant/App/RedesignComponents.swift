@@ -489,7 +489,16 @@ struct OutcomeCardView: View {
                         .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                     if let undo = outcome.undo {
-                        Button(action: undo) {
+                        // [RESPONSIVENESS] The undo is the one
+                        // consequential action on the card — the light
+                        // tap confirms the press landed while the
+                        // outcome text is still being read back (see
+                        // `Haptics` for the reduceMotion/VoiceOver
+                        // gates; silence is the failure direction).
+                        Button {
+                            Haptics.play(.tap)
+                            undo()
+                        } label: {
                             Text("home.outcome.undo")
                                 .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                                 .foregroundStyle(appearance.badgeTint(.emergency))
@@ -501,7 +510,13 @@ struct OutcomeCardView: View {
                     // stand-down states actionable — one recovery action,
                     // nothing transient-only). Clears `lastOutcome` so the
                     // setup strip returns for the rest of the session.
-                    Button(action: onDismiss) {
+                    Button {
+                        // [RESPONSIVENESS] Light press confirmation —
+                        // same vocabulary as the undo beside it (see
+                        // `Haptics`).
+                        Haptics.play(.tap)
+                        onDismiss()
+                    } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                             .foregroundStyle(appearance.colors.textSecondary)
@@ -519,7 +534,13 @@ struct OutcomeCardView: View {
     }
 
     private var collapsedChip: some View {
-        Button(action: onTapChip) {
+        Button {
+            // [RESPONSIVENESS] Expanding the conversation is a primary
+            // tap (it is the only door to the history sheet) — same
+            // light press confirmation as the card's own buttons.
+            Haptics.play(.tap)
+            onTapChip()
+        } label: {
             HStack(spacing: 14) {
                 Circle()
                     .fill(appearance.colors.userBubble)
@@ -669,6 +690,10 @@ struct ConversationHistorySheet: View {
                 // so an elder must never be stranded on the history sheet.
                 HStack(alignment: .center, spacing: 12) {
                     Button {
+                        // [RESPONSIVENESS] Light press confirmation, the
+                        // same feel every settings-screen back control
+                        // gives (see `Haptics` for the gates).
+                        Haptics.play(.tap)
                         dismiss()
                     } label: {
                         Image(systemName: "chevron.left")
@@ -693,7 +718,14 @@ struct ConversationHistorySheet: View {
                         .padding(.top, 32)
                 } else {
                     ForEach(visibleRows) { exchange in
-                        row(exchange)
+                        // [RESPONSIVENESS] (2026-10-14) The row is now an
+                        // extracted, `.equatable()`-gated value view (see
+                        // `ConversationHistoryRow`): unrelated coordinator
+                        // publishes no longer rebuild every row's body.
+                        ConversationHistoryRow(
+                            exchange: exchange,
+                            timingCaption: timingCaption(for: exchange))
+                            .equatable()
                     }
                     if canShowMore {
                         showMoreButton
@@ -721,7 +753,13 @@ struct ConversationHistorySheet: View {
     }
 
     private var showMoreButton: some View {
-        Button(action: loadOlderPage) {
+        Button {
+            // [RESPONSIVENESS] The page load is invisible until the rows
+            // land — the press confirmation is what tells the elder the
+            // button did something at all (see `Haptics`).
+            Haptics.play(.tap)
+            loadOlderPage()
+        } label: {
             Text("history.showMore")
                 .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                 .frame(maxWidth: .infinity)
@@ -735,7 +773,44 @@ struct ConversationHistorySheet: View {
         .padding(.top, 4)
     }
 
-    private func row(_ exchange: AppCoordinator.Exchange) -> some View {
+    /// The [TURN-TIMING] caption shown under `exchange`'s row, or nil —
+    /// resolved here, at the sheet, so the extracted row compares its
+    /// caption as a plain value (see `ConversationHistoryRow`). The
+    /// caption belongs to the latest finalized turn only; every other
+    /// row resolves to nil and stays equal across publishes.
+    private func timingCaption(for exchange: AppCoordinator.Exchange) -> String? {
+        guard coordinator.voiceTimingDebugEnabled,
+              exchange.role == .assistant,
+              exchange.id == coordinator.lastTurnTimingExchangeID else { return nil }
+        return coordinator.lastTurnTimingCaption
+    }
+}
+
+/// [RESPONSIVENESS] (2026-10-14) One conversation-history row, extracted
+/// from `ConversationHistorySheet.row(_:)` so it can be `.equatable()`'d.
+/// The sheet observes the whole coordinator and is open exactly while a
+/// voice turn is churning (transcript, outcome, history and the timing
+/// caption all publish once or more per turn), so every row's body used
+/// to be rebuilt on every one of those publishes. `==` compares the DATA
+/// inputs only, per the house rule (`HomePresentationState`'s documented
+/// contract): the exchange value plus the pre-resolved timing caption.
+/// `@Environment` reads (appearance, locale) are not part of the
+/// comparison — environment invalidation still re-renders the body, the
+/// same as it does for the equatable Home views.
+private struct ConversationHistoryRow: View, Equatable {
+    @Environment(\.appAppearance) private var appearance
+    let exchange: AppCoordinator.Exchange
+    /// nil = no caption under this row (`ConversationHistorySheet
+    /// .timingCaption(for:)` resolves the coordinator state to this plain
+    /// value).
+    let timingCaption: String?
+
+    static func == (lhs: ConversationHistoryRow,
+                    rhs: ConversationHistoryRow) -> Bool {
+        lhs.exchange == rhs.exchange && lhs.timingCaption == rhs.timingCaption
+    }
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(LocalizedStringKey(exchange.role == .user ? "home.conversation.user" : "home.conversation.assistant"))
                 .font(.system(size: appearance.typography.captionPointSize, weight: .bold)).foregroundStyle(exchange.role == .user ? appearance.colors.textSecondary : appearance.colors.accentForeground)
@@ -749,10 +824,7 @@ struct ConversationHistorySheet: View {
             // reply — shown only when the Voice personalization "Show
             // conversation timing" toggle is ON, and only under the row
             // the caption belongs to (the latest finalized turn).
-            if coordinator.voiceTimingDebugEnabled,
-               exchange.role == .assistant,
-               exchange.id == coordinator.lastTurnTimingExchangeID,
-               let caption = coordinator.lastTurnTimingCaption {
+            if let caption = timingCaption {
                 Text(caption)
                     .font(.system(size: appearance.typography.captionPointSize, design: .monospaced))
                     .foregroundStyle(appearance.colors.textSecondary.opacity(0.75))

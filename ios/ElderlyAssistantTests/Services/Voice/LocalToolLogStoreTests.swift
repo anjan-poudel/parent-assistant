@@ -36,11 +36,35 @@ final class LocalToolLogStoreTests: XCTestCase {
     func testRecordPersistsAcrossStoreInstancesOverTheSameStorage() {
         let storage = GeminiInMemoryStorage()
         let entry = makeEntry(query: "भोलि काठमाडौंमा पानी पर्छ?", outcome: "fallback")
-        LocalToolLogStore(storage: storage).record(entry)
+        let store = LocalToolLogStore(storage: storage)
+        store.record(entry)
+        // [RESPONSIVENESS] (2026-10-14) `record` writes on the store's
+        // serial io queue now — flush() is the deterministic seam that
+        // drains it before a second store instance reads disk.
+        store.flush()
 
         let reloaded = LocalToolLogStore(storage: storage)
         XCTAssertEqual(reloaded.entries(), [entry],
                        "a fresh store over the same storage must read the persisted entry")
+    }
+
+    /// [RESPONSIVENESS] (2026-10-14) The split record contract, pinned:
+    /// memory updates IMMEDIATELY (`entries()` is the Settings review
+    /// screen's read and never waits for disk), while the encode + write
+    /// run on the store's serial io queue — `flush()` drains it and the
+    /// payload is durable for a fresh instance.
+    func testRecordIsMemoryImmediateAndDiskConvergesAfterFlush() {
+        let storage = GeminiInMemoryStorage()
+        let store = LocalToolLogStore(storage: storage)
+        let entry = makeEntry(kind: .weather, query: "भोलिको मौसम कस्तो छ?")
+
+        store.record(entry)
+        XCTAssertEqual(store.entries(), [entry],
+                       "memory is the authority and is never queued behind disk")
+
+        store.flush()
+        XCTAssertEqual(LocalToolLogStore(storage: storage).entries(), [entry],
+                       "after flush the payload is durable for a fresh store instance")
     }
 
     func testEntriesAreNewestFirst() {
@@ -122,8 +146,13 @@ final class LocalToolLogStoreTests: XCTestCase {
             kind: .spotify, query: "",
             response: "Spotify is not available right now.", outcome: "fail")
 
-        LocalToolLogStore(storage: storage).record(servedRemote)
-        LocalToolLogStore(storage: storage).record(terminalHonest)
+        let store = LocalToolLogStore(storage: storage)
+        store.record(servedRemote)
+        store.record(terminalHonest)
+        // [RESPONSIVENESS] (2026-10-14) Drain the async writer before
+        // the second instance reads disk (see the record-persistence
+        // test's note).
+        store.flush()
 
         let reloaded = LocalToolLogStore(storage: storage)
         XCTAssertEqual(reloaded.entries(), [terminalHonest, servedRemote],
