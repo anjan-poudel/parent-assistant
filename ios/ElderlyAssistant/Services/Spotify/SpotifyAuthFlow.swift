@@ -232,9 +232,17 @@ enum SpotifyAuthFlow {
             return .failure(.redirectMismatch)
         }
         // Exact-match gate: refuse before parsing anything.
+        //
+        // [FIX 2026-10-14] The path accepts the empty spelling OR "/" —
+        // browsers and the system normalize `scheme://host` to
+        // `scheme://host/` when delivering the redirect (the device
+        // finding: a real callback arrived as `...://callback/` and was
+        // rejected as redirectMismatch). They are the same URI authority
+        // spelling; every other variance stays rejected.
+        let pathIsEmptyOrRoot = components.path.isEmpty || components.path == "/"
         guard components.scheme == callbackScheme,
               components.host == callbackHost,
-              components.path.isEmpty,
+              pathIsEmptyOrRoot,
               (components.user ?? "").isEmpty,
               (components.password ?? "").isEmpty,
               components.port == nil,
