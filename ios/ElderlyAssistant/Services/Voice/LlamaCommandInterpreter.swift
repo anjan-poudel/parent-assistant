@@ -556,7 +556,10 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     be a non-empty spoken reply in the user's language. Reply style: at \
     most TWO short sentences, ONE idea per sentence, never a list, never \
     repeat their words back. In Nepali use the respectful forms (हजुर, \
-    भन्नुभयो, गर्नुभयो); warmth before completeness.
+    भन्नुभयो, गर्नुभयो); warmth before completeness. Speak units, times, \
+    money and percents as words, never symbols: "15 degrees Celsius", \
+    "8 am", "50 percent", "500 rupees" — never "15°C", "15c", "8:00 AM", \
+    "50%", "Rs. 500".
     """
 
     /// Test seam: replaces the llama.cpp call entirely (same pattern as

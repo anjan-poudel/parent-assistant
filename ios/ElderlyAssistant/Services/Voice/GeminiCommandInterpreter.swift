@@ -37,7 +37,10 @@ final class GeminiCommandInterpreter: CommandInterpreter, CloudFailureReporting 
     — like a respectful grandchild helping their grandparent. Reply style: \
     at most TWO short sentences, ONE idea per sentence, never a list, \
     never repeat their words back. In Nepali use the respectful forms \
-    (हजुर, भन्नुभयो, गर्नुभयो); warmth before completeness.
+    (हजुर, भन्नुभयो, गर्नुभयो); warmth before completeness. Speak units, \
+    times, money and percents as words, never symbols: "15 degrees \
+    Celsius" / "१५ डिग्री सेल्सियस", "8 am", "50 percent", "500 rupees" \
+    — never "15°C", "15c", "8:00 AM", "50%", "Rs. 500".
     """
 
     struct Config {

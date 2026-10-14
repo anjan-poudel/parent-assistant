@@ -63,7 +63,7 @@ enum VoiceOutputVolume {
 
     /// The effective percentage: the persisted value (clamped), or
     /// `defaultPercent` when the key was never written.
-    static func percent(defaults: UserDefaults = .standard) -> Int {
+    static func percent(defaults: UserDefaults = SettingsPersistence.shared) -> Int {
         guard defaults.object(forKey: defaultsKey) != nil else {
             return defaultPercent
         }
@@ -71,7 +71,7 @@ enum VoiceOutputVolume {
     }
 
     /// Persists a clamped value (the only write path).
-    static func set(_ percent: Int, defaults: UserDefaults = .standard) {
+    static func set(_ percent: Int, defaults: UserDefaults = SettingsPersistence.shared) {
         defaults.set(clamp(percent), forKey: defaultsKey)
     }
 
@@ -380,6 +380,16 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
 
     func speak(_ text: String, locale: Locale) async {
         cancel()
+
+        // [AUDIT-SPOKEN] The shared speech-text normalization pass
+        // (`SpokenTextNormalizer`): ONE stop at the synthesizer seam for
+        // every spoken path that reaches this speaker — SpeakQueue
+        // lanes, direct calls, plugin/guide text, LiveTranslate, feed
+        // read-aloud, notification-reader fallback. Producers keep raw
+        // text for their cards; only what is SPOKEN is normalized here.
+        // Idempotent by contract (re-spoken replies pass through
+        // unharmed), locale-aware (en + ne).
+        let text = SpokenTextNormalizer.normalize(text, locale: locale)
 
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = Self.voice(for: locale)
@@ -904,6 +914,13 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
             emit("tts_voice_" + (spec.usedAudition ? "audition" : "selected"),
                  locale: spec.locale, voice: spec)
         }
+        // [AUDIT-SPOKEN] The same shared normalization pass as
+        // `SystemSpeechSpeaker` (see there), placed AFTER
+        // `resolveVoiceSpec`: the audition matcher compares exact text,
+        // so it must see the raw utterance. Normalized with
+        // `spec.locale` — the locale the utterance is treated as
+        // (auditions force ne-NP, matching their Nepali sample text).
+        let text = SpokenTextNormalizer.normalize(text, locale: spec.locale)
         guard let voiceDir = modelStore.ttsVoiceDirectory(for: spec.voiceID)
                 ?? modelStore.installBundledTTSVoice(for: spec.voiceID, bundle: bundle) else {
             emit("tts_voice_missing_fallback", locale: spec.locale)

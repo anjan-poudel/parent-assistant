@@ -83,4 +83,16 @@ final class SpokenReplyPolisherTests: XCTestCase {
         XCTAssertEqual(SpokenReplyPolisher.polish("   "), "")
         XCTAssertEqual(SpokenReplyPolisher.polish(""), "")
     }
+
+    // [WEATHER-WORDING] The units stage rides the pipeline: a raw model
+    // token like "15°C" / "१५°C" reaches the speaker as spoken
+    // words, in the reply's locale.
+    func testPipelineNormalizesTemperatureUnits() {
+        XCTAssertEqual(SpokenReplyPolisher.polish("It's 15°C and clear.",
+                                                  locale: Locale(identifier: "en-US")),
+                       "It's 15 degrees Celsius and clear.")
+        XCTAssertEqual(SpokenReplyPolisher.polish("काठमाडौंमा १५°C छ।",
+                                                  locale: Locale(identifier: "ne-NP")),
+                       "काठमाडौंमा १५ डिग्री सेल्सियस छ।")
+    }
 }
