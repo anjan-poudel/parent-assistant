@@ -94,7 +94,7 @@ final class WakeAcknowledgmentSeamTests: XCTestCase {
         var onSpeechStateChange: ((Bool) -> Void)?
         var onEndOfUtterance: (() -> Void)?
         private(set) var startCalls = 0
-        func start(endOfUtteranceMs: Int) { startCalls += 1 }
+        func start(policy: AdaptiveEndpointPolicy) { startCalls += 1 }
         func stop() {}
         func reset() {}
         func process(_ pcm: [Int16]) {}
