@@ -135,7 +135,7 @@ final class CommandRouterDegenerateTriggerTests: XCTestCase {
         let probe = world.events("dialogue_probe_spoken")
         XCTAssertEqual(probe.count, 1)
         XCTAssertEqual(probe.first?.metadata,
-                       ["probe_kind": "slotFill", "attempt": "1", "option_count": "4"])
+                       ["probe_kind": "slotFill", "attempt": "1", "option_count": "0"])
         let expected = DialogueProbeComposer.probeText(for: frame,
                                                        catalog: try DialogueOptionCatalog.load(),
                                                        retry: false, locale: ne)
@@ -254,7 +254,7 @@ final class CommandRouterDegenerateTriggerTests: XCTestCase {
                                                        retry: false, locale: ne)
         XCTAssertTrue(expected.hasPrefix(L10n.str("dialogue.understood.no", locale: ne)),
                       "the honest lead line leads the probe")
-        XCTAssertTrue(expected.contains("दुर्गा भजन बजाउने हो?"),
+        XCTAssertTrue(expected.contains("दुर्गा भजन भन्नुभयो?"),
                       "the hypothesis is re-offered in the probe copy")
         XCTAssertEqual(world.coordinator.assistantSpoken, [expected],
                        "the shipped discard line is replaced only on the candidate-positive path")
@@ -317,7 +317,8 @@ final class CommandRouterDegenerateTriggerTests: XCTestCase {
                                                        retry: true, locale: ne)
         XCTAssertTrue(expected.hasPrefix(L10n.str("dialogue.retry", locale: ne)),
                       "the honest prefixed reprompt")
-        XCTAssertTrue(expected.contains("युट्युब खोल्ने हो?"))
+        XCTAssertTrue(expected.contains("युट्युब खोल्ने"),
+                      "the appLaunch label is the bare %@-खोल्ने form")
         XCTAssertTrue(world.coordinator.assistantSpoken.contains(expected))
 
         let probe = world.events("dialogue_probe_spoken")

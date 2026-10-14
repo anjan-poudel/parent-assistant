@@ -388,6 +388,25 @@ enum DialogueProbeComposer {
             body = correctionChoiceProbe(for: frame, locale: locale)
         }
         guard retry else { return body }
+        // [DIALOGUE-NO-LOOP] (owner rule, field report 2026-10-14): a
+        // GENUINE re-probe — attempts >= 2, the same question was
+        // already asked — must be a DIFFERENT question: re-asking the
+        // option list is the loop, because the options were built from
+        // the same garbled STT that mis-heard the original command.
+        // slotFill re-probes with the free-text-only probe; the choice
+        // probes re-probe with the honest reprompt line. Both are
+        // shipped keys — no new copy (copy is owner-dictated).
+        // Attempt-1 retry:true call sites (the keyword-remainder
+        // reprompt upgrade, the rephrase-discard deferral) keep the
+        // prefixed first-probe form: they have not asked anything yet.
+        if frame.attempts >= 2 {
+            switch frame.probeKind {
+            case .slotFill:
+                return L10n.str(Key.musicAny, locale: locale)
+            case .candidateChoice, .correctionChoice:
+                return L10n.str("router.reprompt", locale: locale)
+            }
+        }
         return L10n.str(Key.retry, locale: locale) + " " + body
     }
 

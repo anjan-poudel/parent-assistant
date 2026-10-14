@@ -1179,6 +1179,23 @@ final class CommandRouter {
                     errorCode: nil,
                     metadata: ["reason": reason.rawValue]
                 ))
+                // [DIALOGUE-NO-LOOP] (owner rule, field report
+                // 2026-10-14: the option list was built from the same
+                // garbled STT that mis-heard the question, so the user's
+                // own answer is the better evidence). An answer that
+                // matches none of the offered options but still carries
+                // the user's words is USED — the frame resolves and the
+                // ladder interprets the raw transcript exactly once
+                // (the `.bargeIn` shape) — never discarded into a
+                // re-probe. Content-free answers (empty after strip,
+                // degenerate, over-length) keep the ONE retry the frame
+                // allows.
+                if case .noCandidateClaimed = reason,
+                   !prepared.trimmingCharacters(in: .whitespaces).isEmpty {
+                    coordinator?.resolveDialogueFrame(.bargedIn)
+                    emitDialogueFrameResolved(.bargedIn)
+                    break
+                }
                 return reprobeDialogueOrExhaust(frame: frame, raw: raw)
             }
         }
@@ -3459,7 +3476,13 @@ final class CommandRouter {
             metadata: [
                 "probe_kind": frame.probeKind.rawValue,
                 "attempt": String(frame.attempts),
-                "option_count": String(dialogueProbeOptionCount(for: frame))
+                // [DIALOGUE-NO-LOOP] A GENUINE re-probe (attempts >= 2)
+                // offers no options — its body is a different question,
+                // never the option list again. Attempt-1 retry:true call
+                // sites (remainder-reprompt upgrade, rephrase-discard)
+                // still report the candidates they actually offer.
+                "option_count": String((retry && frame.attempts >= 2)
+                                       ? 0 : dialogueProbeOptionCount(for: frame))
             ]
         ))
         speak(text: DialogueProbeComposer.probeText(for: frame, catalog: dialogueCatalog,
