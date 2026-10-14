@@ -74,6 +74,10 @@ final class BikramSambatTests: XCTestCase {
         XCTAssertEqual(BikramSambat.devanagariDigits(2083), "२०८३")
         XCTAssertEqual(BikramSambat.devanagariDigits(15), "१५")
         XCTAssertEqual(BikramSambat.devanagariDigits(0), "०")
+        // [WEATHER-WORDING] A sub-zero temperature keeps its sign - the
+        // digit table must never force-unwrap a non-digit (the old
+        // implementation crashed on "-2").
+        XCTAssertEqual(BikramSambat.devanagariDigits(-2), "-२")
     }
 
     func testNepaliString() {

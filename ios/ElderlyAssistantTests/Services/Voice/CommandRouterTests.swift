@@ -1751,9 +1751,9 @@ final class CommandRouterLocalToolsTests: XCTestCase {
         let raw = WeatherTool.reply(for: conditions, placeName: "Arncliffe", locale: Locale(identifier: "en"))
         let expected = L10n.fmt("weather.replySource",
                                 locale: Locale(identifier: "en-US"), raw)
-        XCTAssertEqual(raw, "It's 24°C and clear in Arncliffe.")
+        XCTAssertEqual(raw, "It's 24 degrees Celsius and clear in Arncliffe.")
         XCTAssertEqual(expected,
-                       "According to the weather service, It's 24°C and clear in Arncliffe.")
+                       "According to the weather service, It's 24 degrees Celsius and clear in Arncliffe.")
         XCTAssertEqual(coordinator.assistantSpoken,
                        [L10n.str("weather.checking", locale: Locale(identifier: "en-US")), expected])
         XCTAssertEqual(coordinator.genericReplies, [expected],

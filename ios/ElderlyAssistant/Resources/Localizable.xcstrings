@@ -1576,13 +1576,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Your events today: %@"
+            "value": "Your events today. %@"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "आजका कार्यक्रमहरू: %@"
+            "value": "आजका कार्यक्रमहरू। %@"
           }
         }
       }
@@ -1678,13 +1678,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Your medications today: %@"
+            "value": "Your medications today. %@"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "आजका औषधिहरू: %@"
+            "value": "आजका औषधिहरू। %@"
           }
         }
       }
@@ -1712,13 +1712,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Your routines today: %@"
+            "value": "Your routines today. %@"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "आजका दिनचर्याहरू: %@"
+            "value": "आजका दिनचर्याहरू। %@"
           }
         }
       }
@@ -1780,13 +1780,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The weather today: %@"
+            "value": "The weather today. %@"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "आजको मौसम: %@"
+            "value": "आजको मौसम। %@"
           }
         }
       }
@@ -3701,13 +3701,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Found %@. Tap to call."
+            "value": "Found %@."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ फेला पर्‍यो। कल गर्न थिच्नुहोस्।"
+            "value": "%@ फेला पर्‍यो।"
           }
         }
       }
@@ -11661,7 +11661,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Medicine time: %@"
+            "value": "Medicine time, %@"
           }
         },
         "ne": {
@@ -13701,7 +13701,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "I found more than one matching person (%@). Please say the full name."
+            "value": "I found more than one matching person, %@. Please say the full name."
           }
         },
         "ne": {
@@ -14330,13 +14330,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reminder set: %@"
+            "value": "Reminder set, %@"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "सम्झना राखियो: %@"
+            "value": "सम्झना राखियो, %@"
           }
         }
       }
@@ -23272,13 +23272,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "It's %1$@°C and %2$@%3$@."
+            "value": "It's %1$@ degrees Celsius and %2$@%3$@."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "%3$@अहिले %1$@°C र %2$@ छ।"
+            "value": "%3$@अहिले %1$@ डिग्री सेल्सियस र %2$@ छ।"
           }
         }
       }
@@ -23289,13 +23289,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The day after tomorrow it will be %1$@ to %2$@°C and %3$@%4$@."
+            "value": "The day after tomorrow it will be %1$@ to %2$@ degrees Celsius and %3$@%4$@."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "%4$@पर्सि %1$@ देखि %2$@°C र %3$@ हुनेछ।"
+            "value": "%4$@पर्सि %1$@ देखि %2$@ डिग्री सेल्सियस र %3$@ हुनेछ।"
           }
         }
       }
@@ -23306,13 +23306,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tomorrow it will be %1$@ to %2$@°C and %3$@%4$@."
+            "value": "Tomorrow it will be %1$@ to %2$@ degrees Celsius and %3$@%4$@."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "%4$@भोलि %1$@ देखि %2$@°C र %3$@ हुनेछ।"
+            "value": "%4$@भोलि %1$@ देखि %2$@ डिग्री सेल्सियस र %3$@ हुनेछ।"
           }
         }
       }

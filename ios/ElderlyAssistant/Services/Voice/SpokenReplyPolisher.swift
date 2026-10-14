@@ -5,19 +5,25 @@ import Foundation
 // spoken-reply polisher: every model-generated reply passes through it
 // before it reaches the speaker, whichever model produced it.
 //
-// WHAT IT DOES — cleanup only, never rewriting:
+// WHAT IT DOES — cleanup and deterministic FORMATTING, never grammar:
 //   - collapses whitespace runs and trims;
 //   - collapses repeated terminal punctuation (।।→।, !!, ??, ..);
 //   - strips per-sentence enumeration artifacts ("१.", "2)", "-", "•");
 //   - de-duplicates adjacent repeated words ("हजुर हजुर" → "हजुर");
+//   - [WEATHER-WORDING] (2026-10-14) normalizes temperature tokens to
+//     their spoken form via `SpokenUnits` — "15°C" / "15c" / "15.5c" →
+//     "15 degrees Celsius" / "१५ डिग्री सेल्सियस" — so no °/C token
+//     ever reaches the synthesizer (the "15c" field report);
 //   - enforces the brevity ceiling: at most two sentences, at most
 //     `maxWords` words — the tail is cut at the sentence/word boundary,
 //     no ellipsis, no filler.
 //
 // WHAT IT NEVER DOES — grammar rewriting. A verb-form table would be
 // context-dependent ("काम भयो" ≠ "भन्नुभयो"), so grammar stays the
-// models' job, hardened via prompts; this layer guarantees cleanliness
-// and brevity for every model at once.
+// models' job, hardened via prompts; this layer guarantees cleanliness,
+// spoken-form units and brevity for every model at once. The units pass
+// is formatting, not grammar: context-free, deterministic, idempotent —
+// the same doctrine as `SpokenTime`.
 //
 // Pure and total: every input produces a String; the empty result is
 // the caller's signal to use its honest fallback.
@@ -51,12 +57,19 @@ enum SpokenReplyPolisher {
     static let maxWords = 30
 
     /// The full polish pipeline under a profile's brevity ceiling.
-    static func polish(_ text: String, profile: Profile = .standard) -> String {
+    /// `locale` picks the spoken convention for the units pass (English
+    /// default; `CommandRouter` passes the active locale explicitly).
+    static func polish(_ text: String,
+                       profile: Profile = .standard,
+                       locale: Locale = Locale(identifier: "en")) -> String {
         var value = text
         value = collapseWhitespace(value)
         value = collapseRepeatedTerminalPunctuation(value)
         value = stripEnumerationArtifacts(value)
         value = dedupeAdjacentWords(value)
+        // [WEATHER-WORDING] Spoken-form units BEFORE the brevity cut so
+        // the word budget counts the words the elder will hear.
+        value = SpokenUnits.normalizeTemperatures(in: value, locale: locale)
         value = enforceBrevity(value, profile: profile)
         return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }

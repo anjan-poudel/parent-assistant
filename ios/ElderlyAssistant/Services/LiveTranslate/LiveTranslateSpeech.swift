@@ -24,7 +24,13 @@ import Foundation
 //     its accessibility label. A translation is never re-derived here, so
 //     what the elder hears cannot drift from what the elder sees. A region
 //     that has no translation is read as its recognized text (FR-LCT-023) and
-//     never as a translation.
+//     never as a translation. (2026-10-14, [AUDIT-SPOKEN]) `spokenText` and
+//     the announcement text keep this contract byte-for-byte — what is
+//     normalized is the SYNTHESIS input: both shipped speakers apply the
+//     app-wide `SpokenTextNormalizer` pass, so a price like "Rs. 500/kg" is
+//     read as "500 rupees per kilogram" instead of being spelled out. The
+//     elder hears the on-screen MEANING; the bubble and the screen reader
+//     still see the verbatim line.
 //
 //  3. **Speech is the shipped speech path.** `Announcement(.interactive)` on
 //     the shipped `SpeakQueue`: no second speaker, no second queue, no card
