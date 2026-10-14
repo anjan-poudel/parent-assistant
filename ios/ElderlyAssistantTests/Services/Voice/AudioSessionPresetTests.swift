@@ -50,6 +50,12 @@ final class AudioSessionPresetTests: XCTestCase {
         private(set) var voiceProcessingCalls: [Bool] = []
         /// [LOUD-TTS-CATEGORY] Every engine stop/start, in order.
         private(set) var engineRunningCalls: [Bool] = []
+        /// [MODE-ONLY-LOUD] Every mode switch, in order.
+        private(set) var modeCalls: [AVAudioSession.Mode] = []
+        /// When set, `setMode` throws it for every mode.
+        var modeError: Error?
+        /// When set, `setMode` throws ONLY for this mode.
+        var refusedMode: AVAudioSession.Mode?
         private(set) var permissionRequests = 0
 
         func requestRecordPermission(_ callback: @escaping (Bool) -> Void) {
@@ -80,6 +86,14 @@ final class AudioSessionPresetTests: XCTestCase {
 
         func setEngineRunning(_ running: Bool) throws {
             engineRunningCalls.append(running)
+        }
+
+        func setMode(_ mode: AVAudioSession.Mode) throws {
+            modeCalls.append(mode)
+            if let modeError { throw modeError }
+            if let refusedMode, mode == refusedMode {
+                throw NSError(domain: "test", code: 8)
+            }
         }
 
         func setVoiceProcessingEnabled(_ enabled: Bool) throws {
@@ -401,72 +415,69 @@ final class AudioSessionPresetTests: XCTestCase {
                             defaults: defaults)
     }
 
-    // MARK: - Response playback loudness ([LOUD-TTS-CATEGORY])
+    // MARK: - Response playback loudness ([MODE-ONLY-LOUD])
 
-    func testResponsePlaybackSwitchesToTheLoudBellConfigAndRestoresCapturePreset() {
+    func testResponsePlaybackSwitchesToTheSpokenAudioModeAndRestoresCaptureMode() {
         let session = RecordingSession()
-        let manager = makeManager(session: session, defaults: makeDefaults())
-
-        manager.beginResponsePlayback()
-        XCTAssertEqual(session.categoryCalls,
-                       [.init(category: .playback, mode: .default,
-                              options: [.duckOthers, .defaultToSpeaker])],
-                       "speaking must switch to the bell's proven-loud media "
-                       + "config — call/voice gain staging under "
-                       + ".playAndRecord is the quietness root cause")
-        XCTAssertEqual(session.activeCalls.map(\.0), [false, true],
-                       "setCategory on an ACTIVE session throws on iOS 26 "
-                       + "(Anzaan field test) — the switch must cycle active "
-                       + "off → category → active on")
-        XCTAssertEqual(session.engineRunningCalls, [false],
-                       "the engine stops FIRST — a live input tap is what "
-                       + "the category change refuses to service, and "
-                       + "cycling under a running engine deadens the next "
-                       + "turn's capture (Anzaan: whisperkit_stt samples=0)")
-
-        manager.endResponsePlayback()
-        XCTAssertEqual(session.categoryCalls.last,
-                       .init(category: .playAndRecord, mode: .measurement,
-                             options: measurementOptions),
-                       "playback end must restore the capture preset "
-                       + "(default OFF = measurement), in place")
-        XCTAssertEqual(session.activeCalls.map(\.0), [false, true, false, true],
-                       "restore uses the same deactivate-first cycle and "
-                       + "leaves the session active (deactivating it would "
-                       + "strand the voice pipeline's engine)")
-        XCTAssertEqual(session.engineRunningCalls, [false, true],
-                       "the engine returns LAST, once the capture category "
-                       + "is in place — no path may leave the mic dead")
-    }
-
-    func testPlaybackRefusedFallsThroughTheMediaCategoryChain() {
-        // Anzaan's iOS 26 refuses setCategory(.playback) outright — the
-        // chain must land on the next media-volume category instead of
-        // giving up (all three play at media gain staging).
-        let session = RecordingSession()
-        session.refusedCategory = .playback
         let bus = RecordingBus()
         let manager = AudioSessionManager(observabilityBus: bus,
                                           audioSession: session,
                                           defaults: makeDefaults())
 
         manager.beginResponsePlayback()
-        XCTAssertEqual(session.categoryCalls,
-                       [.init(category: .playback, mode: .default,
-                              options: [.duckOthers, .defaultToSpeaker]),
-                        .init(category: .soloAmbient, mode: .default,
-                              options: [.duckOthers, .defaultToSpeaker])],
-                       "a refused .playback must fall through to soloAmbient")
+        XCTAssertEqual(session.modeCalls, [.spokenAudio],
+                       "speaking must switch to the spoken-audio mode — a "
+                       + "mode change is the loudness lever iOS 26/27 "
+                       + "leave for a playAndRecord-locked session")
         let began = bus.events(ofType: "audio_response_playback")
             .first { $0.outcome == "began" }
-        XCTAssertEqual(began?.metadata["state"], "soloAmbient",
-                       "the winning category is recorded")
-        XCTAssertEqual(session.activeCalls.map(\.0), [false, true],
-                       "the session is active while the reply plays")
+        XCTAssertEqual(began?.metadata["state"], "spokenAudio")
+        XCTAssertTrue(session.categoryCalls.isEmpty,
+                      "a mode change never touches the category")
+        XCTAssertTrue(session.activeCalls.isEmpty,
+                      "a mode change never cycles activation (the mic "
+                      + "never closes — MIC-CONTINUITY)")
+        XCTAssertTrue(session.engineRunningCalls.isEmpty,
+                      "a mode change never stops the engine")
 
         manager.endResponsePlayback()
-        XCTAssertEqual(session.categoryCalls.last?.category, .playAndRecord,
-                       "restore returns to the capture preset")
+        XCTAssertEqual(session.modeCalls, [.spokenAudio, .measurement],
+                       "playback end must restore the capture preset "
+                       + "(default OFF = measurement)")
+    }
+
+    func testSpokenAudioUnavailableFallsBackToVoicePrompt() {
+        let session = RecordingSession()
+        session.refusedMode = .spokenAudio
+        let bus = RecordingBus()
+        let manager = AudioSessionManager(observabilityBus: bus,
+                                          audioSession: session,
+                                          defaults: makeDefaults())
+
+        manager.beginResponsePlayback()
+        XCTAssertEqual(session.modeCalls, [.spokenAudio, .voicePrompt],
+                       "a refused spokenAudio falls through to voicePrompt")
+        let began = bus.events(ofType: "audio_response_playback")
+            .first { $0.outcome == "began" }
+        XCTAssertEqual(began?.metadata["state"], "voicePrompt")
+    }
+
+    func testBothModesRefusedIsReportedNotSilent() {
+        let session = RecordingSession()
+        session.modeError = NSError(domain: "test", code: 9)
+        let bus = RecordingBus()
+        let manager = AudioSessionManager(observabilityBus: bus,
+                                          audioSession: session,
+                                          defaults: makeDefaults())
+
+        manager.beginResponsePlayback()
+        let failed = bus.events(ofType: "audio_response_playback")
+            .filter { $0.outcome == "failed" }
+        XCTAssertFalse(failed.isEmpty, "the mode failure is observable")
+
+        manager.endResponsePlayback()
+        XCTAssertEqual(session.modeCalls.last, .measurement,
+                       "restore still returns to the capture mode")
     }
 
     func testNestedResponsePlaybackRestoresOnlyAtOutermostEnd() {
@@ -477,10 +488,10 @@ final class AudioSessionPresetTests: XCTestCase {
         manager.beginResponsePlayback()
         manager.beginResponsePlayback()
         manager.endResponsePlayback()
-        XCTAssertEqual(session.categoryCalls.count, 1,
+        XCTAssertEqual(session.modeCalls, [.spokenAudio],
                        "the inner end must NOT restore while an outer playback still runs")
         manager.endResponsePlayback()
-        XCTAssertEqual(session.categoryCalls.count, 2,
+        XCTAssertEqual(session.modeCalls, [.spokenAudio, .measurement],
                        "the outermost end restores exactly once")
     }
 
@@ -488,8 +499,7 @@ final class AudioSessionPresetTests: XCTestCase {
         let session = RecordingSession()
         let manager = makeManager(session: session, defaults: makeDefaults())
         manager.endResponsePlayback()
-        XCTAssertTrue(session.categoryCalls.isEmpty)
-        XCTAssertTrue(session.activeCalls.isEmpty)
+        XCTAssertTrue(session.modeCalls.isEmpty)
     }
 
     func testResponsePlaybackRestoresVoiceChatWhenVPPresetIsOn() {
@@ -499,37 +509,7 @@ final class AudioSessionPresetTests: XCTestCase {
 
         manager.beginResponsePlayback()
         manager.endResponsePlayback()
-        XCTAssertEqual(session.categoryCalls.last,
-                       .init(category: .playAndRecord, mode: .voiceChat,
-                             options: measurementOptions),
+        XCTAssertEqual(session.modeCalls, [.spokenAudio, .voiceChat],
                        "restore must return to the ACTIVE preset, not hardcode measurement")
-        XCTAssertEqual(session.voiceProcessingCalls, [true],
-                       "the VPIO node flag is re-armed after the category round-trip")
-    }
-
-    func testResponsePlaybackBeginFailureIsReportedNotSilent() {
-        // A category switch that fails must say so on the bus — a silent
-        // failure would leave replies on the quiet call-gain staging with
-        // no trace of why.
-        let session = RecordingSession()
-        session.categoryError = NSError(domain: "test", code: 7)
-        let bus = RecordingBus()
-        let manager = AudioSessionManager(observabilityBus: bus,
-                                          audioSession: session,
-                                          defaults: makeDefaults())
-
-        manager.beginResponsePlayback()
-        manager.endResponsePlayback()
-        let failed = bus.events(ofType: "audio_response_playback")
-            .filter { $0.outcome == "failed" }
-        XCTAssertFalse(failed.isEmpty, "the begin failure is observable")
-        XCTAssertEqual(session.categoryCalls.count, 4,
-                       "the whole chain is walked (3 candidates), then end "
-                       + "still restores the capture preset (the reply "
-                       + "played, just quieter)")
-        XCTAssertEqual(session.engineRunningCalls, [false, true, true],
-                       "the failed switch rearms the engine, and restore "
-                       + "re-arms again — idempotent in the real controller, "
-                       + "the mic must never stay stopped")
     }
 }
