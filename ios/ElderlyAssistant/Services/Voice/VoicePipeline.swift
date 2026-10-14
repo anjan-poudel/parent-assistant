@@ -732,8 +732,19 @@ final class VoicePipeline {
     /// [AUDIO-REACTIVE-HERO] The meter tap's frame slicer — the same
     /// cursor + amortized compaction shape as the VAD loop above, on its
     /// OWN carry buffer so the [VAD-RT] hot path is untouched. Runs on
-    /// the processing queue (the publisher's FFT + analyzer are confined
-    /// to it — see `AudioLevelPublisher.ingestCaptureFrame`).
+    /// the processing queue — but ONLY the copy + enqueue. [VAD-CUTOFF-FIX]
+    /// (2026-10-14): the FFT + analyzer USED to run inline here, on the
+    /// SAME queue the VAD consumes — under load each 512-pt FFT delayed
+    /// the VAD's frames, its end-of-utterance timer saw stale audio and
+    /// cut the elder off mid-sentence (owner report). The analysis now
+    /// runs on its own low-priority serial queue; the meters may lag or
+    /// the queue may grow under pressure, but the VAD never waits for a
+    /// frame. The publisher's ingest is confined to THIS queue now (see
+    /// `AudioLevelPublisher.ingestCaptureFrame`).
+    private static let visualizationQueue = DispatchQueue(
+        label: "ai.voicebridge.senior.assistant.visualization",
+        qos: .utility)
+
     func feedVisualization(_ samples: [Int16]) {
         guard let audioVisualization else { return }
         vizFrameBuffer.append(contentsOf: samples)
@@ -742,7 +753,9 @@ final class VoicePipeline {
             let start = vizFrameConsumed
             let frame = Array(vizFrameBuffer[start..<(start + frameLength)])
             vizFrameConsumed += frameLength
-            audioVisualization.ingestCaptureFrame(frame)
+            Self.visualizationQueue.async {
+                audioVisualization.ingestCaptureFrame(frame)
+            }
         }
         if vizFrameConsumed >= Self.vadFrameCompactionThreshold {
             vizFrameBuffer.removeFirst(vizFrameConsumed)
