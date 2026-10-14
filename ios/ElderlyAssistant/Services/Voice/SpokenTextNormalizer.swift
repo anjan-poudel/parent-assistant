@@ -263,7 +263,9 @@ enum SpokenTextNormalizer {
             if let asciiValue = character.asciiValue, asciiValue >= 48, asciiValue <= 57 {
                 ascii.append(Character(UnicodeScalar(asciiValue)))
             } else if let digit = devanagariDigitIndex(of: character) {
-                ascii.append(Character(UnicodeScalar(48 + UInt8(digit))!))
+                // UnicodeScalar(UInt8) is non-failable (0-255 are all valid
+                // scalars) — no force-unwrap here (compile error otherwise).
+                ascii.append(Character(UnicodeScalar(48 + UInt8(digit))))
             } else {
                 return nil
             }
