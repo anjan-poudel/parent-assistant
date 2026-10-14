@@ -7613,6 +7613,15 @@ self.noteTalkContractChanged()
     /// executor, so the two paths can never drift apart in what they
     /// probe, say, or claim.
     ///
+    /// [APP-UI-CONFIRM] (2026-10-14) The tile reaches this executor only
+    /// AFTER its own question was asked (`requestAppLaunchFromTile`): a
+    /// re-tap of the same tile performs straight away, and any other
+    /// answer (spoken yes, chipped yes, or another tile's tap) arrives
+    /// through `handleConfirmationResponse` → `executePendingAppLaunch`.
+    /// The voice-yes path arrives with the pend already cleared, so the
+    /// `resolveLaunchQuestion` below is the TILE's resolver and a
+    /// defense-in-depth no-op for the voice path.
+    ///
     /// Dual-channel honesty as before: probe FIRST, and when the app is
     /// gone (deleted after the row appeared) say so out loud and show it
     /// on the outcome card — never a silent dead tap. An absent app that
@@ -7634,6 +7643,10 @@ self.noteTalkContractChanged()
         // window it pends: the question is cleared (and its window closed)
         // before the app opens, so the elder can never hear "Time is up, I
         // won't open it" over an app they are already looking at.
+        // [APP-UI-CONFIRM] Now also the answer to the tile's OWN question
+        // (a same-tile re-tap lands here with its pend still live) — and
+        // a no-op for the voice-yes path, which clears the pend before it
+        // calls in (`handleConfirmationResponse`).
         resolveLaunchQuestion(openedBy: app.id)
         switch app.kind {
         case .camera:
@@ -7847,11 +7860,35 @@ self.noteTalkContractChanged()
     /// the question→verdict clock all live together, so a verdict can
     /// never be recorded against a launch that was never asked about.
     struct PendingAppLaunch {
+        /// [APP-UI-CONFIRM] Which surface asked the question — the voice
+        /// path (an utterance the elder produced) or a curated-bar tile
+        /// tap (2026-10-14). `var` with a default, the `PendingCallAction`
+        /// L2-D3 style: every voice-shaped construction keeps compiling
+        /// and keeps meaning "voice".
+        ///
+        /// Why the distinction exists at all: the two origins share ONE
+        /// pending window (the elder must see one confirmation
+        /// vocabulary, never two) but only one of them is flywheel
+        /// material. A launch the elder SPOKE ("open WhatsApp") is a
+        /// proposal the interpreter or the keyword rules produced, and
+        /// the yes/no that follows is exactly the accept-band signal the
+        /// flywheel trains on. A TILE TAP is not an utterance at all —
+        /// the elder's finger proposed the question, no model ran, no
+        /// interpretation happened — and recording it under
+        /// `launcher.open` would fabricate interpreter performance from
+        /// a touch. So the tile asks through the same window, but its
+        /// verdicts never reach the flywheel (`recordsFlywheelCapture`,
+        /// the gate every capture site funnels through via
+        /// `appendLaunchCapture`).
+        enum Origin { case voice; case tile }
         let appID: String
         /// The interpreted command's confidence, when the launch came from
         /// the model (nil for the keyword/plugin seams that don't carry
         /// one) — the flywheel's accept-band input.
         let confidence: Double?
+        /// The surface that asked — see `Origin`. Only `.voice` launches
+        /// record flywheel verdicts.
+        var origin: Origin = .voice
         /// [INTENTLOG-CAPTURE] When the confirmation question was asked —
         /// the flywheel's latency start (question → verdict).
         let requestedAt: Date = Date()
@@ -7870,6 +7907,11 @@ self.noteTalkContractChanged()
         /// `confidence: nil` from its `.appLaunch` stage; every
         /// interpreter/plugin command has one by construction), so nil IS
         /// the keyword signature.
+        ///
+        /// [APP-UI-CONFIRM] A tile-originated launch is ALSO confidence-
+        /// nil, but it never records (`recordsFlywheelCapture`), so this
+        /// path never mislabels a finger as a keyword hit: the gate in
+        /// `appendLaunchCapture` runs BEFORE any path is read.
         var capturePath: String { confidence == nil ? "keyword" : "model" }
 
         /// This launch's flywheel identity. The slot is the catalog app id
@@ -7880,6 +7922,13 @@ self.noteTalkContractChanged()
                                    confidence: confidence,
                                    requestedAt: requestedAt)
         }
+
+        /// [APP-UI-CONFIRM] Whether this launch may feed the flywheel —
+        /// false for the tile origin (see `Origin`). Every capture site
+        /// writes through `appendLaunchCapture`, which reads this one
+        /// gate, so "record only utterances" is enforced in one place
+        /// instead of six.
+        var recordsFlywheelCapture: Bool { origin == .voice }
     }
 
     @Published private(set) var pendingAppLaunch: PendingAppLaunch?
@@ -7915,7 +7964,37 @@ self.noteTalkContractChanged()
     /// The camera entry is always asked about: it needs no installed app
     /// (the capture is in-process), and whether the DEVICE can capture is
     /// answered after the yes, where the failure is.
+    ///
+    /// [APP-UI-CONFIRM] (2026-10-14) The curated-bar tile asks through
+    /// the SAME machinery — one pending window, one question vocabulary,
+    /// one executor (`requestAppLaunchFromTile`, below) — carrying
+    /// `origin: .tile` so a finger-tapped question never masquerades as
+    /// an interpreted one on the flywheel (`PendingAppLaunch.Origin`).
+    /// This entry point stays the utterance path: `.voice`.
     func requestAppLaunch(appID: String, confidence: Double?) -> String {
+        requestAppLaunchCore(appID: appID, confidence: confidence, origin: .voice).line
+    }
+
+    /// [APP-UI-CONFIRM] What a launch REQUEST resolved to: the line to
+    /// speak, and whether the request actually pended a question. The
+    /// voice path only ever reads `line` (the plugin's reply and the
+    /// router's outcome card deliver it); the tile path must ALSO know
+    /// `pended` — an unavailable app returns the honest not-installed
+    /// line with nothing pended, and the tile has no plugin layer to
+    /// card that line for it, so the tile cards the refusal itself.
+    struct AppLaunchRequest {
+        let line: String
+        let pended: Bool
+    }
+
+    /// The one launch-request implementation, shared by the voice seam
+    /// and the tile — the origin only travels into the pend, and from
+    /// there into the flywheel gate. Private on purpose: "which surface
+    /// asked" must be spelled at every call site, never default-omitted
+    /// by a future caller.
+    private func requestAppLaunchCore(appID: String,
+                                      confidence: Double?,
+                                      origin: PendingAppLaunch.Origin) -> AppLaunchRequest {
         let locale = activeLocale
         guard let app = AppLauncher.app(for: appID) else {
             // No catalog entry: nothing to ask about, and the caller speaks
@@ -7923,7 +8002,8 @@ self.noteTalkContractChanged()
             // is caught before it gets here — this is the same line, from
             // the layer that knows the catalog).
             emitAppLaunch(eventType: "launch_request", outcome: "unknownApp")
-            return L10n.fmt("launcher.unknownApp", locale: locale, appID)
+            return AppLaunchRequest(line: L10n.fmt("launcher.unknownApp", locale: locale, appID),
+                                    pended: false)
         }
         let name = L10n.str(app.nameKey, locale: locale)
         // [F9] Same single resolution the executor uses: what this launch
@@ -7931,13 +8011,15 @@ self.noteTalkContractChanged()
         // one is asked at all.
         switch appLauncher.launchPlan(for: app) {
         case .app, .camera:
-            pendAppLaunch(appID: app.id, confidence: confidence)
+            pendAppLaunch(appID: app.id, confidence: confidence, origin: origin)
             emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):pending")
-            return L10n.fmt("launcher.confirmOpen", locale: locale, name)
+            return AppLaunchRequest(line: L10n.fmt("launcher.confirmOpen", locale: locale, name),
+                                    pended: true)
         case .webFallback:
-            pendAppLaunch(appID: app.id, confidence: confidence)
+            pendAppLaunch(appID: app.id, confidence: confidence, origin: origin)
             emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):webFallbackPending")
-            return L10n.fmt("launcher.confirmOpenWeb", locale: locale, name)
+            return AppLaunchRequest(line: L10n.fmt("launcher.confirmOpenWeb", locale: locale, name),
+                                    pended: true)
         case .settingsFallback:
             // [F9] A pane whose private App-Prefs URL did not answer is
             // still launchable — the public Settings deep link opens the
@@ -7947,15 +8029,115 @@ self.noteTalkContractChanged()
             // names no pane: for the Settings ROOT entry the fallback is
             // the same screen, and "I can't open that exact screen" is
             // true in every case.
-            pendAppLaunch(appID: app.id, confidence: confidence)
+            pendAppLaunch(appID: app.id, confidence: confidence, origin: origin)
             emitAppLaunch(eventType: "launch_request",
                           outcome: "\(app.id):settingsFallbackPending")
-            return L10n.str("launcher.confirmOpenSettings", locale: locale)
+            return AppLaunchRequest(line: L10n.str("launcher.confirmOpenSettings", locale: locale),
+                                    pended: true)
         case .unavailable:
             // A launch that can only fail is never turned into a yes/no
             // question: the honest not-installed line, nothing pended.
             emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):notInstalled")
-            return L10n.fmt("apps.announce.notInstalled", locale: locale, name)
+            return AppLaunchRequest(line: L10n.fmt("apps.announce.notInstalled", locale: locale, name),
+                                    pended: false)
+        }
+    }
+
+    /// [APP-UI-CONFIRM] (2026-10-14) A tap on a curated-app tile — the
+    /// owner's report, verbatim: "the same thing happens when i try to
+    /// open apps from the curated apps scrollable bar at the top - shows
+    /// english dialog confirmation. change that to also use custom UI
+    /// instead of native using corresponding components."
+    ///
+    /// The "english dialog" was iOS's own "Open in <App>?" confirmation,
+    /// presented in the SYSTEM language at the moment the scheme URL
+    /// opened — after the fact, unfixable from here, and silent about
+    /// WHO is being opened (it names the app in English). The fix is the
+    /// voice path's own dialogue, brought to the tile: the tap pends the
+    /// launch and asks in the app's own localized words
+    /// (`launcher.confirmOpen` / `Launcher` chips Open/Cancel), the same
+    /// window, the same 45 s budget, the same executor. The launch
+    /// itself opens the universal link where one exists
+    /// (`AppLauncher.App.preferredLaunchURL`), so for WhatsApp, Facebook,
+    /// Instagram, YouTube, Google Maps and Maps iOS presents no second
+    /// sheet; the remaining custom-scheme apps keep their sheet after
+    /// ours — the honest limit, listed on the `AppLauncher.catalog`
+    /// matrix.
+    ///
+    /// Resolution order, and why:
+    ///
+    ///  1. Re-tap of the SAME tile while its own question is pended IS
+    ///     the answer — proceed exactly as a spoken yes would (the F6
+    ///     "a tap IS an answer" rule, now applied to OUR question
+    ///     instead of circumventing it).
+    ///  2. When another confirm-tier flow owns the window (a call,
+    ///     navigation walk, calendar write or dose challenge is pended),
+    ///     the launch question could never own its answer — so the tile
+    ///     performs directly (the pre-fix behavior), system sheet and
+    ///     all, instead of asking a question that the chips would
+    ///     misroute.
+    ///  3. Past that, a question for a DIFFERENT app is superseded first,
+    ///     recorded the same way a new question supersedes one (F6
+    ///     `supersededByTile`), so no stale question outlives the tap
+    ///     and no 45 s timer later speaks over the app that opened.
+    ///  4. Then the tap asks its own question through the shared core —
+    ///     with `origin: .tile`, so the verdict never reaches the
+    ///     flywheel (see `PendingAppLaunch.Origin`). The bus events keep
+    ///     the voice strings (`<id>:pending`, …): the REQUEST decision is
+    ///     origin-neutral, and the origin-sensitive events
+    ///     (`confirmedByTile` / `supersededByTile`) already carry their
+    ///     suffix.
+    ///
+    /// The question is spoken through the same `speak` seam as the voice
+    /// path, so the elder HEARS it (and its `lastAssistantReply` feeds
+    /// the confirmation chips' body — the same surface the voice path
+    /// uses). A yes — spoken or chipped — runs the identical
+    /// `handleConfirmationResponse` / `executePendingAppLaunch` route, so
+    /// the launched/announce speech fires exactly once, exactly like the
+    /// voice flow (Part C: no double-speak, no dropped launch speech).
+    func requestAppLaunchFromTile(_ app: AppLauncher.App) {
+        if pendingAppLaunch?.appID == app.id {
+            // Same-tile re-tap = yes. `performAppLaunch` resolves the
+            // question itself (F6 `confirmedByTile`) and runs the shared
+            // executor — the one code path every launch takes.
+            performAppLaunch(app)
+            return
+        }
+        // [APP-UI-CONFIRM] The ask only when the launch question would
+        // OWN its answer — the exact priority `handleConfirmationResponse`
+        // applies (navigation walk → call → calendar → launch → dose
+        // challenge). When another flow's question is on screen, a launch
+        // question could never be the one answered: the chips would say
+        // "Open" while the tap answered a call. In that corner the tile
+        // keeps its pre-fix behavior — launch now (the F6 resolution in
+        // `performAppLaunch` still clears or supersedes any launch
+        // question) — and iOS's own sheet, where one appears, stays the
+        // disclosed limit of this fix.
+        let windowBelongsToLaunch = !isAwaitingCallConfirmation
+            && !isAwaitingNavigationDisambiguation
+            && !isAwaitingCalendarEventConfirmation
+            && pendingConfirmationEntryId == nil
+        if !windowBelongsToLaunch {
+            performAppLaunch(app)
+            return
+        }
+        if pendingAppLaunch != nil {
+            // Different question live: supersede it first — recorded and
+            // announced before the new one is asked (F6). The window
+            // stays open across the swap (`requestAppLaunchCore` re-arms
+            // it through `pendAppLaunch`), so the elder still has the
+            // full 45 s for the NEW question.
+            resolveLaunchQuestion(openedBy: app.id)
+        }
+        let request = requestAppLaunchCore(appID: app.id, confidence: nil, origin: .tile)
+        speak(text: request.line)
+        if !request.pended {
+            // The honest refusal (the app is gone and has no fallback
+            // surface): the voice path's caller cards the returned line
+            // through the router's plugin delivery — the tile has no
+            // such layer, so it cards the refusal itself, with the same
+            // warning icon `announceNotInstalled` uses.
+            setOutcome(icon: "exclamationmark.triangle.fill", text: request.line)
         }
     }
 
@@ -7971,8 +8153,10 @@ self.noteTalkContractChanged()
     /// failure, `.stopped` before the pipeline is primed), and a pend with
     /// no window is a pend with no timer and no clearer — the question
     /// would sit on screen forever, answered only by chance.
-    private func pendAppLaunch(appID: String, confidence: Double?) {
-        pendingAppLaunch = PendingAppLaunch(appID: appID, confidence: confidence)
+    private func pendAppLaunch(appID: String, confidence: Double?,
+                               origin: PendingAppLaunch.Origin) {
+        pendingAppLaunch = PendingAppLaunch(appID: appID, confidence: confidence,
+                                            origin: origin)
         openConfirmationWindow()
     }
 
@@ -8018,6 +8202,13 @@ self.noteTalkContractChanged()
     /// DIFFERENT app supersedes the question the same way a new question
     /// does, and is recorded as the unanswered verdict it is.
     ///
+    /// [APP-UI-CONFIRM] (2026-10-14) The same two verdicts now serve the
+    /// tile's OWN question: a re-tap of the same tile resolves it as
+    /// `confirmedByTile` (the tap is a yes), and a tap on a different
+    /// tile supersedes it before that tile asks its own question
+    /// (`requestAppLaunchFromTile`). The flywheel keeps only the
+    /// utterance-asked verdicts (`appendLaunchCapture`'s gate).
+    ///
     /// The window is closed with the pend (when no other flow is riding on
     /// it) so the timer cannot fire at all: `VoiceSessionStateMachine` only
     /// reports an expiry for a window that is still open, so a closed one
@@ -8028,11 +8219,11 @@ self.noteTalkContractChanged()
         switch ConfirmationArbitration.tileResolution(pending: launch.appID,
                                                       opened: appID) {
         case .confirmed:
-            appendCapture(launch.capture, .confirmed, path: launch.capturePath)
+            appendLaunchCapture(launch, .confirmed)
             emitAppLaunch(eventType: "launch_confirmed",
                           outcome: "\(launch.appID):confirmedByTile")
         case .superseded:
-            appendCapture(launch.capture, .timeout, path: launch.capturePath)
+            appendLaunchCapture(launch, .timeout)
             emitAppLaunch(eventType: "launch_superseded",
                           outcome: "\(launch.appID):supersededByTile")
         }
@@ -8066,7 +8257,9 @@ self.noteTalkContractChanged()
         // executor acts on. A device that refuses the CAMERA after the yes
         // is a separate, honestly-reported outcome (its own
         // `camera_capture_*` event) — the interpretation was still right.
-        appendCapture(launch.capture, .confirmed, path: launch.capturePath)
+        // [APP-UI-CONFIRM] Only for an utterance-asked launch: a tile's
+        // yes is a finger, not an interpretation (`appendLaunchCapture`).
+        appendLaunchCapture(launch, .confirmed)
     }
 
     // MARK: - Phone-leaf contact-list launches (contact-leaf-launch task,
@@ -11840,7 +12033,7 @@ self.noteTalkContractChanged()
     private func dropLaunchSupersededByMedicationChallenge() {
         guard let launch = pendingAppLaunch else { return }
         pendingAppLaunch = nil
-        appendCapture(launch.capture, .timeout, path: launch.capturePath)
+        appendLaunchCapture(launch, .timeout)
         emitAppLaunch(eventType: "launch_superseded",
                       outcome: "\(launch.appID):supersededByMedicationChallenge")
     }
@@ -11860,6 +12053,28 @@ self.noteTalkContractChanged()
         intentLogStore.append(capture.record(verdict, path: path, correctedTo: correctedTo))
     }
 
+    /// [APP-UI-CONFIRM] (2026-10-14) The launch branch of the flywheel
+    /// seam: records a pending launch's verdict — but ONLY when the
+    /// question was asked of an UTTERANCE (`PendingAppLaunch.Origin.voice`).
+    /// A tile-asked question records nothing: the elder's finger proposed
+    /// it, no interpreter ran, and a `launcher.open` sample from a tap
+    /// would fabricate accept-band signal about a model that never saw
+    /// the input. Every launch capture site funnels through here — the
+    /// F6 tile-resolution pair, the confirmed executor, the
+    /// medication-challenge drop, the 45 s timeout and the spoken no —
+    /// so the gate exists once and cannot be forgotten at a seventh
+    /// site.
+    ///
+    /// It also fixes a latent mislabel while it is here: the timeout site
+    /// used to record through the DEFAULT path ("model") even for a
+    /// keyword-asked launch, contradicting `capturePath`'s F10 contract.
+    /// The helper always passes `launch.capturePath`.
+    private func appendLaunchCapture(_ launch: PendingAppLaunch,
+                                     _ verdict: IntentLogStore.Verdict) {
+        guard launch.recordsFlywheelCapture else { return }
+        appendCapture(launch.capture, verdict, path: launch.capturePath)
+    }
+
     /// A confirm-tier confirmation whose 45 s window expired (C12). The
     /// action stays pended exactly as before — this records the verdict,
     /// it does not change what the flow does with it. The medication
@@ -11871,7 +12086,10 @@ self.noteTalkContractChanged()
         } else if let event = pendingCalendarEvent {
             appendCapture(event.capture, .timeout)
         } else if let launch = pendingAppLaunch {
-            appendCapture(launch.capture, .timeout)
+            // [APP-UI-CONFIRM] Through the gated seam — a tile-asked
+            // question records nothing, and the voice-asked one records
+            // under its OWN path ("keyword"/"model"), not the default.
+            appendLaunchCapture(launch, .timeout)
         }
     }
 
@@ -11984,8 +12202,11 @@ self.noteTalkContractChanged()
                 executePendingAppLaunch(launch)
             } else {
                 // [INTENTLOG-CAPTURE] Same negative-half capture as the
-                // call path above — a declined launch is flywheel signal.
-                appendCapture(launch.capture, .denied, path: launch.capturePath)
+                // call path above — a declined launch is flywheel signal
+                // when the elder SPOKE it. [APP-UI-CONFIRM] A tile-asked
+                // question's "no" records nothing (the gated seam): the
+                // finger declined, no interpreter to correct.
+                appendLaunchCapture(launch, .denied)
                 emitAppLaunch(eventType: "launch_cancelled", outcome: "\(launch.appID):cancelled")
                 speak(text: L10n.str("launcher.cancelled", locale: activeLocale))
             }

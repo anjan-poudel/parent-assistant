@@ -133,7 +133,15 @@ struct HomeView: View {
                         VStack(spacing: 16) {
                             if !homePresentation.favoriteApps.isEmpty {
                                 QuickAccessStrip(apps: homePresentation.favoriteApps) { app in
-                                    coordinator.performAppLaunch(app)
+                                    // [APP-UI-CONFIRM] (2026-10-14) The
+                                    // tile ASKS first — the app's own
+                                    // localized confirmation instead of
+                                    // iOS's English "Open in <App>?"
+                                    // dialog (owner report, verbatim, on
+                                    // `requestAppLaunchFromTile`).
+                                    // `performAppLaunch` stays the
+                                    // executor behind every yes.
+                                    coordinator.requestAppLaunchFromTile(app)
                                 }
                                 .equatable()
                             }
@@ -1600,6 +1608,37 @@ struct ConfirmationChipSpeech {
     /// Whether the chip may follow up with the generic catalog line. The
     /// medication challenge is the only flow left that needs it.
     static func speaksGenericYesNo(_ flags: Flags) -> Bool { !flags.speaksForItself }
+
+    /// [APP-UI-CONFIRM] (2026-10-14) The chip LABEL keys for the flow that
+    /// currently owns the window. The launch flow renames its chips —
+    /// "Open" / "Cancel" (`launcher.chipOpen` / `launcher.chipCancel`,
+    /// en+ne) — for the owner's report, verbatim: the curated-bar launch
+    /// "shows english dialog confirmation. change that to also use custom
+    /// UI instead of native using corresponding components." Under a
+    /// localized prompt ("Should I open ह्वाट्सएप?"), a generic Yes/No pair
+    /// reproduces the native sheet's language problem in our own surface:
+    /// Open/Cancel names the actual actions, and both keys resolve in the
+    /// elder's language.
+    ///
+    /// Every other flow keeps the shared `state.awaitingConfirmation` pair
+    /// — a dose challenge says Yes/No because the question is about
+    /// taking medicine, not opening anything. The launch rename applies
+    /// only when the launch OWNED the window by the same priority the
+    /// chip action and `handleConfirmationResponse` apply: a higher-
+    /// priority flow that is pended at the same time (call, navigation
+    /// walk, calendar write) takes the answer, so the label must promise
+    /// what the tap will actually do. Pure, so the mapping is testable
+    /// without a screen, and paired with the action's own flags read so
+    /// label and behaviour cannot diverge.
+    static func chipKeys(_ flags: Flags) -> (yes: String, no: String) {
+        let launchOwnsWindow = flags.isAppLaunch
+            && !flags.isCall
+            && !flags.isNavigationDisambiguation
+            && !flags.isCalendarEvent
+        return launchOwnsWindow
+            ? ("launcher.chipOpen", "launcher.chipCancel")
+            : ("state.awaitingConfirmation.chipYes", "state.awaitingConfirmation.chipNo")
+    }
 }
 
 struct ConfirmationChips: View {
@@ -1625,14 +1664,32 @@ struct ConfirmationChips: View {
                         .multilineTextAlignment(.center)
                 }
             }
+            // [APP-UI-CONFIRM] The labels follow the OWNING flow: the app
+            // launch asks in Open/Cancel (localized), everything else in
+            // the shared yes/no pair — see `ConfirmationChipSpeech.chipKeys`
+            // for why, and for the priority rule the rename respects.
             HStack(spacing: 16) {
-                chip(key: "state.awaitingConfirmation.chipYes", isYes: true)
-                chip(key: "state.awaitingConfirmation.chipNo", isYes: false)
+                let keys = ConfirmationChipSpeech.chipKeys(flowFlags)
+                chip(key: keys.yes, isYes: true)
+                chip(key: keys.no, isYes: false)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity)
         .appSurface()
+    }
+
+    /// The flow flags, read exactly as the chip ACTION reads them (one
+    /// property, so label and action can never read different states).
+    /// Read at render time for the labels and again at tap time inside
+    /// the action — the second read is the one that decides the answer,
+    /// because the pends can have changed since the frame was drawn.
+    private var flowFlags: ConfirmationChipSpeech.Flags {
+        ConfirmationChipSpeech.Flags(
+            isCall: coordinator.isAwaitingCallConfirmation,
+            isNavigationDisambiguation: coordinator.isAwaitingNavigationDisambiguation,
+            isCalendarEvent: coordinator.isAwaitingCalendarEventConfirmation,
+            isAppLaunch: coordinator.isAwaitingAppLaunchConfirmation)
     }
 
     private func chip(key: String, isYes: Bool) -> some View {
@@ -1653,11 +1710,7 @@ struct ConfirmationChips: View {
             // opening. `ConfirmationChipSpeech` mirrors
             // `CommandRouter.route`'s `speaksItsOwnYesNo`; the two must
             // move together.
-            let flags = ConfirmationChipSpeech.Flags(
-                isCall: coordinator.isAwaitingCallConfirmation,
-                isNavigationDisambiguation: coordinator.isAwaitingNavigationDisambiguation,
-                isCalendarEvent: coordinator.isAwaitingCalendarEventConfirmation,
-                isAppLaunch: coordinator.isAwaitingAppLaunchConfirmation)
+            let flags = flowFlags
             let response: ConfirmationResponse = isYes ? .yes : .no
             coordinator.handleConfirmationResponse(response)
             if ConfirmationChipSpeech.speaksGenericYesNo(flags) {
