@@ -35,35 +35,8 @@
       "completed_at": null,
       "outputs": [],
       "iterations": 0,
-      "pending_at": "2026-10-14T07:27:36.617Z",
-      "last_activity_at": "2026-10-14T07:27:36.617Z"
-    },
-    "design-l2": {
-      "status": "PENDING",
-      "started_at": null,
-      "completed_at": null,
-      "outputs": [],
-      "iterations": 0,
-      "pending_at": "2026-10-14T07:27:36.617Z",
-      "last_activity_at": "2026-10-14T07:27:36.617Z"
-    },
-    "review-l2": {
-      "status": "PENDING",
-      "started_at": null,
-      "completed_at": null,
-      "outputs": [],
-      "iterations": 0,
-      "pending_at": "2026-10-14T07:27:36.617Z",
-      "last_activity_at": "2026-10-14T07:27:36.617Z"
-    },
-    "security-design-review": {
-      "status": "PENDING",
-      "started_at": null,
-      "completed_at": null,
-      "outputs": [],
-      "iterations": 0,
-      "pending_at": "2026-10-14T07:27:36.617Z",
-      "last_activity_at": "2026-10-14T07:27:36.617Z"
+      "pending_at": "2026-10-14T08:12:52.017Z",
+      "last_activity_at": "2026-10-14T08:12:52.017Z"
     },
     "plan-tasks": {
       "status": "PENDING",
@@ -71,8 +44,8 @@
       "completed_at": null,
       "outputs": [],
       "iterations": 0,
-      "pending_at": "2026-10-14T07:27:36.617Z",
-      "last_activity_at": "2026-10-14T07:27:36.617Z"
+      "pending_at": "2026-10-14T08:12:52.017Z",
+      "last_activity_at": "2026-10-14T08:12:52.017Z"
     },
     "implement": {
       "status": "PENDING",
@@ -80,26 +53,8 @@
       "completed_at": null,
       "outputs": [],
       "iterations": 0,
-      "pending_at": "2026-10-14T07:27:36.617Z",
-      "last_activity_at": "2026-10-14T07:27:36.617Z"
-    },
-    "review-implementation": {
-      "status": "PENDING",
-      "started_at": null,
-      "completed_at": null,
-      "outputs": [],
-      "iterations": 0,
-      "pending_at": "2026-10-14T07:27:36.617Z",
-      "last_activity_at": "2026-10-14T07:27:36.617Z"
-    },
-    "security-test": {
-      "status": "PENDING",
-      "started_at": null,
-      "completed_at": null,
-      "outputs": [],
-      "iterations": 0,
-      "pending_at": "2026-10-14T07:27:36.617Z",
-      "last_activity_at": "2026-10-14T07:27:36.617Z"
+      "pending_at": "2026-10-14T08:12:52.017Z",
+      "last_activity_at": "2026-10-14T08:12:52.017Z"
     },
     "final-sign-off": {
       "status": "PENDING",
@@ -107,8 +62,8 @@
       "completed_at": null,
       "outputs": [],
       "iterations": 0,
-      "pending_at": "2026-10-14T07:27:36.617Z",
-      "last_activity_at": "2026-10-14T07:27:36.617Z"
+      "pending_at": "2026-10-14T08:12:52.017Z",
+      "last_activity_at": "2026-10-14T08:12:52.017Z"
     }
   },
   "engine_pid": 51983,

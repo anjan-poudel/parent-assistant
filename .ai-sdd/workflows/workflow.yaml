@@ -12,16 +12,20 @@
 #
 # CUSTOMISATIONS FROM THE GENERATED FEATURE BASE AND RATIONALE:
 #
-# 1. Dropped the generated review-l1 gate so the design chain matches the
-#    project baseline: design-l1 → design-l2 → review-l2 (the L2 review is
-#    the project's single design gate).
+# 1. [SUPERSEDED 2026-10-14 — see item 6] Dropped the generated review-l1
+#    gate so the design chain matched the project baseline:
+#    design-l1 → design-l2 → review-l2 (the L2 review was the project's
+#    single design gate). Item 6 collapses this to a single design-l1 task.
 #    Reason: the project baseline is the floor for feature workflows;
 #    profile-interview / family-contacts-unify established this convention.
 #    No owner-approved frozen design exists for this feature (the
 #    owner-approved PROPOSAL fixes scope, not design), so the baseline's L1
 #    architecture stage applies.
 #
-# 2. Added security-design-review with a SECURITY-GO exit condition.
+# 2. [SUPERSEDED 2026-10-14 — see item 6] Added security-design-review with
+#    a SECURITY-GO exit condition; item 6 folds this into ONE advisory
+#    (non-blocking) security pass at final-sign-off. The focus areas below
+#    carry over to that advisory pass.
 #    Reason: the feature (a) changes the SAME on-device model that serves the
 #    safety-critical intent path (emergency recall 1.00 is a gate, not a
 #    metric), and (b) introduces a NEW cloud egress surface — chat
@@ -54,16 +58,19 @@
 #    - Prompt discipline: chat templates stay within the 1,024-token budget;
 #      seeds/chat_prompt_template.txt byte-mirrors IntentPrompt.buildChat
 #
-# 3. Kept paired review + confidence threshold 0.85 on implement, and
-#    max_rework_iterations 5 (workflow + implement).
+# 3. [PARTIALLY SUPERSEDED 2026-10-14 — see item 6] Kept paired review +
+#    confidence threshold 0.85 on implement, and max_rework_iterations 5
+#    (workflow + implement). Item 6 drops the paired review; the confidence
+#    overlay (0.85) and max_rework_iterations 5 remain.
 #    Reason: project baseline for all implementation output on this codebase;
 #    this feature edits the model-serving, decode, polisher, and cloud-routing
 #    seams the safety gates cover, where a silent regression is heard by the
 #    elderly user as a broken assistant.
 #
-# 4. Added security-test with a SECURITY-GO exit condition after
-#    review-implementation, and final-sign-off with risk_tier T2 (senior
-#    human approval) + hil.
+# 4. [SUPERSEDED 2026-10-14 — see item 6] Added security-test with a
+#    SECURITY-GO exit condition after review-implementation. final-sign-off
+#    with risk_tier T2 (senior human approval) + hil remains the blocking
+#    gate; item 6 folds security-test into the advisory pass there.
 #    Reason: project baseline. The release-build log-surface gate
 #    `ios/tools/check-release-log-safety.sh` (wired into ios/build.sh) must
 #    cover the new chat/routing/guard paths — no conversation content or key
@@ -76,6 +83,29 @@
 #    "please implement this as ai-sdd feature spec") is settled input, not a
 #    new physical-safety path. The T2 human gate sits at final-sign-off
 #    (profile-interview / spotify / multi-turn / call-dialer convention).
+#
+# 6. MID-RUN OWNER DIRECTIVE (2026-10-14, main session): lean the workflow to
+#    MINIMAL review gates. This supersedes items 1–4 as marked above:
+#    (a) design-l2 merged into design-l1 — one combined design task (the L1
+#        architecture doc carries the component-level design);
+#    (b) review-l2 gate dropped;
+#    (c) paired review dropped from implement (confidence threshold 0.85
+#        and max_rework_iterations 5 kept);
+#    (d) review-implementation gate dropped;
+#    (e) security-design-review + security-test folded into ONE advisory
+#        (non-blocking) security pass attached to final-sign-off — focused
+#        on: safety-gate regression on the shared model + versioned
+#        reversible catalog swap; cloud chat egress consent/disclosure
+#        (OD-12 shape) + key/content hygiene (B2/T-050 precedent; no user
+#        content in logs or the reply_grammar_flag event); guard integrity
+#        (verify-never-rewrite; honest degradation); training-data
+#        provenance (no CC BY-NC in a shipped artifact); prompt discipline
+#        (1,024-token budget; seed byte-mirror).
+#    (f) ONLY blocking gates remain: the T1 HIL at define-requirements
+#        (completed 2026-10-14) and final-sign-off (T2 + HIL + DV-1..6 on
+#        Anzaan). The hard safety gates — emergency recall 1.00, abstention
+#        >=0.90, closed-intent >=0.95 — stay enforced by the training eval
+#        gates and implementation tests, which are not review gates.
 #
 # PHASING (from the approved proposal): P0 runtime items are individually
 # small and may land as a normal PR first; this feature run covers the full
@@ -125,6 +155,8 @@ tasks:
   design-l1:
     use: design-architecture
     depends_on: [define-requirements]
+    # Combined design task (2026-10-14 lean directive: design-l2 merged in —
+    # the L1 architecture doc also carries the component-level design).
     # Architect must resolve/design: the style-spec artifact
     # (seeds/nepali-chat-style-spec) as the single source of truth and every
     # consumer seam (personas, data-generation prompts, eval rubric, grammar
@@ -144,36 +176,9 @@ tasks:
     # fixed-seed 0.3 across device tiers), the design records it explicitly
     # for the owner — no silent drop.
 
-  design-l2:
-    use: design-component
-    depends_on: [design-l1]
-
-  review-l2:
-    use: review-l2
-    depends_on: [design-l2]
-    exit_conditions:
-      - "review.decision == GO"
-
-  security-design-review:
-    use: security-design-review
-    depends_on: [review-l2]
-    # STRIDE required. Focus areas: safety-gate regression on the shared
-    # model + catalog-swap discipline (versioned, reversible, gates green
-    # before ship); the new cloud chat egress (consent/disclosure in the
-    # OD-12 shape; key in header only, never URLs or logs — B2/T-050
-    # precedent; conversation content off the logs; reply_grammar_flag
-    # carries no user content); guard integrity (verify-never-rewrite;
-    # honest degradation on guard failure); training-data provenance (ship
-    # mix CC-BY/Apache/MIT + synthetic + own data only — no CC BY-NC
-    # contamination of a shipped artifact); prompt discipline (1,024-token
-    # budget; seeds/chat_prompt_template.txt byte-mirrored to
-    # IntentPrompt.buildChat).
-    exit_conditions:
-      - "review.decision == \"SECURITY-GO\""
-
   plan-tasks:
     use: plan-tasks
-    depends_on: [security-design-review]
+    depends_on: [design-l1]
 
   implement:
     use: standard-implement
@@ -185,36 +190,25 @@ tasks:
       # topologically sorted into dependency waves and dispatched in parallel
       # groups (set "sequential" to opt out).
     overlays:
-      # Project baseline: paired agentic review required on all implementation
-      # output. challenger_agent must differ from the driver agent (dev).
-      review: { mode: "paired", enabled: true, challenger_agent: reviewer }
+      # 2026-10-14 lean directive: paired review dropped from implement; the
+      # confidence overlay (0.85) is the only implement overlay.
       confidence: { enabled: true, threshold: 0.85 }
     max_rework_iterations: 5
 
-  review-implementation:
-    use: review-implementation
-    depends_on: [implement]
-    exit_conditions:
-      - "review.decision == GO"
-
-  security-test:
-    use: security-test
-    depends_on: [review-implementation]
-    # Focus: emergency recall stays 1.00 and command decode stays
-    # deterministic after the chat changes (temp-0/seed/GBNF untouched on
-    # the command path); chat turns are reproducible at fixed-seed temp ~0.3;
-    # the grammar guard never rewrites and its escalation degrades honestly;
-    # the cloud chat path enforces consent + visible indicator and never
-    # leaks the provider key or conversation content into logs
-    # (check-release-log-safety.sh coverage of the new paths); the ship-mix
-    # provenance manifest proves no CC BY-NC source; the chat templates stay
-    # within the pinned token budget and the seed mirror is byte-identical.
-    exit_conditions:
-      - "review.decision == \"SECURITY-GO\""
-
   final-sign-off:
     use: final-sign-off
-    depends_on: [security-test]
+    depends_on: [implement]
+    # Advisory (non-blocking) security pass folded in per the 2026-10-14 lean
+    # directive (was security-design-review + security-test): safety-gate
+    # regression on the shared model + versioned reversible catalog swap;
+    # cloud chat consent/disclosure (OD-12 shape) + key/content hygiene
+    # (B2/T-050; no user content in logs or reply_grammar_flag); guard
+    # integrity (verify-never-rewrite, honest degradation); ship-mix
+    # provenance (no CC BY-NC in a shipped artifact); prompt budget +
+    # seed byte-mirror. Findings are recorded, not exit conditions — the
+    # hard safety gates (emergency recall 1.00, abstention >=0.90,
+    # closed-intent >=0.95) stay enforced by the training eval gates and
+    # implementation tests, which are not review gates.
     # T2 gate: senior human sign-off before the feature is considered done.
     # DV-* device validation on Anzaan is part of the completion gate:
     # DV-1 — local chat: warm, grammatical replies (honorific agreement, no
