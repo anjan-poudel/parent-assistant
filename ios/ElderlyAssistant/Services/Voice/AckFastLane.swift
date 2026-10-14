@@ -20,16 +20,18 @@ import AVFoundation
 //     caller: no audio IO, no session touches — unit-testable with a
 //     fake engine.
 //  3. `AckFastLanePlayer` — plays the cached WAV directly through
-//     AVAudioPlayer. Session handling is the same world as the bell
-//     player's (TimerAlarmBellPlayer): begin a playback-optimized mode
-//     before playing, restore exactly once when playback settles.
-//     Deliberately the VOICE-reply seam (`ResponsePlaybackModeSeam`)
-//     rather than the bell's save/restore-category switch: the bell
-//     owns the phone (mic unavailable is fine), while an ack is a voice
-//     reply inside the always-on loop — switching the shared session to
-//     `.playback` mid-turn would strand the mic. The seam is
-//     depth-counted (AudioSessionManager), so an ack overlapping the
-//     result utterance's playback nests safely.
+//     AVAudioPlayer ON THE CAPTURE PRESET. The voice-reply seam
+//     (`ResponsePlaybackModeSeam`) is deliberately NOT opened around
+//     the ack ([ACK-MIC-CONTINUITY], 2026-10-14): the seam's restore
+//     became a full deactivate → voice-processing re-enable → engine
+//     restart cycle when the loud-reply category switch shipped, and
+//     around a ~500 ms ack that cost is a live gap between "हजुर दाई"
+//     and listening mode — the elder speaks inside the gap and the
+//     head of the utterance is cut off. The ack plays quieter (the
+//     capture preset's voice gain staging vs the `.playback`
+//     category), but the sample-level gain boost still applies, and
+//     the mic never closes. The result utterance keeps the seam — its
+//     restore cost hides behind the reply itself.
 //
 // Warm-time build: after the warm-start plan's TTS step settles (the
 // engine exists), `AppCoordinator` asks the speaker seam
@@ -46,11 +48,11 @@ import AVFoundation
 //  - A locale switch after warm misses the same way. English-variant
 //    acks on a Nepali UI (or vice versa) are not pre-built (active
 //    locale only, per the plan).
-//  - If the ack is still playing when the result utterance's synthesis
-//    begins, PiperVoiceSpeaker's per-utterance cancel ends the playback
-//    seam; the depth counter restores the capture mode for the ack's
-//    tail. The window is bounded by the LLM round-trip (seconds), so
-//    the overlap is vanishing in practice.
+//  - [ACK-MIC-CONTINUITY] The ack plays outside the seam, so an ack
+//    still playing when the result utterance starts can no longer
+//    disturb the depth-counted seam — the reply owns the seam alone.
+//    PiperVoiceSpeaker's per-utterance cancel ends only its own
+//    playback seam.
 //  - Cache files are regenerated per warm; orphaned files from old
 //    voices/locales are inert (a miss, not a wrong-voice ack) — the
 //    cache is keyed, so a stale file can never play for the wrong
@@ -329,16 +331,21 @@ final class AckFastLanePlayer: NSObject, PreAckPlaying, AVAudioPlayerDelegate {
             let setupMs = Int((CFAbsoluteTimeGetCurrent() - setupStart) * 1000)
             player = newPlayer
             playbackPending = true
-            // [LAT-M2] Voice-reply playback mode for the ack's duration
-            // (depth-counted — nests with the result utterance's own
-            // begin/end).
-            ResponsePlaybackModeSeam.begin()
+            // [ACK-MIC-CONTINUITY] (2026-10-14) The ack deliberately does
+            // NOT open the voice-reply playback seam. The seam's restore
+            // is a full deactivate → voice-processing re-enable → engine
+            // restart cycle (added for the loud-reply category switch),
+            // and around a ~500 ms ack that cost shows up as a live gap
+            // between "हजुर दाई" and listening mode — the elder starts
+            // speaking inside the gap and the utterance's head is cut
+            // off. The ack therefore plays on the capture preset (the
+            // mic never closes); the sample-level gain boost still
+            // applies. The loud-category benefit is kept for the result
+            // utterance, where the gap hides behind the reply itself.
             if !newPlayer.play() {
                 // play() can return false (broken file, session race):
                 // no delegate callback ever fires, so settle here — the
-                // fast lane must not hang the turn, and the seam must
-                // not stay open (that would strand the session in the
-                // loud playback category with no mic).
+                // fast lane must not hang the turn.
                 settle()
                 return false
             }
@@ -365,7 +372,9 @@ final class AckFastLanePlayer: NSObject, PreAckPlaying, AVAudioPlayerDelegate {
         guard playbackPending else { return }
         playbackPending = false
         discardGainedFile()
-        ResponsePlaybackModeSeam.end()
+        // [ACK-MIC-CONTINUITY] No seam teardown — the ack never left the
+        // capture preset, so the mic is already live the moment the
+        // finished note fires (see playCachedAck).
         onPlaybackFinished?()
     }
 

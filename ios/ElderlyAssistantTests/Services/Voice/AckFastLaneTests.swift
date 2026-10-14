@@ -458,13 +458,16 @@ final class AckFastLaneTests: XCTestCase {
         let played = player.playCachedAck(variant: 1, locale: ne)
 
         XCTAssertTrue(played, "a cached WAV plays without synthesis")
-        XCTAssertEqual(seamBegins, 1, "playback begins the voice-reply session mode")
+        // [ACK-MIC-CONTINUITY] The ack plays on the capture preset — the
+        // voice-reply seam is deliberately not opened around it, so the
+        // mic stays live and listening resumes the moment the ack ends.
+        XCTAssertEqual(seamBegins, 0, "a cached ack never opens the voice-reply session mode")
         let hit = bus.events.first { $0.eventType == "ack_cache_hit" }
         XCTAssertNotNil(hit, "a hit is logged with its setup cost")
         XCTAssertEqual(hit?.metadata["locale"], "ne-NP")
 
         player.cancel()
-        XCTAssertEqual(seamEnds, 1, "settling restores the session mode exactly once")
+        XCTAssertEqual(seamEnds, 0, "settling has no session mode to restore — the mic never closed")
         XCTAssertEqual(finished, 1, "the finished note fires exactly once per started playback")
         player.cancel()
         XCTAssertEqual(finished, 1, "a cancel with nothing playing is a no-op")
@@ -472,9 +475,10 @@ final class AckFastLaneTests: XCTestCase {
 
     func testPlayerThatRefusesToPlaySettlesInsteadOfHangingTheFastLane() throws {
         // play() returning false means no delegate callback will ever
-        // fire — the fast lane must settle (end the seam, fire the
-        // finished note) or the turn hangs and the session stays in the
-        // loud playback category with no mic.
+        // fire — the fast lane must settle (fire the finished note) or
+        // the turn hangs. [ACK-MIC-CONTINUITY] The seam is never opened
+        // around an ack, so a refused play has no session mode to
+        // restore — the mic was never closed.
         final class RefusingPlayer: AVAudioPlayer {
             override func play() -> Bool { false }
         }
@@ -495,8 +499,8 @@ final class AckFastLaneTests: XCTestCase {
         let played = player.playCachedAck(variant: 1, locale: ne)
 
         XCTAssertFalse(played, "a refused play reads as a miss — the router falls back")
-        XCTAssertEqual(seamBegins, 1)
-        XCTAssertEqual(seamEnds, 1, "the refused play still settles the seam")
+        XCTAssertEqual(seamBegins, 0, "a refused play never opened the seam")
+        XCTAssertEqual(seamEnds, 0, "nothing to restore — the mic never closed")
         XCTAssertEqual(finished, 1, "the finished note fires — no hang")
     }
 
