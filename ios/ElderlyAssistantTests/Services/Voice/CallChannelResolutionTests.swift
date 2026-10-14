@@ -1382,16 +1382,19 @@ final class CallChannelResolutionTests: XCTestCase {
                                    in: executor)
         let collapsedCase = collapsed(phoneCase)
 
-        // The discard-shaped call is gone: the open exists ONCE, as the
-        // guard's condition — never called twice.
-        XCTAssertEqual(occurrences(of: "callLinks.openPhone(", in: phoneCase), 1,
-                       "the floor's open exists once — inside the guard")
+        // The discard-shaped call is gone: the dial exists ONCE, as the
+        // guard's condition — never called twice. (callkit-gsm: the
+        // floor's dial is the shared CallKit site `placeGSMCall`; the
+        // naive `callLinks.openPhone` open now lives inside it as the
+        // CallKit-failure fallback.)
+        XCTAssertEqual(occurrences(of: "placeGSMCall(", in: phoneCase), 1,
+                       "the floor's dial exists once — inside the guard")
         XCTAssertTrue(collapsedCase.trimmingCharacters(in: .whitespaces)
-            .hasPrefix("case .phone: guard callLinks.openPhone(action.contact.phone) else {"),
+            .hasPrefix("case .phone: guard placeGSMCall(phone: action.contact.phone) else {"),
                       "the guard is the FIRST statement of the case — nothing can "
-                      + "succeed, learn or record before the open is known")
+                      + "succeed, learn or record before the dial is known")
         let guardNeedle = collapsed("""
-            guard callLinks.openPhone(action.contact.phone) else {
+            guard placeGSMCall(phone: action.contact.phone) else {
                 announceNoUsableNumber(contact: action.contact, locale: locale)
                 return
             }
@@ -2021,10 +2024,11 @@ final class CallChannelResolutionTests: XCTestCase {
     /// shipped no-number line (the `?? ""` default — the pre-fix behaviour
     /// for hop-less callers, byte-identical). The POSITIVE direction (a hop
     /// that carries a number) cannot run inert: `performSystemContactCall`
-    /// hands any dialable number straight to `UIApplication.shared.open`
-    /// (`PhoneDialer.url` builds a real `tel://` for any digits), so a unit
-    /// arm driving it would dial the simulator for real — the source pin
-    /// above is the honest ceiling there (see the T-151 notes).
+    /// hands any dialable number straight to the CallKit dialer
+    /// (`placeGSMCall` → `CXStartCallAction`, callkit-gsm 2026-10-14 —
+    /// after the fix; before it, a raw `tel:` open), so a unit arm driving
+    /// it would place a native call for real — the source pin above is the
+    /// honest ceiling there (see the T-151 notes).
     @MainActor
     func testHoppedFloorLegWithoutAPhoneKeepsTheShippedLine() {
         let coordinator = makeCoordinator()

@@ -148,8 +148,11 @@ struct FaceAvatar: View {
     }
 }
 
-// MARK: - Phone dialing (shared by the emergency icon, contact tiles, and
-// voice-triggered calling — redesign spec §3.2, trial voice wiring)
+// MARK: - Phone dialing (the `tel:` builders — every GSM dial now goes
+// through `AppCoordinator.placeGSMCall`/CallKit (callkit-gsm, 2026-10-14);
+// these remain for the CallKit-failure fallback, the empty-dialer phone
+// opener, and the pinned no-digits guards — redesign spec §3.2, trial
+// voice wiring)
 
 enum PhoneDialer {
     /// Deliberately `tel://` WITH slashes (tel-scheme fix, 2026-09-07):
@@ -196,8 +199,10 @@ enum PhoneAppOpener {
 /// The one voice/safety affordance allowed outside Home. Real behavior:
 /// posts the same local notification `CommandRouter` posts for a
 /// voice-triggered emergency, speaks the ack, and — when a family contact
-/// is configured — places a real phone call via `tel:`. Honest about the
-/// unconfigured case instead of pretending the action succeeded.
+/// is configured — places a real phone call through the CallKit dialer
+/// (`dialEmergencyContact`; no system `tel:` sheet, callkit-gsm
+/// 2026-10-14). Honest about the unconfigured case instead of pretending
+/// the action succeeded.
 struct EmergencyIconButton: View {
     @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
@@ -228,12 +233,16 @@ struct EmergencyIconButton: View {
 
     private func trigger() {
         coordinator.emergencyNotify()
+        // callkit-gsm (2026-10-14): the dial goes through the coordinator's
+        // CallKit path (`dialEmergencyContact` → `placeGSMCall`), so the
+        // emergency call is placed with NO system `tel:` sheet between the
+        // tap and the call — the app's own ack/confirmation flow is the
+        // only one. False means an undialable number (or no contact).
         guard let contact = coordinator.emergencyContact,
-              let url = PhoneDialer.url(for: contact.phone) else {
+              coordinator.dialEmergencyContact(contact) else {
             showNoContactAlert = true
             return
         }
-        UIApplication.shared.open(url)
     }
 }
 

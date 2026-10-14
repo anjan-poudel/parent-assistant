@@ -2068,6 +2068,14 @@ final class AppCoordinator: ObservableObject {
     /// Stateless, so no lazy needed; tests fake it via `CallLinkOpening`.
     private let callLinks = CallLinks()
 
+    /// The GSM floor's dialer (callkit-gsm, 2026-10-14): every GSM call
+    /// goes through CallKit's `CXStartCallAction` so the ONLY
+    /// confirmation the user sees is the app's own localized yes/no
+    /// seam — never the system `tel:` sheet (owner report). Stateless
+    /// across calls; `tel:` opens survive strictly as its failure
+    /// fallback (and the family paths' numberless honest line).
+    private let callKitDialer = CallKitDialer()
+
     /// Per-contact Messenger handles for ADDRESS-BOOK people, keyed by
     /// normalized phone (Messenger deep-link fix, 2026-09-07) — Messenger
     /// has NO phone-number thread link, so a captured handle is what
@@ -8624,10 +8632,13 @@ self.noteTalkContractChanged()
         let locale = activeLocale
         switch action.method {
         case .phone:
-            guard callLinks.openPhone(action.contact.phone) else {
-                // RES-8/RES-10: the floor is terminal but its open can
+            guard placeGSMCall(phone: action.contact.phone) else {
+                // RES-8/RES-10: the floor is terminal but its dial can
                 // still fail (an undialable number) — the shipped honest
-                // line, no hop exists from the floor.
+                // line, no hop exists from the floor. (callkit-gsm: the
+                // dial itself is CallKit, see `placeGSMCall` — a plain
+                // tel: open here would raise the SYSTEM sheet AFTER the
+                // app's own confirmation, the owner-reported dialog.)
                 announceNoUsableNumber(contact: action.contact, locale: locale)
                 return
             }
@@ -8943,7 +8954,7 @@ self.noteTalkContractChanged()
                                      isVideo: kind == .video, locale: locale)
             }
         case .phone:
-            guard callLinks.openPhone(contact.phone) else {
+            guard placeGSMCall(phone: contact.phone) else {
                 announceNoUsableNumber(contact: contact, locale: locale)
                 return
             }
@@ -9009,14 +9020,13 @@ self.noteTalkContractChanged()
     /// Dial a SYSTEM-address-book search result (Phone leaf search,
     /// system-contacts search task 2026-09-06) — plain GSM audio call,
     /// the one surface a random phone-book row implies (there is no
-    /// per-contact `FamilyContact` preference behind it). Dialed through
-    /// `PhoneDialer.url(for:)`, the helper the emergency icon in the same
-    /// leaf chrome already uses (`RedesignComponents`) — per the task;
-    /// the family paths keep dialing via `CallLinks`, which builds the
-    /// same `tel:` with stricter '+' handling. A dialable row can't
-    /// really fail, but if it somehow does, say so aloud instead of
-    /// going silent. The number enters the recency ranking only after
-    /// the dial actually opened.
+    /// per-contact `FamilyContact` preference behind it). The dial goes
+    /// through `placeGSMCall` (callkit-gsm, 2026-10-14 — CallKit's
+    /// native `CXStartCallAction`, so no system `tel:` sheet interrupts
+    /// the flow), the single site every other GSM path uses too; a
+    /// numberless row can't dial and says so aloud instead of going
+    /// silent. The number enters the recency ranking only after the
+    /// dial actually opened.
     /// The `hop` parameter is accepted for call-site uniformity with the
     /// three search-shaped openers but deliberately never consulted: the
     /// GSM floor is TERMINAL (design-l2 §10.1, "the floor is the last
@@ -9026,19 +9036,55 @@ self.noteTalkContractChanged()
     /// are the hopping ones — see the T-149 notes.)
     func performSystemContactCall(name: String, phone: String,
                                   hop: LaunchHop? = nil) {
-        guard let url = PhoneDialer.url(for: phone) else {
+        guard placeGSMCall(phone: phone) else {
             setOutcome(icon: "exclamationmark.triangle.fill",
                        text: L10n.fmt("call.announce.noPhoneNumber", locale: activeLocale, name))
             speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: activeLocale, name))
             return
         }
-        DispatchQueue.main.async { UIApplication.shared.open(url) }
         contactNumberUsed(phone)
         setOutcome(icon: "phone.fill",
                    text: L10n.fmt("home.outcome.callPlaced", locale: activeLocale, name))
         speak(text: L10n.fmt("router.call.calling", locale: activeLocale, name))
         recordActivity(kind: .call, channel: .phone,
                        contactName: name, phone: phone)
+    }
+
+    /// The ONE GSM dial site (callkit-gsm, 2026-10-14) — every GSM path
+    /// (the voice executor's floor, the family contact tiles, the
+    /// system-search leaf, the emergency icon, missed-call dial-back)
+    /// reaches the phone app through here, and the dial is CallKit's
+    /// native `CXStartCallAction` everywhere: the SYSTEM `tel:`
+    /// confirmation sheet (the owner-report dialog — number plus
+    /// Open/Cancel) never appears, so the app's own spoken yes/no
+    /// confirmation stays the ONLY confirmation.
+    /// Returns false when the number carries no dialable digits —
+    /// nothing dialable anywhere; the caller speaks its shipped honest
+    /// line. Should CallKit itself reject the submitted request, the
+    /// dialer falls back to the shipped `tel:` open — the one remaining
+    /// path that can raise the system sheet, kept strictly for that
+    /// failure.
+    @discardableResult
+    func placeGSMCall(phone: String) -> Bool {
+        switch callKitDialer.dial(phoneNumber: phone, onFailure: { [weak self] in
+            _ = self?.callLinks.openPhone(phone)
+        }) {
+        case .requested:
+            return true
+        case .invalidNumber:
+            return false
+        }
+    }
+
+    /// The emergency icon's dial (callkit-gsm, 2026-10-14) — the SAME
+    /// CallKit path every other GSM call takes, so an emergency tap
+    /// reaches the contact with no system sheet standing between the
+    /// tap and the call. False when the contact's number is undialable;
+    /// the icon's own alert surface then stands
+    /// (`EmergencyIconButton.trigger`).
+    @discardableResult
+    func dialEmergencyContact(_ contact: FamilyContact) -> Bool {
+        placeGSMCall(phone: contact.phone)
     }
 
     /// FaceTime re-initiation for a Recent activity row (call-history
