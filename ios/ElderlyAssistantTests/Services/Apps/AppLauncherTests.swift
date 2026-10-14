@@ -9,7 +9,10 @@ import XCTest
 /// scheme-only root URLs with the tel:/sms: slashes-less exception and the
 /// Settings panes' full `App-Prefs:root=…` form, cap 8), the pure
 /// restore/validation and search rules, and — through a scripted opener —
-/// that installed-probes and opens use exactly the launch URL. The
+/// that installed-probes use exactly the scheme launch URL while
+/// confirmed opens use the prompt-free preferred form (the
+/// [APP-PROMPT-MATRIX] section: universal link where the app claims one,
+/// scheme root otherwise, with the may-still-prompt matrix pinned). The
 /// `launchPlan` section pins what a launch actually opens when the probe
 /// fails (the public Settings fallback for the App-Prefs panes, the web
 /// fallback, or the honest refusal), and the vocabulary section pins that
@@ -434,14 +437,21 @@ final class AppLauncherTests: XCTestCase {
     }
 
     func testOpenOpensExactlyTheAppsLaunchURL() {
+        // [APP-PROMPT-MATRIX] (2026-10-14) What OPENS is the entry's
+        // `preferredLaunchURL`: the https universal link where one exists
+        // (WhatsApp → wa.me — the prompt-free form), the scheme root
+        // everywhere else (here, the Settings pane's full App-Prefs URL).
+        // The PROBE above still reads `rootURL`; only the confirmed open
+        // swaps forms.
         let opener = FakeCallLinkOpener(installed: ["whatsapp": true])
         let launcher = AppLauncher(opener: opener)
 
         launcher.open(AppLauncher.app(for: "whatsapp")!)
         launcher.open(AppLauncher.app(for: "settingsaccessibility")!)
         XCTAssertEqual(opener.opened.map(\.absoluteString),
-                       ["whatsapp://", "App-Prefs:root=ACCESSIBILITY"],
-                       "a Settings pane opens its own full App-Prefs URL")
+                       ["https://wa.me/", "App-Prefs:root=ACCESSIBILITY"],
+                       "the universal link opens where one exists; a Settings pane " +
+                       "opens its own full App-Prefs URL")
     }
 
     func testOpenOfTheCameraEntryOpensNothing() {
@@ -452,6 +462,101 @@ final class AppLauncherTests: XCTestCase {
         let opener = FakeCallLinkOpener()
         AppLauncher(opener: opener).open(AppLauncher.app(for: "camera")!)
         XCTAssertTrue(opener.opened.isEmpty)
+    }
+
+    // MARK: - [APP-PROMPT-MATRIX] prompt-free launches (2026-10-14)
+    //
+    // The owner's report, verbatim: the curated bar "shows english dialog
+    // confirmation" — iOS's own "Open in <App>?" sheet, presented in the
+    // SYSTEM language for programmatic custom-scheme opens. The fix has
+    // two halves, both pinned here: the app's own localized confirmation
+    // runs first (`AppLaunchTileConfirmationTests`), and the confirmed
+    // open uses the https universal link where the target app claims one
+    // (its apple-app-site-association), which iOS opens WITHOUT the sheet.
+    // The per-app matrix with the AASA evidence lives on
+    // `AppLauncher.catalog`; these tests are its executable form.
+
+    /// Exactly the six evidence-backed entries carry a universal link,
+    /// each https (nothing else opens an app without iOS's sheet), each
+    /// pinned character for character — a typo would not crash, it would
+    /// silently fall back to the scheme and the sheet would return.
+    func testUniversalLinkMatrixIsPinnedAndHttpsOnly() {
+        let expected: [String: String] = [
+            "whatsapp": "https://wa.me/",
+            "facebook": "https://www.facebook.com/",
+            "instagram": "https://www.instagram.com/",
+            "youtube": "https://www.youtube.com/",
+            "googlemaps": "https://www.google.com/maps",
+            "maps": "https://maps.apple.com/"
+        ]
+        let withLink = AppLauncher.catalog.filter { $0.universalLink != nil }
+        XCTAssertEqual(withLink.map(\.id),
+                       ["maps", "whatsapp", "facebook", "instagram",
+                        "youtube", "googlemaps"],
+                       "exactly the six evidence-backed entries carry a universal " +
+                       "link — any other entry needs its AASA read first")
+        for (id, url) in expected {
+            XCTAssertEqual(AppLauncher.app(for: id)?.universalLink?.absoluteString, url,
+                           "\(id) must carry exactly \(url)")
+        }
+        for app in withLink {
+            XCTAssertEqual(app.universalLink?.scheme, "https",
+                           "\(app.id)'s universal link must be https — the only form " +
+                           "iOS routes into the claiming app without its own sheet")
+        }
+    }
+
+    /// The probe never moves: installed-ness is still decided by the
+    /// scheme (`canOpenURL` cannot tell a universal link's app from
+    /// Safari), and only the confirmed open swaps to the prompt-free
+    /// form. This is what keeps a phone WITHOUT WhatsApp from having
+    /// wa.me opened blind into Safari.
+    func testProbeStaysOnTheSchemeWhileTheConfirmedOpenUsesTheUniversalLink() {
+        let opener = FakeCallLinkOpener(installed: ["whatsapp": true])
+        let launcher = AppLauncher(opener: opener)
+        let whatsapp = AppLauncher.app(for: "whatsapp")!
+
+        XCTAssertEqual(launcher.launchPlan(for: whatsapp), .app)
+        XCTAssertEqual(opener.canOpenChecks.map(\.absoluteString), ["whatsapp://"],
+                       "the probe is the scheme root — launchPlan reads rootURL")
+        launcher.open(whatsapp)
+        XCTAssertEqual(opener.opened.map(\.absoluteString), ["https://wa.me/"],
+                       "the confirmed open uses the universal link")
+        XCTAssertEqual(AppLauncher.app(for: "whatsapp")?.preferredLaunchURL?.absoluteString,
+                       "https://wa.me/")
+    }
+
+    /// Every scheme-only entry keeps opening its scheme root — the
+    /// universal link is an addition for the six, never a rewrite of the
+    /// rest of the catalog.
+    func testSchemeOnlyEntriesPreferTheirSchemeRoot() {
+        for app in AppLauncher.catalog where app.universalLink == nil {
+            XCTAssertEqual(app.preferredLaunchURL?.absoluteString,
+                           app.rootURL?.absoluteString,
+                           "\(app.id) has no universal link — it must open its scheme root")
+        }
+    }
+
+    /// The honest half of the matrix: iOS's own sheet can still follow
+    /// OURS for every custom-scheme entry (no suppression exists for a
+    /// third-party scheme), and cannot for the six universal-link entries
+    /// or the in-process camera. The Settings panes count as "may
+    /// prompt": the private `App-Prefs` pane is unverified on 26.x (a DV
+    /// item), while the public `settingsFallback` deep link is
+    /// prompt-free but not what a pane probes to.
+    func testLaunchStillMayPromptIsFalseExactlyForThePromptFreeEntries() {
+        let promptFree: Set<String> = ["whatsapp", "facebook", "instagram",
+                                       "youtube", "googlemaps", "maps", "camera"]
+        for app in AppLauncher.catalog {
+            XCTAssertEqual(app.launchStillMayPrompt, !promptFree.contains(app.id),
+                           "\(app.id): the matrix must name exactly the prompt-free set")
+        }
+        for id in ["phone", "messages", "messenger", "settings", "settingswifi",
+                   "gmail", "imo"] {
+            XCTAssertTrue(AppLauncher.app(for: id)!.launchStillMayPrompt,
+                          "\(id) rides a custom scheme — iOS's sheet may still appear " +
+                          "after ours, and the matrix must say so")
+        }
     }
 
     // MARK: - Spoken resolution (app(matchingSpoken:), 2026-09-16)
@@ -845,6 +950,38 @@ final class AppLauncherTests: XCTestCase {
         XCTAssertEqual(record.path, "keyword")
         XCTAssertEqual(record.action, "launcher.open")
         XCTAssertEqual(record.slots?["app"], "photos")
+    }
+
+    /// [APP-UI-CONFIRM] (2026-10-14) The origin gate: a question a TILE
+    /// asked is answered by a finger, not an interpretation — it must
+    /// never reach the flywheel (`recordsFlywheelCapture` false), while a
+    /// bare construction stays the utterance it always was (the
+    /// defaulted field, the `PendingCallAction` L2-D3 style). The
+    /// capture's SHAPE is unchanged for both — only the write is gated
+    /// (`appendLaunchCapture` in `AppCoordinator`), so nothing about a
+    /// tile tap can masquerade as model or keyword performance.
+    func testTileAskedLaunchesNeverRecordFlywheelVerdicts() {
+        let utterance = AppCoordinator.PendingAppLaunch(appID: "photos", confidence: nil)
+        XCTAssertEqual(utterance.origin, .voice,
+                       "a construction that omits the origin is an utterance")
+        XCTAssertTrue(utterance.recordsFlywheelCapture)
+        XCTAssertEqual(utterance.capturePath, "keyword",
+                       "the F10 path derivation is untouched by the origin field")
+
+        let modelUtterance = AppCoordinator.PendingAppLaunch(appID: "photos",
+                                                             confidence: 0.9)
+        XCTAssertTrue(modelUtterance.recordsFlywheelCapture)
+        XCTAssertEqual(modelUtterance.capturePath, "model")
+
+        let tile = AppCoordinator.PendingAppLaunch(appID: "photos", confidence: nil,
+                                                   origin: .tile)
+        XCTAssertFalse(tile.recordsFlywheelCapture,
+                       "a tile tap is a finger, not an interpretation — no verdict, " +
+                       "no capturePath, nothing to teach the accept band")
+        XCTAssertEqual(tile.capture.action, "launcher.open",
+                       "the capture SHAPE is identical — the gate refuses the write, " +
+                       "it does not fork the record")
+        XCTAssertEqual(tile.capture.slots?["app"], "photos")
     }
 
     /// [F13] A launch question that expired names itself: one observable
