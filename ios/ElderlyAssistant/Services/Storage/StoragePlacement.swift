@@ -56,6 +56,15 @@ enum StoragePlacementPolicy {
         // a small secret that keeps the Keychain item's per-item
         // protection, and one key so the unlink wipe is a single delete.
         "spotify.session",
+        // [SETTINGS-SURVIVAL] (2026-10-14, owner invariant: "settings
+        // should be invariants of all updates — even if you uninstall,
+        // still keep the settings") The user profile (the interview data
+        // — name, address-as, language, relationship) and the survival
+        // snapshot of user-set preferences. Keychain-resident because
+        // the Keychain is the ONE store the OS keeps after an app
+        // uninstall; the container is not.
+        "user.profile",
+        "settings.survival",
     ]
 
     static func placement(for key: String) -> StoragePlacement {

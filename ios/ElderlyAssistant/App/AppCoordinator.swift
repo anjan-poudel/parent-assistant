@@ -48,6 +48,15 @@ final class AppCoordinator: ObservableObject {
         }
         return .other
     }
+    /// [AUDIO-REACTIVE-HERO] (2026-10-14) The Talk hero's live level
+    /// model (see AudioVisualization.swift) — ONE instance for the whole
+    /// app. `buildAndStartVoicePipeline` attaches it to the pipeline
+    /// (the mic feed) and `start()` attaches it to `PiperVoiceSpeaker`
+    /// (the reply feed); Home reads it straight into the hero. Created
+    /// at declaration because the UI may render before `start()` runs —
+    /// the model simply reports "no signal" (rest) until one exists.
+    let audioVisualization = AudioLevelPublisher()
+
     /// Catalog KEY naming the active STT — resolved in the UI's locale
     /// (spec §3.2; no hardcoded English labels).
     @Published var activeSTTNameKey: String = "stt.name.sfs"
@@ -273,7 +282,7 @@ final class AppCoordinator: ObservableObject {
     /// (Spec §4.4.4 — the Settings AI मोडेल section is this picker's home.)
     @Published var sttModelPreference: ModelID? {
         didSet {
-            UserDefaults.standard.set(sttModelPreference?.rawValue,
+            SettingsPersistence.shared.set(sttModelPreference?.rawValue,
                                       forKey: Self.sttPreferenceKey)
             whisperSpeechRecognizer.setPreferredModel(sttModelPreference)
             // [STT-SWITCHER] The ANE (WhisperKit) recognizer takes the pick
@@ -304,21 +313,21 @@ final class AppCoordinator: ObservableObject {
     /// Restore only at launch; rendering consumes the root environment value.
     @Published var appTheme: AppTheme {
         didSet {
-            UserDefaults.standard.set(appTheme.rawValue, forKey: Self.themeKey)
+            SettingsPersistence.shared.set(appTheme.rawValue, forKey: Self.themeKey)
         }
     }
     private static let themeKey = "appTheme"
 
     @Published var appVisualStyle: AppVisualStyle {
         didSet {
-            UserDefaults.standard.set(appVisualStyle.rawValue, forKey: Self.visualStyleKey)
+            SettingsPersistence.shared.set(appVisualStyle.rawValue, forKey: Self.visualStyleKey)
         }
     }
     private static let visualStyleKey = "appVisualStyle"
 
     @Published var appTextSize: AppTextSize {
         didSet {
-            UserDefaults.standard.set(appTextSize.rawValue, forKey: Self.textSizeKey)
+            SettingsPersistence.shared.set(appTextSize.rawValue, forKey: Self.textSizeKey)
         }
     }
     private static let textSizeKey = "appTextSize"
@@ -333,7 +342,7 @@ final class AppCoordinator: ObservableObject {
     /// not fire there).
     @Published var defaultCallApp: CallApp {
         didSet {
-            UserDefaults.standard.set(defaultCallApp.rawValue, forKey: Self.defaultCallAppKey)
+            SettingsPersistence.shared.set(defaultCallApp.rawValue, forKey: Self.defaultCallAppKey)
         }
     }
     private static let defaultCallAppKey = "defaultCallApp"
@@ -349,7 +358,7 @@ final class AppCoordinator: ObservableObject {
     /// pattern — didSet does not fire there).
     @Published var secondaryCallApp: CallApp {
         didSet {
-            UserDefaults.standard.set(secondaryCallApp.rawValue,
+            SettingsPersistence.shared.set(secondaryCallApp.rawValue,
                                       forKey: Self.secondaryCallAppKey)
         }
     }
@@ -367,7 +376,7 @@ final class AppCoordinator: ObservableObject {
     /// not fire there).
     @Published var navigationMapApp: NavigationMapApp {
         didSet {
-            UserDefaults.standard.set(navigationMapApp.rawValue, forKey: Self.navigationMapAppKey)
+            SettingsPersistence.shared.set(navigationMapApp.rawValue, forKey: Self.navigationMapAppKey)
         }
     }
     private static let navigationMapAppKey = "navigationMapApp"
@@ -381,7 +390,7 @@ final class AppCoordinator: ObservableObject {
     /// a fresh pick works immediately).
     @Published var brainModelPreference: ModelID? {
         didSet {
-            UserDefaults.standard.set(brainModelPreference?.rawValue,
+            SettingsPersistence.shared.set(brainModelPreference?.rawValue,
                                       forKey: Self.brainPreferenceKey)
             applyBrainModel()
         }
@@ -398,7 +407,7 @@ final class AppCoordinator: ObservableObject {
     /// holds its interpreter as an immutable `private let`).
     @Published var voiceEngineStack: VoiceEngineStack {
         didSet {
-            UserDefaults.standard.set(voiceEngineStack.rawValue, forKey: Self.voiceEngineStackKey)
+            SettingsPersistence.shared.set(voiceEngineStack.rawValue, forKey: Self.voiceEngineStackKey)
             applyVoiceEngineStack()
         }
     }
@@ -419,7 +428,7 @@ final class AppCoordinator: ObservableObject {
     /// same instant-apply rule as the engine toggle itself).
     @Published var cloudFallbackEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(cloudFallbackEnabled, forKey: Self.cloudFallbackKey)
+            SettingsPersistence.shared.set(cloudFallbackEnabled, forKey: Self.cloudFallbackKey)
             applyVoiceEngineStack()
         }
     }
@@ -462,7 +471,7 @@ final class AppCoordinator: ObservableObject {
     @Published var noiseFilterEnabled: Bool {
         didSet {
             guard noiseFilterEnabled != oldValue else { return }
-            UserDefaults.standard.set(noiseFilterEnabled,
+            SettingsPersistence.shared.set(noiseFilterEnabled,
                                       forKey: Self.noiseFilterEnabledKey)
             applyNoiseFilterChange()
         }
@@ -478,7 +487,7 @@ final class AppCoordinator: ObservableObject {
     /// a second provider exists to switch between).
     @Published var cloudProvider: CloudProvider {
         didSet {
-            UserDefaults.standard.set(cloudProvider.rawValue, forKey: Self.cloudProviderKey)
+            SettingsPersistence.shared.set(cloudProvider.rawValue, forKey: Self.cloudProviderKey)
         }
     }
     private static let cloudProviderKey = "cloudProvider"
@@ -523,7 +532,7 @@ final class AppCoordinator: ObservableObject {
     /// the didSet always sees the new value.
     @Published private(set) var favoriteAppIDs: [String] {
         didSet {
-            UserDefaults.standard.set(favoriteAppIDs, forKey: Self.quickAccessAppsKey)
+            SettingsPersistence.shared.set(favoriteAppIDs, forKey: Self.quickAccessAppsKey)
         }
     }
     private static let quickAccessAppsKey = "quickAccessApps"
@@ -1050,7 +1059,7 @@ final class AppCoordinator: ObservableObject {
     /// pattern — didSet does not fire there).
     @Published var appointmentsToCalendar: Bool {
         didSet {
-            UserDefaults.standard.set(appointmentsToCalendar,
+            SettingsPersistence.shared.set(appointmentsToCalendar,
                                       forKey: Self.appointmentsToCalendarKey)
             appointmentStore.calendarWritesEnabled = appointmentsToCalendar
         }
@@ -1064,7 +1073,7 @@ final class AppCoordinator: ObservableObject {
     /// confined to `dismissAppointmentSmsNote`.
     @Published private(set) var appointmentSmsNoteDismissed: Bool {
         didSet {
-            UserDefaults.standard.set(appointmentSmsNoteDismissed,
+            SettingsPersistence.shared.set(appointmentSmsNoteDismissed,
                                       forKey: Self.appointmentSmsNoteDismissedKey)
         }
     }
@@ -1561,7 +1570,7 @@ final class AppCoordinator: ObservableObject {
     /// from the next launch (the Settings copy says so).
     @Published var warmStartEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(warmStartEnabled,
+            SettingsPersistence.shared.set(warmStartEnabled,
                                       forKey: Self.warmStartEnginesKey)
         }
     }
@@ -2923,11 +2932,11 @@ final class AppCoordinator: ObservableObject {
         // store's calendar gate is synced by hand (same rule as
         // `appTheme` above).
         let appointmentsToCalendarValue =
-            UserDefaults.standard.object(forKey: Self.appointmentsToCalendarKey) as? Bool ?? true
+            SettingsPersistence.shared.object(forKey: Self.appointmentsToCalendarKey) as? Bool ?? true
         self.appointmentsToCalendar = appointmentsToCalendarValue
         appointmentStore.calendarWritesEnabled = appointmentsToCalendarValue
         self.appointmentSmsNoteDismissed =
-            UserDefaults.standard.bool(forKey: Self.appointmentSmsNoteDismissedKey)
+            SettingsPersistence.shared.bool(forKey: Self.appointmentSmsNoteDismissedKey)
 
         // Safety-critical service (no LLM dependency)
         self.medicationScheduler = MedicationScheduler(
@@ -3027,11 +3036,11 @@ final class AppCoordinator: ObservableObject {
         self.appLanguage = AppLanguage.persisted()
 
         self.appTheme = AppTheme(rawOrDefault:
-            UserDefaults.standard.string(forKey: Self.themeKey))
+            SettingsPersistence.shared.string(forKey: Self.themeKey))
         self.appVisualStyle = AppVisualStyle(rawOrDefault:
-            UserDefaults.standard.string(forKey: Self.visualStyleKey))
+            SettingsPersistence.shared.string(forKey: Self.visualStyleKey))
         self.appTextSize = AppTextSize(rawOrDefault:
-            UserDefaults.standard.string(forKey: Self.textSizeKey))
+            SettingsPersistence.shared.string(forKey: Self.textSizeKey))
 
         // Calendar display (calendar-display task, 2026-09-09) — the
         // default calendar + overlay toggles behind the Home top bar's
@@ -3058,7 +3067,7 @@ final class AppCoordinator: ObservableObject {
         // every row. This is the property's ONLY initial assignment, so
         // its didSet does not fire here (same rule as `appTheme` above) —
         // nothing needs to react to the restored value.
-        self.defaultCallApp = UserDefaults.standard
+        self.defaultCallApp = SettingsPersistence.shared
             .string(forKey: Self.defaultCallAppKey)
             .flatMap(CallApp.init(rawValue:)) ?? .phone
 
@@ -3068,7 +3077,7 @@ final class AppCoordinator: ObservableObject {
         // the GSM floor every route contains. This is the property's
         // ONLY initial assignment, so its didSet does not fire here
         // (same rule as `defaultCallApp` above).
-        self.secondaryCallApp = UserDefaults.standard
+        self.secondaryCallApp = SettingsPersistence.shared
             .string(forKey: Self.secondaryCallAppKey)
             .flatMap(CallApp.init(rawValue:)) ?? .phone
 
@@ -3078,7 +3087,7 @@ final class AppCoordinator: ObservableObject {
         // installed at request time. This is the property's ONLY initial
         // assignment, so its didSet does not fire here (same rule as
         // `appTheme` above) — nothing reacts to the restored value.
-        self.navigationMapApp = UserDefaults.standard
+        self.navigationMapApp = SettingsPersistence.shared
             .string(forKey: Self.navigationMapAppKey)
             .flatMap(NavigationMapApp.init(rawValue:)) ?? .auto
 
@@ -3144,7 +3153,7 @@ final class AppCoordinator: ObservableObject {
         // every on-device brain runs deterministic temp-0 + fixed-seed
         // sampling through `OnDeviceSampling` ([NO-GIBBERISH] 2026-09-07).
         let restoredBrain: ModelID?
-        if let raw = UserDefaults.standard.string(forKey: Self.brainPreferenceKey) {
+        if let raw = SettingsPersistence.shared.string(forKey: Self.brainPreferenceKey) {
             let stored = ModelID(rawValue: raw)
             restoredBrain = ModelCatalog.entry(for: stored) != nil ? stored : nil
         } else {
@@ -3161,7 +3170,7 @@ final class AppCoordinator: ObservableObject {
         // `applyVoiceEngineStack()`. This is the property's ONLY initial
         // assignment, so (like `appLanguage` above) its didSet does not
         // fire here.
-        self.voiceEngineStack = UserDefaults.standard.string(forKey: Self.voiceEngineStackKey)
+        self.voiceEngineStack = SettingsPersistence.shared.string(forKey: Self.voiceEngineStackKey)
             .flatMap(VoiceEngineStack.init(rawValue:)) ?? .gemini
 
         // Restore the persisted cloud-fallback opt-in (default OFF — the
@@ -3170,8 +3179,8 @@ final class AppCoordinator: ObservableObject {
         // didSets do not fire here (same rule as `voiceEngineStack`
         // above); `applyVoiceEngineStack()` — which runs once in the
         // startup callback — applies the restored opt-in for real.
-        self.cloudFallbackEnabled = UserDefaults.standard.bool(forKey: Self.cloudFallbackKey)
-        self.cloudProvider = UserDefaults.standard.string(forKey: Self.cloudProviderKey)
+        self.cloudFallbackEnabled = SettingsPersistence.shared.bool(forKey: Self.cloudFallbackKey)
+        self.cloudProvider = SettingsPersistence.shared.string(forKey: Self.cloudProviderKey)
             .flatMap(CloudProvider.init(rawValue:)) ?? .gemini
 
         // Restore the persisted cloud-cascade tier settings ([CLOUD-CASCADE],
@@ -3197,7 +3206,7 @@ final class AppCoordinator: ObservableObject {
         // assignment (didSet does not fire here); the restored stage is
         // attached to the pipeline at its construction below.
         self.noiseFilterEnabled =
-            UserDefaults.standard.bool(forKey: Self.noiseFilterEnabledKey)
+            SettingsPersistence.shared.bool(forKey: Self.noiseFilterEnabledKey)
 
         // Restore the persisted quick-access favourites (quick-access-apps
         // task, 2026-09-06). Pure prune — dedupe, drop ids naming no
@@ -3207,7 +3216,7 @@ final class AppCoordinator: ObservableObject {
         // `voiceEngineStack` above) — nothing else needs to react to the
         // restored list.
         self.favoriteAppIDs = AppLauncher.validatedFavouriteIDs(
-            UserDefaults.standard.stringArray(forKey: Self.quickAccessAppsKey) ?? []
+            SettingsPersistence.shared.stringArray(forKey: Self.quickAccessAppsKey) ?? []
         )
 
         // Restore the persisted wake-word listening preference (default
@@ -3223,9 +3232,9 @@ final class AppCoordinator: ObservableObject {
         // above); the boot's warm phase reads the restored value. Must
         // land before the wake-word restore below, which reads `self`.
         self.warmStartEnabled =
-            UserDefaults.standard.object(forKey: Self.warmStartEnginesKey) == nil
+            SettingsPersistence.shared.object(forKey: Self.warmStartEnginesKey) == nil
             ? true
-            : UserDefaults.standard.bool(forKey: Self.warmStartEnginesKey)
+            : SettingsPersistence.shared.bool(forKey: Self.warmStartEnginesKey)
 
         self.wakeWordEnabled = wakeWordPreferences.isEnabled
         wakeWordActivityGate.setEnabled(wakeWordEnabled)
@@ -3254,7 +3263,7 @@ final class AppCoordinator: ObservableObject {
         // IDs (a model removed from the catalog, or a bad stored value)
         // are ignored so a stale preference can't wedge the picker.
         // Superseded ids migrate forward through `migratedSTTPreference`.
-        if let raw = UserDefaults.standard.string(forKey: Self.sttPreferenceKey),
+        if let raw = SettingsPersistence.shared.string(forKey: Self.sttPreferenceKey),
            ModelCatalog.entry(for: ModelID(rawValue: raw)) != nil {
             self.sttModelPreference = Self.migratedSTTPreference(
                 ModelID(rawValue: raw))
@@ -3771,7 +3780,7 @@ final class AppCoordinator: ObservableObject {
         // time (see `maybeStartAckCacheWarm`), the player below reads
         // the cached WAVs on the ack path. Files are the shared state.
         let ackAudioCache = AckAudioCache()
-        let speaker: Speaker = PiperVoiceSpeaker(
+        let piperSpeaker = PiperVoiceSpeaker(
             fallback: systemSpeaker,
             observabilityBus: observabilityBus,
             modelStore: modelStore,
@@ -3783,6 +3792,12 @@ final class AppCoordinator: ObservableObject {
             traceRecorder: pipelineTraceRecorder,
             ackCache: ackAudioCache
         )
+        // [AUDIO-REACTIVE-HERO] (2026-10-14) The reply side of the hero's
+        // live meter: Piper playbacks feed it metering + a played-file
+        // band track; its system-speech fallbacks report the meterless
+        // (no-signal) path so the UI keeps honest idle motion there.
+        piperSpeaker.audioVisualization = audioVisualization
+        let speaker: Speaker = piperSpeaker
         let ackFastLanePlayer = AckFastLanePlayer(cache: ackAudioCache,
                                                   observabilityBus: observabilityBus)
         self.speaker = speaker
@@ -4168,6 +4183,15 @@ final class AppCoordinator: ObservableObject {
     /// `SecItemCopyMatching` + decode with empty-on-error semantics);
     /// the published windows are assigned on main afterwards.
     private func bootRestoreData() {
+        // [SETTINGS-PERSIST] One-time migration of owner-facing
+        // preferences still living only in UserDefaults (an install
+        // that predates the seam) into the durable Keychain store.
+        // Idempotent — a copied key makes the Keychain hold it, so
+        // later launches (and the second boot path) skip it — and
+        // deliberately AFTER the init-time restores: this launch has
+        // already read the old values, and every later read sees the
+        // Keychain copy instead.
+        SettingsPersistence.shared.backfillFromUserDefaults()
         let batch = StartupDataBatch.load(
             contactStore: familyContactStore,
             placeStore: placeStore,
@@ -4907,6 +4931,10 @@ self.noteTalkContractChanged()
         // [NOISE-FILTER] Attach the restored A/B stage (nil when OFF —
         // the hot-swap seam emits the honest engine name either way).
         voicePipeline?.setNoiseSuppressor(makeNoiseSuppressor())
+        // [AUDIO-REACTIVE-HERO] (2026-10-14) The hero's live meter: the
+        // capture fan-out slices the enhanced frames it already produces
+        // and pushes them to this model (VoicePipeline.feedVisualization).
+        voicePipeline?.audioVisualization = audioVisualization
         // [PROFILE-INTERVIEW T-096] Hand the wake ack to the pipeline it
         // belongs to (C05, §5.4). This is the pipeline's single
         // construction site, and the service exists by the time this
@@ -5612,7 +5640,7 @@ self.noteTalkContractChanged()
     /// live from UserDefaults (the Voice personalization toggle's key) so
     /// the sheet always sees the current setting.
     var voiceTimingDebugEnabled: Bool {
-        UserDefaults.standard.bool(forKey: VoiceSettingsModel.timingDebugKey)
+        SettingsPersistence.shared.bool(forKey: VoiceSettingsModel.timingDebugKey)
     }
 
     /// Main-queue entry point of the tracer's finalize callback: derives

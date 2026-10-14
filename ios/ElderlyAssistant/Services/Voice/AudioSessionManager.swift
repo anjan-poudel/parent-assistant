@@ -87,7 +87,18 @@ private final class SystemAudioSessionController: AudioSessionControlling {
     func setCategory(_ category: AVAudioSession.Category,
                      mode: AVAudioSession.Mode,
                      options: AVAudioSession.CategoryOptions) throws {
-        try session.setCategory(category, mode: mode, options: options)
+        // Temporary field-diagnostic prints (2026-10-14): attribute the
+        // Anzaan -50 paramErr to setCategory vs setActive and log the
+        // exact arguments. Removed once the race/refusal is settled.
+        print("[audio_session] setCategory(\(category.rawValue), mode=\(mode.rawValue), "
+              + "options=\(options.rawValue))")
+        do {
+            try session.setCategory(category, mode: mode, options: options)
+            print("[audio_session] setCategory OK")
+        } catch {
+            print("[audio_session] setCategory FAILED code=\((error as NSError).code)")
+            throw error
+        }
     }
 
     func setActive(_ active: Bool,
@@ -266,6 +277,12 @@ final class AudioSessionManager {
             emitPlaybackFailure(step: "engine_stop", error: error)
             return
         }
+        // TEMPORARY race probe (2026-10-14): Anzaan returns paramErr
+        // (-50) for every media category immediately after engine.stop().
+        // Give the IO teardown time to finish — if the categories then
+        // succeed, the failure is a stop→setCategory race, and the
+        // permanent fix is a proper teardown wait instead of a sleep.
+        Thread.sleep(forTimeInterval: 0.2)
         do {
             try session.setActive(false, options: [.notifyOthersOnDeactivation])
         } catch {
@@ -393,10 +410,11 @@ final class AudioSessionManager {
 
     /// Designated initializer — test seam: injects the session fake and a
     /// disposable UserDefaults suite; the production convenience
-    /// initializer below supplies the real controller + `.standard`.
+    /// initializer below supplies the real controller + the settings
+    /// seam (`SettingsPersistence.shared`).
     init(observabilityBus: ObservabilityBus,
          audioSession: AudioSessionControlling,
-         defaults: UserDefaults = .standard) {
+         defaults: UserDefaults = SettingsPersistence.shared) {
         self.observabilityBus = observabilityBus
         self.session = audioSession
         self.defaults = defaults
@@ -409,7 +427,7 @@ final class AudioSessionManager {
     /// pipeline installs its tap on — the VP flag is per-node).
     convenience init(observabilityBus: ObservabilityBus,
                      audioEngine: AVAudioEngine,
-                     defaults: UserDefaults = .standard) {
+                     defaults: UserDefaults = SettingsPersistence.shared) {
         self.init(observabilityBus: observabilityBus,
                   audioSession: SystemAudioSessionController(
                       session: AVAudioSession.sharedInstance(),

@@ -21,7 +21,7 @@ final class CalendarShareConsent {
 
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = SettingsPersistence.shared) {
         self.defaults = defaults
     }
 
@@ -153,7 +153,7 @@ final class CalendarShareService: ObservableObject {
         observabilityBus: ObservabilityBus,
         eventKit: EventKitCalendarGateway = EKCalendarGateway(),
         contactsProvider: @escaping () -> [FamilyContact],
-        defaults: UserDefaults = .standard,
+        defaults: UserDefaults = SettingsPersistence.shared,
         now: @escaping () -> Date = Date.init
     ) {
         self.session = session

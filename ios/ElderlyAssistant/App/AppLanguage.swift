@@ -45,7 +45,7 @@ enum AppLanguage: String, CaseIterable, Identifiable, Codable {
     private static let defaultsKey = "appLanguage"
 
     static func persisted() -> AppLanguage {
-        guard let raw = UserDefaults.standard.string(forKey: defaultsKey),
+        guard let raw = SettingsPersistence.shared.string(forKey: defaultsKey),
               let language = AppLanguage(rawValue: raw) else {
             return .nepali   // pilot language default
         }
@@ -53,7 +53,7 @@ enum AppLanguage: String, CaseIterable, Identifiable, Codable {
     }
 
     func persist() {
-        UserDefaults.standard.set(rawValue, forKey: Self.defaultsKey)
+        SettingsPersistence.shared.set(rawValue, forKey: Self.defaultsKey)
     }
 }
 
@@ -114,7 +114,7 @@ enum AppLocale: String, CaseIterable, Identifiable, Codable {
     /// language the user has since switched away from must not leak
     /// across (e.g. `en-IN` surviving a switch to Nepali).
     static func persisted(for language: AppLanguage) -> AppLocale {
-        guard let raw = UserDefaults.standard.string(forKey: defaultsKey),
+        guard let raw = SettingsPersistence.shared.string(forKey: defaultsKey),
               let stored = AppLocale(rawValue: raw),
               stored.language == language else {
             return defaultLocale(for: language)
@@ -123,6 +123,6 @@ enum AppLocale: String, CaseIterable, Identifiable, Codable {
     }
 
     func persist() {
-        UserDefaults.standard.set(rawValue, forKey: Self.defaultsKey)
+        SettingsPersistence.shared.set(rawValue, forKey: Self.defaultsKey)
     }
 }

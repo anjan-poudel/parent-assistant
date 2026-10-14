@@ -105,7 +105,7 @@ enum ResponseVoiceSelection {
     /// The persisted choice, sanitised against the catalog. Nil = no
     /// choice yet — the locale default (google-medium speaker 0) rules,
     /// which is byte-identical to today's behavior.
-    static func persisted(defaults: UserDefaults = .standard) -> ResponseVoice? {
+    static func persisted(defaults: UserDefaults = SettingsPersistence.shared) -> ResponseVoice? {
         decode(ResponseVoice.self, key: selectionKey, defaults: defaults)?.sanitised()
     }
 
@@ -120,7 +120,7 @@ enum ResponseVoiceSelection {
     /// sanitisation rejects — the caller keeps the previous choice.
     @discardableResult
     static func apply(_ voice: ResponseVoice,
-                      defaults: UserDefaults = .standard) -> Bool {
+                      defaults: UserDefaults = SettingsPersistence.shared) -> Bool {
         guard let clean = voice.sanitised() else { return false }
         encode(clean, key: selectionKey, defaults: defaults)
         return true
@@ -128,7 +128,7 @@ enum ResponseVoiceSelection {
 
     /// Clears the choice back to the locale default (Settings "Google —
     /// Voice 1" row calls this so the default is never orphaned).
-    static func clear(defaults: UserDefaults = .standard) {
+    static func clear(defaults: UserDefaults = SettingsPersistence.shared) {
         defaults.removeObject(forKey: selectionKey)
     }
 
@@ -154,7 +154,7 @@ enum ResponseVoiceSelection {
     /// decoding): a stale voice id must be ignored by the reader
     /// (`LanguageModelResolver`), never deleted — storage the user did not
     /// touch stays untouched.
-    static func rememberedVoices(defaults: UserDefaults = .standard) -> [String: ResponseVoice] {
+    static func rememberedVoices(defaults: UserDefaults = SettingsPersistence.shared) -> [String: ResponseVoice] {
         decode([String: ResponseVoice].self,
                key: preferenceByLanguageKey,
                defaults: defaults) ?? [:]
@@ -166,7 +166,7 @@ enum ResponseVoiceSelection {
     @discardableResult
     static func remember(_ voice: ResponseVoice,
                          for language: String,
-                         defaults: UserDefaults = .standard) -> Bool {
+                         defaults: UserDefaults = SettingsPersistence.shared) -> Bool {
         guard let clean = voice.sanitised() else { return false }
         var map = rememberedVoices(defaults: defaults)
         map[language.lowercased()] = clean
@@ -176,7 +176,7 @@ enum ResponseVoiceSelection {
 
     /// Test seam: drops the per-language memory entirely (the main
     /// selection is NOT touched — see `clear`).
-    static func clearRememberedVoices(defaults: UserDefaults = .standard) {
+    static func clearRememberedVoices(defaults: UserDefaults = SettingsPersistence.shared) {
         defaults.removeObject(forKey: preferenceByLanguageKey)
     }
 
@@ -188,7 +188,7 @@ enum ResponseVoiceSelection {
     static func requestAudition(of voice: ResponseVoice,
                                 for text: String,
                                 at date: Date = Date(),
-                                defaults: UserDefaults = .standard) {
+                                defaults: UserDefaults = SettingsPersistence.shared) {
         encode(VoiceAuditionRequest(voice: voice, text: text, requestedAt: date),
                key: auditionKey, defaults: defaults)
     }
@@ -197,7 +197,7 @@ enum ResponseVoiceSelection {
     /// the request is unexpired; clears stale requests either way.
     static func consumeAudition(matchingText text: String,
                                 now: Date = Date(),
-                                defaults: UserDefaults = .standard) -> ResponseVoice? {
+                                defaults: UserDefaults = SettingsPersistence.shared) -> ResponseVoice? {
         guard let request = decode(VoiceAuditionRequest.self,
                                    key: auditionKey, defaults: defaults) else {
             return nil
@@ -212,7 +212,7 @@ enum ResponseVoiceSelection {
     }
 
     /// Test seam: drop any pending audition request.
-    static func clearAudition(defaults: UserDefaults = .standard) {
+    static func clearAudition(defaults: UserDefaults = SettingsPersistence.shared) {
         defaults.removeObject(forKey: auditionKey)
     }
 

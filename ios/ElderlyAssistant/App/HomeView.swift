@@ -403,6 +403,10 @@ struct HomeView: View {
     private var talkStage: TalkStage {
         TalkStage(state: session.state,
                   session: session,
+                  // [AUDIO-REACTIVE-HERO] (2026-10-14) The hero's live
+                  // audio-level model — the app-constant instance the
+                  // pipeline (mic) and the Piper speaker (reply) feed.
+                  audioLevels: coordinator.audioVisualization,
                   voice: voicePresentation,
                   isSpeaking: coordinator.isSpeaking,
                   slotAnswerCaptureActive: coordinator.slotAnswerCaptureActive,
@@ -551,6 +555,15 @@ struct TalkButton: View {
         appearance.style != .classic && !reduceTransparency && contrast != .increased
     }
     @ObservedObject var session: VoiceSessionStateMachine
+    /// [AUDIO-REACTIVE-HERO] (2026-10-14) The live signal model the hero
+    /// renders from — the owner's "the main button should bounce like a
+    /// speaker … the side bars should move like a CD player's equalizer
+    /// - not random but based on music". Observed here (like `session`):
+    /// every ~30 Hz publish re-renders ONLY this button, never the stage
+    /// above it (see TalkStage's `==` note). When `source` reports no
+    /// real signal, every audio-driven branch below stands down and the
+    /// existing [HERO-MOTION] idle/fallback motion takes over unchanged.
+    @ObservedObject var audioLevels: AudioLevelPublisher
     @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// [HERO-STATES] True while any reply audio plays.
@@ -639,6 +652,88 @@ struct TalkButton: View {
     private var heroIconPointSize: CGFloat {
         min(heroIconBaseSize, 48)
     }
+
+    // MARK: Audio-reactive motion ([AUDIO-REACTIVE-HERO], 2026-10-14)
+
+    /// The live envelope the disc bounce and the state-glyph breathing
+    /// read — the owner's "the main button should bounce like a speaker
+    /// when talking or when mic sound comes in". 0 under Reduce Motion:
+    /// the static fallback is the correct state visuals with no
+    /// signal-driven displacement.
+    private var audioEnvelope: Double {
+        reduceMotion ? 0 : audioLevels.envelope
+    }
+
+    /// True exactly while the published levels are REAL signal (mic
+    /// capture, or a Piper reply with metering + its played-file band
+    /// track — see `AudioLevelPublisher.Source`). The ONE gate between
+    /// signal-driven motion and the [HERO-MOTION] fallback: the
+    /// meterless speaker path (AVSpeechSynthesizer exposes no audio
+    /// levels of any kind) and every non-audio state fall back to the
+    /// existing motion — never a fabricated meter.
+    private var hasLiveAudio: Bool {
+        !reduceMotion && audioLevels.hasLiveSignal
+    }
+
+    /// The disc's speaker-cone bounce: scale = 1 + envelope x 0.06 (up
+    /// to 1.06 — a cone's excursion, not a zoom), composed
+    /// multiplicatively with the press echo. Applied via `scaleEffect`,
+    /// so the constant 132pt frame, the stage layout and the button's
+    /// hit region are untouched ([HERO-SIZE] invariant).
+    private var discAudioScale: CGFloat {
+        1 + 0.06 * audioEnvelope
+    }
+
+    /// The state glyph's envelope-driven breathing (owner follow-up:
+    /// "the mic in the centre should also be animated when speaking").
+    /// A gentle `scaleEffect` on the Image — never a font-size change,
+    /// which would re-lay-out the content VStack inside the fixed disc —
+    /// strongest for the mic during capture (0.15), softer for live
+    /// reply playback (0.10), exactly 1 when no real signal flows
+    /// (fallback / Reduce Motion). Max 48pt glyph x 1.15 = 55pt, well
+    /// inside the 132pt disc.
+    private var iconAudioScale: CGFloat {
+        guard !reduceMotion else { return 1 }
+        switch audioLevels.source {
+        case .mic: return 1 + 0.15 * audioLevels.envelope
+        case .speakerLive: return 1 + 0.10 * audioLevels.envelope
+        case .none, .speakerMeterless: return 1
+        }
+    }
+
+    /// One side bar's live band level, 0…1 (owner: each bar moves "based
+    /// on music" — the actual band energies, never a random walk). The
+    /// five bars map straight onto `AudioLevelPublisher.bands`
+    /// (200/400/800/1600/3200/6400 Hz edges — low→high, left→right on
+    /// the left flank). The RIGHT flank is mirrored: its innermost bar
+    /// (index 0) shows the HIGHEST band so the equalizer reads as one
+    /// symmetric spectrum spreading outward from the disc, matching the
+    /// mirrored idle stagger in `waveformSide`. Defensive `first`/`last`
+    /// lookups collapse out-of-range reads onto the nearest band instead
+    /// of crashing on an index — the publisher's band count is a service
+    /// detail this view must not assume.
+    private func bandLevel(index: Int, mirrored: Bool) -> Double {
+        let bands = audioLevels.bands
+        guard !bands.isEmpty else { return 0 }
+        let bandIndex = mirrored ? bands.count - 1 - index : index
+        guard bands.indices.contains(bandIndex) else {
+            // bandIndex < 0 only if the publisher ever grows MORE bands
+            // than the five bars; the nearest band is the honest edge.
+            return bandIndex < 0 ? bands[bands.startIndex] : bands[bands.index(before: bands.endIndex)]
+        }
+        return bands[bandIndex]
+    }
+
+    /// The [AUDIO-REACTIVE-HERO] equalizer range for one side bar, as a
+    /// y-scale of its published capsule height
+    /// (`heroDiameter * 0.28 * waveformHeights[index]`). Min 0.30 so a
+    /// quiet band still reads as a present bar (never a vanishing
+    /// capsule — elderly-legibility over meter realism); max 1.55 so
+    /// the tallest bar at full band energy stays inside the overlay's
+    /// fixed height. Applied via `scaleEffect(y:)` like the idle
+    /// oscillation — no layout ever moves.
+    private static let audioBarMinScale: CGFloat = 0.30
+    private static let audioBarMaxScale: CGFloat = 1.55
 
     /// [HERO-MOTION] Fires the shared press echo: a quick easeOut
     /// down-stroke to `discPulseScale`, a ~one-frame beat, then a springy
@@ -819,7 +914,19 @@ struct TalkButton: View {
                         // `scaleEffect` is a render transform: the disc's
                         // 132pt frame, the stage layout and the button's
                         // hit region are all untouched.
-                        .scaleEffect(discPulseScale, anchor: .center)
+                        //
+                        // [AUDIO-REACTIVE-HERO] (2026-10-14) Composed
+                        // multiplicatively with the live speaker-cone
+                        // bounce (`discAudioScale` = 1 + envelope x 0.06):
+                        // the tap echo and the audio excursion stack, and
+                        // the spring below retargets the disc smoothly
+                        // through every ~30 Hz publish. Reduce Motion
+                        // zeroes the audio factor and the spring is nil —
+                        // the echo alone remains, as before.
+                        .scaleEffect(discPulseScale * discAudioScale, anchor: .center)
+                        .animation(reduceMotion ? nil
+                                   : .spring(response: 0.14, dampingFraction: 0.7),
+                                   value: audioEnvelope)
                     if isPressingForReset {
                         resetProgressRing
                     }
@@ -1004,6 +1111,17 @@ struct TalkButton: View {
                 // animation at all.
                 Image(systemName: visuals.icon)
                     .font(.system(size: heroIconPointSize))
+                    // [AUDIO-REACTIVE-HERO] (2026-10-14) The state glyph
+                    // breathes with the live envelope (owner follow-up:
+                    // "the mic in the centre should also be animated when
+                    // speaking") — a `scaleEffect` render transform, NOT
+                    // a font-size change, so the fixed 132pt disc and the
+                    // content VStack's layout never shift. Static 1 under
+                    // Reduce Motion and whenever no real signal flows.
+                    .scaleEffect(iconAudioScale, anchor: .center)
+                    .animation(reduceMotion ? nil
+                               : .spring(response: 0.14, dampingFraction: 0.7),
+                               value: audioEnvelope)
                     .id(visuals.icon)
                     .transition(heroIconTransition)
                 // The state caption is essential localized text ("I'm
@@ -1170,13 +1288,29 @@ struct TalkButton: View {
     /// the rhythm. Bundling both means a state-family flip also animates
     /// through the looping modifier (springboard: the amplitude/tempo
     /// change glides from the current render value) instead of snapping.
+    /// [AUDIO-REACTIVE-HERO] (2026-10-14) `audioLevel` was added: the
+    /// LIVE band level this particular bar is rendering (0 while not
+    /// audio-driven). Watching it makes each ~30 Hz publish retarget the
+    /// bar's existing animation toward its new level — continuous
+    /// equalizer motion, and because the key is per-bar, adjacent bars
+    /// are fully decoupled.
     private struct WaveformMotionKey: Equatable {
         let breathe: Bool
         let rhythm: WaveformRhythm
+        let audioLevel: Double
     }
 
-    private var waveformMotionKey: WaveformMotionKey {
-        WaveformMotionKey(breathe: breathe, rhythm: waveformRhythm)
+    /// The per-bar key: the family values, plus THIS bar's live band
+    /// level while real signal flows. Each bar watches its own level, so
+    /// one publish retargets five independent animations — the
+    /// adjacent-bars-decoupled equalizer the owner asked for. Without
+    /// live audio every bar's key collapses to the same family value, so
+    /// state flips retarget exactly as before this feature.
+    private func waveformBarKey(index: Int, mirrored: Bool) -> WaveformMotionKey {
+        WaveformMotionKey(breathe: breathe,
+                          rhythm: waveformRhythm,
+                          audioLevel: hasLiveAudio
+                              ? bandLevel(index: index, mirrored: mirrored) : 0)
     }
 
     /// Decorative reference waveforms, not fabricated live audio levels.
@@ -1217,14 +1351,30 @@ struct TalkButton: View {
     /// The current scale target for one bar. `scaleEffect(y:)` is a render
     /// transform — the capsule's frame (the only layout the fixed overlay
     /// depends on) never changes, so the hero geometry stays constant.
-    /// Adjacent bars move in OPPOSITE directions (even indices rise while
-    /// odd indices fall, then swap) — a real meter never pumps in unison,
-    /// and this keeps the antiphase permanent instead of only during the
-    /// first cycle. The spec's `.delay` stays short because SwiftUI
-    /// applies a repeating animation's delay on EVERY cycle: it is there
-    /// to break the initial lockstep, not to gate the loop.
-    private func waveformBarScale(index: Int) -> CGFloat {
+    /// [AUDIO-REACTIVE-HERO] With LIVE signal the target is this bar's
+    /// band level mapped across the equalizer range — the "CD player
+    /// equalizer, based on music" the owner asked for; adjacent bars
+    /// decouple because each reads its own band. The branch deliberately
+    /// comes before the breathe/parity oscillation: real meter data, not
+    /// a random walk, while sound flows. `.still` rhythm (error/stopped/
+    /// loading/reset-hold families) keeps holding the published heights
+    /// even if a release tail is still decaying — the settled state
+    /// presentation wins.
+    ///
+    /// Fallback (no live signal): adjacent bars move in OPPOSITE
+    /// directions (even indices rise while odd indices fall, then swap)
+    /// — a real meter never pumps in unison, and this keeps the
+    /// antiphase permanent instead of only during the first cycle. The
+    /// spec's `.delay` stays short because SwiftUI applies a repeating
+    /// animation's delay on EVERY cycle: it is there to break the
+    /// initial lockstep, not to gate the loop.
+    private func waveformBarScale(index: Int, mirrored: Bool) -> CGFloat {
         guard !reduceMotion else { return 1 }
+        if hasLiveAudio, waveformRhythm != .still {
+            let level = CGFloat(bandLevel(index: index, mirrored: mirrored))
+            return Self.audioBarMinScale
+                + (Self.audioBarMaxScale - Self.audioBarMinScale) * level
+        }
         let spec = waveformBarSpec(index: index, mirrored: false)
         let risesFirst = index.isMultiple(of: 2)
         if breathe { return risesFirst ? spec.high : spec.low }
@@ -1235,11 +1385,20 @@ struct TalkButton: View {
     /// tempo + phase. `nil` under Reduce Motion — the static fallback is
     /// every bar at its exact published height — and a plain settle ease
     /// while `.still` (so a flip back to error/stopped settles smoothly
-    /// instead of restarting a loop).
+    /// instead of restarting a loop). [AUDIO-REACTIVE-HERO] With LIVE
+    /// signal: a short easeOut to each new band level, fired by that
+    /// bar's own key change. Held brief on purpose — the analyzer's
+    /// attack/release ballistics already do the musical smoothing, so a
+    /// longer view curve would double-smooth and visibly lag the audio;
+    /// each ~30 Hz publish retargets the in-flight ease from wherever
+    /// the bar currently renders.
     private func waveformBarAnimation(index: Int, mirrored: Bool) -> Animation? {
         guard !reduceMotion else { return nil }
         guard waveformRhythm != .still else {
             return .easeInOut(duration: 0.35)
+        }
+        if hasLiveAudio {
+            return .easeOut(duration: 0.12)
         }
         let spec = waveformBarSpec(index: index, mirrored: mirrored)
         return .easeInOut(duration: spec.duration)
@@ -1247,23 +1406,28 @@ struct TalkButton: View {
             .delay(spec.delay)
     }
 
-    /// The two static capsule groups flanking the disc, now animated per
-    /// the owner's "the side bars should be animated as well". Each
-    /// capsule oscillates around its published height
+    /// The two static capsule groups flanking the disc, animated per the
+    /// owner's "the side bars should be animated as well" — and, with
+    /// live signal, per "the side bars should move like a CD player's
+    /// equalizer - not random but based on music". Each capsule scales
+    /// around its published height
     /// (`heroDiameter * 0.28 * waveformHeights[index]`) via
-    /// `scaleEffect(y:)` — a transform, never a relayout — driven by the
-    /// SAME `breathe` flag/`.task(id: reduceMotion)` the breathing rings
-    /// use (one animation driver, per-bar curves via `waveformBarSpec`).
-    /// Everything stays inside the existing overlay frame.
+    /// `scaleEffect(y:)` — a transform, never a relayout. TWO drivers,
+    /// picked per frame by `hasLiveAudio`: real band levels via the
+    /// per-bar `.animation(value:)` key (each publish retargets), or the
+    /// fallback oscillation riding the SAME `breathe` flag the breathing
+    /// rings use (one animation driver, per-bar curves via
+    /// `waveformBarSpec`). Everything stays inside the existing overlay
+    /// frame.
     private func waveformSide(mirrored: Bool) -> some View {
         HStack(alignment: .center, spacing: 3) {
             ForEach(Self.waveformHeights.indices, id: \.self) { index in
                 Capsule()
                     .fill(appearance.colors.accentForeground.opacity(appearance.skin.isDark ? 0.75 : 0.48))
                     .frame(width: 3, height: heroDiameter * 0.28 * Self.waveformHeights[index])
-                    .scaleEffect(y: waveformBarScale(index: index), anchor: .center)
+                    .scaleEffect(y: waveformBarScale(index: index, mirrored: mirrored), anchor: .center)
                     .animation(waveformBarAnimation(index: index, mirrored: mirrored),
-                               value: waveformMotionKey)
+                               value: waveformBarKey(index: index, mirrored: mirrored))
             }
         }
     }

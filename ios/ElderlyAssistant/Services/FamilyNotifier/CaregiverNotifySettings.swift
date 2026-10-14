@@ -63,7 +63,7 @@ final class CaregiverNotifySettings: ObservableObject {
 
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = SettingsPersistence.shared) {
         self.defaults = defaults
         // `bool(forKey:)` answers false for a missing key — which IS the
         // required default (OFF). No `object(forKey:)` dance needed.

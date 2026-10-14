@@ -44,7 +44,7 @@ enum CloudCascadeSettings {
 
     /// The effective threshold: the persisted value (clamped), or
     /// `defaultThreshold` when the key was never written.
-    static func threshold(defaults: UserDefaults = .standard) -> Double {
+    static func threshold(defaults: UserDefaults = SettingsPersistence.shared) -> Double {
         guard defaults.object(forKey: thresholdKey) != nil else {
             return defaultThreshold
         }
@@ -52,7 +52,7 @@ enum CloudCascadeSettings {
     }
 
     /// Persists a clamped threshold (the only write path).
-    static func setThreshold(_ threshold: Double, defaults: UserDefaults = .standard) {
+    static func setThreshold(_ threshold: Double, defaults: UserDefaults = SettingsPersistence.shared) {
         defaults.set(clamp(threshold), forKey: thresholdKey)
     }
 
@@ -60,12 +60,12 @@ enum CloudCascadeSettings {
     /// requested behaviour, and it stays inert on its own wherever no
     /// cloud provider is configured — the switch exists so a tester can
     /// hold the ladder local-first on purpose, not to arm the feature.
-    static func isEnabled(defaults: UserDefaults = .standard) -> Bool {
+    static func isEnabled(defaults: UserDefaults = SettingsPersistence.shared) -> Bool {
         guard defaults.object(forKey: enabledKey) != nil else { return true }
         return defaults.bool(forKey: enabledKey)
     }
 
-    static func setEnabled(_ enabled: Bool, defaults: UserDefaults = .standard) {
+    static func setEnabled(_ enabled: Bool, defaults: UserDefaults = SettingsPersistence.shared) {
         defaults.set(enabled, forKey: enabledKey)
     }
 
