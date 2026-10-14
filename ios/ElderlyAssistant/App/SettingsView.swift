@@ -391,6 +391,21 @@ struct GeminiAPISettingsView: View {
     @State private var showClearConfirm = false
     @State private var customModel: String = ""
     @State private var connectionTest: ConnectionTestState = .idle
+    /// [MASKED-SETTINGS] (2026-10-14, owner: blank boxes give no way to
+    /// know whether a value is set) True while a stored key is shown in
+    /// its masked form; false once the user taps Change to type.
+    @State private var editingKey = false
+
+    /// The masked display for an already-set key — bullets plus the last
+    /// four characters, so the holder can recognise their own key
+    /// without the full secret ever being on screen.
+    private var storedKeyMasked: String? {
+        guard let key = coordinator.geminiConfigStore.apiKey, !key.isEmpty else {
+            return nil
+        }
+        let tail = String(key.suffix(4))
+        return "••••••••" + tail
+    }
 
     private var isCustomModelSelected: Bool {
         !GeminiModelCatalog.entries.contains { $0.id == coordinator.geminiConfigStore.model }
@@ -413,8 +428,29 @@ struct GeminiAPISettingsView: View {
                     Text("settings.gemini.fieldLabel")
                         .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                         .foregroundStyle(appearance.colors.textSecondary)
-                    SecureField("settings.gemini.fieldPlaceholder", text: $draftKey)
-                        .font(.system(size: appearance.typography.bodyPointSize, design: .monospaced))
+                    if let masked = storedKeyMasked, !editingKey {
+                        // [MASKED-SETTINGS] The configured state is
+                        // visible: the masked key plus a Change affordance
+                        // — never an empty box that pretends nothing is
+                        // stored.
+                        HStack(spacing: 10) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(appearance.colors.accentForeground)
+                            Text(masked)
+                                .font(.system(size: appearance.typography.bodyPointSize,
+                                              design: .monospaced))
+                                .foregroundStyle(appearance.colors.textPrimary)
+                            Spacer()
+                            Button {
+                                editingKey = true
+                            } label: {
+                                Text("settings.gemini.change")
+                                    .font(.system(size: appearance.typography.bodyPointSize,
+                                                  weight: .semibold))
+                                    .foregroundStyle(appearance.colors.accentForeground)
+                            }
+                            .buttonStyle(.plain)
+                        }
                         .padding(14)
                         .frame(minHeight: DesignTokens.minTapTargetSize)
                         .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
@@ -422,8 +458,19 @@ struct GeminiAPISettingsView: View {
                             RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
                                 .stroke(appearance.colors.textSecondary.opacity(0.25), lineWidth: 1)
                         )
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    } else {
+                        SecureField("settings.gemini.fieldPlaceholder", text: $draftKey)
+                            .font(.system(size: appearance.typography.bodyPointSize, design: .monospaced))
+                            .padding(14)
+                            .frame(minHeight: DesignTokens.minTapTargetSize)
+                            .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
+                                    .stroke(appearance.colors.textSecondary.opacity(0.25), lineWidth: 1)
+                            )
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -432,6 +479,7 @@ struct GeminiAPISettingsView: View {
                 Button {
                     coordinator.geminiConfigStore.save(draftKey)
                     draftKey = ""
+                    editingKey = false
                 } label: {
                     Text("settings.gemini.save")
                         .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))

@@ -6381,8 +6381,7 @@
         }
       }
     },
-        
-"family.relationship.daughter": {
+    "family.relationship.daughter": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -24044,6 +24043,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "पिपले गलत सुनिएका शब्द आफैं सच्याउँछ, र ढुक्क नभए सोध्छ। सबै कुरा यही फोनमा रहन्छ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.change": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बदल्नुहोस्"
           }
         }
       }
