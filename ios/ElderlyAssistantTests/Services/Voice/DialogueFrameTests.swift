@@ -316,23 +316,36 @@ final class DialogueFrameTests: XCTestCase {
         XCTAssertEqual(probe, template)
     }
 
-    /// Gherkin 7, second half: the retry variant prefixes the localized
-    /// retry prefix exactly once, with exactly one space.
-    func testProbeTextRetryPrefixesTheRetryKeyExactlyOnce() throws {
+    /// [DIALOGUE-NO-LOOP] Gherkin 7, second half: a GENUINE re-probe
+    /// (attempts >= 2) is a DIFFERENT question — the free-text-only
+    /// probe for slotFill — never the same option list re-asked (the
+    /// options came from the same garbled STT that mis-heard the
+    /// original command).
+    func testProbeTextRetryUsesTheFreeTextProbeNotTheOptionListAgain() throws {
         let catalog = try fiveOptionCatalog()
-        let frame = slotFillDraft(defaultQuery: "भजन")
+        var frame = slotFillDraft(defaultQuery: "भजन")
+        frame.attempts = 2
 
         let first = DialogueProbeComposer.probeText(for: frame, catalog: catalog,
                                                     retry: false, locale: ne)
         let retry = DialogueProbeComposer.probeText(for: frame, catalog: catalog,
                                                     retry: true, locale: ne)
 
-        let prefix = L10n.str("dialogue.retry", locale: ne)
-        XCTAssertTrue(retry.hasPrefix(prefix + " "),
-                      "exactly one space after the retry prefix")
-        XCTAssertEqual(retry, prefix + " " + first)
-        XCTAssertEqual(retry.components(separatedBy: prefix).count - 1, 1,
-                       "the retry prefix appears exactly once")
+        XCTAssertNotEqual(retry, first, "a re-probe must not re-ask the same probe")
+        XCTAssertEqual(retry, L10n.str("dialogue.probe.musicAny", locale: ne),
+                       "the slotFill re-probe is the free-text-only probe")
+    }
+
+    /// [DIALOGUE-NO-LOOP] The choice probes re-probe with the honest
+    /// reprompt line — a shipped key, never a re-asked option list.
+    func testProbeTextChoiceRetriesUseTheRepromptLine() {
+        var frame = DialogueFrame.candidateChoice(
+            candidates: [musicCandidate()],
+            sourceTranscript: "भजन बजाऊ")
+        frame.attempts = 2
+        let retry = DialogueProbeComposer.probeText(for: frame, catalog: nil,
+                                                    retry: true, locale: ne)
+        XCTAssertEqual(retry, L10n.str("router.reprompt", locale: ne))
     }
 
     /// L2-D12: with no group claiming the pending query — or with no

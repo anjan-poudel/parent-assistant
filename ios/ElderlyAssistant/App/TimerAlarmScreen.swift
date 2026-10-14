@@ -8,6 +8,11 @@ struct TimerAlarmScreen: View {
     @Environment(\.appAppearance) private var appearance
     /// [AX-VIEWPORT] Gates the pinned STOP button's padding below.
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// [RESPONSIVENESS] Gates the ringing bell's pulse below: a
+    /// repeating decorative animation is exactly what reduceMotion is
+    /// for (the motion IS the decoration here — when it is off the bell
+    /// is simply still).
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let timer: TimerItem
     let onStop: () -> Void
 
@@ -18,7 +23,21 @@ struct TimerAlarmScreen: View {
             ScrollView {
             VStack(spacing: 20) {
                 HStack {
-                    Button(action: onStop) {
+                    Button {
+                        // [RESPONSIVENESS] Escape-path confirmation: a
+                        // light tap for the navigation-flavoured exit.
+                        // The STOP button below carries the success
+                        // feel — the deliberate completion — while both
+                        // silence the same bell (the shell doc's
+                        // "Both exits stop the ringing timer"). See
+                        // `Haptics` for the reduceMotion/VoiceOver
+                        // gates; the swipe-down dismissal
+                        // (`TimerAlarmOverlay`) deliberately carries no
+                        // haptic: it closes with the system sheet's own
+                        // feel.
+                        Haptics.play(.tap)
+                        onStop()
+                    } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 26, weight: .bold))
                             .foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
@@ -34,10 +53,7 @@ struct TimerAlarmScreen: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
                 Spacer()
-                Image(systemName: "bell.fill")
-                    .font(.system(size: 100, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.top, 32)
+                bellIcon
                 Text("timerAlarm.title")
                     .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
                     .foregroundColor(.white)
@@ -76,6 +92,31 @@ struct TimerAlarmScreen: View {
         }
     }
 
+    /// The ringing bell — the ONE moving thing on this screen, and the
+    /// native way to say "this is ringing, not just displayed"
+    /// [RESPONSIVENESS] (2026-10-14). A slowly repeating `.pulse` symbol
+    /// effect on iOS 17+, where the glyph itself animates without a
+    /// single timeline driving a view tree. Gated twice:
+    ///
+    /// - `#available(iOS 17.0, *)` — the iOS 16 floor renders the exact
+    ///   static glyph this screen always had (no fallback animation: a
+    ///   hand-rolled pulse would be new machinery for an icon, and the
+    ///   ringing is already carried by the alarm audio).
+    /// - `accessibilityReduceMotion` — no pulse at all under the Reduce
+    ///   Motion setting; the STOP action and the audio are the alarm.
+    @ViewBuilder
+    private var bellIcon: some View {
+        let bell = Image(systemName: "bell.fill")
+            .font(.system(size: 100, weight: .bold))
+            .foregroundColor(.white)
+            .padding(.top, 32)
+        if #available(iOS 17.0, *) {
+            bell.symbolEffect(.pulse, isActive: !reduceMotion)
+        } else {
+            bell
+        }
+    }
+
     /// The STOP action, pinned to the bottom safe area (see `body`): the
     /// one exit from a ringing alarm must be visible without scrolling,
     /// at every text size. Its padding tightens at accessibility sizes —
@@ -83,7 +124,16 @@ struct TimerAlarmScreen: View {
     /// so the pinned bar cannot eat the viewport it sits over. Standard
     /// sizes keep the 24pt padding exactly.
     private var stopButton: some View {
-        Button(action: onStop) {
+        Button {
+            // [RESPONSIVENESS] The success notification's double-tick is
+            // the one "it worked" feel in the vocabulary, reserved for
+            // exactly this: silencing a ringing alarm. Fires inside the
+            // action (never a gesture) so it is guaranteed on a shaky
+            // press — for a ringing alarm the confirmation must not be
+            // the thing that can be missed. See `Haptics` for the gates.
+            Haptics.play(.success)
+            onStop()
+        } label: {
             Text("timerAlarm.stop")
                 .font(.system(size: appearance.typography.bodyPointSize + 4,
                               weight: .bold))

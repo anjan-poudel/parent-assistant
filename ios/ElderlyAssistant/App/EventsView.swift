@@ -147,12 +147,17 @@ struct EventsView: View {
     /// trick `RoutinePlugin` uses: Calendar weekday 1...7 indexes
     /// `DateFormatter`'s localized symbols (Sunday-first), so a weekday
     /// needs no catalog key of its own.
+    ///
+    /// [RESPONSIVENESS] (2026-10-14) The symbols come from the
+    /// locale-keyed `LocaleFormatters` cache — the same fix the house
+    /// applied to per-row formatters (`ViewCaches.swift`). This used to
+    /// build a fresh `DateFormatter` per weekly-recurrence row per body
+    /// pass, which is formatter construction (an ICU setup, not a
+    /// format) inside view evaluation.
     private static func weekdayName(_ date: Date, locale: Locale) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = locale
+        let symbols = LocaleFormatters.longWeekdaySymbols(locale: locale)
         let weekday = Calendar.current.component(.weekday, from: date)
-        guard let symbols = formatter.weekdaySymbols,
-              weekday >= 1, weekday <= symbols.count else { return "" }
+        guard weekday >= 1, weekday <= symbols.count else { return "" }
         return symbols[weekday - 1]
     }
 }
@@ -493,10 +498,24 @@ struct EventFormView: View {
     private func loadPickedPhoto(_ item: PhotosPickerItem?) {
         guard let item else { return }
         Task {
-            guard let data = try? await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: data) else { return }
-            form.pickedPhoto = DownsampledImageCache.downsampled(
-                image, maxPixelEdge: ContactPhotoStore.maxDimension) ?? image
+            guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+            // [RESPONSIVENESS] (2026-10-14) Decode + downsample OFF the
+            // main actor. The old path did `UIImage(data:)` + a renderer
+            // pass wherever this Task resumed — main, for a view-owned
+            // Task — so the tens-of-megapixels decode ran as a visible
+            // hitch between the picker dismissing and the preview
+            // appearing. `downsampled(from:)` is ImageIO's thumbnail
+            // decode (the full-size bitmap is never materialized), and
+            // the detached hop mirrors the house pattern for heavy
+            // loads (`SettingsView`'s family picker, the address-book
+            // enumerate). Undecodable bytes yield nil → no photo, the
+            // same soft failure the old `UIImage(data:)` guard had.
+            let thumb = await Task.detached(priority: .userInitiated) {
+                DownsampledImageCache.downsampled(
+                    from: data, maxPixelEdge: ContactPhotoStore.maxDimension)
+            }.value
+            guard let thumb else { return }
+            form.pickedPhoto = thumb
             removingStoredPhoto = false
         }
     }
