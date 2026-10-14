@@ -62,7 +62,7 @@ enum VoiceOutputVolume {
     /// on THIS, not on the default, so the default still gets the boost.
     static let rawReferencePercent = 100
     static let minimumPercent = 50
-    static let maximumPercent = 200
+    static let maximumPercent = 300
     static let stepPercent = 10
 
     /// Range clamp — the single definition both the write path and the
@@ -150,7 +150,10 @@ enum VoiceOutputGain {
 
     /// Soft-knee threshold in dBFS — below it the full requested gain
     /// applies linearly, above it samples compress toward the ceiling.
-    static let kneeDBFS: Float = -12
+    /// −15 (2026-10-14 field tuning): the −12 knee compressed too much
+    /// of the speech body on quiet Piper synthesis — the boost must
+    /// lift the BODY, which is what carries intelligibility.
+    static let kneeDBFS: Float = -15
 
     /// The knee as a linear amplitude (≈ 0.2512).
     static var kneeLinear: Float { powf(10, kneeDBFS / 20) }
@@ -1084,6 +1087,10 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
     /// makes a Settings change apply from the very next reply.
     private func gainedPlaybackURL(for wav: URL, locale: Locale) -> URL {
         let percent = VoiceOutputVolume.percent()
+        // TEMPORARY field diagnostic (2026-10-14): the device reports
+        // quiet replies at a 200 % setting — pin down the effective
+        // percent and the gain actually applied, then remove.
+        print("[speaker] volume percent=\(percent) linear=\(VoiceOutputGain.linearFactor(percent: percent))")
         guard percent != VoiceOutputVolume.rawReferencePercent else { return wav }
         do {
             return try SpokenReplyGainProcessor.playbackURL(for: wav, percent: percent)

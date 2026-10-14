@@ -273,15 +273,15 @@ final class VoiceSettingsModelTests: XCTestCase {
         XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 50)
         VoiceOutputVolume.set(150, defaults: defaults)
         XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 150)
-        VoiceOutputVolume.set(200, defaults: defaults)
-        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 200,
+        VoiceOutputVolume.set(300, defaults: defaults)
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 300,
                        "the top of the range persists")
     }
 
     func testVolumeClampsOutOfRangeValuesOnWrite() {
         VoiceOutputVolume.set(500, defaults: defaults)
-        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 200,
-                       "above the range clamps to the 200 % boost ceiling")
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 300,
+                       "above the range clamps to the 300 % boost ceiling")
         VoiceOutputVolume.set(10, defaults: defaults)
         XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 50,
                        "below the range clamps to the 50 % floor")
@@ -292,7 +292,7 @@ final class VoiceSettingsModelTests: XCTestCase {
         // must clamp on READ too — the transfer can never see it, and the
         // UI can never show an impossible number.
         defaults.set(9_999, forKey: VoiceOutputVolume.defaultsKey)
-        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 200)
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 300)
         defaults.set(-40, forKey: VoiceOutputVolume.defaultsKey)
         XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 50)
     }
@@ -300,7 +300,7 @@ final class VoiceSettingsModelTests: XCTestCase {
     func testVolumeStepsInTensAndSaturatesAtTheRangeEnds() {
         XCTAssertEqual(VoiceOutputVolume.stepped(100, bySteps: 1), 110)
         XCTAssertEqual(VoiceOutputVolume.stepped(100, bySteps: -1), 90)
-        XCTAssertEqual(VoiceOutputVolume.stepped(200, bySteps: 1), 200,
+        XCTAssertEqual(VoiceOutputVolume.stepped(300, bySteps: 1), 300,
                        "the top of the range is a hard stop, not a wrap")
         XCTAssertEqual(VoiceOutputVolume.stepped(50, bySteps: -1), 50)
         // Every value the control can reach is on the 10 % grid inside
@@ -311,7 +311,7 @@ final class VoiceSettingsModelTests: XCTestCase {
             XCTAssertEqual(VoiceOutputVolume.clamp(percent), percent)
         }
         XCTAssertEqual(VoiceOutputVolume.minimumPercent, 50)
-        XCTAssertEqual(VoiceOutputVolume.maximumPercent, 200)
+        XCTAssertEqual(VoiceOutputVolume.maximumPercent, 300)
         XCTAssertEqual(VoiceOutputVolume.stepPercent, 10)
     }
 
