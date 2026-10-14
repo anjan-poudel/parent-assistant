@@ -28,6 +28,14 @@ import XCTest
 /// the same split (a pure coverage function over the parsed catalog,
 /// fixtures for the fails-naming-the-key scenario, and resolution through
 /// `L10n.str`).
+///
+/// T-147 extends it with the family-contacts family (design-l2 §7).
+///
+/// T-171 extends it with the conversational-nepali-replies cloud-chat
+/// family (design-l1 §17): the 18 consent/disclosure/indicator/
+/// revocation/state/safe-template keys, the bounded safe-template set
+/// (the register bar, mirrored from T-166's style spec) and a sweep that
+/// reports user-visible copy hardcoded on the feature's surfaces.
 final class L10nCatalogCoverageTests: XCTestCase {
 
     private let english = Locale(identifier: "en-US")
@@ -182,7 +190,10 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// on master since the T-147 measurement (`launcher.chipCancel`,
     /// `launcher.chipOpen`, `settings.gemini.change`), and that branch
     /// adds `feeds.readerTitle` — total 1,421, so this baseline is 1,402.
-    private static let dialogueBaselineKeyCount = 1_402
+    /// Re-measured at the T-171 cloud-chat copy landing (2026-10-14): the
+    /// 18-key cloud-chat family (design-l1 §17) lands on the same tree —
+    /// total 1,439 — so this baseline is 1,420.
+    private static let dialogueBaselineKeyCount = 1_420
 
     /// The design-l2 §16 draft copy, verbatim, both languages. The owner
     /// copy review is a later step recorded in the plan; this pin makes
@@ -469,7 +480,10 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// merge, all three families accounted). Re-measured at the
     /// news-feed-images merge (2026-10-14): total 1,421 (three post-T-144
     /// master keys plus `feeds.readerTitle`), so this baseline is 1,416.
-    private static let callingBaselineKeyCount = 1_416
+    /// Re-measured at the T-171 cloud-chat copy landing (2026-10-14): the
+    /// 18-key cloud-chat family (design-l1 §17) lands on the same tree —
+    /// total 1,439 — so this baseline is 1,434.
+    private static let callingBaselineKeyCount = 1_434
 
     /// The authored copy, both languages. The design freezes the keys and
     /// the parameter contracts, not the wording (catalog-time copy), so
@@ -1018,8 +1032,11 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// rather than guessed (TG-29 failure-path scenario: no stale pin, no
     /// guessing). Re-measured at the news-feed-images merge (2026-10-14):
     /// total 1,421 (three post-T-144 master keys plus
-    /// `feeds.readerTitle`), so this baseline is 1,398.
-    private static let familyContactsBaselineKeyCount = 1_398
+    /// `feeds.readerTitle`), so this baseline is 1,398. Re-measured at the
+    /// T-171 cloud-chat copy landing (2026-10-14): the 18-key cloud-chat
+    /// family (design-l1 §17) lands on the same tree — total 1,439 — so
+    /// this baseline is 1,416.
+    private static let familyContactsBaselineKeyCount = 1_416
 
     /// Scenario: All 21 keys exist in both languages — the behavioural
     /// half. Every key resolves through the shipped lproj bundles in both
@@ -1581,6 +1598,1097 @@ final class L10nCatalogCoverageTests: XCTestCase {
             return nil
         }
         return value
+    }
+
+    // MARK: T-171 — the conversational-nepali-replies cloud-chat family (design-l1 §17)
+
+    /// The 15-key chat block of the family, alphabetical, as it sits in the
+    /// catalog file between `caregiverNotify.shareHint` and
+    /// `cloudCascade.holdCue` (design-l1 §17): the four safe templates, the
+    /// consent question and its two answers, the indicator pair, the
+    /// revocation trio and the two spoken state answers.
+    private static let cloudChatChatBlockKeys: [String] = [
+        "chat.safeTemplate.danglingParticle",
+        "chat.safeTemplate.devanagariPurity",
+        "chat.safeTemplate.generic",
+        "chat.safeTemplate.honorificAgreement",
+        "cloud.chat.consent.allow",
+        "cloud.chat.consent.body",
+        "cloud.chat.consent.notNow",
+        "cloud.chat.consent.title",
+        "cloud.chat.indicator",
+        "cloud.chat.indicatorSpoken",
+        "cloud.chat.revoke.body",
+        "cloud.chat.revoke.done",
+        "cloud.chat.revoke.title",
+        "cloud.chat.state.spoken.off",
+        "cloud.chat.state.spoken.on",
+    ]
+
+    /// The three Settings keys, alphabetical, as they sit between
+    /// `settings.cloudCascade.toggleNote` and `settings.diagnostics.title`.
+    private static let cloudChatSettingsKeys: [String] = [
+        "settings.cloudChat.title",
+        "settings.cloudChat.toggleLabel",
+        "settings.cloudChat.toggleNote",
+    ]
+
+    /// The pinned inventory: design-l1 §17's family — 18 keys, the two
+    /// blocks in file order. The design's optional
+    /// `chat.cloudFallback.notice` is deliberately NOT here: §8.8 chooses
+    /// "no user-visible error where a reply is expected", so the key would
+    /// ship as dead copy (recorded in the unit notes).
+    private static let cloudChatKeys: [String] =
+        cloudChatChatBlockKeys + cloudChatSettingsKeys
+
+    /// The safe-template keys alone — the bounded set the guard's check
+    /// classes select from (the `L10n.SafeTemplate` enum is the enumerable
+    /// form; the two are pinned to each other below).
+    private static let cloudChatSafeTemplateKeys: [String] = [
+        "chat.safeTemplate.danglingParticle",
+        "chat.safeTemplate.devanagariPurity",
+        "chat.safeTemplate.generic",
+        "chat.safeTemplate.honorificAgreement",
+    ]
+
+    /// The catalog total minus this family's 18 keys. Re-measured at this
+    /// unit's landing (2026-10-14): the tree carried 1,421 keys (the
+    /// news-feed-images measurement, 1,402 + 19 dialogue keys) and this
+    /// unit adds exactly its 18 — total 1,439 — so the baseline is 1,421.
+    /// The +18 delta is the constant, not the absolute; a later landing on
+    /// the same tree re-measures this pin deliberately rather than guessing.
+    private static let cloudChatBaselineKeyCount = 1_421
+
+    /// The design-l1 §17 copy as authored by this unit, verbatim, both
+    /// languages. T-176 owns the final disclosure-copy review; this pin
+    /// makes every wording change — including an "improvement" — a
+    /// deliberate one rather than a drift.
+    private static let cloudChatCopy: [(key: String, en: String, ne: String)] = [
+        ("chat.safeTemplate.danglingParticle",
+         en: "I enjoy listening to you. Tell me that again, please.",
+         ne: "सुन्दा रमाइलो लाग्छ हजुर। फेरि भन्नुहोस् न।"),
+        ("chat.safeTemplate.devanagariPurity",
+         en: "Say that once more — I'm listening carefully.",
+         ne: "फेरि एक चोटि सुनाउनुहोस् न हजुर। म ध्यान दिएर सुन्छु।"),
+        ("chat.safeTemplate.generic",
+         en: "Tell me that again, please.",
+         ne: "हजुर, त्यो कुरा फेरि भन्नुहोस् न।"),
+        ("chat.safeTemplate.honorificAgreement",
+         en: "My words came out muddled. Tell me that again, please.",
+         ne: "मेरो कुरा अलि अलमल भयो। फेरि भन्नुहोस् न हजुर।"),
+        ("cloud.chat.consent.allow",
+         en: "Yes, use the internet",
+         ne: "हो, इन्टरनेट प्रयोग गर्नुहोस्"),
+        ("cloud.chat.consent.body",
+         en: "What you say to me is sent to the internet. The answer comes from there. Everything else stays on this phone. It's fine to say no. Even if you say no, I keep answering on this phone.",
+         ne: "हजुरले मसँग भन्नुभएको कुरा इन्टरनेटमा पठाइन्छ। जवाफ त्यही इन्टरनेटबाट आउँछ। बाँकी सबै कुरा यही फोनमै रहन्छ। होइन भन्नुभए पनि हुन्छ। त्यसो भन्नुभए पनि म यही फोनमै जवाफ दिइरहन्छु।"),
+        ("cloud.chat.consent.notNow",
+         en: "No, keep it on this phone",
+         ne: "होइन, यही फोनमै राख्नुहोस्"),
+        ("cloud.chat.consent.title",
+         en: "Get answers from the internet?",
+         ne: "कुराको जवाफ इन्टरनेटबाट ल्याउने?"),
+        ("cloud.chat.indicator",
+         en: "Answering online",
+         ne: "अनलाइन जवाफ आउँदैछ"),
+        ("cloud.chat.indicatorSpoken",
+         en: "This answer is coming from the internet.",
+         ne: "हजुर, यो जवाफ इन्टरनेटबाट आउँदैछ।"),
+        ("cloud.chat.revoke.body",
+         en: "Answers come from this phone again. Chat keeps working just as before. Nothing is lost.",
+         ne: "जवाफ फेरि यही फोनबाट आउँछ। कुराकानी पहिलेजस्तै चलिरहन्छ। केही गुम्दैन।"),
+        ("cloud.chat.revoke.done",
+         en: "Done — answers come from this phone now.",
+         ne: "भयो हजुर — जवाफ अब यही फोनबाट आउँछ।"),
+        ("cloud.chat.revoke.title",
+         en: "Turn off answers from the internet?",
+         ne: "इन्टरनेटबाट जवाफ ल्याउन बन्द गर्ने?"),
+        ("cloud.chat.state.spoken.off",
+         en: "No — answers come from this phone right now.",
+         ne: "होइन हजुर — अहिले जवाफ यही फोनबाट आउँछ।"),
+        ("cloud.chat.state.spoken.on",
+         en: "Yes — answers are coming from the internet right now.",
+         ne: "हो हजुर — अहिले जवाफ इन्टरनेटबाट आउँदैछ।"),
+        ("settings.cloudChat.title",
+         en: "Answers from the internet",
+         ne: "इन्टरनेटबाट आउने जवाफ"),
+        ("settings.cloudChat.toggleLabel",
+         en: "Get answers from the internet",
+         ne: "इन्टरनेटबाट जवाफ ल्याउने"),
+        ("settings.cloudChat.toggleNote",
+         en: "When this is on, the answers to our talks come from the internet. When it is off, answers come from this phone. Chat keeps working just as before.",
+         ne: "खुला हुँदा कुराको जवाफ इन्टरनेटबाट आउँछ। बन्द हुँदा जवाफ यही फोनबाट आउँछ, र कुराकानी पहिलेजस्तै चलिरहन्छ।"),
+    ]
+
+    /// T-166's style spec `ai_isms` substring classes (the seed file
+    /// `tools/train-intent/seeds/nepali-chat-style-spec`, read at authoring
+    /// time; mirrored here as the copy gate — the runtime guard is T-169's)
+    /// plus this unit's apology bar ("sorry, I am an AI" boilerplate is
+    /// banned by the task's register rule). A value carrying any of these
+    /// is a defect, not a style choice.
+    private static let cloudChatBannedBoilerplate: [String] = [
+        "म एक AI हुँ", "म एउटा AI हुँ", "म कृत्रिम बुद्धिमत्ता हुँ",
+        "As an AI", "I am an AI", "I'm an AI", "AI language model",
+        "कृपया नम्र निवेदन", "तपाईंको अनुरोध स्वीकार गरियो",
+        "Your request has been processed",
+        "यो प्रश्नको उत्तर", "यस प्रश्नको जवाफ", "यो जानकारीको आधारमा",
+        "I hope this helps", "आशा छ यसले सहयोग गर्छ",
+        "यदि तपाईंलाई अरू केही चाहिए भने मलाई भन्नुहोस्", "If you need anything else",
+        "sorry", "apolog", "क्षमा", "माफ",
+    ]
+
+    /// The register block's banned forms (T-166's style spec): the familiar
+    /// address forms and the curated familiar finite verb forms. They are
+    /// checked against Nepali values only (the Nepali values carry no ASCII,
+    /// so a Latin-script name can never false-positive them).
+    private static let cloudChatForbiddenFamiliarForms: [String] = [
+        "तँ", "तलाई", "तँलाई", "तेरो", "तेरी", "तिमी", "तिमीलाई",
+        "तिम्रो", "तिम्री", "तिम्रा", "तिमीहरू",
+    ]
+    private static let cloudChatNonHonorificVerbForms: [String] = [
+        "भन्यो", "गर्यो", "खायो", "पियो", "हेर्यो", "लियो", "दियो",
+        "आयो", "गयो", "सुत्यो", "सक्यो",
+    ]
+
+    /// The plainness bar (the task's register rule over design-l1
+    /// §17/§8.4): consent, disclosure, indicator, revocation, state and
+    /// Settings copy names what happens — never a provider, a model, a
+    /// route, a server or a setting-category term, in either language. The
+    /// Nepali list additionally bans the shipped legacy nouns this copy
+    /// deliberately does not reuse (`क्लाउड` in the pre-existing
+    /// `settings.cloudCascade.toggleNote` is that other feature's key, not
+    /// this family's).
+    private static let cloudChatForbiddenEnglishTerms: [String] = [
+        "cloud", "server", "gemini", "model", "api",
+    ]
+    private static let cloudChatForbiddenNepaliTerms: [String] = [
+        "क्लाउड", "सर्भर", "जेमिनी", "मोडेल", "दिमाग", "इन्जिन",
+        "एपीआई", "राउटर",
+    ]
+
+    /// The sentence-shape caps (T-166's style spec `sentence_shape` and the
+    /// family's own bar): safe templates run at most TWO short sentences —
+    /// the spec's `max_sentences` — and every other key stays at most five,
+    /// so the disclosure cannot grow into a wall of text. The character
+    /// caps are the authored bar, set above the measured maxima
+    /// (2026-10-14, in code points — Swift's grapheme count is at or below
+    /// these on Devanagari: template sentences en 44 / ne 32, the family's
+    /// sentences en 64 / ne 63), so a growing paragraph fails while
+    /// ordinary wording edits do not.
+    private static let cloudChatMaxTemplateSentences = 2
+    private static let cloudChatMaxPlainSentences = 5
+    private static let cloudChatMaxTemplateSentenceCharacters = (en: 70, ne: 65)
+    private static let cloudChatMaxPlainSentenceCharacters = (en: 80, ne: 70)
+
+    /// Scenario: Every new key resolves in both languages — the behavioural
+    /// half. Every key resolves through the shipped lproj bundles in both
+    /// languages; the Nepali resolution is Devanagari copy and the two
+    /// values differ, so a forgotten half or an English copy pasted into
+    /// the `ne` slot fails here.
+    func testEveryCloudChatKeyResolvesInBothLanguages() {
+        for key in Self.cloudChatKeys {
+            let en = L10n.str(key, locale: english)
+            let ne = L10n.str(key, locale: nepali)
+            XCTAssertNotEqual(en, key,
+                              "\(key) does not resolve in en — the catalog "
+                              + "entry is missing")
+            XCTAssertNotEqual(ne, key,
+                              "\(key) does not resolve in ne — the catalog "
+                              + "entry is missing")
+            XCTAssertFalse(en.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "\(key) resolves to empty en copy")
+            XCTAssertFalse(ne.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "\(key) resolves to empty ne copy")
+            XCTAssertNotEqual(en, ne,
+                              "\(key) resolves to the SAME string in en and ne "
+                              + "— the Nepali copy is missing (or the key was "
+                              + "forgotten in one language)")
+            XCTAssertTrue(Self.isDevanagariOrPlaceholderOnly(ne),
+                          "\(key) resolves to non-Devanagari Nepali copy: \(ne)")
+        }
+    }
+
+    /// Scenario: Every new key resolves in both languages — the source
+    /// half. The catalog total is pinned to the freshly measured pre-unit
+    /// count plus exactly the 18 insertions; the coverage check runs its
+    /// rules over the parsed catalog; and the four neighbours of the two
+    /// insertion points are pinned so a clobbering edit cannot pass.
+    func testTheCloudChatFamilyPassesTheCoverageCheck() {
+        let catalog = sourceCatalog()
+
+        XCTAssertEqual(catalog.count,
+                       Self.cloudChatBaselineKeyCount + Self.cloudChatKeys.count,
+                       "the feature adds exactly \(Self.cloudChatKeys.count) keys "
+                       + "and removes none (baseline \(Self.cloudChatBaselineKeyCount), "
+                       + "measured on this tree)")
+
+        let failures = Self.cloudChatCoverageFailures(in: catalog)
+        XCTAssertTrue(failures.isEmpty,
+                      "the cloud-chat coverage check failed:\n"
+                      + failures.joined(separator: "\n"))
+
+        // The immediate alphabetical neighbours of the two insertion
+        // points: if a textual insertion had clobbered an entry, one of
+        // these would change. (The blocks' own contiguity is pinned by the
+        // raw-line span check below.)
+        // The neighbours keep their verbatim pins: a clobbering
+        // alphabetical insertion would change one of them.
+        assertCatalogValue("caregiverNotify.shareHint",
+                           en: "Family members can also be invited to see these events on their own calendar. These switches choose who is invited — but an emergency contact is always invited. Set up in Calendar sharing.",
+                           ne: "परिवारका सदस्यहरूलाई यी कार्यक्रम आफ्नै क्यालेन्डरमा देख्न पनि निम्ता दिन सकिन्छ। कसलाई निम्ता जान्छ यी स्विचले तय गर्छन् — तर आपतकालीन सम्पर्कलाई सधैँ निम्ता जान्छ। यो क्यालेन्डर साझा भन्ने ठाउँमा मिलाइन्छ।")
+        assertCatalogValue("cloudCascade.holdCue",
+                           en: "One moment — this is taking a little longer…",
+                           ne: "एक छिन — अलि बढी समय लाग्दैछ…")
+        assertCatalogValue("settings.cloudCascade.toggleNote",
+                           en: "On, an answer the large local brain gives below the confidence shown below goes to the configured cloud provider — after the spoken hold cue; off, the local answer stands. Inert while no cloud provider is configured.",
+                           ne: "खुला हुँदा, तल देखाइएको विश्वासभन्दा कम भएको स्थानीय जवाफ क्लाउडमा जान्छ — पहिले 'एक छिन' भनिन्छ; बन्द हुँदा स्थानीय जवाफ नै रहन्छ। क्लाउड मिलाइएको नभए यसले केही गर्दैन।")
+        assertCatalogValue("settings.diagnostics.title",
+                           en: "Diagnostics",
+                           ne: "निदान")
+    }
+
+    /// DoD evidence: every value is the copy this unit authored, verbatim,
+    /// in both languages — a dropped translation or an English copy pasted
+    /// into the `ne` slot fails here. T-176's disclosure review changes
+    /// these deliberately (the pin is updated in the same commit).
+    func testTheCloudChatCopyIsPinnedVerbatim() {
+        XCTAssertEqual(Self.cloudChatCopy.map { $0.key }, Self.cloudChatKeys,
+                       "the copy table and the pinned inventory must agree")
+        for (key, expectedEN, expectedNE) in Self.cloudChatCopy {
+            assertCatalogValue(key, en: expectedEN, ne: expectedNE)
+        }
+    }
+
+    /// Scenario: A missing translation (the failure path). Each fixture is
+    /// a copy of the parsed catalog mutated in one way; the coverage check
+    /// must fail NAMING the offending key — and, for a one-language value,
+    /// the missing language too. An English copy pasted into the `ne` slot
+    /// fails as well (the two values must differ), and a slot added to one
+    /// language only is a defect (the family's format-slot contract).
+    func testTheCloudChatCoverageCheckFailsNamingTheMissingValue() {
+        // Fixture 1: the ne value removed — the scenario's exact case (a
+        // key added with only one language fails naming the key AND the
+        // missing language).
+        var missingNE = sourceCatalog()
+        Self.removeCloudChatLanguage("ne", from: "cloud.chat.consent.body",
+                                     in: &missingNE)
+        assertCloudChatCoverageFails(missingNE, naming: "cloud.chat.consent.body",
+                                     language: "ne")
+
+        // Fixture 2: the en value removed.
+        var missingEN = sourceCatalog()
+        Self.removeCloudChatLanguage("en", from: "chat.safeTemplate.generic",
+                                     in: &missingEN)
+        assertCloudChatCoverageFails(missingEN, naming: "chat.safeTemplate.generic",
+                                     language: "en")
+
+        // Fixture 3: the whole entry removed.
+        var missingEntry = sourceCatalog()
+        missingEntry.removeValue(forKey: "cloud.chat.indicator")
+        assertCloudChatCoverageFails(missingEntry, naming: "cloud.chat.indicator")
+
+        // Fixture 4: a blank Nepali value.
+        var blankNE = sourceCatalog()
+        Self.setCloudChatValue("   ", language: "ne",
+                               key: "cloud.chat.revoke.title", in: &blankNE)
+        assertCloudChatCoverageFails(blankNE, naming: "cloud.chat.revoke.title",
+                                     language: "ne")
+
+        // Fixture 5: the English value copied into the Nepali slot.
+        var untranslatedNE = sourceCatalog()
+        Self.setCloudChatValue("Turn off answers from the internet?", language: "ne",
+                               key: "cloud.chat.revoke.title", in: &untranslatedNE)
+        assertCloudChatCoverageFails(untranslatedNE, naming: "cloud.chat.revoke.title")
+
+        // Fixture 6: a `%@` added to ONE language only — the parity rule
+        // the family's zero-slot contract enforces.
+        var slotDrift = sourceCatalog()
+        Self.setCloudChatValue("पर्दैन %@", language: "ne",
+                               key: "cloud.chat.consent.notNow", in: &slotDrift)
+        assertCloudChatCoverageFails(slotDrift, naming: "cloud.chat.consent.notNow",
+                                     language: "ne")
+
+        // Fixtures 7-9: a stray key in each owned namespace.
+        for stray in ["chat.safeTemplate.stray", "cloud.chat.stray",
+                      "settings.cloudChat.stray"] {
+            var fixture = sourceCatalog()
+            fixture[stray] = Self.sampleEntry(en: "Stray", ne: "थप")
+            assertCloudChatCoverageFails(fixture, naming: stray)
+        }
+
+        // Fixture 10: the count pin's delta semantics — any extra key
+        // breaks the baseline arithmetic until it is deliberately
+        // re-measured.
+        var drifted = sourceCatalog()
+        drifted["t171.driftProbe"] = Self.sampleEntry(en: "Drift", ne: "थप")
+        XCTAssertNotEqual(drifted.count,
+                          Self.cloudChatBaselineKeyCount + Self.cloudChatKeys.count,
+                          "any added key must break the count pin")
+    }
+
+    /// The parameter contract: no key in this family takes a format
+    /// argument in either language (T-174's selection and T-176/T-177's
+    /// surfaces compose none), so each value carries ZERO `%` placeholders
+    /// — and a slot present in one language only can never ship, because
+    /// the zero-slot rule and the parity rule are the same assertion here.
+    func testTheCloudChatPlaceholderContractIsZeroSlotsInBothLanguages() {
+        for key in Self.cloudChatKeys {
+            for language in ["en", "ne"] {
+                guard let value = catalogValue(key, language: language) else {
+                    XCTFail("\(key).\(language) is missing from the catalog")
+                    continue
+                }
+                XCTAssertEqual(Self.placeholderCount(in: value), 0,
+                               "\(key): \(language) must carry no `%` placeholder "
+                               + "— no key in this family takes an argument: \(value)")
+            }
+        }
+    }
+
+    /// Scenario: Safe templates are a bounded, spec-authored set — the
+    /// closed-set half. The set is the guard's three check classes plus the
+    /// generic entry: four keys, no more. The `L10n.SafeTemplate` enum is
+    /// the enumerable form, its cases are exactly the pinned keys, the
+    /// selection is deterministic (the first KNOWN class wins; an unknown
+    /// name is dropped, never echoed into a key), and the catalog carries
+    /// no fifth `chat.safeTemplate.*` entry.
+    func testTheSafeTemplateSetIsBoundedAndEnumerable() {
+        XCTAssertEqual(L10n.SafeTemplate.allCases.map(\.catalogKey).sorted(),
+                       Self.cloudChatSafeTemplateKeys,
+                       "the enum's cases and the pinned inventory must agree — "
+                       + "the set is enumerable, not free-form text at runtime")
+        XCTAssertEqual(L10n.SafeTemplate.allCases.count, 4,
+                       "the set is a handful: the guard's three check classes "
+                       + "plus the generic entry")
+
+        // The deterministic selection keyed by the guard's check classes.
+        XCTAssertEqual(L10n.safeTemplate(forCheckClasses: []), .generic)
+        XCTAssertEqual(L10n.safeTemplate(forCheckClasses: ["notAClass"]), .generic,
+                       "an unknown class must never become a key — it resolves "
+                       + "to the generic template")
+        XCTAssertEqual(L10n.safeTemplate(forCheckClasses: ["honorificAgreement"]),
+                       .honorificAgreement)
+        XCTAssertEqual(L10n.safeTemplate(forCheckClasses: ["devanagariPurity"]),
+                       .devanagariPurity)
+        XCTAssertEqual(L10n.safeTemplate(forCheckClasses: ["danglingParticle"]),
+                       .danglingParticle)
+        XCTAssertEqual(L10n.safeTemplate(forCheckClasses: ["mystery",
+                                                           "devanagariPurity"]),
+                       .devanagariPurity,
+                       "the first KNOWN class wins, in the guard's own order")
+        XCTAssertEqual(L10n.safeTemplate(forCheckClasses: ["danglingParticle",
+                                                           "honorificAgreement"]),
+                       .danglingParticle)
+
+        // Each case resolves in both languages through the helper, to the
+        // pinned values — a helper wired to the wrong key would pass an
+        // existence check but fail this one.
+        for template in L10n.SafeTemplate.allCases {
+            let key = template.catalogKey
+            XCTAssertNotNil(Self.cloudChatCopy.first { $0.key == key },
+                            "\(key): every case must be pinned in the copy table")
+            XCTAssertEqual(L10n.safeTemplate(template, locale: english),
+                           catalogValue(key, language: "en") ?? "",
+                           "\(key): the helper and the catalog must agree in en")
+            XCTAssertEqual(L10n.safeTemplate(template, locale: nepali),
+                           catalogValue(key, language: "ne") ?? "",
+                           "\(key): the helper and the catalog must agree in ne")
+        }
+
+        // No fifth template key may sit in the catalog.
+        let catalog = sourceCatalog()
+        let templateKeys = catalog.keys
+            .filter { $0.hasPrefix("chat.safeTemplate.") }
+            .sorted()
+        XCTAssertEqual(templateKeys, Self.cloudChatSafeTemplateKeys,
+                       "the catalog must carry exactly the pinned templates")
+    }
+
+    /// Scenario: Safe templates are a bounded, spec-authored set — the
+    /// register half. Each template (and, for the shared bar, every key in
+    /// the family) is compared with T-166's style-spec register: a short,
+    /// warm sentence from the register — the polite forms only, at most
+    /// two sentences for a template, no list or markdown, no emoji, no
+    /// apology boilerplate and no "I am an AI" line.
+    func testTheCloudChatCopyMeetsTheRegisterBar() {
+        let catalog = sourceCatalog()
+        var values: [String: [String: String]] = [:]
+        for key in Self.cloudChatKeys {
+            guard let entry = catalog[key] as? [String: Any],
+                  let localizations = entry["localizations"] as? [String: Any] else {
+                XCTFail("\(key) is missing from the catalog")
+                continue
+            }
+            var pair: [String: String] = [:]
+            for language in ["en", "ne"] {
+                guard let unit = (localizations[language] as? [String: Any])?["stringUnit"]
+                        as? [String: Any],
+                      let value = unit["value"] as? String else {
+                    XCTFail("\(key).\(language) is missing from the catalog")
+                    continue
+                }
+                pair[language] = value
+            }
+            values[key] = pair
+            let failures = Self.cloudChatRegisterFailures(key: key, values: pair)
+            XCTAssertTrue(failures.isEmpty,
+                          "the register check failed:\n"
+                          + failures.joined(separator: "\n"))
+        }
+
+        // The templates carry the register's warmth marker explicitly.
+        for key in Self.cloudChatSafeTemplateKeys {
+            XCTAssertEqual(values[key]?.count, 2,
+                           "\(key): the template copy must be readable from "
+                           + "the source catalog in both languages")
+            XCTAssertTrue(values[key]?["ne"]?.contains("हजुर") == true,
+                          "\(key): the template must address the elder with "
+                          + "the polite attention marker हजुर")
+        }
+
+        // The check is not a rubber stamp: apology boilerplate, a list, an
+        // emoji AND a familiar-register form each fail, so the assertions
+        // above mean something.
+        let offences: [(marker: String, en: String, ne: String)] = [
+            ("apology boilerplate",
+             "Sorry, I am an AI and cannot answer.",
+             "क्षमा गर्नुहोस्, म जवाफ दिन सक्दिन।"),
+            ("a list",
+             "Here is the answer:",
+             "जवाफ यहाँ छ:\n1. हुन्छ हजुर"),
+            ("an emoji",
+             "Tell me again 🙂",
+             "फेरि भन्नुहोस् न हजुर 🙂"),
+            ("a familiar form",
+             "Tell me that again.",
+             "फेरि तिमी भन।"),
+        ]
+        for offence in offences {
+            let failures = Self.cloudChatRegisterFailures(
+                key: "chat.safeTemplate.generic",
+                values: ["en": offence.en, "ne": offence.ne])
+            XCTAssertFalse(failures.isEmpty,
+                           "the register check must fail the \(offence.marker) case")
+        }
+    }
+
+    /// The mirror rule (FR-CNR-001 / NFR-CNR-005): the register bar's lists
+    /// are MIRRORS of T-166's style spec, not a second source. The suite
+    /// reads the seed's machine blocks and fails when the spec grows a ban
+    /// this file does not carry. The mirror may be a SUPERSET — this unit's
+    /// apology bar is deliberately wider than the spec's list — but never a
+    /// subset: a rule changes in the spec first.
+    func testTheRegisterMirrorCoversTheStyleSpecsBans() throws {
+        guard let aiIsms = try Self.styleSpecBlock("ai_isms"),
+              let forbidden = aiIsms["forbidden"] as? [[String: Any]] else {
+            return XCTFail("the style spec carries no readable ai_isms block")
+        }
+        let specSubstrings = forbidden.compactMap { entry -> [String]? in
+            entry["kind"] as? String == "substring" ? entry["patterns"] as? [String] : nil
+        }.flatMap { $0 }
+        XCTAssertFalse(specSubstrings.isEmpty,
+                       "the ai_isms block's substring bans must be readable")
+        for pattern in specSubstrings {
+            XCTAssertTrue(Self.cloudChatBannedBoilerplate.contains {
+                $0.lowercased() == pattern.lowercased()
+            }, "the spec bans \"\(pattern)\" and the register mirror does not "
+               + "carry it — mirror the spec, never the other way around")
+        }
+
+        guard let register = try Self.styleSpecBlock("register"),
+              let addressForms = register["forbidden_address_forms"] as? [String],
+              let familiarVerbs = register["non_honorific_verb_forms"] as? [String] else {
+            return XCTFail("the style spec carries no readable register block")
+        }
+        XCTAssertFalse(addressForms.isEmpty || familiarVerbs.isEmpty,
+                       "the register block's lexicons must be readable")
+        for form in addressForms {
+            XCTAssertTrue(Self.cloudChatForbiddenFamiliarForms.contains(form),
+                          "the spec bans the address form \"\(form)\" and the "
+                          + "mirror does not carry it")
+        }
+        for form in familiarVerbs {
+            XCTAssertTrue(Self.cloudChatNonHonorificVerbForms.contains(form),
+                          "the spec bans the verb form \"\(form)\" and the "
+                          + "mirror does not carry it")
+        }
+
+        guard let shape = try Self.styleSpecBlock("sentence_shape"),
+              let maxSentences = shape["max_sentences"] as? Int else {
+            return XCTFail("the style spec carries no readable sentence_shape block")
+        }
+        XCTAssertEqual(maxSentences, Self.cloudChatMaxTemplateSentences,
+                       "the template cap IS the spec's max_sentences — the "
+                       + "style contract's own number, not a local constant")
+    }
+
+    /// Scenario: The copy speaks to a person. No consent, disclosure,
+    /// indicator, revocation, state or Settings string names a model, a
+    /// provider, a route, a server or a setting-category term — in either
+    /// language (design-l1 §17/§8.4; the task's register bar). The term
+    /// lists themselves are pinned so they cannot be quietly emptied.
+    func testTheCloudChatCopyNamesNoInternals() {
+        XCTAssertEqual(Set(Self.cloudChatForbiddenEnglishTerms),
+                       ["cloud", "server", "gemini", "model", "api"],
+                       "the English term ban must be the pinned list")
+        XCTAssertEqual(Set(Self.cloudChatForbiddenNepaliTerms),
+                       ["क्लाउड", "सर्भर", "जेमिनी", "मोडेल", "दिमाग",
+                        "इन्जिन", "एपीआई", "राउटर"],
+                       "the Nepali term ban must be the pinned list")
+
+        for key in Self.cloudChatKeys {
+            for language in ["en", "ne"] {
+                guard let value = catalogValue(key, language: language) else {
+                    XCTFail("\(key).\(language) is missing from the catalog")
+                    continue
+                }
+                XCTAssertNil(Self.cloudChatForbiddenTerm(in: value, language: language),
+                             "\(key): \(language) copy names an internal — the "
+                             + "copy must speak to a person: \(value)")
+            }
+        }
+
+        // The ban is enforced, not decorative: a fixture that names the
+        // term fails the coverage check by key and language.
+        var fixture = sourceCatalog()
+        Self.setCloudChatValue("तपाईंको कुरा क्लाउडमा पठाइन्छ।", language: "ne",
+                               key: "cloud.chat.consent.body", in: &fixture)
+        assertCloudChatCoverageFails(fixture, naming: "cloud.chat.consent.body",
+                                     language: "ne")
+    }
+
+    /// Implementation note: the entries were inserted at their alphabetical
+    /// positions as two contiguous blocks — the 15 `chat.*`/`cloud.chat.*`
+    /// keys between `caregiverNotify.shareHint` and `cloudCascade.holdCue`,
+    /// the 3 settings keys between `settings.cloudCascade.toggleNote` and
+    /// `settings.diagnostics.title`. JSONSerialization loses key order, so
+    /// this pin reads the raw file.
+    func testTheCloudChatBlocksSitAlphabeticallyAndContiguouslyInTheFile() {
+        let keyLines = rawCatalogKeyLines()
+        XCTAssertGreaterThan(keyLines.count, 1_000,
+                             "the key-line scan found too few entries — the "
+                             + "catalog layout changed and this pin is blind")
+        let failures = Self.cloudChatSpanFailures(in: keyLines)
+        XCTAssertTrue(failures.isEmpty,
+                      "the cloud-chat span check failed:\n"
+                      + failures.joined(separator: "\n"))
+    }
+
+    /// The span rule enforced by the check itself: a moved key, a smuggled
+    /// key and a reordered block each fail naming the offender, so the
+    /// passing assertion above is not vacuous.
+    func testTheCloudChatSpanCheckFailsOnAMovedOrSmuggledKey() {
+        let real = rawCatalogKeyLines()
+        XCTAssertTrue(Self.cloudChatSpanFailures(in: real).isEmpty,
+                      "the fixture must start from a passing scan")
+
+        var moved = real
+        if let index = moved.firstIndex(of: "cloud.chat.indicator") {
+            moved.remove(at: index)
+            moved.append("cloud.chat.indicator")
+        }
+        XCTAssertTrue(Self.cloudChatSpanFailures(in: moved)
+                        .contains { $0.contains("cloud.chat.indicator") },
+                      "a key moved out of the span must fail naming it")
+
+        var smuggled = real
+        if let index = smuggled.firstIndex(of: "cloud.chat.consent.title") {
+            smuggled.insert("cloud.chat.stray", at: index)
+        }
+        XCTAssertTrue(Self.cloudChatSpanFailures(in: smuggled)
+                        .contains { $0.contains("cloud.chat.stray") },
+                      "an unpinned key inside the span must fail naming it")
+
+        var swapped = real
+        if let index = swapped.firstIndex(of: "settings.cloudChat.title"),
+           index + 1 < swapped.count {
+            swapped.swapAt(index, index + 1)
+        }
+        XCTAssertTrue(Self.cloudChatSpanFailures(in: swapped)
+                        .contains { $0.contains("settings.cloudChat.title") },
+                      "a reordered settings block must fail naming the key")
+    }
+
+    /// Scenario: A hardcoded user-visible string (the failure path). The
+    /// sweep inspects the feature's surfaces — the `CloudChat` sources and
+    /// the five files the feature's plan wires into — with every family
+    /// value in hand, and reports each finding with its file, line and
+    /// text; the fix is a catalogue key in both languages, never a string
+    /// left in code.
+    func testNoCloudChatCopyIsHardcodedOnTheFeatureSurfaces() {
+        let values = Self.cloudChatKeys.compactMap { catalogValue($0, language: "en") }
+            + Self.cloudChatKeys.compactMap { catalogValue($0, language: "ne") }
+        XCTAssertEqual(values.count, Self.cloudChatKeys.count * 2,
+                       "every family value must resolve before the sweep can "
+                       + "claim anything")
+
+        var findings: [String] = []
+        for (relative, devanagariScan) in Self.cloudChatSweepFiles() {
+            let url = FeatureSourceScan.iosDirectory()
+                .appendingPathComponent(relative)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                XCTFail("the swept surface \(relative) is missing — the sweep "
+                        + "must not claim anything about files it cannot read")
+                continue
+            }
+            findings += Self.hardcodedCopyFindings(
+                path: relative,
+                codeText: FeatureSourceScan.codeText(of: url),
+                devanagariScan: devanagariScan,
+                catalogValues: values)
+        }
+        XCTAssertTrue(findings.isEmpty,
+                      "user-visible copy must live in the catalogue (both "
+                      + "languages), not in code:\n"
+                      + findings.joined(separator: "\n"))
+    }
+
+    /// The sweep's own failure path: a sample source carrying Nepali copy
+    /// and a duplicated catalogue value is reported with its file, line and
+    /// text; an internal ASCII literal is not.
+    func testTheHardcodedCopySweepReportsTheStringAndItsLocation() {
+        let sample = [
+            "func speak() {",
+            "    say(\"Yes, use the internet\")",
+            "    say(\"ठीक छ हजुर\")",
+            "    say(\"OK\")",
+            "}",
+        ].joined(separator: "\n")
+        let findings = Self.hardcodedCopyFindings(
+            path: "ElderlyAssistant/Services/Intents/CloudChat/Sample.swift",
+            codeText: sample,
+            devanagariScan: true,
+            catalogValues: ["Yes, use the internet"])
+        XCTAssertEqual(findings.count, 2,
+                       "one finding per offending line: \(findings)")
+        XCTAssertTrue(findings.contains {
+            $0.contains("Sample.swift:2") && $0.contains("Yes, use the internet")
+        }, "the hardcoded catalogue value must be reported with its file, "
+           + "line and text: \(findings)")
+        XCTAssertTrue(findings.contains {
+            $0.contains("Sample.swift:3") && $0.contains("ठीक छ हजुर")
+        }, "the hardcoded Nepali copy must be reported with its file, line "
+           + "and text: \(findings)")
+        XCTAssertFalse(findings.contains { $0.contains("Sample.swift:4") },
+                       "an internal ASCII literal must not be flagged: \(findings)")
+    }
+
+    // MARK: T-171 helpers
+
+    /// The cloud-chat coverage check as a pure function over a parsed
+    /// catalog, so every rule can be exercised against fixtures. Each
+    /// failure names the offending key and the rule it broke; a missing or
+    /// lost value names the language too (the "one language only"
+    /// scenario's exact message shape). The family is membership in the
+    /// three namespaces this unit owns — a key shaped like a family key but
+    /// outside the pinned inventory is a nineteenth user-visible string.
+    static func cloudChatCoverageFailures(in catalog: [String: Any]) -> [String] {
+        var failures: [String] = []
+        let inventory = Set(cloudChatKeys)
+        let familyPrefixes = ["chat.safeTemplate.", "cloud.chat.",
+                              "settings.cloudChat."]
+
+        for key in catalog.keys.sorted() where familyPrefixes.contains(where: {
+            key.hasPrefix($0)
+        }) && !inventory.contains(key) {
+            failures.append("\(key): in the cloud-chat family but not in the "
+                            + "pinned inventory (exactly \(cloudChatKeys.count) "
+                            + "keys)")
+        }
+        for key in cloudChatKeys {
+            guard let entry = catalog[key] as? [String: Any] else {
+                failures.append("\(key): missing from the catalog")
+                continue
+            }
+            if entry["extractionState"] as? String != "manual" {
+                failures.append("\(key): extractionState is not `manual`")
+            }
+            guard let localizations = entry["localizations"] as? [String: Any] else {
+                failures.append("\(key): no localizations")
+                continue
+            }
+            var values: [String: String] = [:]
+            for language in ["en", "ne"] {
+                guard let unit = ((localizations[language] as? [String: Any])?["stringUnit"]
+                                    as? [String: Any]),
+                      let value = unit["value"] as? String,
+                      !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    failures.append("\(key): missing or empty \(language) value")
+                    continue
+                }
+                values[language] = value
+                if unit["state"] as? String != "translated" {
+                    failures.append("\(key): \(language) is not marked `translated`")
+                }
+                if language == "ne" {
+                    if containsASCIILetters(value) {
+                        failures.append("\(key): Nepali value carries ASCII "
+                                        + "letters — \(value)")
+                    }
+                    if !isDevanagariOrPlaceholderOnly(value) {
+                        failures.append("\(key): Nepali value is not Devanagari "
+                                        + "— \(value)")
+                    }
+                }
+                if let term = cloudChatForbiddenTerm(in: value, language: language) {
+                    failures.append("\(key): \(language) copy names the technical "
+                                    + "term \"\(term)\" — the copy must speak to "
+                                    + "a person: \(value)")
+                }
+                let placeholders = placeholderCount(in: value)
+                if placeholders != 0 {
+                    failures.append("\(key): \(language) carries \(placeholders) "
+                                    + "`%` placeholder(s) — no key in this family "
+                                    + "takes an argument")
+                }
+            }
+            failures += cloudChatRegisterFailures(key: key, values: values)
+            if let en = values["en"], let ne = values["ne"], en == ne {
+                failures.append("\(key): en and ne resolve to the same value — "
+                                + "the Nepali copy is missing")
+            }
+        }
+        return failures
+    }
+
+    /// The register bar as a pure function (T-166's style spec register and
+    /// `ai_isms` sections, plus this unit's apology rule), so every clause
+    /// can be exercised against fixtures. Applies to both languages; the
+    /// register-lexicon clauses apply to the Nepali value.
+    static func cloudChatRegisterFailures(key: String,
+                                          values: [String: String]) -> [String] {
+        var failures: [String] = []
+        let isTemplate = key.hasPrefix("chat.safeTemplate.")
+        for (language, value) in values.sorted(by: { $0.key < $1.key }) {
+            if containsEmoji(value) {
+                failures.append("\(key): \(language) copy carries an emoji — "
+                                + "spoken copy is prose: \(value)")
+            }
+            if carriesListOrMarkdownMarker(value) {
+                failures.append("\(key): \(language) copy carries a list, "
+                                + "numbering, bullet or markdown marker: \(value)")
+            }
+            let lowered = value.lowercased()
+            for banned in cloudChatBannedBoilerplate
+            where lowered.contains(banned.lowercased()) {
+                failures.append("\(key): \(language) copy carries banned "
+                                + "boilerplate \"\(banned)\": \(value)")
+            }
+            if stacksAddressForms(value) {
+                failures.append("\(key): \(language) copy piles the address "
+                                + "forms up (हजुर/तपाईं twice within a short "
+                                + "span): \(value)")
+            }
+            let sentenceLimit = isTemplate ? cloudChatMaxTemplateSentences
+                                           : cloudChatMaxPlainSentences
+            let sentences = cloudChatSentences(in: value, language: language)
+            if sentences.count > sentenceLimit {
+                failures.append("\(key): \(language) copy runs \(sentences.count) "
+                                + "sentence(s) — the cap is \(sentenceLimit)")
+            }
+            let charCap = isTemplate
+                ? (language == "ne" ? cloudChatMaxTemplateSentenceCharacters.ne
+                                    : cloudChatMaxTemplateSentenceCharacters.en)
+                : (language == "ne" ? cloudChatMaxPlainSentenceCharacters.ne
+                                    : cloudChatMaxPlainSentenceCharacters.en)
+            for sentence in sentences where sentence.count > charCap {
+                failures.append("\(key): \(language) sentence runs "
+                                + "\(sentence.count) characters — the cap is "
+                                + "\(charCap) (short sentences, one idea each): "
+                                + sentence)
+            }
+            guard language == "ne" else { continue }
+            for form in cloudChatForbiddenFamiliarForms where value.contains(form) {
+                failures.append("\(key): Nepali copy uses the familiar form "
+                                + "\"\(form)\" — the elder is addressed with "
+                                + "तपाईं/हजुर: \(value)")
+            }
+            for form in cloudChatNonHonorificVerbForms where value.contains(form) {
+                failures.append("\(key): Nepali copy uses the familiar verb form "
+                                + "\"\(form)\": \(value)")
+            }
+            if isTemplate && !value.contains("हजुर") {
+                failures.append("\(key): the template must carry the polite "
+                                + "attention marker हजुर: \(value)")
+            }
+        }
+        return failures
+    }
+
+    /// The plainness rule: the first banned term the value carries, or nil.
+    /// English terms match case-insensitively; the Nepali list is matched
+    /// verbatim (Devanagari has no case).
+    static func cloudChatForbiddenTerm(in value: String,
+                                       language: String) -> String? {
+        guard language == "ne" else {
+            let lowered = value.lowercased()
+            return cloudChatForbiddenEnglishTerms.first { lowered.contains($0) }
+        }
+        return cloudChatForbiddenNepaliTerms.first { value.contains($0) }
+    }
+
+    /// The exact-span placement check as a pure function over the raw
+    /// file's key lines: the 15-key chat block must sit contiguously
+    /// between its pinned neighbours, and the 3 settings keys between
+    /// theirs. A moved, removed, smuggled or reordered key fails naming
+    /// itself.
+    static func cloudChatSpanFailures(in keyLines: [String]) -> [String] {
+        var failures: [String] = []
+        failures += cloudChatSpanFailures(in: keyLines,
+                                          between: "caregiverNotify.shareHint",
+                                          and: "cloudCascade.holdCue",
+                                          expected: cloudChatChatBlockKeys)
+        failures += cloudChatSpanFailures(in: keyLines,
+                                          between: "settings.cloudCascade.toggleNote",
+                                          and: "settings.diagnostics.title",
+                                          expected: cloudChatSettingsKeys)
+        return failures
+    }
+
+    private static func cloudChatSpanFailures(in keyLines: [String],
+                                              between predecessor: String,
+                                              and successor: String,
+                                              expected: [String]) -> [String] {
+        var failures: [String] = []
+        guard let before = keyLines.firstIndex(of: predecessor) else {
+            return ["\(predecessor): the span's predecessor is missing — the "
+                    + "placement pin is blind"]
+        }
+        guard let after = keyLines.firstIndex(of: successor) else {
+            return ["\(successor): the span's successor is missing — the "
+                    + "placement pin is blind"]
+        }
+        if after <= before + 1 {
+            return ["no cloud-chat span between \(predecessor) and \(successor)"]
+        }
+        let span = Array(keyLines[(before + 1)..<after])
+        if span != expected {
+            for key in expected where !span.contains(key) {
+                failures.append("\(key): not inside the pinned span between "
+                                + "\(predecessor) and \(successor) "
+                                + "(moved or removed)")
+            }
+            for key in span where !expected.contains(key) {
+                failures.append("\(key): inside the cloud-chat span but not in "
+                                + "the pinned inventory — unpinned or wrongly "
+                                + "placed")
+            }
+            if Set(span) == Set(expected) {
+                for index in 0..<min(expected.count, span.count) {
+                    if span[index] != expected[index] {
+                        failures.append("\(expected[index]): out of pinned order "
+                                        + "(found \(span[index]) at its position)")
+                    }
+                }
+            }
+            if span.count != expected.count {
+                failures.append("the cloud-chat span between \(predecessor) and "
+                                + "\(successor) has \(span.count) key lines — "
+                                + "expected \(expected.count)")
+            }
+        }
+        return failures
+    }
+
+    /// The hardcoded-copy sweep as a pure function over one file's
+    /// comment-stripped code, reporting file, line and text. Two probes:
+    /// (a) any Devanagari in the code is Nepali copy that must live in the
+    /// catalogue; (b) any literal equal to a catalogue value is that copy
+    /// duplicated in code. `devanagariScan` is false for files whose
+    /// Devanagari is a spoken-INPUT lexicon or another feature's output
+    /// copy, which only probe (b) may judge.
+    static func hardcodedCopyFindings(path: String,
+                                      codeText: String,
+                                      devanagariScan: Bool,
+                                      catalogValues: [String]) -> [String] {
+        var findings: [String] = []
+        let lines = codeText.split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+        for (offset, line) in lines.enumerated() {
+            if devanagariScan && containsDevanagari(line) {
+                findings.append("\(path):\(offset + 1): Nepali copy in code — "
+                                + "add it to the catalogue in both languages: "
+                                + line.trimmingCharacters(in: .whitespaces))
+            }
+            for value in catalogValues {
+                if line.contains(value) {
+                    findings.append("\(path):\(offset + 1): catalogue copy "
+                                    + "hardcoded — resolve it via its key "
+                                    + "instead: "
+                                    + line.trimmingCharacters(in: .whitespaces))
+                }
+            }
+        }
+        return findings
+    }
+
+    /// The swept surfaces: the feature's own source directory (any
+    /// Devanagari outside comments there can only be user-visible copy —
+    /// the guard's lexicons live under `Services/Voice`, checked by their
+    /// own suite) plus the five files this feature's plan wires the family
+    /// into — T-176's sheet lives under `CloudChat`, the consent sheet's
+    /// host and the indicator/revocation surfaces are the three `App/`
+    /// files, the revoke/state keyword rules are `KeywordIntentRule`, and
+    /// the safe template is spoken from `CommandRouter`'s chat dispatch
+    /// (T-174) (pinned-copy probe only for the five: those files
+    /// legitimately carry other features' Devanagari, e.g.
+    /// `KeywordIntentRule`'s spoken stimuli).
+    private static func cloudChatSweepFiles() -> [(relative: String, devanagari: Bool)] {
+        var files: [(relative: String, devanagari: Bool)] = FeatureSourceScan
+            .swiftFiles(in: "ElderlyAssistant/Services/Intents/CloudChat")
+            .map { (FeatureSourceScan.relativePath(of: $0), true) }
+        files += [
+            ("ElderlyAssistant/App/AppCoordinator.swift", false),
+            ("ElderlyAssistant/App/HomeSubviews.swift", false),
+            ("ElderlyAssistant/App/SettingsView.swift", false),
+            ("ElderlyAssistant/Services/Voice/CommandRouter.swift", false),
+            ("ElderlyAssistant/Services/Voice/KeywordIntentRule.swift", false),
+        ]
+        return files.sorted { $0.relative < $1.relative }
+    }
+
+    /// One machine block of T-166's style spec (`tools/train-intent/seeds/
+    /// nepali-chat-style-spec`), parsed from its fenced ` ```json <name> `
+    /// form — the register mirror's authority, read from the artifact
+    /// itself (the `ChatSamplingTests.specSection` pattern). A block that
+    /// cannot be read is nil, and the calling test fails rather than
+    /// passing blind.
+    private static func styleSpecBlock(_ name: String) throws -> [String: Any]? {
+        let seed = FeatureSourceScan.iosDirectory(file: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("tools/train-intent/seeds/nepali-chat-style-spec")
+        let text = try String(contentsOf: seed, encoding: .utf8)
+        guard let opener = text.range(of: "```json \(name)"),
+              let closer = text.range(of: "```",
+                                      range: opener.upperBound..<text.endIndex) else {
+            return nil
+        }
+        let json = String(text[opener.upperBound..<closer.lowerBound])
+        guard let data = json.data(using: .utf8) else { return nil }
+        return try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    /// The sentences of a value, split on the language's terminators (the
+    /// Devanagari danda for Nepali — the family's Nepali copy carries no
+    /// ASCII period) and trimmed; the spoken prose has no other punctuation.
+    private static func cloudChatSentences(in value: String,
+                                           language: String) -> [String] {
+        let terminators: Set<Character> = language == "ne"
+            ? ["।", "?", "!"] : [".", "?", "!"]
+        return value.split(whereSeparator: { terminators.contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// Emoji — the U+1F000 block and the common symbol ranges a keyboard
+    /// inserts — pinned as a bar: spoken copy is prose. The em dash and the
+    /// ellipsis sit outside these ranges deliberately; they are
+    /// punctuation, not pictographs.
+    private static func containsEmoji(_ value: String) -> Bool {
+        value.unicodeScalars.contains { scalar in
+            (0x1F000...0x1FAFF).contains(scalar.value)
+                || (0x2600...0x27BF).contains(scalar.value)
+                || (0x2B00...0x2BFF).contains(scalar.value)
+                || scalar.value == 0xFE0F
+                || scalar.value == 0x200D
+        }
+    }
+
+    /// The spec's "no lists, numbering, bullets or markdown" class: a
+    /// list/numbering/bullet opener at the start of any line, or a markdown
+    /// marker anywhere in the value.
+    private static func carriesListOrMarkdownMarker(_ value: String) -> Bool {
+        if value.contains("**") || value.contains("__") || value.contains("`") {
+            return true
+        }
+        for line in value.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            if let first = trimmed.first, "-*•".contains(first),
+               trimmed.dropFirst().first == " " {
+                return true
+            }
+            let digits = trimmed.prefix(while: { $0.isNumber })
+            if !digits.isEmpty,
+               let after = trimmed.dropFirst(digits.count).first,
+               after == "." || after == ")" {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// The spec's over-politeness class, approximated on the value: an
+    /// address marker (हजुर or तपाईं) twice within 12 characters.
+    private static func stacksAddressForms(_ value: String) -> Bool {
+        for marker in ["हजुर", "तपाईं"] {
+            var search = value.startIndex..<value.endIndex
+            var hits: [String.Index] = []
+            while let found = value.range(of: marker, range: search) {
+                hits.append(found.lowerBound)
+                search = found.upperBound..<value.endIndex
+            }
+            for (first, second) in zip(hits, hits.dropFirst()) {
+                if value.distance(from: first, to: second) <= 12 {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    /// Asserts the cloud-chat check fails naming `key` — and, when given,
+    /// that some failure for `key` also names the lost `language` (the
+    /// one-language scenario's requirement), showing every failure the
+    /// check produced.
+    private func assertCloudChatCoverageFails(_ catalog: [String: Any],
+                                              naming key: String,
+                                              language: String? = nil,
+                                              file: StaticString = #filePath,
+                                              line: UInt = #line) {
+        let failures = Self.cloudChatCoverageFailures(in: catalog)
+        XCTAssertTrue(failures.contains { $0.contains(key) },
+                      "the coverage check must fail naming \(key); it produced: "
+                      + "\(failures)", file: file, line: line)
+        if let language {
+            XCTAssertTrue(failures.contains {
+                $0.contains(key) && $0.contains(language)
+            }, "the failure for \(key) must also name the missing/lost language "
+               + "\(language); it produced: \(failures)",
+               file: file, line: line)
+        }
+    }
+
+    /// Fixture-only: drops one language's localization from `key`.
+    private static func removeCloudChatLanguage(_ language: String,
+                                                from key: String,
+                                                in catalog: inout [String: Any]) {
+        guard var entry = catalog[key] as? [String: Any],
+              var localizations = entry["localizations"] as? [String: Any] else {
+            XCTFail("fixture setup: \(key) is missing from the catalog")
+            return
+        }
+        localizations.removeValue(forKey: language)
+        entry["localizations"] = localizations
+        catalog[key] = entry
+    }
+
+    /// Fixture-only: overwrites one language's value for `key`.
+    private static func setCloudChatValue(_ value: String, language: String,
+                                          key: String,
+                                          in catalog: inout [String: Any]) {
+        guard var entry = catalog[key] as? [String: Any],
+              var localizations = entry["localizations"] as? [String: Any],
+              var languageEntry = localizations[language] as? [String: Any],
+              var unit = languageEntry["stringUnit"] as? [String: Any] else {
+            XCTFail("fixture setup: \(key).\(language) is missing from the catalog")
+            return
+        }
+        unit["value"] = value
+        languageEntry["stringUnit"] = unit
+        localizations[language] = languageEntry
+        entry["localizations"] = localizations
+        catalog[key] = entry
     }
 
 }

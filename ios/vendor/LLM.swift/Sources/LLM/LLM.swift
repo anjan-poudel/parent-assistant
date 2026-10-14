@@ -111,7 +111,15 @@ public actor LLMCore {
     private var sampler: UnsafeMutablePointer<llama_sampler>?
     private var chatSession: OpaquePointer?
     
-    func setParameters(seed: UInt32? = nil, topK: Int32? = nil, topP: Float? = nil, temp: Float? = nil, repeatPenalty: Float? = nil, repetitionLookback: Int32? = nil) {
+    /// [CHAT-SAMPLING] (2026-10-14, T-167) `public` so the app can re-assert a
+    /// turn's sampling parameters on the resident handle immediately before
+    /// that turn's decode. The app awaits this on the SAME actor that runs
+    /// `generateWithConstraints`, which orders the write before the decode —
+    /// the wrapper's fire-and-forget `temp`/`seed` setters (the `configure`
+    /// task chain) cannot give that ordering. Access-level change only: the
+    /// body, defaults and every caller inside this module are unchanged, and
+    /// no sampling behaviour differs.
+    public func setParameters(seed: UInt32? = nil, topK: Int32? = nil, topP: Float? = nil, temp: Float? = nil, repeatPenalty: Float? = nil, repetitionLookback: Int32? = nil) {
         if let seed { self.seed = seed }
         if let topK { self.topK = topK }
         if let topP { self.topP = topP }
