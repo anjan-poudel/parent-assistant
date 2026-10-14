@@ -216,4 +216,38 @@ final class FeedSpeechSanitizerTests: XCTestCase {
         XCTAssertTrue(FeedSpeechSanitizer.hasFullArticle(
             summary: "Short blurb", fullText: "<p>A much longer body.</p>"))
     }
+
+    // MARK: - Block tags → newline (news-feed-images task, 2026-10-14)
+
+    func testBlockTagsBecomeNewlinesForTheReaderLayout() {
+        // The SAME tag list as the speech pass, a different boundary
+        // filler: the article reader splits paragraphs on these line
+        // breaks, so the two paths can never disagree about which tags
+        // are blocks. The newlines are EXPECTED raw here — the reader's
+        // own pipeline trims and drops the blank pieces.
+        XCTAssertEqual(
+            FeedSpeechSanitizer.replacingBlockTagsWithNewline("<p>one</p><p>two</p>"),
+            "\none\n\ntwo\n")
+        XCTAssertEqual(
+            FeedSpeechSanitizer.replacingBlockTagsWithNewline("first<br>second"),
+            "first\nsecond")
+        XCTAssertEqual(
+            FeedSpeechSanitizer.replacingBlockTagsWithNewline(
+                "<ul><li>a</li><li>b</li></ul>"),
+            "\n\na\n\nb\n\n")
+    }
+
+    func testNewlinePassLeavesInlineTags() {
+        // Inline markup is not a block boundary in either pass — the
+        // shared strip removes it without adding a line break.
+        XCTAssertEqual(
+            FeedSpeechSanitizer.replacingBlockTagsWithNewline("Full <b>bold</b> text"),
+            "Full <b>bold</b> text")
+    }
+
+    func testNewlinePassLeavesProseComparisonsAlone() {
+        XCTAssertEqual(
+            FeedSpeechSanitizer.replacingBlockTagsWithNewline("2 < 3 and a > b"),
+            "2 < 3 and a > b")
+    }
 }

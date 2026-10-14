@@ -110,6 +110,18 @@ enum FeedSpeechSanitizer {
                                   options: .regularExpression)
     }
 
+    /// The SAME block-tag set as `replacingBlockTagsWithSpace`, but each
+    /// tag becomes a line break instead of a space (news-feed-images
+    /// task, 2026-10-14). The speech path must read one flowing run —
+    /// a pause is all a "paragraph" is to a voice — while the article
+    /// reader lays the same body out as separate paragraphs, which is
+    /// the structure the eye reads. One tag list, two boundary fillers,
+    /// so the two paths can never disagree about which tags are blocks.
+    static func replacingBlockTagsWithNewline(_ html: String) -> String {
+        html.replacingOccurrences(of: blockTagPattern, with: "\n",
+                                  options: .regularExpression)
+    }
+
     private static func capped(_ text: String, at limit: Int) -> String {
         text.count > limit ? String(text.prefix(limit)) : text
     }

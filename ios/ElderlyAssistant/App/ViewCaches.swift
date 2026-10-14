@@ -215,6 +215,46 @@ final class DownsampledImageCache {
         cache.removeAllObjects()
     }
 
+    // MARK: Remote images (news-feed-images task, 2026-10-14)
+
+    /// The REMOTE-image variant of `thumbnail(forKey:...)`: the source
+    /// is bytes fetched over the network, so the load is async and the
+    /// decode is explicitly hopped off the caller's actor.
+    ///
+    /// Key family: `"feedimg:<url>"` — the feed article images
+    /// (`FeedArticleImageView` draws all three surfaces this serves: the
+    /// text card's thumbnail, the image card, the article reader). The
+    /// URL is the identity; feed content is immutable per URL in
+    /// practice, and every entry is derivable and bounded, so a miss is
+    /// always safe and a stale serve cannot outlive its URL.
+    ///
+    /// `loadData` runs ONLY on a miss (the same contract as the sync
+    /// variant's `load`), on the caller's actor — pass `URLSession`'s
+    /// async fetch, whose transfer work is off-main already. The
+    /// DOWNSAMPLE then runs on a detached task: `downsampled(from:)` is
+    /// ImageIO's thumbnail decode, but the caller is typically a SwiftUI
+    /// `.task` (main actor), and the [RESPONSIVENESS] house rule is that
+    /// the decode of an image never runs on the main thread — the same
+    /// `Task.detached` hop `EventsView`'s photo picker takes.
+    func thumbnail(forKey key: String,
+                   pointSize: CGFloat,
+                   displayScale: CGFloat,
+                   loadData: @escaping () async -> Data?) async -> UIImage? {
+        let pixelEdge = max(1, (pointSize * displayScale).rounded(.up))
+        let cacheKey = "\(key)@\(Int(pixelEdge))" as NSString
+        if let hit = cache.object(forKey: cacheKey) { return hit }
+        guard let data = await loadData() else { return nil }
+        // A trailing closure cannot sit inside a `guard` condition
+        // (Swift's parser binds it to the wrong construct), so the
+        // detached decode is built first and its value awaited after.
+        let decode = Task.detached(priority: .userInitiated) {
+            DownsampledImageCache.downsampled(from: data, maxPixelEdge: pixelEdge)
+        }
+        guard let thumb = await decode.value else { return nil }
+        cache.setObject(thumb, forKey: cacheKey, cost: Self.cost(of: thumb))
+        return thumb
+    }
+
     // MARK: Downsampling
 
     /// `data` decoded DIRECTLY at the target size via ImageIO — the path
