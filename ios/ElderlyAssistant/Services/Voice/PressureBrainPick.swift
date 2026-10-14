@@ -192,6 +192,224 @@ enum PressureBrainPickResolver {
     }
 }
 
+// MARK: - The pick latch ([PICK-HYSTERESIS], 2026-10-14)
+
+/// [PICK-HYSTERESIS] The hysteresis latch that sits between the raw
+/// per-turn pick and the model swap: a raw change must REPEAT for
+/// several consecutive turns before it flips what actually runs.
+///
+/// The audit's finding 3C/15 (`docs/native-responsiveness-audit.md`)
+/// named the hole: `PressureBrainPickResolver.resolve` is consulted
+/// EVERY turn against a fresh sample, and a device oscillating around
+/// the fit margin — the headroom half of `pressureEngages` reads the
+/// raw probe with no freshness requirement — can therefore alternate
+/// 4B→1B→4B, each swap an unload plus a next-turn full page-in (~3.4 GB,
+/// ~10 s for the 4B; the 1B ≈ 4.8 s — `ModelCostModel`). The load-rate
+/// thrash guard covers load RATE, not swap rate, and `switchBaseModel`
+/// bypasses it entirely, so nothing between the resolver and the swap
+/// brakes.
+///
+/// The measurement this latch exists for, and the owner's ruling that
+/// made it the top priority (2026-10-14): the field console on the
+/// iPhone 17 Pro Max showed the device AT its ceiling — `liveBytes`
+/// 4.49 GB against the 3.54 GB class budget — with the whisper weights
+/// released mid-turn for "ram_headroom", and the owner reads the
+/// eviction ping-pong as "the most likely instability source" for the
+/// jumbled STT episodes seen under load.
+///
+/// ### The asymmetry, and why
+///
+/// DOWN is fast (2 consecutive pressurized turns), UP is slow (4
+/// consecutive clean turns), and M > N is the point:
+///
+///  - A late step-down is bounded. The load-site terminal gate
+///    (`PressureBrainPickResolver.pressureRefusesLoad` in
+///    `LlamaCommandInterpreter.loadLLMHandle`) refuses a load that
+///    cannot clear the margin and the router's deterministic reply
+///    answers — the audit's own trade, verbatim: "a latched 1B for one
+///    extra turn under real pressure is the intended behavior." N = 2 is
+///    the smallest N that is a latch at all; N = 1 is the per-turn
+///    behavior this change replaces.
+///  - A premature RECOVER is what the ping-pong spends: it pages the
+///    big model back in at ~10 s AND re-arms the next eviction. Four
+///    consecutive clean samples is the evidence bar that headroom has
+///    actually returned — on a conversational cadence that is minutes of
+///    sustained headroom, not a blip between two warnings.
+///
+/// ### Why turns, not seconds
+///
+/// The cost this prevents is paid in TURNS — a swap's page-in lands on
+/// the next turn — and the pick is only ever asked per turn
+/// (`recordTranscript` → `applyPressureBrainPickForTurn`). A wall-clock
+/// window would add a second, invisible clock (and a timer) to a seam
+/// whose only events are turns; consecutive samples are the same
+/// evidence with no clock to drift. The thresholds are fields with
+/// defaults, so retuning them is a one-line change, not a rewrite.
+///
+/// ### In-memory only, and the two re-baselines
+///
+/// The latch is per-process state — a `var` on the coordinator, never
+/// persisted. The degraded tier is a property of THIS process's pressure
+/// history: a relaunch has none, and a latch restored from disk would
+/// hold a step-down against evidence that could be hours stale. On a
+/// fresh process the first decision therefore ADOPTS the raw pick (there
+/// is no prior state to protect, the boot warm has loaded the remembered
+/// pick, and turn one behaves exactly as it does today); the latch's
+/// guarantee begins with the second turn.
+///
+/// A change of the remembered pick — Settings, or the automatic
+/// resolution changing under it — also re-baselines (adopt raw, clear
+/// both streaks): an explicit pick outranks hysteresis the same way it
+/// outranks the language table (`AppCoordinator.resolveBrainModelID`
+/// rule 1), and streaks counted against a different remembered pick
+/// would be arithmetic about a model nobody chose.
+///
+/// ### What a streak is
+///
+/// Streaks compare the picks' live-byte ranks — `.keep` ranks at the
+/// remembered pick's live bytes, `.stepDown` at its own, `.lightweight`
+/// at zero, the same currency the resolver's never-up rule spends. A raw
+/// pick that ranks strictly BELOW the latched pick is a degrade sample;
+/// any other disagreement (up, or a lateral equal-byte swap the
+/// resolver's own rules make unreachable) is a recover sample — the
+/// latch never moves faster than the recover threshold except DOWN. A
+/// turn whose raw pick EQUALS the latched pick clears both streaks,
+/// which is the hysteresis itself: an alternating signal — the
+/// margin-oscillation case — accumulates neither streak and therefore
+/// never flips at all.
+///
+/// One deliberate consequence, stated: a latched `stepDown` id deleted
+/// from the store mid-session self-heals through these same rules — the
+/// resolver can no longer produce it, so the walk's next candidate
+/// (smaller, equal, or nothing at all) accumulates its own streak and
+/// the latch leaves the deleted id within max(N, M) turns.
+struct PressureBrainPickLatch: Equatable {
+
+    /// [PICK-HYSTERESIS] Consecutive pressurized turns needed before the
+    /// latch steps DOWN. 2 is the smallest N that is a latch at all, and
+    /// the extra turn it buys costs at most one deterministic reply (the
+    /// load-site terminal gate refuses a load that cannot clear the
+    /// margin — never an OOM).
+    static let defaultDegradeTurns = 2
+
+    /// [PICK-HYSTERESIS] Consecutive clean turns needed before the latch
+    /// steps back UP. 4 is the anti-ping-pong number: a single clean
+    /// sample between two pressurized ones must never pay the ~3.4 GB
+    /// page-in back, and four consecutive samples on a conversational
+    /// cadence is minutes of sustained headroom. M > N is the point
+    /// (pinned by a test).
+    static let defaultRecoverTurns = 4
+
+    /// The thresholds, as fields with defaults — a configurable surface
+    /// in the same sense `ModelBudgetPolicy`'s numbers are.
+    let degradeTurns: Int
+    let recoverTurns: Int
+
+    /// The pick currently in force — what the coordinator applied and
+    /// what `DegradedVoiceMode` describes. `.keep` until a first
+    /// decision; the first decision re-baselines anyway.
+    private(set) var latchedPick: PressureBrainPick = .keep
+
+    /// The remembered pick the latch was last re-baselined against, `nil`
+    /// before the first decision — a change is an explicit act, and it
+    /// re-baselines rather than counting against the old baseline.
+    private(set) var latchedRememberedPick: ModelID?
+
+    /// Consecutive turns whose raw pick ranked strictly below the
+    /// latched pick. Reaching `degradeTurns` flips; any other turn's
+    /// outcome clears it (consecutive is the word that makes this
+    /// hysteresis).
+    private(set) var degradeStreak = 0
+
+    /// Consecutive turns whose raw pick disagreed without ranking below.
+    /// Reaching `recoverTurns` flips; cleared like `degradeStreak`.
+    private(set) var recoverStreak = 0
+
+    init(degradeTurns: Int = PressureBrainPickLatch.defaultDegradeTurns,
+         recoverTurns: Int = PressureBrainPickLatch.defaultRecoverTurns) {
+        self.degradeTurns = degradeTurns
+        self.recoverTurns = recoverTurns
+    }
+
+    /// One turn's latched pick — the pick the coordinator should run.
+    ///
+    /// - `raw` is `PressureBrainPickResolver.resolve`'s answer for this
+    ///   turn: a sample, not a decision, until it repeats.
+    /// - `rememberedPick` is the pick the household would run with no
+    ///   pressure; a change from the last decision re-baselines.
+    /// - `liveBytes` prices the picks for the down/up comparison — the
+    ///   same injected default the resolver takes, so the two can never
+    ///   disagree about which model is smaller.
+    mutating func decide(
+        raw: PressureBrainPick,
+        rememberedPick: ModelID,
+        liveBytes: (ModelID) -> UInt64 = {
+            ModelLifecycleInventory.footprint(for: .brain, modelID: $0).liveBytes
+        }
+    ) -> PressureBrainPick {
+        // An explicit (re-)pick — first use, Settings, a changed
+        // automatic resolution — re-baselines: adopt the raw pick
+        // outright and clear the streaks. The household's choice
+        // outranks hysteresis the same way it outranks the language
+        // table.
+        guard latchedRememberedPick == rememberedPick else {
+            latchedRememberedPick = rememberedPick
+            adopt(raw)
+            return raw
+        }
+
+        // The turn agrees with what is in force — either the healthy
+        // steady state or the latch's own hold. Either way it is not
+        // evidence FOR a change, so both streaks clear.
+        if raw == latchedPick {
+            degradeStreak = 0
+            recoverStreak = 0
+            return latchedPick
+        }
+
+        let rawRank = Self.rank(of: raw,
+                                rememberedPick: rememberedPick,
+                                liveBytes: liveBytes)
+        let latchedRank = Self.rank(of: latchedPick,
+                                    rememberedPick: rememberedPick,
+                                    liveBytes: liveBytes)
+
+        if rawRank < latchedRank {
+            degradeStreak += 1
+            recoverStreak = 0
+            if degradeStreak >= degradeTurns { adopt(raw) }
+        } else {
+            recoverStreak += 1
+            degradeStreak = 0
+            if recoverStreak >= recoverTurns { adopt(raw) }
+        }
+        return latchedPick
+    }
+
+    /// Adopts `pick` as the state in force and zeroes both streaks — the
+    /// streak that produced the flip is spent, and the other direction
+    /// starts counting fresh.
+    private mutating func adopt(_ pick: PressureBrainPick) {
+        latchedPick = pick
+        degradeStreak = 0
+        recoverStreak = 0
+    }
+
+    /// The live-byte rank a pick occupies: `.keep` at the remembered
+    /// pick's live bytes, `.stepDown` at its own, `.lightweight` at zero
+    /// (nothing loads). Pure, so the ordering the streaks compare
+    /// against is pinned without a latch.
+    static func rank(of pick: PressureBrainPick,
+                     rememberedPick: ModelID,
+                     liveBytes: (ModelID) -> UInt64) -> UInt64 {
+        switch pick {
+        case .keep: return liveBytes(rememberedPick)
+        case .stepDown(let id): return liveBytes(id)
+        case .lightweight: return 0
+        }
+    }
+}
+
 // MARK: - The degraded-mode status (F, 2026-10-10)
 
 /// What the main screen's degraded-mode pill shows for the turn in force.
