@@ -393,10 +393,11 @@ final class AudioSessionManager {
 
     /// Designated initializer — test seam: injects the session fake and a
     /// disposable UserDefaults suite; the production convenience
-    /// initializer below supplies the real controller + `.standard`.
+    /// initializer below supplies the real controller + the settings
+    /// seam (`SettingsPersistence.shared`).
     init(observabilityBus: ObservabilityBus,
          audioSession: AudioSessionControlling,
-         defaults: UserDefaults = .standard) {
+         defaults: UserDefaults = SettingsPersistence.shared) {
         self.observabilityBus = observabilityBus
         self.session = audioSession
         self.defaults = defaults
@@ -409,7 +410,7 @@ final class AudioSessionManager {
     /// pipeline installs its tap on — the VP flag is per-node).
     convenience init(observabilityBus: ObservabilityBus,
                      audioEngine: AVAudioEngine,
-                     defaults: UserDefaults = .standard) {
+                     defaults: UserDefaults = SettingsPersistence.shared) {
         self.init(observabilityBus: observabilityBus,
                   audioSession: SystemAudioSessionController(
                       session: AVAudioSession.sharedInstance(),

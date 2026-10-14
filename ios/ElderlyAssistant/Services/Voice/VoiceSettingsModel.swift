@@ -83,7 +83,7 @@ final class VoiceSettingsModel: ObservableObject {
 
     init(noiseFilterController: NoiseFilterPreferenceControlling,
          warmStartController: WarmStartPreferenceControlling,
-         defaults: UserDefaults = .standard) {
+         defaults: UserDefaults = SettingsPersistence.shared) {
         self.noiseFilterController = noiseFilterController
         self.warmStartController = warmStartController
         self.defaults = defaults

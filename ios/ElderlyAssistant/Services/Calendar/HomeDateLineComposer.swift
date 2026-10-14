@@ -50,7 +50,7 @@ struct CalendarDisplaySettings: Equatable {
 struct CalendarDisplaySettingsStore {
     let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = SettingsPersistence.shared) {
         self.defaults = defaults
     }
 

@@ -63,7 +63,7 @@ enum VoiceOutputVolume {
 
     /// The effective percentage: the persisted value (clamped), or
     /// `defaultPercent` when the key was never written.
-    static func percent(defaults: UserDefaults = .standard) -> Int {
+    static func percent(defaults: UserDefaults = SettingsPersistence.shared) -> Int {
         guard defaults.object(forKey: defaultsKey) != nil else {
             return defaultPercent
         }
@@ -71,7 +71,7 @@ enum VoiceOutputVolume {
     }
 
     /// Persists a clamped value (the only write path).
-    static func set(_ percent: Int, defaults: UserDefaults = .standard) {
+    static func set(_ percent: Int, defaults: UserDefaults = SettingsPersistence.shared) {
         defaults.set(clamp(percent), forKey: defaultsKey)
     }
 

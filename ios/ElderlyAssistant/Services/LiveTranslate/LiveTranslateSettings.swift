@@ -95,7 +95,7 @@ struct LiveTranslateSettings: Equatable {
     /// than a second literal.
     let config: LiveTranslateConfig
 
-    init(defaults: UserDefaults = .standard,
+    init(defaults: UserDefaults = SettingsPersistence.shared,
          config: LiveTranslateConfig = .default,
          launchArguments: [String] = ProcessInfo.processInfo.arguments) {
         self.defaults = defaults

@@ -40,7 +40,7 @@ final class WakeWordPreferences {
 
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = SettingsPersistence.shared) {
         self.defaults = defaults
     }
 
