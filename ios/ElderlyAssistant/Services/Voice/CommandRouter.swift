@@ -609,6 +609,64 @@ extension VoiceCommandCoordinating {
     }
 }
 
+// MARK: - [CNR T-174] Chat guard seam (flag resolution at the dispatch seam)
+
+/// [CNR T-174 / FR-CNR-005, FR-CNR-006, FR-CNR-007] The chat dispatch
+/// seam's guard inputs (design-l1 §7.1–§7.5): which shape served the reply
+/// being dispatched, whether this turn's routing decision allows cloud
+/// egress, and how to reach the cloud chat call for the escalation.
+///
+/// Every field is INJECTED (the T-173 `Inputs` pattern) and defaults to
+/// the dormant, fail-closed reading, so every pre-existing construction
+/// site and every existing router test keeps compiling and behaving
+/// exactly as before — no path is claimed, no escalation can be issued.
+/// The guard itself is NOT injectable and not a field here: it is T-169's
+/// pure static entry point (`NepaliGrammarGuard.verdict`), computed at the
+/// call site over the exact text that would be spoken.
+///
+/// The coordinator wiring (T-177) fills these from the real sources:
+/// `servingPath` from the chat lane that answered (the design's
+/// "provenance record" — today's only `.chat` producer is the local chat
+/// entry point, `IntentRouter.interpretLocalLadder`; the cloud chat
+/// responder once the cloud-first routing is wired), `cloudAllowed` from
+/// `CloudChatRouting.decide(...) == .cloud` for THIS turn, and
+/// `respondToChat` from the cloud chat responder (T-168's
+/// `ChatResponding.respondToChat`).
+struct ChatGuardSeam {
+
+    /// The serving path of the reply that reached the dispatch — the
+    /// design's `path` field (§7.5). Closed vocabulary, one token per
+    /// shape. Defaults to the on-device shape, today's only chat
+    /// producer; a wired coordinator overrides it per turn.
+    enum ServingPath: String, Equatable {
+        case onDevice = "onDevice"
+        case cloud = "cloud"
+    }
+
+    /// Which shape served the reply being dispatched. Read once per turn
+    /// at verdict time, never cached (`CloudChatRouting`'s per-turn read
+    /// discipline).
+    var servingPath: () -> ServingPath = { .onDevice }
+
+    /// The routing decision's cloud-allowed read for this turn — T-173's
+    /// `decide(...)` yielding `.cloud` (consent granted + online + key +
+    /// cost). `false` (the default) is the fail-closed reading: an
+    /// unwired or undecided turn never escalates — the design's single
+    /// chokepoint (§8.1) is the only source of egress permission
+    /// (FR-CNR-009).
+    var cloudAllowed: () -> Bool = { false }
+
+    /// The cloud chat call for the SAME turn's transcript — T-168's
+    /// `ChatResponding.respondToChat` (which owns sanitisation, the spec
+    /// persona and the explicit chat temperature on its side). The
+    /// completion is invoked exactly once, on the main queue, with nil on
+    /// any failure or timeout; the escalation issues exactly ONE attempt
+    /// (design §14 — no retry loop). nil (the default: no cloud chat lane
+    /// wired) means an escalation can never be issued — a flagged reply
+    /// then takes the safe-template path directly.
+    var respondToChat: ((String, @escaping (InterpretedCommand?) -> Void) -> Void)?
+}
+
 /// Turns a raw transcript into a coordinator call and a spoken reply.
 ///
 /// Routing order:
@@ -777,6 +835,25 @@ final class CommandRouter {
     /// spoken through the same sanity gate a `query` answer passes.
     private let chatConfidenceFloor: Double
 
+    /// [CNR T-174] The chat dispatch's guard seam (design-l1 §7.1–§7.5):
+    /// which shape served the reply, whether this turn's routing allows
+    /// cloud, and the cloud chat call for the escalation. Dormant by
+    /// default — see `ChatGuardSeam`; the coordinator wiring (T-177)
+    /// fills it, and the definitional `ChatGuardSeam()` keeps every
+    /// pre-existing construction site and router test byte-identical.
+    private let chatGuard: ChatGuardSeam
+
+    /// [CNR T-174] True while a flagged chat turn's escalation hop is in
+    /// flight: the interpreter dispatch completion's tail must not resolve
+    /// the turn's reply-pending token while the reply is still
+    /// outstanding — the hop's completion resolves it (cloud reply or
+    /// safe template, whichever commits; design §7.3's bounded second
+    /// egress). Turn-scoped: reset at every `dispatchInterpreted` entry
+    /// and cleared by the hop's completion, which the responder's own
+    /// failure/timeout contract bounds — the pipeline's 45 s safety
+    /// timeout stays the backstop, exactly as for a hung interpreter.
+    private var chatEscalationInFlight = false
+
     init(coordinator: VoiceCommandCoordinating,
          observabilityBus: ObservabilityBus,
          speaker: Speaker? = nil,
@@ -801,7 +878,12 @@ final class CommandRouter {
          spotifyTransport: LocalToolTransport? = nil,
          spotifyLinkOpener: CallLinkOpening? = nil,
          preAckPlayer: PreAckPlaying? = nil,
-         turnTracer: VoiceTurnLatencyTracer? = nil) {
+         turnTracer: VoiceTurnLatencyTracer? = nil,
+         // [CNR T-174] The chat dispatch's guard seam — dormant by default
+         // (see `ChatGuardSeam`): no path claimed, no escalation issuable,
+         // so a pre-existing construction site behaves exactly as before.
+         // T-177 fills it from the coordinator.
+         chatGuard: ChatGuardSeam = ChatGuardSeam()) {
         self.coordinator = coordinator
         self.observabilityBus = observabilityBus
         self.speaker = speaker
@@ -809,6 +891,7 @@ final class CommandRouter {
         self.chatConfidenceFloor = chatConfidenceFloor
         self.turnTracer = turnTracer
         self.preAckPlayer = preAckPlayer
+        self.chatGuard = chatGuard
         self.pluginRegistry = pluginRegistry
         self.geminiClient = geminiClient
         self.searchConfigStore = searchConfigStore
@@ -1863,10 +1946,23 @@ final class CommandRouter {
                 // queued / declined) — the turn is no longer pending.
                 // This runs AFTER the commit, so the reply's speech-start
                 // hop is enqueued before the pipeline's deferred idle hop.
-                self.resolveTurnReplyPending()
-                // [TURN-TIMING] Dispatch resolved — the tracer finalizes
-                // now or once the reply speech finishes.
-                self.turnTracer?.endTurn()
+                //
+                // [CNR T-174] …unless THIS dispatch opened a chat guard
+                // escalation: the reply is still outstanding (the cloud
+                // chat call or its safe-template fallback owns it), so the
+                // resolve is deferred to the hop's completion and the
+                // turn-scoped flag clears here — a completion that never
+                // arrives cannot defer the NEXT turn's tail (the
+                // escalation's own responder contract bounds the wait;
+                // the pipeline's 45 s timeout is the backstop).
+                if self.chatEscalationInFlight {
+                    self.chatEscalationInFlight = false
+                } else {
+                    self.resolveTurnReplyPending()
+                    // [TURN-TIMING] Dispatch resolved — the tracer finalizes
+                    // now or once the reply speech finishes.
+                    self.turnTracer?.endTurn()
+                }
             }
             // We can't return a synchronous result once the LLM path fires;
             // report the transcript as "handled asynchronously".
@@ -4415,6 +4511,11 @@ final class CommandRouter {
     var clock: () -> Date = { Date() }
 
     private func dispatchInterpreted(_ command: InterpretedCommand, raw: String) {
+        // [CNR T-174] A fresh dispatch: no earlier turn's chat escalation
+        // can still defer THIS turn's commit (the hop that issued one
+        // already resolved its own turn; this reset is the recursion
+        // bound the turn-scoped flag rests on).
+        chatEscalationInFlight = false
         switch command.action {
         case .ackMed:
             // [NO-GIBBERISH] (2026-09-07) The model's ack text is flavor
@@ -4528,7 +4629,21 @@ final class CommandRouter {
                 return
             }
             emit(eventType: "command_llm_chat", outcome: "info")
-            deliverModelReply(command.reply)
+            // [CNR T-174 / FR-CNR-005, FR-CNR-006] The grammar guard wraps
+            // the DELIVERY sequence at this one case (design-l1 §7.1/§7.3):
+            // the verdict is computed AFTER the polisher's candidate text
+            // (inside `deliverGuardedChatReply` → `polishedModelReply` —
+            // the single polish call site, not duplicated) and BEFORE a
+            // word is spoken, over the exact text that would be spoken. A
+            // flag resolves honestly — escalate once when the local shape
+            // flagged and the routing decision allows cloud, otherwise the
+            // localized safe template — and the flagged text is never
+            // spoken. Both local and cloud chat replies arrive at this one
+            // case, so "every chat reply passes the guard" holds
+            // structurally; `raw` is the turn's transcript, in scope here
+            // precisely so the escalation can issue the cloud chat call
+            // for the same turn.
+            deliverGuardedChatReply(command.reply, transcript: raw)
         case .none:
             emit(eventType: "command_llm_no_action", outcome: "info")
             deliverModelReply(command.reply)
@@ -4544,27 +4659,267 @@ final class CommandRouter {
     /// text never reaches the speaker or the visible card either way, and
     /// every rejection is observable
     /// (`llama_response_rejected_sanity`, reason in errorCode).
+    ///
+    /// [CNR T-174] The gate itself is `polishedModelReply` below — THE
+    /// single sanity + polish call site for model text, shared with the
+    /// guard-wrapped chat delivery (`deliverGuardedChatReply`), so the
+    /// guard's verdict is always computed over the exact post-polish text
+    /// that would be spoken (design-l1 §7.1/§7.2). This function's
+    /// behaviour is unchanged, byte for byte.
     private func deliverModelReply(_ text: String) {
-        if let safe = sanitisedModelReply(text) {
-            // [REPLY-POLISH] The deterministic polisher runs AFTER the
-            // sanity gate: gibberish is rejected as gibberish, clean text
-            // is polished — whitespace, punctuation runs, enumeration
-            // artifacts, stutters, spoken-form units (temperature tokens
-            // like "15°C"/"15c" become "15 degrees Celsius", see
-            // `SpokenUnits`) and the brevity ceiling — before it reaches a
-            // human ear, whichever model produced it. The active locale
-            // picks the Nepali/English spoken convention.
-            let polished = SpokenReplyPolisher.polish(
-                safe, locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"))
-            guard !polished.isEmpty else {
-                speakWithVisibleOutcome(key: "router.modelReplyUnclear")
-                return
-            }
+        if let polished = polishedModelReply(text) {
             coordinator?.noteGenericReply(polished)
             speak(text: polished)
         } else {
             speakWithVisibleOutcome(key: "router.modelReplyUnclear")
         }
+    }
+
+    /// [NO-GIBBERISH] + [REPLY-POLISH] The single delivery gate for model
+    /// text: the sanity gate first (gibberish is rejected as gibberish —
+    /// the rejection is observable), then the deterministic polisher —
+    /// whitespace, punctuation runs, enumeration artifacts, stutters,
+    /// spoken-form units (temperature tokens like "15°C"/"15c" become "15
+    /// degrees Celsius", see `SpokenUnits`) and the brevity ceiling —
+    /// before the text reaches a human ear, whichever model produced it.
+    /// The active locale picks the Nepali/English spoken convention.
+    /// Returns nil when the candidate must not be delivered (rejected, or
+    /// empty after polishing); the caller speaks the honest fallback.
+    ///
+    /// [CNR T-174] Extracted unchanged from `deliverModelReply` so the
+    /// chat path can compute its candidate text and run the guard over it
+    /// WITHOUT duplicating the polish call site (design-l1 §7.1: "the one
+    /// polish call site is not duplicated").
+    private func polishedModelReply(_ text: String) -> String? {
+        guard let safe = sanitisedModelReply(text) else { return nil }
+        let polished = SpokenReplyPolisher.polish(
+            safe, locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"))
+        return polished.isEmpty ? nil : polished
+    }
+
+    // MARK: - [CNR T-174] Guard flag resolution (design-l1 §7.1–§7.5)
+
+    /// [CNR T-174 / FR-CNR-005, FR-CNR-006] The chat dispatch's guarded
+    /// delivery — the guard call site (§7.1). Runs AFTER the confidence
+    /// floor (unchanged, above) and AFTER the polisher's candidate text is
+    /// computed, so the verdict is computed over the exact text that would
+    /// be spoken: brevity trimming happens first, so a trimmed-away clause
+    /// cannot flag and a surviving one does (§7.2).
+    ///
+    ///  - `.pass` → the polished text is spoken byte-identically (the
+    ///    guard changes nothing), observable with the `notApplicable`
+    ///    outcome;
+    ///  - `.flag` → the flagged text is NEVER spoken:
+    ///    `resolveFlaggedChatReply` escalates once when the reply came
+    ///    from the local shape and the routing decision allows cloud
+    ///    (§7.3), otherwise the localized safe template owns the turn;
+    ///  - `.unavailable` → today's behaviour stands (the polished text is
+    ///    spoken — a guard that is not running must never block or replace
+    ///    speech) and the event records `degraded`: "a guard that is not
+    ///    running is visible rather than silently absent", and an
+    ///    unverified reply is never reported as if it had been verified
+    ///    (§7.4; the reason vocabulary is T-169's closed set).
+    ///
+    /// A candidate the sanity gate rejects (or that polishes to empty) is
+    /// answered with the existing honest line and emits NO guard event:
+    /// nothing was deliverable, so there was nothing to verify — the
+    /// rejection itself is already observable
+    /// (`llama_response_rejected_sanity`).
+    private func deliverGuardedChatReply(_ text: String, transcript: String) {
+        guard let polished = polishedModelReply(text) else {
+            speakWithVisibleOutcome(key: "router.modelReplyUnclear")
+            return
+        }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let path = chatGuard.servingPath()
+        switch NepaliGrammarGuard.verdict(spokenText: polished, locale: locale.identifier) {
+        case .pass:
+            emitChatGuardEvent(path: path, classes: [], outcome: "notApplicable", attempts: 0)
+            coordinator?.noteGenericReply(polished)
+            speak(text: polished)
+        case .unavailable:
+            emitChatGuardEvent(path: path, classes: [], outcome: "degraded", attempts: 0)
+            coordinator?.noteGenericReply(polished)
+            speak(text: polished)
+        case .flag(let classes):
+            resolveFlaggedChatReply(classes, path: path, locale: locale, transcript: transcript)
+        }
+    }
+
+    /// [CNR T-174 / FR-CNR-006] §7.3's two outcomes for a flagged reply.
+    /// Escalate only when the flagged reply came from the LOCAL shape AND
+    /// `CloudChatRouting` yields cloud for this turn (the injected
+    /// `cloudAllowed` read) AND a cloud chat lane is wired; otherwise —
+    /// and for a flagged CLOUD reply, always (§7.3's documented
+    /// asymmetry: escalating a cloud reply back to the same cloud would
+    /// repeat the failure) — the safe template owns the turn.
+    ///
+    /// The escalation is ONE attempt (design §14): the turn's reply is
+    /// outstanding across the hop, so it is marked pending (the same hold
+    /// the interpreter round-trip uses, `markTurnReplyPending`) and the
+    /// dispatch completion's tail defers its own resolve while
+    /// `chatEscalationInFlight`; the hop's completion resolves. The
+    /// once-guard drops a second completion from a wiring that violates
+    /// the responder's exactly-once contract — the flagged turn can never
+    /// receive two replies.
+    private func resolveFlaggedChatReply(_ classes: [GrammarCheckClass],
+                                         path: ChatGuardSeam.ServingPath,
+                                         locale: Locale,
+                                         transcript: String) {
+        guard path == .onDevice,
+              chatGuard.cloudAllowed(),
+              let respondToChat = chatGuard.respondToChat else {
+            speakChatSafeTemplate(for: classes, path: path, locale: locale, attempts: 0)
+            return
+        }
+        markTurnReplyPending()
+        chatEscalationInFlight = true
+        var finished = false
+        respondToChat(transcript) { [weak self] command in
+            // The responder's contract: completion on the main queue. The
+            // hop normalizes that (and never runs inside the dispatch
+            // frame, so the tail below always sees the deferral first).
+            DispatchQueue.main.async {
+                guard !finished else { return }
+                finished = true
+                self?.finishChatGuardEscalation(command, flagged: classes,
+                                                path: path, locale: locale)
+            }
+        }
+    }
+
+    /// [CNR T-174 / FR-CNR-005 property 3, FR-CNR-006] The escalation
+    /// hop's completion: the cloud reply is itself run through the SAME
+    /// guard before speaking (FR-CNR-005: verify, never rewrite — a
+    /// second verification site, the same guard). Disposition:
+    ///
+    ///  - verify pass → the cloud reply is spoken, observable as
+    ///    `escalated` with the ORIGINAL flag's classes (the flag that
+    ///    justified the escalation — the story the event must tell);
+    ///  - verify flag → the safe template owns the turn, keyed by the
+    ///    escalation reply's own classes (they are what flagged now);
+    ///  - verify unavailable → §7.4 uniformly: today's behaviour (the
+    ///    readable reply is spoken) plus `degraded` with empty classes —
+    ///    never reported as verified;
+    ///  - nil (failure/timeout per the responder's contract), a
+    ///    non-`.chat` shape (a chat turn never executes), or a
+    ///    sanity/polish rejection → the safe template owns the turn.
+    ///
+    /// The flagged text never reaches the speaker on any path, and the
+    /// turn's reply-pending hold is resolved HERE, after the commit —
+    /// mirroring the interpreter dispatch completion, so the reply's
+    /// speech-start hop precedes the pipeline's deferred idle hop.
+    private func finishChatGuardEscalation(_ command: InterpretedCommand?,
+                                           flagged classes: [GrammarCheckClass],
+                                           path: ChatGuardSeam.ServingPath,
+                                           locale: Locale) {
+        chatEscalationInFlight = false
+        // The escalation reply, gated exactly like the local candidate
+        // (sanity → polish), and shape-checked: only a `.chat` result is
+        // a reply (T-168's contract; anything else is a failure).
+        let reply: String? = {
+            guard let command, command.action == .chat else { return nil }
+            return polishedModelReply(command.reply)
+        }()
+        var spoken: String?
+        var eventClasses = classes
+        var outcome = "safeTemplate"
+        if let reply {
+            switch NepaliGrammarGuard.verdict(spokenText: reply, locale: locale.identifier) {
+            case .pass:
+                spoken = reply
+                outcome = "escalated"
+            case .flag(let reflagged):
+                eventClasses = reflagged
+            case .unavailable:
+                spoken = reply
+                eventClasses = []
+                outcome = "degraded"
+            }
+        }
+        if let spoken {
+            emitChatGuardEvent(path: path, classes: eventClasses,
+                               outcome: outcome, attempts: 1)
+            coordinator?.noteGenericReply(spoken)
+            speak(text: spoken)
+        } else {
+            speakChatSafeTemplate(for: eventClasses, path: path,
+                                  locale: locale, attempts: 1)
+        }
+        resolveTurnReplyPending()
+        // [TURN-TIMING] The escalation resolved the turn — the tracer
+        // finalizes now or once the reply speech finishes.
+        turnTracer?.endTurn()
+    }
+
+    /// [CNR T-174 / FR-CNR-006] §7.3 outcome (2): the localised safe
+    /// template — deterministic selection keyed by the flagging classes
+    /// (T-171's `L10n.safeTemplate(forCheckClasses:)`: the first known
+    /// class wins, an unknown name drops to `generic`, so a flag with no
+    /// known class still answers), resolved in the active locale through
+    /// the catalogue. No copy lives in code: this site speaks only what
+    /// the catalogue carries, and the flagged text is never a fallback.
+    private func speakChatSafeTemplate(for classes: [GrammarCheckClass],
+                                       path: ChatGuardSeam.ServingPath,
+                                       locale: Locale,
+                                       attempts: Int) {
+        emitChatGuardEvent(path: path, classes: classes,
+                           outcome: "safeTemplate", attempts: attempts)
+        let template = L10n.safeTemplate(forCheckClasses: classes.map(\.rawValue))
+        let text = L10n.safeTemplate(template, locale: locale)
+        guard !text.isEmpty else {
+            // A catalogue miss (unreachable with the shipped catalogue —
+            // `L10nCatalogCoverageTests` pins every template in en + ne)
+            // must still answer the turn: the existing honest line, never
+            // silence, never the flagged text.
+            speakWithVisibleOutcome(key: "router.modelReplyUnclear")
+            return
+        }
+        coordinator?.noteGenericReply(text)
+        speak(text: text, locale: locale)
+    }
+
+    /// [CNR T-174 / FR-CNR-007, NFR-CNR-007] The content-free
+    /// `reply_grammar_flag` event (design-l1 §7.5) — the feature's only
+    /// telemetry, on the existing sanitising bus. The frozen field set,
+    /// mapped onto the bus's shipped vocabulary (the allow-list is the
+    /// authority — `LogSanitiser.allowedKeys`; T-185 gates this site
+    /// against it):
+    ///
+    ///  - event kind → `eventType` ("reply_grammar_flag");
+    ///  - serving path → metadata `origin` ("onDevice" / "cloud" — the
+    ///    closed `ServingPath` vocabulary; the design's `path`);
+    ///  - check classes → metadata `reason`, space-joined
+    ///    `GrammarCheckClass` raw values (the design's `check`; empty
+    ///    when nothing flagged — pass and degraded);
+    ///  - outcome → the `outcome` field ("notApplicable" / "escalated" /
+    ///    "safeTemplate" / "degraded");
+    ///  - counters → metadata `count`, the escalation-attempt count
+    ///    ("0"/"1" — the only counter this decision produces; design
+    ///    §14's one-attempt rule is visible in the event itself);
+    ///  - timestamps → the channel's own: `ConsoleObservabilityBus`
+    ///    stamps every line at emission, so no field here duplicates it.
+    ///
+    /// FORBIDDEN, ever (NFR-CNR-007): the transcript, the reply text,
+    /// identity, health values, contacts, profile content and key
+    /// material. Every value passed here is a closed token, a space-joined
+    /// closed vocabulary or a count — the unit suite asserts this
+    /// payload's key set exactly and scans this site for a
+    /// content-bearing field.
+    private func emitChatGuardEvent(path: ChatGuardSeam.ServingPath,
+                                    classes: [GrammarCheckClass],
+                                    outcome: String,
+                                    attempts: Int) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "reply_grammar_flag",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: ["origin": path.rawValue,
+                       "reason": classes.map(\.rawValue).joined(separator: " "),
+                       "count": String(attempts)]
+        ))
     }
 
     /// [NO-GIBBERISH] (2026-09-07) Sanity-gates model-generated text

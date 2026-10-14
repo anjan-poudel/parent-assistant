@@ -189,6 +189,12 @@ tasks:
       # parallelism: waves is the default when absent — the plan's units are
       # topologically sorted into dependency waves and dispatched in parallel
       # groups (set "sequential" to opt out).
+      # test cadence (amendment-4, 2026-10-14 owner directive): per-unit work is
+      # code + build/typecheck only; each wave closes with ONE consolidated
+      # scoped (-only-testing) pass over the wave's touched suites; the single
+      # full-suite pass stays at the very end; the T-181/T-182 hard gates are
+      # unchanged. No engine knob exists for test cadence — this comment records
+      # the policy of record.
     overlays:
       # 2026-10-14 lean directive: paired review dropped from implement; the
       # confidence overlay (0.85) is the only implement overlay.
