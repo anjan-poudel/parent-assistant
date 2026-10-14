@@ -3,9 +3,9 @@ import AVFoundation
 
 /// Voice activity detector: decides whether a chunk of PCM audio contains
 /// speech, and reports when the user has stopped talking — after the
-/// trailing-silence hangover VoicePipeline configures (900 ms since
-/// 2026-09-07, 700 ms behind the flag since 2026-09-11 — see
-/// `VADHangoverPolicy`). Used to gate the
+/// trailing-silence hangover VoicePipeline configures (900 ms — the
+/// 700 ms trim is opt-in behind the flag since 2026-09-11; the default
+/// returned to 900 on 2026-10-14 — see `VADHangoverPolicy`). Used to gate the
 /// speech recognizer: VoicePipeline calls the recognizer's `finish()` on
 /// `onEndOfUtterance`, so a finished command flips to transcription
 /// within ~1.0-1.5 s of the user's last word instead of riding the
@@ -40,19 +40,34 @@ import AVFoundation
 // The flag exists so the field can restore 900 ms without a release if
 // elderly users report mid-sentence cuts.
 enum VADHangoverPolicy {
-    /// UserDefaults key: the trim is ON unless this key is present AND
-    /// false (default ON per the plan).
+    /// UserDefaults key: the trim is OFF unless this key is present AND
+    /// true. [VAD-HANGOVER-DEFAULT] (2026-10-14) Default flipped OFF on
+    /// field evidence: the 700 ms trim closed the capture on elderly
+    /// mid-sentence pauses (0.5-0.7 s breaths/word-searches) — the
+    /// owner's reminders truncated at "मलाई भोलि बिहान ७ बजे…". The
+    /// latency win (~200 ms per finished utterance) is not worth
+    /// cutting instructions in half. 900 ms is the value the
+    /// 2026-09-07 field pass validated for this audience.
     static let trim700DefaultsKey = "vadHangoverTrim700"
     static let trimmedMs = 700
     static let legacyMs = 900
+    /// [VAD-HANGOVER-DEFAULT] The field-validated value for this
+    /// audience: console evidence (Anzaan, 2026-10-14) shows the VAD
+    /// closing a capture at a natural pause 2.7 s into a deliberate
+    /// phrase — 700 ms cut it and 900 ms sits at the very top of the
+    /// measured pause band, so the default is 1200 ms (still inside the
+    /// documented 0.8-1.5 s "end after last word" target, and nowhere
+    /// near the 22 s capture cap). The 700 ms trim remains opt-in.
+    static let elderlyMs = 1200
 
-    /// Default ON: 700 ms unless the key exists and is explicitly false.
+    /// Default: 1200 ms unless the key exists and is explicitly true
+    /// (700 ms trim).
     static func hangoverMs(defaults: UserDefaults) -> Int {
-        guard defaults.object(forKey: trim700DefaultsKey) != nil,
-              !defaults.bool(forKey: trim700DefaultsKey) else {
+        if defaults.object(forKey: trim700DefaultsKey) != nil,
+           defaults.bool(forKey: trim700DefaultsKey) {
             return trimmedMs
         }
-        return legacyMs
+        return elderlyMs
     }
 }
 
