@@ -30,6 +30,9 @@ final class AudioSessionPresetTests: XCTestCase {
         var permissionGranted = true
         /// When set, `setCategory` throws it.
         var categoryError: Error?
+        /// When set, `setCategory` throws ONLY for this category — the
+        /// Anzaan iOS 26 shape (`.playback` refused, others accepted).
+        var refusedCategory: AVAudioSession.Category?
         /// When set, `setActive` throws it.
         var activeError: Error?
         /// When set, `setVoiceProcessingEnabled(true)` throws it.
@@ -64,6 +67,9 @@ final class AudioSessionPresetTests: XCTestCase {
                                               mode: mode,
                                               options: options))
             if let categoryError { throw categoryError }
+            if let refusedCategory, category == refusedCategory {
+                throw NSError(domain: "test", code: 8)
+            }
         }
 
         func setActive(_ active: Bool,
@@ -433,6 +439,37 @@ final class AudioSessionPresetTests: XCTestCase {
                        + "is in place — no path may leave the mic dead")
     }
 
+    func testPlaybackRefusedFallsThroughTheMediaCategoryChain() {
+        // Anzaan's iOS 26 refuses setCategory(.playback) outright — the
+        // chain must land on the next media-volume category instead of
+        // giving up (all three play at media gain staging).
+        let session = RecordingSession()
+        session.refusedCategory = .playback
+        let bus = RecordingBus()
+        let manager = AudioSessionManager(observabilityBus: bus,
+                                          audioSession: session,
+                                          defaults: makeDefaults())
+
+        manager.beginResponsePlayback()
+        XCTAssertEqual(session.categoryCalls,
+                       [.init(category: .playback, mode: .default,
+                              options: [.duckOthers, .defaultToSpeaker]),
+                        .init(category: .soloAmbient, mode: .default,
+                              options: [.duckOthers, .defaultToSpeaker])],
+                       "a refused .playback must fall through to soloAmbient")
+        let began = bus.events(ofType: "audio_response_playback")
+            .first { $0.outcome == "began" }
+        XCTAssertEqual(began?.metadata["state"], "soloAmbient",
+                       "the winning category is recorded")
+        XCTAssertEqual(session.activeCalls.map(\.0), [false, true],
+                       "the session is active while the reply plays")
+
+        manager.endResponsePlayback()
+        XCTAssertEqual(session.categoryCalls.last?.category, .playAndRecord,
+                       "restore returns to the capture preset")
+    }
+    }
+
     func testNestedResponsePlaybackRestoresOnlyAtOutermostEnd() {
         let session = RecordingSession()
         let manager = makeManager(session: session, defaults: makeDefaults())
@@ -487,8 +524,9 @@ final class AudioSessionPresetTests: XCTestCase {
         let failed = bus.events(ofType: "audio_response_playback")
             .filter { $0.outcome == "failed" }
         XCTAssertFalse(failed.isEmpty, "the begin failure is observable")
-        XCTAssertEqual(session.categoryCalls.count, 2,
-                       "end still restores the capture preset (the reply "
+        XCTAssertEqual(session.categoryCalls.count, 4,
+                       "the whole chain is walked (3 candidates), then end "
+                       + "still restores the capture preset (the reply "
                        + "played, just quieter)")
         XCTAssertEqual(session.engineRunningCalls, [false, true, true],
                        "the failed switch rearms the engine, and restore "
