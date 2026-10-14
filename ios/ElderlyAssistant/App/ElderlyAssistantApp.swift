@@ -53,12 +53,12 @@ struct ElderlyAssistantApp: App {
                 SpotifyLinkProbe.runIfRequested(on: appCoordinator)
                 #endif
             }
-            // The OAuth callback bridge for the in-app Safari consent
-            // seam (the iOS 26.6.2 ASWebAuthenticationSession workaround):
+            // The OAuth callback bridge for the default-browser consent
+            // seam (the iOS 27.0.1 ASWebAuthenticationSession workaround):
             // callback-scheme URLs are consumed by a pending attempt and
             // nothing else; all other URLs are not this handler's concern.
             .onOpenURL { url in
-                _ = SafariSpotifyAuthSession.handleOpenURL(url)
+                _ = ExternalBrowserSpotifyAuthSession.handleOpenURL(url)
             }
             .environmentObject(appCoordinator)
             .environmentObject(appCoordinator.voiceSession)
