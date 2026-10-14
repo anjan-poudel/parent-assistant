@@ -745,6 +745,12 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
     /// consume an ack's outstanding begin (the shared depth accounting
     /// would restore the capture preset under the ack's tail).
     private var playbackSeamOpen = false
+    /// [AUDIO-REACTIVE-HERO] (2026-10-14) The hero's live level feed
+    /// (see AudioVisualization.swift). Injected post-init by the
+    /// coordinator (the `wakeAcknowledger` pattern — the speaker exists
+    /// before the wiring site runs). nil = byte-identical pre-feature
+    /// behavior: no metering, no band track, no sends.
+    var audioVisualization: AudioLevelPublisher?
 
     init(fallback: SystemSpeechSpeaker,
          observabilityBus: ObservabilityBus,
@@ -927,7 +933,8 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
             ttsStartSpan?.finish()
             ttsTrace?.finish(output: "voice missing — system fallback",
                              decision: "fallback")
-            await fallbackSpeaker(for: spec.locale).speak(text, locale: spec.locale)
+            await speakFallback(fallbackSpeaker(for: spec.locale),
+                                text: text, locale: spec.locale)
             return
         }
 
@@ -947,7 +954,8 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
                 ttsStartSpan?.finish()
                 ttsTrace?.finish(output: "synthesis failed — system fallback",
                                  decision: "failed")
-                await fallbackSpeaker(for: spec.locale).speak(text, locale: spec.locale)
+                await speakFallback(fallbackSpeaker(for: spec.locale),
+                                text: text, locale: spec.locale)
             }
             return
         }
@@ -968,6 +976,9 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
         engine.cancelSynthesis()
         player?.stop()
         player = nil
+        // [AUDIO-REACTIVE-HERO] A cancelled reply ends its meter epoch on
+        // the same path as a settled one (idempotent with settlePlayback).
+        audioVisualization?.speakerEnded()
         // [LOUD-TTS-CATEGORY] End the playback seam ONLY if this speaker
         // opened it — see `playbackSeamOpen`.
         if playbackSeamOpen {
@@ -1026,6 +1037,21 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
             self.player = player
             player.delegate = self
             player.prepareToPlay()
+            // [AUDIO-REACTIVE-HERO] (2026-10-14) Hand the hero's meter a
+            // LIVE source for this playback: the player's own metering
+            // (`isMeteringEnabled` + `averagePower` — a documented
+            // AVAudioPlayer API; the envelope) plus a band track
+            // precomputed from the exact file about to play
+            // (`playbackURL` — the gained copy when the volume boost is
+            // active, so what plays is what is analysed). Nothing here
+            // delays `play()`: the track builds concurrently on a
+            // detached task and the bars simply hold still for its first
+            // few milliseconds (turn latency is sacred — see `play`).
+            if let visualization = audioVisualization {
+                player.isMeteringEnabled = true
+                visualization.speakerStarted(source: PiperPlaybackLevelSource(
+                    player: player, playbackURL: playbackURL))
+            }
             // [LOUD-TTS-CATEGORY] Spoken responses get the loud bell
             // configuration (category `.playback`) for the duration of
             // the playback (restored by settlePlayback and cancel()
@@ -1044,8 +1070,25 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
             }
         } catch {
             emit("tts_player_failed_fallback", locale: locale)
-            await fallbackSpeaker(for: locale).speak(text, locale: locale)
+            await speakFallback(fallbackSpeaker(for: locale),
+                                text: text, locale: locale)
         }
+    }
+
+    /// [AUDIO-REACTIVE-HERO] (2026-10-14) Every Piper→system fallback
+    /// speaks through here so the hero's meter knows a reply is playing
+    /// there with NO readable signal: AVSpeechSynthesizer exposes no
+    /// audio-level API of any kind (no metering, no tap — do not pretend
+    /// otherwise), so the publisher marks the source meterless and the
+    /// UI keeps its existing subtle idle motion — clearly labelled
+    /// fallback, never a fake meter. The NullSpeaker (Nepali silence
+    /// fallback) returns immediately, shrinking the window to ~zero;
+    /// honest either way.
+    private func speakFallback(_ speaker: Speaker, text: String,
+                               locale: Locale) async {
+        audioVisualization?.speakerStartedMeterless()
+        await speaker.speak(text, locale: locale)
+        audioVisualization?.speakerEnded()
     }
 
     /// [VOLUME-BOOST] The file this reply should play from: the
@@ -1064,6 +1107,10 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
     }
 
     private func settlePlayback() {
+        // [AUDIO-REACTIVE-HERO] Playback over (finished, failed, or
+        // cancelled): the hero's meter lets its last REAL readings fall
+        // to rest (ballistic release — see AudioLevelPublisher).
+        audioVisualization?.speakerEnded()
         playbackSeamOpen = false
         ResponsePlaybackModeSeam.end()
         if let cont = currentContinuation {
