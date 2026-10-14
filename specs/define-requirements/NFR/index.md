@@ -1,32 +1,36 @@
-# Non-Functional Requirements — Family Contacts Unify (v1)
+# Non-Functional Requirements — Conversational Nepali Replies (v1)
 
-9 non-functional requirements. IDs are namespaced `NFR-FCU-NNN` to avoid colliding with the
+11 non-functional requirements. IDs are namespaced `NFR-CNR-NNN` to avoid colliding with the
 project-level `NFR-NNN` set in the root stakeholder brief (`requirements.md`) — the same
 convention live-camera-translation used (`NFR-LCT-NNN`), profile-interview used (`NFR-PI-NNN`),
-spotify-music-integration used (`NFR-SP-NNN`) and multi-turn-conversation used (`NFR-MTC-NNN`).
-This page covers the `family-contacts-unify` set (`NFR-FCU-*`) only; the earlier feature files
-remain in this folder and are not part of this feature's requirements or lock.
+spotify-music-integration used (`NFR-SP-NNN`), multi-turn-conversation used (`NFR-MTC-NNN`),
+family-contacts-unify used (`NFR-FCU-NNN`) and call-dialer-primary-secondary used (`NFR-CDP-NNN`).
+This page covers the `conversational-nepali-replies` set (`NFR-CNR-*`) only; the earlier feature
+files remain in this folder and are not part of this feature's requirements or lock.
 
 | ID | Title | Category | Priority |
 |----|-------|----------|----------|
-| [NFR-FCU-001](NFR-FCU-001-nickname-index-and-match-performance.md) | Nickname index and matching performance stay within the interaction envelope | Performance | MUST |
-| [NFR-FCU-002](NFR-FCU-002-pii-log-safety.md) | PII / log safety — names, nicknames, numbers, links and photos never reach logs | Privacy / Security | MUST |
-| [NFR-FCU-003](NFR-FCU-003-no-new-network-egress.md) | No new network egress — contacts, links, nicknames and photos stay on-device | Privacy | MUST |
-| [NFR-FCU-004](NFR-FCU-004-localisation-ne-en.md) | Localisation — every new user-visible string exists in ne and en | Localisation | MUST |
-| [NFR-FCU-005](NFR-FCU-005-accessibility-voice-first.md) | Accessibility — voice-first capability, house touch standards, no authorization reasoning for the elderly user | Accessibility | MUST |
-| [NFR-FCU-006](NFR-FCU-006-migration-compatibility.md) | Migration compatibility — legacy payloads load, nothing is lost | Reliability | MUST |
-| [NFR-FCU-007](NFR-FCU-007-grapheme-regression-pin.md) | Devanagari substring / grapheme-cluster behavior regression-pinned | Reliability | MUST |
-| [NFR-FCU-008](NFR-FCU-008-delivery-sequencing-call-dialer.md) | Delivery sequencing and scope separation vs call-dialer-primary-secondary | Compliance | MUST |
-| [NFR-FCU-009](NFR-FCU-009-test-and-release-gates.md) | Test gate, release gates and baseline honesty | Compliance | MUST |
+| [NFR-CNR-001](NFR-CNR-001-chat-reply-reproducibility.md) | Chat reply reproducibility — fixed seed, same input, same reply | Reliability / Determinism | MUST |
+| [NFR-CNR-002](NFR-CNR-002-listening-turn-latency-envelope.md) | Listening-turn latency envelope — chat replies stay within the spoken-conversation budget | Performance | MUST |
+| [NFR-CNR-003](NFR-CNR-003-memory-and-jetsam-device-tiers.md) | Memory and jetsam behaviour — one brain resident, zero feature-attributable terminations | Reliability / Resource Behaviour | MUST |
+| [NFR-CNR-004](NFR-CNR-004-chat-prompt-token-budget.md) | Chat prompt token budget — the 1,024-token ceiling holds | Performance / Resource Budget | MUST |
+| [NFR-CNR-005](NFR-CNR-005-prompt-template-byte-mirror.md) | Prompt-template byte-mirror discipline — seed and code cannot drift | Reliability / Build Discipline | MUST |
+| [NFR-CNR-006](NFR-CNR-006-log-safety.md) | Log safety — no conversation content, transcript or key material in any log | Privacy / Security | MUST |
+| [NFR-CNR-007](NFR-CNR-007-telemetry-content-hygiene.md) | Telemetry content hygiene — every new event carries classification only | Privacy | MUST |
+| [NFR-CNR-008](NFR-CNR-008-gate-thresholds.md) | Gate thresholds — the measurable ship conditions for the v17 swap | Quality / Evaluation Gates | MUST |
+| [NFR-CNR-009](NFR-CNR-009-accessibility.md) | Accessibility — voice-first, house touch standards, and no routing reasoning asked of the elderly user | Accessibility | MUST |
+| [NFR-CNR-010](NFR-CNR-010-localisation-ne-en.md) | Localisation — every new user-visible string exists in Nepali and English | Localisation | MUST |
+| [NFR-CNR-011](NFR-CNR-011-compliance-and-release-gates.md) | Compliance and release gates — workflow gates, the log gate, and honest baseline reporting | Compliance | MUST |
 
-## Coverage of the security-relevant surfaces (workflow focus areas)
+## Coverage of the workflow's security focus areas
 
-| Surface (workflow `security-design-review` / `security-test` focus) | Covered by |
+| Focus area (workflow `security-design-review` / `security-test`) | Covered by |
 |---|---|
-| Write authority — the app's first write into the shared system address book; blast radius confined to the edited contact's photo; no bulk mutation; wrong-contact write prevented by construction | [FR-FCU-008](../FR/FR-FCU-008-photo-write-confined-to-edited-contact.md), [FR-FCU-009](../FR/FR-FCU-009-write-authorization-honest-states.md), [NFR-FCU-009](NFR-FCU-009-test-and-release-gates.md) |
-| Identity integrity — a wrong link merges two people; a nickname matching several contacts must never silently dial the wrong person; unlink semantics; stale-link degradation | [FR-FCU-005](../FR/FR-FCU-005-unlink-both-records-intact.md), [FR-FCU-006](../FR/FR-FCU-006-stale-link-degradation.md), [FR-FCU-014](../FR/FR-FCU-014-ambiguous-nickname-never-wrong-person.md), [FR-FCU-003](../FR/FR-FCU-003-link-aware-dedupe-unified-search.md) |
-| Degradation safety — permission denied/limited/read-only or a failed save falls back to the app-local photo with honest UI; no data loss, no false success, no crash | [FR-FCU-009](../FR/FR-FCU-009-write-authorization-honest-states.md), [FR-FCU-010](../FR/FR-FCU-010-non-writable-photo-fallback.md), [FR-FCU-007](../FR/FR-FCU-007-photo-display-precedence.md) |
-| PII discipline — names/numbers/photos off the logs beyond B2/T-050; `check-release-log-safety.sh` covers the new write/fallback/resolution paths | [NFR-FCU-002](NFR-FCU-002-pii-log-safety.md), [FR-FCU-006](../FR/FR-FCU-006-stale-link-degradation.md) |
-| No new egress — nothing leaves the device; no new network surface or data collection | [NFR-FCU-003](NFR-FCU-003-no-new-network-egress.md) |
-| Matching-semantics integrity — reuse not fork; grapheme behavior regression-pinned (no "fixes") | [NFR-FCU-007](NFR-FCU-007-grapheme-regression-pin.md), [FR-FCU-012](../FR/FR-FCU-012-nickname-matching-in-search.md), [FR-FCU-013](../FR/FR-FCU-013-nickname-matching-in-voice-resolution.md) |
-| Migration integrity — pre-change payloads load; the pre-change single nickname still matches; no loss | [NFR-FCU-006](NFR-FCU-006-migration-compatibility.md), [FR-FCU-002](../FR/FR-FCU-002-link-reference-storage-and-migration.md), [FR-FCU-011](../FR/FR-FCU-011-multi-nickname-storage-and-migration.md) |
+| Safety-gate regression on the shared model — the v17 chat variant serves the intent and emergency paths; catalog swap versioned/reversible; command decode determinism untouched | [FR-CNR-004](../FR/FR-CNR-004-command-decode-determinism-preserved.md), [FR-CNR-014](../FR/FR-CNR-014-router-ladder-emergency-gate-unchanged.md), [FR-CNR-021](../FR/FR-CNR-021-full-gate-harness-before-swap.md), [FR-CNR-022](../FR/FR-CNR-022-v17-catalog-entry-versioned-reversible.md), [NFR-CNR-008](NFR-CNR-008-gate-thresholds.md) |
+| NEW cloud egress surface — chat conversation content reaches Gemini via routing and guard escalation; consent/disclosure in the OD-12 shape; never blocks chat | [FR-CNR-008](../FR/FR-CNR-008-cloud-first-chat-routing-toggle.md), [FR-CNR-009](../FR/FR-CNR-009-cloud-chat-consent-disclosure-indicator.md), [FR-CNR-010](../FR/FR-CNR-010-cloud-chat-egress-scope.md), [FR-CNR-006](../FR/FR-CNR-006-guard-flag-escalation-honest-degradation.md) |
+| Credential + content hygiene — key in header only, never URLs or logs; conversation content off the logs; the flag event carries no user content | [FR-CNR-012](../FR/FR-CNR-012-cloud-chat-credential-and-content-hygiene.md), [FR-CNR-007](../FR/FR-CNR-007-reply-grammar-flag-telemetry-no-content.md), [NFR-CNR-006](NFR-CNR-006-log-safety.md), [NFR-CNR-007](NFR-CNR-007-telemetry-content-hygiene.md) |
+| Guard integrity — verify-never-rewrite; honest degradation on guard failure; never a false success | [FR-CNR-005](../FR/FR-CNR-005-grammar-guard-verify-never-rewrite.md), [FR-CNR-006](../FR/FR-CNR-006-guard-flag-escalation-honest-degradation.md) |
+| Data provenance — ship mix CC-BY/Apache/MIT + synthetic + own data only; no CC BY-NC contamination; provenance manifest as evidence | [FR-CNR-018](../FR/FR-CNR-018-ship-mix-provenance-manifest.md), [FR-CNR-017](../FR/FR-CNR-017-four-layer-corpus-construction.md) |
+| Prompt discipline — 1,024-token budget; `chat_prompt_template.txt` byte-mirrors `IntentPrompt.buildChat`; intent prompt untouched; no few-shot exemplars | [FR-CNR-023](../FR/FR-CNR-023-chat-prompt-template-discipline.md), [NFR-CNR-004](NFR-CNR-004-chat-prompt-token-budget.md), [NFR-CNR-005](NFR-CNR-005-prompt-template-byte-mirror.md) |
+| Determinism and resource behaviour on device tiers — fixed-seed reproducibility; latency envelope; one brain resident; jetsam | [NFR-CNR-001](NFR-CNR-001-chat-reply-reproducibility.md), [NFR-CNR-002](NFR-CNR-002-listening-turn-latency-envelope.md), [NFR-CNR-003](NFR-CNR-003-memory-and-jetsam-device-tiers.md) |
+| Unchanged surfaces — STT pipeline, permissions, data collection, ladder/emergency path, single-decode schema | [FR-CNR-013](../FR/FR-CNR-013-single-decode-schema-unchanged.md), [FR-CNR-015](../FR/FR-CNR-015-stt-permissions-data-collection-unchanged.md) |
