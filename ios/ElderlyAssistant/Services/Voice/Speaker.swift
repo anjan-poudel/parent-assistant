@@ -50,7 +50,17 @@ enum VoiceOutputVolume {
     /// Stable UserDefaults key — never rename it: a rename silently
     /// resets every user's setting to 100 %.
     static let defaultsKey = "voice.outputVolumePercent"
-    static let defaultPercent = 100
+    /// [VOLUME-DEFAULT] (owner field verdict 2026-10-14): the shipped
+    /// default is the BOOST — elderly users must get loud replies out of
+    /// the box. The category-switch loud mode is dormant (MIC-CONTINUITY
+    /// plays replies on the capture preset) and iOS 26 on the device
+    /// refuses the media categories anyway, so the sample gain is the
+    /// loudness lever that works everywhere.
+    static let defaultPercent = 150
+    /// The no-processing reference: 100 % plays the raw file (the
+    /// loudness the app originally shipped with) — the passthrough keys
+    /// on THIS, not on the default, so the default still gets the boost.
+    static let rawReferencePercent = 100
     static let minimumPercent = 50
     static let maximumPercent = 200
     static let stepPercent = 10
@@ -1074,7 +1084,7 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
     /// makes a Settings change apply from the very next reply.
     private func gainedPlaybackURL(for wav: URL, locale: Locale) -> URL {
         let percent = VoiceOutputVolume.percent()
-        guard percent != VoiceOutputVolume.defaultPercent else { return wav }
+        guard percent != VoiceOutputVolume.rawReferencePercent else { return wav }
         do {
             return try SpokenReplyGainProcessor.playbackURL(for: wav, percent: percent)
         } catch {

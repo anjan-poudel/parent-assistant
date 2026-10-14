@@ -385,7 +385,7 @@ final class AckFastLanePlayer: NSObject, PreAckPlaying, AVAudioPlayerDelegate {
     /// one, and never a missed fast lane.
     private func gainAdjusted(_ url: URL) -> URL {
         let percent = gainPercentProvider()
-        guard percent != VoiceOutputVolume.defaultPercent else { return url }
+        guard percent != VoiceOutputVolume.rawReferencePercent else { return url }
         return (try? SpokenReplyGainProcessor.playbackURL(for: url, percent: percent)) ?? url
     }
 
