@@ -4,8 +4,10 @@ import XCTest
 /// Pure pressure-tiered brain pick tests ([VOICE-OOM] B', 2026-10-10):
 /// the tier walk from the hardening brief, the installed-only /
 /// no-download / never-up guarantees, the language gate, the pressure
-/// freshness doctrine, the shared load-refusal predicate, and the
-/// degraded-mode state (F) that drives Home's status pill — all without a
+/// freshness doctrine, the shared load-refusal predicate, the
+/// degraded-mode state (F) that drives Home's status pill, and the
+/// [PICK-HYSTERESIS] latch (2026-10-14) that holds a raw per-turn sample
+/// to a consecutive-turn streak before it flips the pick — all without a
 /// device, a store, or a ledger (the walk is a pure function of values).
 final class PressureBrainPickTests: XCTestCase {
 
@@ -375,5 +377,369 @@ final class PressureBrainPickTests: XCTestCase {
                        "home.degradedMode.smallerBrain")
         XCTAssertEqual(DegradedVoiceMode.lightweight.copyKey,
                        "home.degradedMode.lightweight")
+    }
+
+    // MARK: - The pick latch ([PICK-HYSTERESIS], 2026-10-14)
+
+    private let fourB = ModelCatalog.qwen3_4BInstruct
+    private let oneSevenB = ModelCatalog.qwen3_1_7BInstruct
+    private let oneB = ModelCatalog.intentGemma1B
+
+    /// One turn's RAW pick, resolved for real — the latch tests feed a
+    /// streak the same samples production feeds it (only the deliberate
+    /// hand-built cases construct enums directly, and say so).
+    private func rawPick(reading: MemoryPressureReading,
+                         available: UInt64,
+                         language: String = "en",
+                         remembered: ModelID,
+                         installed: Set<ModelID>) -> PressureBrainPick {
+        PressureBrainPickResolver.resolve(
+            reading: reading,
+            availableProcessMemoryBytes: available,
+            language: language,
+            rememberedPick: remembered,
+            installedModelIDs: installed,
+            liveBytes: live)
+    }
+
+    /// Feeds a latch one turn per entry and returns what actually ran.
+    private func drive(_ latch: inout PressureBrainPickLatch,
+                       raws: [PressureBrainPick],
+                       remembered: ModelID) -> [PressureBrainPick] {
+        var picks: [PressureBrainPick] = []
+        for raw in raws {
+            picks.append(latch.decide(raw: raw,
+                                      rememberedPick: remembered,
+                                      liveBytes: live))
+        }
+        return picks
+    }
+
+    /// Feeds a latch one turn per (reading, available) sample — each raw
+    /// pick resolved for real — and returns what actually ran.
+    private func driveResolved(_ latch: inout PressureBrainPickLatch,
+                               samples: [(MemoryPressureReading, UInt64)],
+                               remembered: ModelID,
+                               language: String = "en",
+                               installed: Set<ModelID>) -> [PressureBrainPick] {
+        var picks: [PressureBrainPick] = []
+        for (reading, available) in samples {
+            let raw = rawPick(reading: reading,
+                              available: available,
+                              language: language,
+                              remembered: remembered,
+                              installed: installed)
+            picks.append(latch.decide(raw: raw,
+                                      rememberedPick: remembered,
+                                      liveBytes: live))
+        }
+        return picks
+    }
+
+    /// The shipped thresholds, and the asymmetry that is the whole point:
+    /// recovery must demand strictly more evidence than degradation.
+    func testLatchThresholdsAreAsymmetricWithShippedDefaults() {
+        XCTAssertEqual(PressureBrainPickLatch.defaultDegradeTurns, 2)
+        XCTAssertEqual(PressureBrainPickLatch.defaultRecoverTurns, 4)
+        XCTAssertGreaterThan(PressureBrainPickLatch.defaultRecoverTurns,
+                             PressureBrainPickLatch.defaultDegradeTurns)
+    }
+
+    /// The live-byte rank the streaks compare: lightweight below every
+    /// step-down, every step-down below `.keep` (which ranks at the
+    /// remembered pick's own bytes).
+    func testPickRankOrdersLightweightBelowStepDownBelowKeep() {
+        XCTAssertEqual(PressureBrainPickLatch.rank(
+            of: .keep, rememberedPick: fourB, liveBytes: live), 3_400_000_000)
+        XCTAssertEqual(PressureBrainPickLatch.rank(
+            of: .stepDown(oneSevenB), rememberedPick: fourB, liveBytes: live),
+            1_980_000_000)
+        XCTAssertEqual(PressureBrainPickLatch.rank(
+            of: .lightweight, rememberedPick: fourB, liveBytes: live), 0)
+    }
+
+    /// A fresh process has no history to protect: the first decision
+    /// adopts the raw pick (turn one behaves exactly as it does today),
+    /// and the latch's guarantee begins with turn two — one clean sample
+    /// is not a recovery.
+    func testFreshLatchAdoptsRawOnFirstDecisionThenHolds() {
+        var latch = PressureBrainPickLatch()
+        let adopted = latch.decide(raw: .stepDown(oneSevenB),
+                                   rememberedPick: fourB,
+                                   liveBytes: live)
+        XCTAssertEqual(adopted, .stepDown(oneSevenB))
+        XCTAssertEqual(latch.latchedPick, .stepDown(oneSevenB))
+        XCTAssertEqual(latch.latchedRememberedPick, fourB)
+
+        let held = latch.decide(raw: .keep, rememberedPick: fourB, liveBytes: live)
+        XCTAssertEqual(held, .stepDown(oneSevenB))
+        XCTAssertEqual(latch.recoverStreak, 1)
+    }
+
+    /// THE field case (the 2026-10-14 console): one transient pressurized
+    /// sample must NOT flip the pick — and a following clean one clears
+    /// the evidence entirely.
+    func testASinglePressurizedSampleDoesNotFlipThePick() {
+        var latch = PressureBrainPickLatch()
+        _ = latch.decide(raw: .keep, rememberedPick: fourB, liveBytes: live)
+
+        let one = drive(&latch, raws: [.stepDown(oneSevenB)], remembered: fourB)
+        XCTAssertEqual(one, [.keep],
+                       "one pressured sample is not enough evidence to unload a model")
+        XCTAssertEqual(latch.degradeStreak, 1)
+
+        let cleared = drive(&latch, raws: [.keep, .stepDown(oneSevenB)], remembered: fourB)
+        XCTAssertEqual(cleared, [.keep, .keep],
+                       "the clean turn resets the streak — the next sample counts from one again")
+        XCTAssertEqual(latch.degradeStreak, 1)
+    }
+
+    /// Degrade-after-N: the flip lands on the second consecutive
+    /// pressurized turn, and the flip spends the streak.
+    func testDegradeFlipsOnTheSecondConsecutivePressurizedTurn() {
+        var latch = PressureBrainPickLatch()
+        _ = latch.decide(raw: .keep, rememberedPick: fourB, liveBytes: live)
+
+        let picks = drive(&latch,
+                          raws: [.stepDown(oneSevenB), .stepDown(oneSevenB)],
+                          remembered: fourB)
+        XCTAssertEqual(picks, [.keep, .stepDown(oneSevenB)])
+        XCTAssertEqual(latch.latchedPick, .stepDown(oneSevenB))
+        XCTAssertEqual(latch.degradeStreak, 0)
+        XCTAssertEqual(latch.recoverStreak, 0)
+    }
+
+    /// The margin-oscillation case the audit named: an alternating signal
+    /// accumulates neither streak and therefore never flips at all.
+    func testAnAlternatingSignalNeverFlipsThePick() {
+        var latch = PressureBrainPickLatch()
+        _ = latch.decide(raw: .keep, rememberedPick: fourB, liveBytes: live)
+
+        let picks = drive(&latch,
+                          raws: [.stepDown(oneSevenB), .keep,
+                                 .stepDown(oneSevenB), .keep,
+                                 .stepDown(oneSevenB), .keep],
+                          remembered: fourB)
+        XCTAssertEqual(picks, Array(repeating: PressureBrainPick.keep, count: 6))
+        XCTAssertEqual(latch.degradeStreak, 0)
+        XCTAssertEqual(latch.recoverStreak, 0)
+    }
+
+    /// Recover-after-M (M > N): a degraded latch comes back only on the
+    /// fourth consecutive clean turn.
+    func testRecoverFlipsOnlyOnTheFourthConsecutiveCleanTurn() {
+        var latch = PressureBrainPickLatch()
+        _ = latch.decide(raw: .keep, rememberedPick: fourB, liveBytes: live)
+        _ = drive(&latch,
+                  raws: [.stepDown(oneSevenB), .stepDown(oneSevenB)],
+                  remembered: fourB)
+        XCTAssertEqual(latch.latchedPick, .stepDown(oneSevenB))
+
+        let threeClean = drive(&latch, raws: [.keep, .keep, .keep], remembered: fourB)
+        XCTAssertEqual(threeClean,
+                       Array(repeating: PressureBrainPick.stepDown(oneSevenB), count: 3),
+                       "recovery waits for M — k < M clean turns change nothing")
+        XCTAssertEqual(latch.recoverStreak, 3)
+
+        let fourthClean = drive(&latch, raws: [.keep], remembered: fourB)
+        XCTAssertEqual(fourthClean, [.keep])
+        XCTAssertEqual(latch.latchedPick, .keep)
+        XCTAssertEqual(latch.recoverStreak, 0)
+    }
+
+    /// Counter reset: an interruption mid-recovery clears the streak —
+    /// the evidence is only worth what it is consecutive.
+    func testAnInterveningSqueezeResetsTheRecoverStreak() {
+        var latch = PressureBrainPickLatch()
+        _ = latch.decide(raw: .keep, rememberedPick: fourB, liveBytes: live)
+        _ = drive(&latch,
+                  raws: [.stepDown(oneSevenB), .stepDown(oneSevenB)],
+                  remembered: fourB)
+
+        let picks = drive(&latch,
+                          raws: [.keep, .keep,
+                                 .stepDown(oneB), // a deeper squeeze, not a clean turn
+                                 .keep, .keep, .keep],
+                          remembered: fourB)
+        XCTAssertEqual(picks,
+                       Array(repeating: PressureBrainPick.stepDown(oneSevenB),
+                             count: 6))
+        XCTAssertEqual(latch.recoverStreak, 3,
+                       "three clean turns after the interruption is three, not five")
+        XCTAssertEqual(latch.degradeStreak, 0)
+
+        let seventh = drive(&latch, raws: [.keep], remembered: fourB)
+        XCTAssertEqual(seventh, [.keep],
+                       "the fourth CONSECUTIVE clean turn is the flip")
+    }
+
+    /// A deeper squeeze within the degraded tier is a DOWN move (N), and
+    /// climbing back up within it is an UP move (M) — the ladder has one
+    /// rule, whichever rungs it connects.
+    func testDeeperStepDownAndPartialRecoveryEachUseTheirOwnStreak() {
+        var latch = PressureBrainPickLatch()
+        _ = latch.decide(raw: .keep, rememberedPick: fourB, liveBytes: live)
+        _ = drive(&latch,
+                  raws: [.stepDown(oneSevenB), .stepDown(oneSevenB)],
+                  remembered: fourB)
+
+        let deeper = drive(&latch,
+                           raws: [.stepDown(oneB), .stepDown(oneB)],
+                           remembered: fourB)
+        XCTAssertEqual(deeper, [.stepDown(oneSevenB), .stepDown(oneB)])
+
+        let climb = drive(&latch,
+                          raws: Array(repeating: .stepDown(oneSevenB), count: 4),
+                          remembered: fourB)
+        XCTAssertEqual(climb, [.stepDown(oneB), .stepDown(oneB),
+                               .stepDown(oneB), .stepDown(oneSevenB)])
+    }
+
+    /// The terminal rung obeys the same clock: nothing-fits degrades fast
+    /// and is left slowly.
+    func testTerminalLightweightDegradesFastAndRecoversSlow() {
+        var latch = PressureBrainPickLatch()
+        _ = latch.decide(raw: .keep, rememberedPick: fourB, liveBytes: live)
+
+        let down = drive(&latch, raws: [.lightweight, .lightweight], remembered: fourB)
+        XCTAssertEqual(down, [.keep, .lightweight])
+
+        let up = drive(&latch,
+                       raws: Array(repeating: .keep, count: 4),
+                       remembered: fourB)
+        XCTAssertEqual(up, [.lightweight, .lightweight,
+                            .lightweight, .keep])
+    }
+
+    /// An explicit re-pick re-baselines the latch: the household's choice
+    /// is adopted outright, streaks and all, instead of counting against
+    /// a baseline nobody chose any more.
+    func testRememberedPickChangeRebaselinesTheLatchImmediately() {
+        var latch = PressureBrainPickLatch()
+        _ = latch.decide(raw: .keep, rememberedPick: fourB, liveBytes: live)
+        _ = drive(&latch,
+                  raws: [.stepDown(oneSevenB), .stepDown(oneSevenB)],
+                  remembered: fourB)
+        XCTAssertEqual(latch.latchedPick, .stepDown(oneSevenB))
+
+        let afterRepick = latch.decide(raw: .keep,
+                                       rememberedPick: oneSevenB,
+                                       liveBytes: live)
+        XCTAssertEqual(afterRepick, .keep)
+        XCTAssertEqual(latch.latchedRememberedPick, oneSevenB)
+        XCTAssertEqual(latch.degradeStreak, 0)
+        XCTAssertEqual(latch.recoverStreak, 0)
+
+        // And the other direction: a re-pick back to the 4B under
+        // pressure adopts the raw step-down on the spot.
+        var second = PressureBrainPickLatch()
+        _ = second.decide(raw: .keep, rememberedPick: oneSevenB, liveBytes: live)
+        let adopted = second.decide(raw: .stepDown(oneSevenB),
+                                    rememberedPick: fourB,
+                                    liveBytes: live)
+        XCTAssertEqual(adopted, .stepDown(oneSevenB))
+        XCTAssertEqual(second.latchedPick, .stepDown(oneSevenB))
+    }
+
+    /// The fit boundary in exact bytes: refusal is strict
+    /// (`available < live + margin`), so `available == live + margin`
+    /// admits the 4B and one byte less steps down. A device hovering on
+    /// that byte — the field console's case — flips the RAW pick every
+    /// turn, and the latch holds every time.
+    func testMarginOscillationAcrossTheExactFitBoundaryNeverFlips() {
+        // 4B live 3.4 GB + margin 768 MB = 4.168 GB exactly.
+        let fits: UInt64 = 4_168_000_000
+        let refuses: UInt64 = 4_167_999_999
+        let installed: Set<ModelID> = [fourB, oneSevenB]
+
+        XCTAssertEqual(rawPick(reading: freshWarning, available: fits,
+                               remembered: fourB, installed: installed),
+                       .keep)
+        XCTAssertEqual(rawPick(reading: freshWarning, available: refuses,
+                               remembered: fourB, installed: installed),
+                       .stepDown(oneSevenB),
+                       "one byte under the fit line is a step-down sample")
+
+        var latch = PressureBrainPickLatch()
+        let picks = driveResolved(&latch,
+                                  samples: [(freshWarning, fits),
+                                            (freshWarning, refuses),
+                                            (freshWarning, fits),
+                                            (freshWarning, refuses),
+                                            (freshWarning, fits),
+                                            (freshWarning, refuses)],
+                                  remembered: fourB,
+                                  installed: installed)
+        XCTAssertEqual(picks, Array(repeating: PressureBrainPick.keep, count: 6),
+                       "the ping-pong needs two CONSECUTIVE samples; the hover never provides them")
+    }
+
+    /// Sustained pressure across the same boundary does flip — down on
+    /// the second sample, back up only on the fourth sustained fit.
+    func testSustainedPressureAcrossTheBoundaryFlipsDownThenUp() {
+        let fits: UInt64 = 4_168_000_000
+        let refuses: UInt64 = 4_167_999_999
+        let installed: Set<ModelID> = [fourB, oneSevenB]
+        var latch = PressureBrainPickLatch()
+        _ = latch.decide(raw: .keep, rememberedPick: fourB, liveBytes: live)
+
+        let down = driveResolved(&latch,
+                                 samples: [(freshWarning, refuses),
+                                           (freshWarning, refuses)],
+                                 remembered: fourB,
+                                 installed: installed)
+        XCTAssertEqual(down, [.keep, .stepDown(oneSevenB)])
+
+        let up = driveResolved(&latch,
+                               samples: Array(repeating: (freshWarning, fits),
+                                              count: 4),
+                               remembered: fourB,
+                               installed: installed)
+        XCTAssertEqual(up, [.stepDown(oneSevenB), .stepDown(oneSevenB),
+                            .stepDown(oneSevenB), .keep])
+    }
+
+    /// `pressureEngages`' own headroom boundary, exact: the
+    /// catastrophic-probe half is strict too, so a probe exactly AT the
+    /// margin with no kernel signal does not engage, and one byte under
+    /// engages as nothing-fits at that headroom — which the latch still
+    /// holds for its first turn.
+    func testExactMarginByteDoesNotEngageAndOneByteUnderDoes() {
+        let margin = PressureBrainPickResolver.safetyMarginBytes
+
+        XCTAssertEqual(rawPick(reading: normal, available: margin,
+                               remembered: fourB, installed: [fourB]),
+                       .keep)
+        XCTAssertEqual(rawPick(reading: normal, available: margin - 1,
+                               remembered: fourB, installed: [fourB]),
+                       .lightweight,
+                       "engages by the app's own account, and at this headroom nothing fits")
+
+        var latch = PressureBrainPickLatch()
+        _ = latch.decide(raw: .keep, rememberedPick: fourB, liveBytes: live)
+        let picks = driveResolved(&latch,
+                                  samples: [(normal, margin - 1),
+                                            (normal, margin - 1)],
+                                  remembered: fourB,
+                                  installed: [fourB])
+        XCTAssertEqual(picks, [.keep, .lightweight],
+                       "even the terminal rung waits out the first sample")
+    }
+
+    /// The pill keeps its "current state only" meaning under the latch:
+    /// a held turn renders the mode of the pick that RAN, the flip turn
+    /// renders the new one, and a single clean sample does not flip the
+    /// pill back.
+    func testDegradedModeFollowsTheLatchedPickNotTheRawSample() {
+        var latch = PressureBrainPickLatch()
+        _ = latch.decide(raw: .keep, rememberedPick: fourB, liveBytes: live)
+
+        let picks = drive(&latch,
+                          raws: [.stepDown(oneSevenB),
+                                 .stepDown(oneSevenB),
+                                 .keep],
+                          remembered: fourB)
+        XCTAssertEqual(picks.map(DegradedVoiceMode.resolved(from:)),
+                       [.normal, .smallerBrain, .smallerBrain])
     }
 }

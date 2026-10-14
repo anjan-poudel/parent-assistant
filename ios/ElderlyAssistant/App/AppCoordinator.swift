@@ -730,6 +730,16 @@ final class AppCoordinator: ObservableObject {
     /// for `.normal`, which is both the default and the recovered state).
     @Published private(set) var degradedVoiceMode: DegradedVoiceMode = .normal
 
+    /// [PICK-HYSTERESIS] (2026-10-14) The per-process latch that gives
+    /// `applyPressureBrainPickForTurn` its hysteresis: the resolver's
+    /// answer is a raw per-turn sample, and this holds a change back
+    /// until it repeats (2 turns down / 4 turns up — see
+    /// `PressureBrainPickLatch` for why the pair is asymmetric).
+    /// In-memory only, on purpose: the degraded tier is a property of
+    /// THIS process's pressure history, so a relaunch starts clean
+    /// rather than restoring a step-down against stale evidence.
+    private var pressureBrainPickLatch = PressureBrainPickLatch()
+
     /// [DESIGN-REVIEW] Explicit outcome dismissal — clears the published
     /// outcome so Home's feedback region hands the strip back to the
     /// optional-setup affordance for the rest of the session (the
@@ -6621,13 +6631,26 @@ self.noteTalkContractChanged()
     /// this function resolves its inputs and applies the outcome through
     /// the interpreter's existing `switchBaseModel` seam. The stored
     /// preference is NEVER touched: Settings keeps showing the household's
-    /// pick, and a recovered device swaps straight back to it.
+    /// pick, and a recovered device swaps back to it — since
+    /// [PICK-HYSTERESIS] after the latch's sustained-headroom window
+    /// rather than on the first clean sample.
     ///
     /// Gated on `llamaCommandInterpreter.isAvailable` only — wherever the
     /// local brain can load, the pick must be able to protect that load.
     /// That is BOTH stacks: the .gemini stack is local-first hybrid (the
     /// local brain answers what it can, Gemini takes the rest), so its
     /// first tier is the same load.
+    ///
+    /// [PICK-HYSTERESIS] (2026-10-14) The resolver's answer is a RAW
+    /// per-turn sample; it is now fed through `PressureBrainPickLatch`
+    /// before anything is applied, so a sample that disagrees with the
+    /// pick in force must repeat (2 turns down / 4 turns up) before it
+    /// flips a model — the audit's finding 3C/15, the fix for the
+    /// per-turn eviction ping-pong the owner's 2026-10-14 console shows.
+    /// Everything below reads the LATCHED pick, which is what keeps
+    /// `DegradedVoiceMode` a statement about the turn actually running.
+    /// A change the latch suppressed this turn emits a `held` event, so
+    /// the next console can count suppressed swaps directly.
     private func applyPressureBrainPickForTurn() {
         guard llamaCommandInterpreter.isAvailable else {
             // No local brain can load this turn — nothing to pick, and no
@@ -6636,12 +6659,20 @@ self.noteTalkContractChanged()
             return
         }
         let remembered = resolvedBrainModelID
-        let pick = PressureBrainPickResolver.resolve(
+        let raw = PressureBrainPickResolver.resolve(
             reading: ModelLifecycleManager.shared.memoryPressureReading(),
             availableProcessMemoryBytes: MemoryProbe.availableProcessMemoryBytes,
             language: appLanguage.rawValue,
             rememberedPick: remembered,
             installedModelIDs: installedBrainModelIDs)
+        let pick = pressureBrainPickLatch.decide(raw: raw,
+                                                 rememberedPick: remembered)
+        if pick != raw {
+            // The sample disagrees with the pick in force and the latch
+            // has not accepted it yet — observability only; the apply
+            // below stays on the latched pick.
+            emitPressureBrainPickHeldEvent(raw: raw, kept: pick)
+        }
         switch pick {
         case .keep:
             if llamaCommandInterpreter.baseModelID != remembered {
@@ -6692,6 +6723,11 @@ self.noteTalkContractChanged()
     /// One event per non-normal pick: component `pressure_brain_pick`,
     /// catalog ids only — never audio or transcripts. No event for
     /// `.keep` (the healthy path must stay silent).
+    ///
+    /// [PICK-HYSTERESIS] The pick passed here is the LATCHED pick — one
+    /// event per turn the state in force is non-normal, exactly as
+    /// before; raw samples the latch held back ride their own event
+    /// (`emitPressureBrainPickHeldEvent`).
     private func emitPressureBrainPickEvent(pick: PressureBrainPick,
                                             remembered: ModelID) {
         var metadata: [String: String] = ["from": remembered.rawValue]
@@ -6713,6 +6749,38 @@ self.noteTalkContractChanged()
             errorCode: nil,
             metadata: metadata
         ))
+    }
+
+    /// [PICK-HYSTERESIS] (2026-10-14) One event per HELD turn: the raw
+    /// pick disagreed with the pick in force and the latch has not
+    /// accepted the change yet (either direction — a held step-down and
+    /// a held recovery both land here). Outcome `held`, metadata
+    /// `kept`/`raw` naming the two picks by catalog id (or the two
+    /// content-free tokens), so the next field console can count
+    /// suppressed swaps — the number the owner's 2026-10-14 measurement
+    /// had no way to see.
+    private func emitPressureBrainPickHeldEvent(raw: PressureBrainPick,
+                                                kept: PressureBrainPick) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "pressure_brain_pick",
+            eventType: "turn",
+            durationMs: nil,
+            outcome: "held",
+            errorCode: nil,
+            metadata: ["kept": pressurePickToken(kept),
+                       "raw": pressurePickToken(raw)]
+        ))
+    }
+
+    /// A pick's observability token: the catalog id for a stepped-down
+    /// model, or the content-free word for the two model-less outcomes
+    /// — the same vocabulary rule every other event follows.
+    private func pressurePickToken(_ pick: PressureBrainPick) -> String {
+        switch pick {
+        case .keep: return "keep"
+        case .stepDown(let id): return id.rawValue
+        case .lightweight: return "lightweight"
+        }
     }
 
     // MARK: - Family & friends — curated contacts (spec §4.4.2)
