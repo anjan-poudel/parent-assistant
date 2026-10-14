@@ -86,6 +86,7 @@ plugins:
     config:
       provider: slack
       slack:
+        answers_only: true                  # all HIL and qna via slack
         bot_token_env: SLACK_BOT_TOKEN      # env var holding xoxb-… (default name)
         app_token_env: SLACK_APP_TOKEN      # env var holding xapp-… (Socket Mode)
         transport: auto                     # auto | socket | polling

@@ -1,0 +1,117 @@
+{
+  "schema_version": "1",
+  "workflow": "conversational-nepali-replies",
+  "project": "/Users/anjan/workspace/projects/elderly-ai-assistant-conversational-nepali-replies",
+  "started_at": "2026-10-14T07:01:09.032Z",
+  "updated_at": "2026-10-14T07:44:56.919Z",
+  "tasks": {
+    "define-requirements": {
+      "status": "COMPLETED",
+      "started_at": "2026-10-14T07:01:09.025Z",
+      "completed_at": "2026-10-14T07:44:52.567Z",
+      "outputs": [
+        {
+          "path": "specs/define-requirements.md"
+        },
+        {
+          "path": "specs/define-requirements.lock.yaml"
+        }
+      ],
+      "iterations": 1,
+      "pending_at": "2026-10-14T07:01:09.013Z",
+      "hil_item_id": "90a5c30a-0b12-4340-ada6-ccad85627e3c",
+      "overlay_evidence": {
+        "overlay_id": "hil",
+        "source": "local",
+        "data": {
+          "hil_id": "90a5c30a-0b12-4340-ada6-ccad85627e3c"
+        }
+      },
+      "last_activity_at": "2026-10-14T07:27:36.679Z"
+    },
+    "design-l1": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-14T07:27:36.617Z",
+      "last_activity_at": "2026-10-14T07:27:36.617Z"
+    },
+    "design-l2": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-14T07:27:36.617Z",
+      "last_activity_at": "2026-10-14T07:27:36.617Z"
+    },
+    "review-l2": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-14T07:27:36.617Z",
+      "last_activity_at": "2026-10-14T07:27:36.617Z"
+    },
+    "security-design-review": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-14T07:27:36.617Z",
+      "last_activity_at": "2026-10-14T07:27:36.617Z"
+    },
+    "plan-tasks": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-14T07:27:36.617Z",
+      "last_activity_at": "2026-10-14T07:27:36.617Z"
+    },
+    "implement": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-14T07:27:36.617Z",
+      "last_activity_at": "2026-10-14T07:27:36.617Z"
+    },
+    "review-implementation": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-14T07:27:36.617Z",
+      "last_activity_at": "2026-10-14T07:27:36.617Z"
+    },
+    "security-test": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-14T07:27:36.617Z",
+      "last_activity_at": "2026-10-14T07:27:36.617Z"
+    },
+    "final-sign-off": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-14T07:27:36.617Z",
+      "last_activity_at": "2026-10-14T07:27:36.617Z"
+    }
+  },
+  "engine_pid": 51983,
+  "engine_started_at": "2026-10-14T07:27:36.520Z",
+  "phase": "RUNNING"
+}
