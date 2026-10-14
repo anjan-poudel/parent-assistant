@@ -64,6 +64,9 @@ struct FeedArticleReaderView: View {
                 Text(item.title)
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
+                    // [FEED-VISUAL-FIX] Wraps long unbroken tokens
+                    // instead of spilling past the reader card.
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 captionRow
@@ -223,9 +226,9 @@ struct FeedArticleImageView: View {
     /// and it is exactly what "no layout jump" demands — the placeholder,
     /// the failure glyph and the loaded photo all occupy this one band,
     /// so a slow network can never reflow the card under a finger.
-    /// 200pt keeps the photo genuinely visible for these eyes without
-    /// letting one item swallow the scroll.
-    static let slotHeight: CGFloat = 200
+    /// [FEED-VISUAL-FIX] (2026-10-14) 140pt, down from 200pt — owner:
+    /// "the image is too large"; one image must not swallow the card.
+    static let slotHeight: CGFloat = 140
 
     var body: some View {
         // No renderable reference at all (absent, or not an http(s) URL
@@ -241,9 +244,14 @@ struct FeedArticleImageView: View {
         ZStack {
             switch phase {
             case .loaded(let image):
+                // [FEED-VISUAL-FIX] Always letterbox (.fit), never
+                // stretch: many feed sources publish small thumbnails,
+                // and upscaling them to the band's width was the owner's
+                // "blurry". A photo smaller than the band renders at its
+                // natural size, centred on the card surface.
                 Image(uiImage: image)
                     .resizable()
-                    .aspectRatio(contentMode: fit == .fill ? .fill : .fit)
+                    .aspectRatio(contentMode: .fit)
             case .failed:
                 // Honest placeholder — the load failed, the card still
                 // says what the item is (the same glyph the old image
@@ -257,7 +265,9 @@ struct FeedArticleImageView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: Self.slotHeight)
+        .background(appearance.colors.card.opacity(0.6))
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        .clipped()
         .accessibilityHidden(true)
     }
 

@@ -247,16 +247,20 @@ struct FeedsView: View {
                 Text(display.title)
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
+                    // [FEED-VISUAL-FIX] Wraps long unbroken tokens
+                    // (URLs, hashtags) instead of spilling past the card.
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let summary = displaySummary(display) {
                     Text(summary)
                         .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textPrimary)
-                        // [AX-VIEWPORT] Four lines of caption text at
-                        // accessibility sizes is a fraction of the article —
-                        // the summary wraps fully there instead of stopping
-                        // mid-sentence. Standard sizes keep the 4-line cap.
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 4)
+                        // [FEED-VISUAL-FIX] (2026-10-14) No line cap at
+                        // any size — owner: "text is getting cut off".
+                        // The tap-through reader exists now, so the
+                        // glance no longer needs to truncate to protect
+                        // the card's height; the summary wraps fully.
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 captionRow(item)
@@ -303,6 +307,9 @@ struct FeedsView: View {
             Text(item.title)
                 .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
+                // [FEED-VISUAL-FIX] Wraps long unbroken tokens instead
+                // of spilling past the card edge.
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             captionRow(item)
         }
