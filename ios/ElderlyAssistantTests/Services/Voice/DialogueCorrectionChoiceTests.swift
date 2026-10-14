@@ -62,12 +62,18 @@ final class DialogueCorrectionChoiceTests: XCTestCase {
         XCTAssertEqual(single, "तपाईंले गइए भन्नुभयो?")
     }
 
-    func testTheRetryProbePrefixesTheRetryLine() {
-        let text = DialogueProbeComposer.probeText(for: frame(),
+    func testTheRetryProbeUsesTheRepromptLineNotTheSameQuestionAgain() {
+        // [DIALOGUE-NO-LOOP] A GENUINE re-probe (attempts >= 2) is a
+        // DIFFERENT question — the correction options came from the same
+        // mis-heard transcript, so re-asking them is the loop the owner
+        // hit (2026-10-14).
+        var reprobe = frame()
+        reprobe.attempts = 2
+        let text = DialogueProbeComposer.probeText(for: reprobe,
                                                    catalog: nil,
                                                    retry: true,
                                                    locale: ne)
-        XCTAssertTrue(text.hasPrefix("फेरि भन्नुस् न। "))
+        XCTAssertEqual(text, L10n.str("router.reprompt", locale: ne))
     }
 
     // MARK: - Classification
