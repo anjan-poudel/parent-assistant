@@ -95,6 +95,11 @@ enum AudioBandPlan {
     /// (DC) and the Nyquist slot are never included — the packed-real
     /// convention stores them 2×-scaled (see `SpectralGateCore.FFT`),
     /// and no band edge reaches them anyway.
+    ///
+    /// Bin b ↔ frequency b·sampleRate/fftLength holds for the extraction
+    /// ONLY with the packed-real (even/odd) input arrangement — see
+    /// `AudioLevelExtraction.packedReal` for the verified convention and
+    /// what a plain real-array call would do to this mapping.
     static func binRanges(sampleRate: Double, fftLength: Int) -> [Range<Int>] {
         let halfN = fftLength / 2
         let binWidth = sampleRate / Double(fftLength)
@@ -136,9 +141,20 @@ enum AudioLevelExtraction {
     /// The sqrt-Hann (sine) window — the same analysis window the
     /// spectral-gate denoiser uses (SpectralGateCore.sineWindow).
     static let window: [Float] = SpectralGateCore.sineWindow(length: fftLength)
-    static let windowMean: Float = {
+    /// RMS of the analysis window (√2/2 for the sine window, exactly —
+    /// Σsin² over a full period is N/2). This — NOT the window's mean —
+    /// is the Parseval factor the band calibration needs: for a windowed
+    /// tone of amplitude A, Σ|X_b|² across the tone's lobe (as the
+    /// packed-real output returns it) equals (A·N·rms(w))², so scaling
+    /// amplitudes by 1/(N·rms(w)) makes the band read back ≈ A. (The
+    /// window MEAN was the original factor here: mean(w) = 2/π vs
+    /// rms(w) = √2/2 for this window — the ratio rms/mean = π/(2√2) ≈
+    /// 1.1107 is exactly the overshoot the gate measured, e.g. the
+    /// 500 Hz band reading 1.1105·A instead of A.)
+    static let windowRMS: Float = {
         guard !window.isEmpty else { return 1 }
-        return window.reduce(0, +) / Float(window.count)
+        let sumSquares = window.reduce(0) { $0 + $1 * $1 }
+        return sqrt(sumSquares / Float(window.count))
     }()
 
     /// Int16 PCM frame (16 kHz, as the pipeline's capture fan-out
@@ -175,10 +191,43 @@ enum AudioLevelExtraction {
                                                 sampleRate: sampleRate))
     }
 
-    /// Windowed FFT → per-band RMS. Amplitude normalisation removes the
-    /// N/2 FFT gain and the window's mean so bandRMS ≈ the amplitude of
-    /// a pure tone in that band (empirical scale, not exact RMS — the dB
-    /// window in `AudioLevelMapping` is calibrated to this convention).
+    /// The vDSP packed-real INPUT arrangement for this FFT (zrip
+    /// convention, verified numerically 2026-10-14): realp = EVEN-index
+    /// samples, imagp = ODD-index samples — NOT two contiguous halves.
+    /// `SpectralGateCore.FFT.forward` splits its argument into contiguous
+    /// halves, so a plain `forward(real: frame)` feeds the transform
+    /// (x[0..<N/2], x[N/2..<N]) as (even, odd) pairs — an even/odd
+    /// permutation of the true signal that halves every tone's bin
+    /// (a 1 kHz tone read back at bin 16 instead of 32; measured against
+    /// a Double-precision reference DFT). Interleaving the windowed
+    /// frame here makes the output the true packed spectrum: bin b =
+    /// frequency b·sampleRate/N, |X_b| = exactly 2× the DFT (the zrip 2×
+    /// scale, verified at bin 16 of an exact-bin tone: ratio 2.0000000).
+    /// The denoiser's own call sites pack halves by design (their
+    /// forward/inverse pair is self-consistent and shipped); this helper
+    /// is the extraction's side of the same class.
+    static func packedReal(_ samples: [Float]) -> [Float] {
+        let halfN = samples.count / 2
+        guard halfN > 0 else { return samples }
+        var packed = [Float](repeating: 0, count: samples.count)
+        for m in 0..<halfN {
+            packed[m] = samples[2 * m]
+            packed[halfN + m] = samples[2 * m + 1]
+        }
+        return packed
+    }
+
+    /// Windowed FFT → per-band RMS. Two calibration facts, both verified
+    /// numerically against a Double-precision reference DFT (2026-10-14)
+    /// — see `packedReal` and `windowRMS`:
+    ///  · the input interleave makes output bin b the true bin b;
+    ///  · `norm = 1/(N·rms(w))` removes the zrip 2× scale AND converts
+    ///    the summed lobe power back to tone amplitude, so a pure tone
+    ///    of amplitude A reads back ≈ A in its band — measured 0.4999
+    ///    for exact-bin (500/1000/3000 Hz) and straddling (440 Hz)
+    ///    tones alike, residual wobble ≈ 1 %.
+    /// The dB window in `AudioLevelMapping` is calibrated to this
+    /// amplitude convention.
     static func bandRMS(fromFloats samples: [Float],
                         fft: SpectralGateCore.FFT?,
                         sampleRate: Double) -> [Float] {
@@ -187,9 +236,9 @@ enum AudioLevelExtraction {
         }
         var windowed = [Float](repeating: 0, count: fftLength)
         for i in 0..<fftLength { windowed[i] = samples[i] * window[i] }
-        let spectrum = fft.forward(real: windowed)
+        let spectrum = fft.forward(real: packedReal(windowed))
         let halfN = fftLength / 2
-        let norm = 2 / (Float(fftLength) * windowMean)
+        let norm = 1 / (Float(fftLength) * windowRMS)
         var bands = [Float](repeating: 0, count: AudioBandPlan.count)
         for (band, range) in AudioBandPlan
             .binRanges(sampleRate: sampleRate, fftLength: fftLength).enumerated() {
