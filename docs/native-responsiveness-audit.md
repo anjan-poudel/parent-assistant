@@ -731,3 +731,11 @@ for a phone on a table; the spoken acknowledgment is the feedback). See
   chat/tool store tests now pin the split memory/disk contract and the
   `flush()` seam; the haptics tests pin the accessibility truth table; the
   image tests pin the decode-size contract the memory budget relies on.
+- The image tests' fixtures pin `UIGraphicsImageRendererFormat.scale = 1`
+  so their width/height parameters mean PIXELS on any host (a @3x gate
+  host had rendered them at 3×, tripping the pixel assertions with
+  exact-3× values: 150 vs 50, {300,150} vs {50,100}); all assertions are
+  unchanged. The decode implementation was verified against the exact
+  options block with a direct ImageIO probe: 3000×1500 @ edge 100 →
+  100×50, EXIF-6 rotated 300×150 → 150×300, 150×120 @ edge 200 → 150×120
+  (rescale-down, aspect, EXIF, and never-upscale all hold).

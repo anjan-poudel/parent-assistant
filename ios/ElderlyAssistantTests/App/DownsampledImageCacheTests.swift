@@ -29,7 +29,18 @@ final class DownsampledImageCacheTests: XCTestCase {
     /// A solid-colour JPEG at `width`×`height` pixels — the encoded
     /// bytes the picker hands the decode path.
     private func jpegData(width: Int, height: Int) throws -> Data {
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height))
+        // scale 1, deliberately: the default renderer format inherits
+        // the HOST screen scale, so on a @3x gate host this fixture's
+        // "50x40" encoded 150x120 pixels and the @3x "100x50" encoded
+        // 300x150 — every pixel assertion below failed with a value
+        // exactly 3x its expectation (150 vs 50, {300,150} vs
+        // {50,100}). The assertions are written in PIXELS (the unit the
+        // decode contract is about), so the fixture must encode exactly
+        // `width`x`height` pixels on any host.
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height),
+                                               format: format)
         let image = renderer.image { context in
             UIColor.systemTeal.setFill()
             context.fill(CGRect(x: 0, y: 0, width: width, height: height))
@@ -42,7 +53,14 @@ final class DownsampledImageCacheTests: XCTestCase {
     /// the transform applied to render upright.
     private func orientedJPEGData(width: Int, height: Int,
                                   orientation: Int) throws -> Data {
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height))
+        // scale 1 for the same reason as `jpegData` above: stored
+        // pixels must be exactly `width`x`height` on every host, so
+        // "rotate 90°" turns a 100x50-pixel image into a 50x100-pixel
+        // one — the size the assertions expect, not 3x it.
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height),
+                                               format: format)
         let image = renderer.image { context in
             UIColor.systemOrange.setFill()
             context.fill(CGRect(x: 0, y: 0, width: width, height: height))
