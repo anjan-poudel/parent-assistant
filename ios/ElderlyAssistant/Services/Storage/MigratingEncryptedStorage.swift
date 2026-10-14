@@ -91,6 +91,7 @@ final class MigratingEncryptedStorage: EncryptedLocalStorage {
             // the file store (the legacy file-resident copy of the
             // profile). Reverse-migrate it into the Keychain once, so the
             // invariant ("settings survive uninstalls") holds for data
+
             // that predates the flip. The payload moves VERBATIM (the
             // header's byte-identical doctrine), so the read stays
             // Decodable-only — a decode→encode round trip would both
