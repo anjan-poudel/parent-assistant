@@ -4,7 +4,7 @@ import UIKit
 @testable import ElderlyAssistant
 
 /// T-111 — the C-SP-04 presenter half (`ASWebSpotifyAuthSession`) and the
-/// `sahayak-spotify` URL-scheme declaration (C-SP-12, design-l2 §11/§19/§26).
+/// `spotify-1aa5ca19720646e4bc46dea1acac5d37` URL-scheme declaration (C-SP-12, design-l2 §11/§19/§26).
 ///
 /// The Gherkin's three scenarios map onto this suite as follows:
 ///
@@ -60,7 +60,7 @@ final class ASWebSpotifyAuthSessionTests: XCTestCase {
         // presenter, not a URL builder (that is `SpotifyAuthFlow`'s half).
         XCTAssertEqual(stub.presentedURL, authorizeURL)
         XCTAssertEqual(stub.presentedScheme, SpotifyAuthFlow.callbackScheme)
-        XCTAssertEqual(SpotifyAuthFlow.callbackScheme, "sahayak-spotify",
+        XCTAssertEqual(SpotifyAuthFlow.callbackScheme, "spotify-1aa5ca19720646e4bc46dea1acac5d37",
                        "the one shared constant the plist entry is checked against")
         XCTAssertNotNil(stub.providerAtStart,
                         "the presentation context must be set BEFORE start(), "
@@ -346,7 +346,7 @@ final class ASWebSpotifyAuthSessionTests: XCTestCase {
     // MARK: - Scenario: the URL scheme is declared exactly once (C-SP-12)
 
     /// "Given the built app's Info.plist / When CFBundleURLTypes is
-    /// inspected / Then the sahayak-spotify scheme is declared with its
+    /// inspected / Then the spotify-1aa5ca19720646e4bc46dea1acac5d37 scheme is declared with its
     /// callback handler" — the SOURCE file under review, read from the tree
     /// (the app-launcher suite's source-plist convention).
     func testSourceInfoPlistDeclaresTheCallbackSchemeExactlyOnce() throws {
@@ -469,7 +469,7 @@ final class ASWebSpotifyAuthSessionTests: XCTestCase {
 
     /// The callback the system would deliver for the configured attempt.
     private func callbackURL() throws -> URL {
-        try XCTUnwrap(URL(string: "sahayak-spotify://callback"
+        try XCTUnwrap(URL(string: "spotify-1aa5ca19720646e4bc46dea1acac5d37://callback"
                           + "?code=AQD-test-code-1&state=\(attemptState)"))
     }
 
