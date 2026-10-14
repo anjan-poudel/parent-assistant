@@ -559,12 +559,12 @@ final class ContactCallButtonsTests: XCTestCase {
         XCTAssertEqual(occurrences(of: "performLaunchFailHop(", in: phoneArm), 0,
                        "the GSM floor never hops (RES-10)")
         XCTAssertTrue(collapsed(phoneArm).contains(collapsed("""
-            guard callLinks.openPhone(contact.phone) else {
+            guard placeGSMCall(phone: contact.phone) else {
                 announceNoUsableNumber(contact: contact, locale: locale)
                 return
             }
             """).trimmingCharacters(in: .whitespaces)),
-                      "the shipped floor guard, verbatim")
+                      "the floor guard — the shared CallKit dial site, verbatim")
         XCTAssertTrue(collapsed(phoneArm).contains(collapsed("""
             setOutcome(icon: "phone.fill",
                        text: L10n.fmt("home.outcome.callPlaced", locale: locale, contact.name))
