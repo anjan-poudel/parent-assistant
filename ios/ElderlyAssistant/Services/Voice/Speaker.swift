@@ -19,12 +19,14 @@ protocol SpeechRateAdjusting: Speaker {
     func speak(_ text: String, locale: Locale, speed: Float) async
 }
 
-/// [LOUD-TTS-CATEGORY] Response-playback loudness seam: switches the
-/// shared audio session to the bell's loud `.playback` configuration
-/// while the assistant speaks and restores the capture preset afterwards
-/// (see `AudioSessionManager`). A static seam — the same pattern as
-/// `NewsSourceEditorSeam` — installed by `AppCoordinator.start()`; the
-/// no-op default keeps speaker unit tests audio-free.
+/// [MODE-ONLY-LOUD] Response-playback loudness seam: switches the
+/// shared audio session to Apple's spoken-audio MODE (.spokenAudio →
+/// .voicePrompt) while the assistant speaks and restores the capture
+/// mode afterwards (see `AudioSessionManager`) — a mode change never
+/// closes the mic, unlike the retired category switch. A static seam —
+/// the same pattern as `NewsSourceEditorSeam` — installed by
+/// `AppCoordinator.start()`; the no-op default keeps speaker unit tests
+/// audio-free.
 enum ResponsePlaybackModeSeam {
     static var begin: () -> Void = {}
     static var end: () -> Void = {}
@@ -376,6 +378,10 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
     private let synthesizer: AVSpeechSynthesizer
     private let observabilityBus: ObservabilityBus
     private var currentContinuation: CheckedContinuation<Void, Never>?
+    /// [MODE-ONLY-LOUD] True between this speaker's own seam begin/end —
+    /// `cancel()` ends the seam ONLY when this speaker opened it (see
+    /// PiperVoiceSpeaker's `playbackSeamOpen`).
+    private var seamOpen = false
 
     init(observabilityBus: ObservabilityBus,
          synthesizer: AVSpeechSynthesizer = AVSpeechSynthesizer()) {
@@ -405,14 +411,16 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
         utterance.volume = 1.0
         utterance.pitchMultiplier = 1.0
 
-        // [MIC-CONTINUITY] (2026-10-14) No playback seam around spoken
-        // responses — the seam's restore (deactivate → VPIO re-enable →
-        // engine restart) delayed listening resume after every reply and
-        // cut the head of the next utterance. Replies play on the
-        // capture preset, the mic never closes, and listening resumes
-        // the moment the utterance ends. The sample-level gain boost
-        // still applies; the loud `.playback` category is retired for
-        // voice replies (owner: instant speak→listen, zero loss).
+        // [MODE-ONLY-LOUD] (2026-10-14) The seam is BACK — but it is a
+        // session MODE switch (.spokenAudio → .voicePrompt), never a
+        // category change: iOS 26/27 refuse every media category while
+        // the always-on input node is attached, and the spoken-audio
+        // modes are the loudness lever that exists for that shape. A
+        // mode change never closes the mic — the MIC-CONTINUITY
+        // speak→listen guarantee is untouched (no deactivation, no
+        // engine restart; the sample-level boost still applies).
+        ResponsePlaybackModeSeam.begin()
+        seamOpen = true
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             currentContinuation = continuation
@@ -428,8 +436,13 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
         settleSpeech()
     }
 
-    /// Resumes the awaiting continuation exactly once.
+    /// Ends the seam (if this speaker opened it) and resumes the
+    /// awaiting continuation exactly once.
     private func settleSpeech() {
+        if seamOpen {
+            seamOpen = false
+            ResponsePlaybackModeSeam.end()
+        }
         if let cont = currentContinuation {
             currentContinuation = nil
             cont.resume()
@@ -744,6 +757,11 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
     private var currentContinuation: CheckedContinuation<Void, Never>?
     private var generationTask: Task<URL?, Never>?
     private var cancelled = false
+    /// [MODE-ONLY-LOUD] True between this speaker's own seam
+    /// begin/end — `cancel()` ends the seam ONLY when this speaker
+    /// opened it (a cancel while synthesis is in flight must not
+    /// consume a concurrent playback's begin).
+    private var playbackSeamOpen = false
     /// [AUDIO-REACTIVE-HERO] (2026-10-14) The hero's live level feed
     /// (see AudioVisualization.swift). Injected post-init by the
     /// coordinator (the `wakeAcknowledger` pattern — the speaker exists
@@ -975,6 +993,10 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
         engine.cancelSynthesis()
         player?.stop()
         player = nil
+        if playbackSeamOpen {
+            playbackSeamOpen = false
+            ResponsePlaybackModeSeam.end()
+        }
         // [AUDIO-REACTIVE-HERO] A cancelled reply ends its meter epoch on
         // the same path as a settled one (idempotent with settlePlayback).
         audioVisualization?.speakerEnded()
@@ -1045,10 +1067,15 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
                 visualization.speakerStarted(source: PiperPlaybackLevelSource(
                     player: player, playbackURL: playbackURL))
             }
-            // [MIC-CONTINUITY] (2026-10-14) No playback seam — the reply
-            // plays on the capture preset so the mic never closes and
-            // listening resumes the moment playback ends (see the
-            // AckFastLane [ACK-MIC-CONTINUITY] sibling).
+            // [MODE-ONLY-LOUD] (2026-10-14) The seam is BACK — but it is
+            // now a session MODE switch (.spokenAudio → .voicePrompt),
+            // never a category change: the always-on input node locks
+            // the session to .playAndRecord on iOS 26/27, so the mode is
+            // the only loudness lever that exists, and a mode change
+            // never closes the mic — the MIC-CONTINUITY speak→listen
+            // guarantee is untouched (no deactivation, no engine stop).
+            ResponsePlaybackModeSeam.begin()
+            playbackSeamOpen = true
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                 currentContinuation = cont
                 // play() can return false (broken file, session race):
@@ -1101,6 +1128,10 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
     }
 
     private func settlePlayback() {
+        if playbackSeamOpen {
+            playbackSeamOpen = false
+            ResponsePlaybackModeSeam.end()
+        }
         // [AUDIO-REACTIVE-HERO] Playback over (finished, failed, or
         // cancelled): the hero's meter lets its last REAL readings fall
         // to rest (ballistic release — see AudioLevelPublisher).

@@ -24,6 +24,11 @@ protocol AudioSessionControlling: AnyObject {
                      options: AVAudioSession.CategoryOptions) throws
     func setActive(_ active: Bool,
                    options: AVAudioSession.SetActiveOptions) throws
+    /// [MODE-ONLY-LOUD] Switches the session MODE in place (category and
+    /// options untouched) — the response-playback seam's only lever. A
+    /// mode change never affects input availability, so the
+    /// mic-continuity property holds.
+    func setMode(_ mode: AVAudioSession.Mode) throws
     /// Enables/disables Voice Processing I/O on the engine's input node
     /// (AVAudioIONode.setVoiceProcessingEnabled — iOS 13+; only while the
     /// engine is stopped, never in manual rendering mode). Throws when
@@ -43,6 +48,8 @@ extension AudioSessionControlling {
     /// Default no-op — fakes and non-engine configurations inherit the
     /// pre-seam behavior without change.
     func setEngineRunning(_ running: Bool) throws {}
+    /// Default no-op for the same reason.
+    func setMode(_ mode: AVAudioSession.Mode) throws {}
 }
 
 enum AudioSessionControllingError: Error {
@@ -104,6 +111,10 @@ private final class SystemAudioSessionController: AudioSessionControlling {
     func setActive(_ active: Bool,
                    options: AVAudioSession.SetActiveOptions) throws {
         try session.setActive(active, options: options)
+    }
+
+    func setMode(_ mode: AVAudioSession.Mode) throws {
+        try session.setMode(mode)
     }
 
     func setEngineRunning(_ running: Bool) throws {
@@ -221,104 +232,70 @@ final class AudioSessionManager {
     // speaker nests begin/end, and only the OUTERMOST end restores the
     // capture preset.
 
+    /// [MODE-ONLY-LOUD] (2026-10-14) The response-playback seam's ONE
+    /// lever: a session MODE change, never a category change.
+    ///
+    /// Field data (iOS 26.6.2 beta AND iOS 27.0.1 — released): the
+    /// always-on pipeline holds the input node in the audio graph, which
+    /// locks the session to `.playAndRecord`; `setCategory` to ANY media
+    /// category returns paramErr (-50) even with the engine stopped and
+    /// the session inactive (the simulator, with its virtual input,
+    /// accepts the same calls). The media-volume lever that exists for
+    /// exactly this shape is Apple's SPOKEN-audio MODES — `.spokenAudio`
+    /// (the pre-iOS-17 Siri mode) falling back to `.voicePrompt` — which
+    /// change playback processing without touching the category, the
+    /// input, or the engine: the MIC-CONTINUITY speak→listen guarantee
+    /// is untouched.
+    ///
+    /// Depth-counted, not stacked: Piper falling back to the system
+    /// speaker nests begin/end, and only the OUTERMOST end restores the
+    /// capture mode.
+
     private var playbackModeDepth = 0
 
-    /// [LOUD-TTS-CATEGORY] One media-volume candidate, with the state
-    /// token that identifies it in console events.
-    private struct PlaybackCategoryCandidate {
-        let state: String
-        let category: AVAudioSession.Category
-        let mode: AVAudioSession.Mode
-        let options: AVAudioSession.CategoryOptions
+    /// The mode the active capture preset uses — the value playback
+    /// restores to.
+    private var captureMode: AVAudioSession.Mode {
+        voiceProcessingEnabled ? Self.voiceProcessingMode : Self.measurementMode
     }
-
-    /// The loud playback category chain in preference order — the bell's
-    /// exact config first (`TimerAlarmBellPlayer`, the app's
-    /// proven-loud path), then the other media-volume-scale categories.
-    /// All three play at media gain staging (the thing that makes other
-    /// apps loud); Anzaan's iOS 26 refuses `.playback` outright, so the
-    /// chain walks them until the OS accepts one.
-    private static let playbackCategoryChain: [PlaybackCategoryCandidate] = [
-        .init(state: "playback", category: .playback, mode: .default,
-              options: [.duckOthers, .defaultToSpeaker]),
-        .init(state: "soloAmbient", category: .soloAmbient, mode: .default,
-              options: [.duckOthers, .defaultToSpeaker]),
-        .init(state: "ambient", category: .ambient, mode: .default,
-              options: [.duckOthers, .defaultToSpeaker]),
-    ]
 
     func beginResponsePlayback() {
         if playbackModeDepth == 0 {
-            switchToPlaybackCategory()
+            do {
+                try session.setMode(.spokenAudio)
+                emit(eventType: "audio_response_playback", outcome: "began",
+                     metadata: ["state": "spokenAudio"])
+            } catch {
+                if #available(iOS 17.0, *) {
+                    do {
+                        try session.setMode(.voicePrompt)
+                        emit(eventType: "audio_response_playback",
+                             outcome: "began",
+                             metadata: ["state": "voicePrompt"])
+                        return
+                    } catch {
+                        emitPlaybackFailure(step: "mode", error: error)
+                    }
+                } else {
+                    emitPlaybackFailure(step: "mode", error: error)
+                }
+            }
         }
         playbackModeDepth += 1
     }
 
-    /// The bell-config switch, one step at a time so a failure says
-    /// WHICH step — field history: setCategory on an ACTIVE session
-    /// threw NSOSStatusErrorDomain on Anzaan (iOS 26, 2026-10-14), and
-    /// the deactivate-first cycle under a RUNNING engine left the next
-    /// turn's capture dead (whisperkit_stt samples=0). The engine stops
-    /// FIRST — a live input tap is what the category change refuses to
-    /// service — and every failure path rearms it (the mic pipeline is
-    /// the invariant; no path may leave it stopped or inactive).
-    ///
-    /// Category candidates: Anzaan's iOS 26 REFUSES setCategory(.playback)
-    /// outright (step="category" in the field log, even with the engine
-    /// stopped and the session inactive — the simulator accepts it).
-    /// The chain therefore walks the media-volume-scale categories —
-    /// all three play at media gain staging, the thing that makes other
-    /// apps loud — and the first one the OS accepts wins. All refused →
-    /// rearm + failed (the reply plays at the old quiet staging).
-    private func switchToPlaybackCategory() {
+    func endResponsePlayback() {
+        guard playbackModeDepth > 0 else { return }
+        playbackModeDepth -= 1
+        guard playbackModeDepth == 0 else { return }
         do {
-            try session.setEngineRunning(false)
+            try session.setMode(captureMode)
+            emit(eventType: "audio_response_playback", outcome: "restored",
+                 metadata: ["state": captureMode.rawValue])
         } catch {
-            emitPlaybackFailure(step: "engine_stop", error: error)
-            return
+            emitPlaybackFailure(step: "mode_restore", error: error,
+                                outcome: "restore_failed")
         }
-        // TEMPORARY race probe (2026-10-14): Anzaan returns paramErr
-        // (-50) for every media category immediately after engine.stop().
-        // Give the IO teardown time to finish — if the categories then
-        // succeed, the failure is a stop→setCategory race, and the
-        // permanent fix is a proper teardown wait instead of a sleep.
-        Thread.sleep(forTimeInterval: 0.2)
-        do {
-            try session.setActive(false, options: [.notifyOthersOnDeactivation])
-        } catch {
-            emitPlaybackFailure(step: "deactivate", error: error)
-            rearmCaptureSession()
-            return
-        }
-        for candidate in Self.playbackCategoryChain {
-            do {
-                try session.setCategory(candidate.category,
-                                        mode: candidate.mode,
-                                        options: candidate.options)
-                try session.setActive(true, options: [])
-                emit(eventType: "audio_response_playback", outcome: "began",
-                     metadata: ["state": candidate.state])
-                return
-            } catch {
-                // Temporary field-diagnostic print (2026-10-14): the
-                // console bus redacts errorCode; the raw OSStatus pins
-                // the refusal reason for the upstream iOS 26 report.
-                print("[audio_session] playback switch candidate \(candidate.state) "
-                      + "failed: \((error as NSError).domain) "
-                      + "\(String((error as NSError).code))")
-                emitPlaybackFailure(step: "category_\(candidate.state)",
-                                    error: error)
-            }
-        }
-        rearmCaptureSession()
-    }
-
-    /// Failure recovery for the playback switch: reactivate the session
-    /// and restart the engine — a failed switch must cost the reply's
-    /// loudness, never the mic.
-    private func rearmCaptureSession() {
-        try? session.setActive(true, options: [])
-        try? session.setEngineRunning(true)
     }
 
     private func emitPlaybackFailure(step: String, error: Error,
@@ -334,62 +311,6 @@ final class AudioSessionManager {
              metadata: ["state": step])
     }
 
-    func endResponsePlayback() {
-        guard playbackModeDepth > 0 else { return }
-        playbackModeDepth -= 1
-        guard playbackModeDepth == 0 else { return }
-        restoreCapturePreset()
-        emit(eventType: "audio_response_playback", outcome: "restored")
-    }
-
-    /// Re-arms the active capture preset after a reply, in place — the
-    /// session ends active (deactivating it would strand the voice
-    /// pipeline's engine). Same active-session rule as begin: deactivate
-    /// first, then configure. The VPIO branch re-runs the full
-    /// activate-time sequence (category → node enable, with its honest
-    /// measurement fallback) because the node's voice-processing flag is
-    /// not guaranteed to survive the category round-trip.
-    private func restoreCapturePreset() {
-        do {
-            try session.setActive(false, options: [.notifyOthersOnDeactivation])
-        } catch {
-            emitPlaybackFailure(step: "restore_deactivate", error: error,
-                                outcome: "restore_failed")
-            try? session.setEngineRunning(true)
-            return
-        }
-        if voiceProcessingEnabled {
-            do {
-                // Re-runs the full activate-time sequence (category →
-                // node enable, honest measurement fallback) because the
-                // node's voice-processing flag is not guaranteed to
-                // survive the category round-trip. The engine is still
-                // stopped here — VPIO enable requires it.
-                try configureVoiceProcessingPreset()
-            } catch {
-                emitPlaybackFailure(step: "restore_vpio", error: error,
-                                    outcome: "restore_failed")
-            }
-        } else {
-            do {
-                try session.setCategory(Self.measurementCategory,
-                                        mode: Self.measurementMode,
-                                        options: Self.measurementOptions)
-            } catch {
-                emitPlaybackFailure(step: "restore_category", error: error,
-                                    outcome: "restore_failed")
-            }
-        }
-        // Activate (idempotent — the VPIO path already did), then bring
-        // the engine back LAST, once the capture category is in place.
-        try? session.setActive(true, options: [.notifyOthersOnDeactivation])
-        do {
-            try session.setEngineRunning(true)
-        } catch {
-            emitPlaybackFailure(step: "engine_start", error: error,
-                                outcome: "restore_failed")
-        }
-    }
 
     /// Today's (pre-A/B) session configuration — `.measurement` mode.
     private static let measurementCategory: AVAudioSession.Category = .playAndRecord
