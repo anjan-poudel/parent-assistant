@@ -261,6 +261,14 @@ struct AudioLevelAnalyzer {
     var envelopeSmoothing: AudioLevelSmoothing = .envelope
     var bandSmoothing: AudioLevelSmoothing = .bands
 
+    /// Re-seed with a caller's current display levels — the release tail
+    /// borrows the live readings so the bars fall from where they were
+    /// instead of snapping. `levels` is private(set), so the seed is a
+    /// method, not an assignment from outside the struct.
+    mutating func seed(_ newLevels: AudioLevels) {
+        levels = newLevels
+    }
+
     /// Raw physical frame → display targets → smoothed levels.
     mutating func update(raw frame: AudioLevelFrame, dt: TimeInterval) -> AudioLevels {
         let mapped = Self.mapped(frame)
@@ -677,7 +685,7 @@ final class AudioLevelPublisher: ObservableObject {
     /// keeps rendering the fall for the ~300 ms it lasts.
     private func beginReleaseTail() {
         guard !captureActiveMain, !speakerActive else { return }
-        tailAnalyzer.levels = currentLevels()
+        tailAnalyzer.seed(currentLevels())
         tailActive = !tailAnalyzer.levels.isAtRest
         if tailActive {
             lastDriverTick = CFAbsoluteTimeGetCurrent()
