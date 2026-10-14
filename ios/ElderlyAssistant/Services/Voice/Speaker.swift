@@ -53,16 +53,11 @@ enum VoiceOutputVolume {
     /// resets every user's setting to 100 %.
     static let defaultsKey = "voice.outputVolumePercent"
     /// [VOLUME-DEFAULT] (owner field verdict 2026-10-14): the shipped
-    /// default is the BOOST — elderly users must get loud replies out of
-    /// the box. The category-switch loud mode is dormant (MIC-CONTINUITY
-    /// plays replies on the capture preset) and iOS 26 on the device
-    /// refuses the media categories anyway, so the sample gain is the
-    /// loudness lever that works everywhere.
-    static let defaultPercent = 150
-    /// The no-processing reference: 100 % plays the raw file (the
-    /// loudness the app originally shipped with) — the passthrough keys
-    /// on THIS, not on the default, so the default still gets the boost.
-    static let rawReferencePercent = 100
+    /// default IS the loud baseline — with the [VOLUME-BASELINE] fold,
+    /// 100 % carries the 3× body gain the owner validated at the old
+    /// 300 %. Elderly users get loud replies out of the box at the
+    /// number they expect to be "normal".
+    static let defaultPercent = 100
     static let minimumPercent = 50
     static let maximumPercent = 300
     static let stepPercent = 10
@@ -97,8 +92,10 @@ enum VoiceOutputVolume {
 /// [VOLUME-BOOST] The playback gain + soft-knee limiter for one spoken
 /// reply.
 ///
-/// Gain — linear factor = percent / 100, i.e. 0.5× … 2.0×
-/// (−6.0 dB … +6.0 dB). It is applied to the SAMPLES of the reply WAV
+/// Gain — linear factor = percent / 100 × 3 ([VOLUME-BASELINE]: the
+/// owner-validated loudness folded into the 100 % baseline), i.e.
+/// 1.5× … 9.0× (+3.5 dB … +19.1 dB). It is applied to the SAMPLES of
+/// the reply WAV
 /// that is about to play — never to the shared audio session, never to a
 /// global/system volume — so no other audio path in the app can change
 /// because of it.
@@ -118,12 +115,15 @@ enum VoiceOutputVolume {
 /// quieter than other apps even at the top of the range). Speech is
 /// low-RMS with occasional peaks, so the knee gives the BODY of the
 /// speech the full requested gain while the loudest moments compress
-/// smoothly toward the ceiling instead of clipping. Attenuation
-/// (≤ 100 %) stays pure linear: a quiet room is turned down, never
-/// compressed.
+/// smoothly toward the ceiling instead of clipping. The gain ≤ 1
+/// linear branch remains in the transfer (direct callers and tests);
+/// the SLIDER no longer reaches it — [VOLUME-BASELINE] 50 % is
+/// "softer than 100 %", not attenuation.
 ///
-/// Ceiling = −1 dBFS (≈ 0.891 linear), knee = −12 dBFS (≈ 0.251
-/// linear). tanh is smooth (derivative 1 at the knee), so the
+/// Ceiling = −1 dBFS (≈ 0.891 linear), knee = −15 dBFS (≈ 0.178
+/// linear; −12 compressed too much of the speech body — the boost
+/// must lift the BODY, which carries intelligibility). tanh is
+/// smooth (derivative 1 at the knee), so the
 /// compression onset has no audible corner, and |out| approaches the
 /// ceiling asymptotically without ever reaching it. One transfer for
 /// every channel keeps the stereo image unshifted.
@@ -162,12 +162,18 @@ enum VoiceOutputGain {
 
     /// Percent → linear multiplier. Clamped first: the transfer must
     /// never see an out-of-range gain.
+    /// [VOLUME-BASELINE] (owner verdict 2026-10-14) The scale is folded
+    /// so 100 % delivers the loudness the owner validated at the old
+    /// 300 %: gain = percent/100 × 3. 100 % = 3.0× (the loud baseline),
+    /// 300 % = 9.0× (the knee saturates it into maximum density),
+    /// 50 % = 1.5× — the range no longer attenuates below the raw file;
+    /// the quiet-room use is "softer than 100 %", not "below raw".
     static func linearFactor(percent: Int) -> Float {
-        Float(VoiceOutputVolume.clamp(percent)) / 100
+        Float(VoiceOutputVolume.clamp(percent)) / 100 * 3
     }
 
     /// Percent → dB, for logs and diagnostics (the DSP uses the linear
-    /// form). 100 % = 0 dB.
+    /// form). 100 % = +9.5 dB (the [VOLUME-BASELINE] loud default).
     static func decibels(percent: Int) -> Float {
         20 * log10f(linearFactor(percent: percent))
     }
@@ -1118,7 +1124,6 @@ final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
         // quiet replies at a 200 % setting — pin down the effective
         // percent and the gain actually applied, then remove.
         print("[speaker] volume percent=\(percent) linear=\(VoiceOutputGain.linearFactor(percent: percent))")
-        guard percent != VoiceOutputVolume.rawReferencePercent else { return wav }
         do {
             return try SpokenReplyGainProcessor.playbackURL(for: wav, percent: percent)
         } catch {
