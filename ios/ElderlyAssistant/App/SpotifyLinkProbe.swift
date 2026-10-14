@@ -5,14 +5,15 @@ import Foundation
 /// on-device taps (the `MessengerProbe` precedent). Inert without an
 /// argument; DEBUG-only. Remove with the root-cause fix.
 ///
-/// `-spotifyLink` runs the normal path (system session, Safari fallback);
-/// `-spotifyLinkSafari` drives the in-app Safari seam directly — the path
-/// the device takes after the iOS 27.0.1 `start()` refusal.
+/// `-spotifyLink` runs the normal path (system session, default-browser
+/// fallback); `-spotifyLinkExternal` drives the default-browser seam
+/// directly — the path the device takes after the iOS 27.0.1 `start()`
+/// refusal.
 enum SpotifyLinkProbe {
 
     static func runIfRequested(on coordinator: AppCoordinator) {
         let arguments = ProcessInfo.processInfo.arguments
-        let mode: Mode = arguments.contains("-spotifyLinkSafari") ? .safari
+        let mode: Mode = arguments.contains("-spotifyLinkExternal") ? .external
             : arguments.contains("-spotifyLink") ? .normal
             : .none
         guard mode != .none else { return }
@@ -28,8 +29,8 @@ enum SpotifyLinkProbe {
                 return
             }
             do {
-                let seam: SpotifyAuthSession = mode == .safari
-                    ? SafariSpotifyAuthSession()
+                let seam: SpotifyAuthSession = mode == .external
+                    ? ExternalBrowserSpotifyAuthSession()
                     : ASWebSpotifyAuthSession()
                 let callback = try await seam.authorize(url: url,
                                                         callbackURLScheme: SpotifyAuthFlow.callbackScheme)
@@ -40,5 +41,5 @@ enum SpotifyLinkProbe {
         }
     }
 
-    private enum Mode: Equatable { case none, normal, safari }
+    private enum Mode: Equatable { case none, normal, external }
 }
