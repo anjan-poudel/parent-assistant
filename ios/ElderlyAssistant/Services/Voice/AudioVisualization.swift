@@ -660,8 +660,11 @@ final class AudioLevelPublisher: ObservableObject {
         micLock.lock()
         guard captureActive else { micLock.unlock(); return }
         if !micFFTAttempted {
-            // Thread-confined to the processing queue — the same doctrine
-            // SpectralGateCore.FFT documents for the denoiser's instance.
+            // [VAD-CUTOFF-FIX] Thread-confined to the visualization queue
+            // now (VoicePipeline.feedVisualization dispatches here) — the
+            // FFT must NEVER run on the VAD's processing queue: under
+            // load it delayed VAD frames and truncated speech mid-
+            // sentence (owner report).
             micFFT = SpectralGateCore.FFT(log2n: 9)
             micFFTAttempted = true
         }
