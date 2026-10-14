@@ -84,7 +84,9 @@ final class MigratingEncryptedStorage: EncryptedLocalStorage {
         }
     }
 
-    func read<T: Decodable>(key: String, type: T.Type) -> Result<T, StorageError> {
+    // Codable, not Decodable: the reverse-migration below may WRITE
+    // the value it reads, and the keychain write requires Encodable.
+    func read<T: Codable>(key: String, type: T.Type) -> Result<T, StorageError> {
         guard StoragePlacementPolicy.migratesToFile(key) else {
             // [SETTINGS-SURVIVAL] The key is keychain-resident, but a
             // value written before the placement change may still live in
