@@ -332,6 +332,12 @@ private final class LiveSystemWebAuthSession: SystemWebAuthSession {
         session = ASWebAuthenticationSession(url: url,
                                              callbackURLScheme: callbackURLScheme,
                                              completionHandler: completion)
+        // [FIX 2026-10-14] The ephemeral session takes a different
+        // presentation path inside the system; on iOS 26.6.2 the default
+        // path refuses `start()` (presentationFailed(0) with a perfect
+        // window state). The ephemeral sheet shares no cookies — the
+        // household logs in once per link, so nothing is lost.
+        session.prefersEphemeralWebBrowserSession = true
     }
 
     var presentationContextProvider: ASWebAuthenticationPresentationContextProviding? {
