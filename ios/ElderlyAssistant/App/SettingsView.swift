@@ -990,6 +990,16 @@ struct SpotifySettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 statusCard
 
+                // [DIAGNOSTIC 2026-10-14 — temporary] Surface the typed link
+                // failure on the card so the device test can read it without
+                // a console attach (the print-only event died with a jetsam
+                // kill). Remove with the presentation root-cause fix.
+                if case .linkFailed(let error) = session.status {
+                    Text("debug: \(Self.linkErrorName(error))")
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
+                }
+
                 // FR-SP-016's visible half: the M-2 amended disclosure
                 // (the copy T-123's obligation 7 is checked against).
                 Text("spotifySettings.privacy")
@@ -1083,6 +1093,29 @@ struct SpotifySettingsView: View {
         .disabled(!leafState.actionEnabled)
         .accessibilityLabel(Text(LocalizedStringKey(leafState.actionKey)))
         .accessibilityIdentifier("settings.spotify.action")
+    }
+
+    // [DIAGNOSTIC 2026-10-14 — temporary] The typed error as one line:
+    // content-free by construction (case name + numeric/registry code
+    // only — no token, code, URL or body text).
+    private static func linkErrorName(_ error: SpotifyAuthError) -> String {
+        switch error {
+        case .notConfigured: return "notConfigured"
+        case .noPresenter: return "noPresenter"
+        case .userCancelled: return "userCancelled"
+        case .redirectMismatch: return "redirectMismatch"
+        case .stateMismatch: return "stateMismatch"
+        case .providerError(let code): return "providerError(\(code))"
+        case .exchangeFailed(let status): return "exchangeFailed(\(status))"
+        case .malformedResponse: return "malformedResponse"
+        case .verificationFailed(let status): return "verificationFailed(\(status))"
+        case .missingScopes: return "missingScopes"
+        case .refreshFailed(let status): return "refreshFailed(\(status))"
+        case .revoked: return "revoked"
+        case .storageFailure: return "storageFailure"
+        case .networkUnavailable: return "networkUnavailable"
+        case .presentationFailed(let code): return "presentationFailed(\(code))"
+        }
     }
 }
 

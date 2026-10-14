@@ -555,8 +555,15 @@ final class SpotifyAccountSession: ObservableObject {
                  errorCode: Self.errorCodeName(error))
             return .cancelled
         }
+        // [DIAGNOSTIC 2026-10-10] Temporary: append the numeric
+        // presentation code so the device log distinguishes
+        // start()-refused (0) from presentationContextNotProvided (2) /
+        // presentationContextInvalid (3). Remove once the failed link
+        // presentation is root-caused.
+        var code = Self.errorCodeName(error)
+        if case .presentationFailed(let numeric) = error { code += "(\(numeric))" }
         emit(eventType: "spotify_link", outcome: outcome ?? "failed",
-             errorCode: Self.errorCodeName(error))
+             errorCode: code)
         return .failed(error)
     }
 
