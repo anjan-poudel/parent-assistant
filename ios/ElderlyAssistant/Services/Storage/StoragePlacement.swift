@@ -59,12 +59,13 @@ enum StoragePlacementPolicy {
         // [SETTINGS-SURVIVAL] (2026-10-14, owner invariant: "settings
         // should be invariants of all updates — even if you uninstall,
         // still keep the settings") The user profile (the interview data
-        // — name, address-as, language, relationship) and the survival
-        // snapshot of user-set preferences. Keychain-resident because
-        // the Keychain is the ONE store the OS keeps after an app
-        // uninstall; the container is not.
+        // — name, address-as, language, relationship). Keychain-resident
+        // because the Keychain is the ONE store the OS keeps after an
+        // app uninstall; the container is not. The user-set scalar
+        // preferences live in `SettingsPersistence` (its own keychain
+        // service) — the snapshot-blob follow-up was folded into that
+        // single mechanism and removed.
         "user.profile",
-        "settings.survival",
     ]
 
     static func placement(for key: String) -> StoragePlacement {

@@ -43,7 +43,13 @@ final class StoragePlacementTests: XCTestCase {
         // conscious edit to this list.
         XCTAssertEqual(StoragePlacementPolicy.keychainResidentKeys,
                        ["gemini.apiKey", "search.apiKey", "search.engineId",
-                        "youtube.apiKey", "gemini.model", "spotify.session"])
+                        "youtube.apiKey", "gemini.model", "spotify.session",
+                        // [SETTINGS-SURVIVAL] The interview profile survives
+                        // uninstalls; the scalar preferences live in
+                        // SettingsPersistence's own keychain service (the
+                        // snapshot-blob key was folded away — this list is
+                        // the placement surface only).
+                        "user.profile"])
     }
 
     // MARK: - What moves to encrypted files
