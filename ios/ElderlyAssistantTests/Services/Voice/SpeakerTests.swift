@@ -35,11 +35,9 @@ final class SpeakerTests: XCTestCase {
     }
 
     func testPiperSpeakerCancelDoesNotEndASeamItNeverBegan() throws {
-        // [LOUD-TTS-CATEGORY] Seam balance: the ack fast lane may hold an
-        // open playback seam while Piper is still synthesizing. A cancel()
-        // [MIC-CONTINUITY] No speaker opens the playback seam anymore, so
-        // a cancel that never began playback can never touch the seam —
-        // the ack (and every other capture-preset audio) is untouched.
+        // [MIC-CONTINUITY-REGRESSION] A cancel that never began playback
+        // can never touch the seam — an outstanding begin from another
+        // speaker (the ack's, a nested reply's) must not be consumed.
         var begins = 0
         var ends = 0
         ResponsePlaybackModeSeam.begin = { begins += 1 }
@@ -68,6 +66,14 @@ final class SpeakerTests: XCTestCase {
     }
 
     // MARK: - [VOLUME-BOOST] Gain math (percent → linear factor)
+
+    /// [MIC-CONTINUITY-REGRESSION] The shipped default IS the loud
+    /// baseline (owner field verdict 2026-10-14: "that loudness at
+    /// 100 %"). A default drifting back to the pre-baseline quietness is
+    /// a loudness regression, not a neutral refactor.
+    func testShippedDefaultIsTheLoudBaseline() {
+        XCTAssertEqual(VoiceOutputVolume.defaultPercent, 100)
+    }
 
     func testGainFactorMapsPercentToLinearAndClampsFirst() {
         // [VOLUME-BASELINE] The fold: gain = percent/100 × 3 — 100 % is

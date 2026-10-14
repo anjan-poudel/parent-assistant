@@ -142,6 +142,36 @@ final class PiperVoiceSpeakerTests: XCTestCase {
         XCTAssertTrue(bus.emittedEvents.map(\.eventType).contains("speak"))
     }
 
+    // MARK: - [MIC-CONTINUITY-REGRESSION] playback seam balance
+
+    /// A successful reply playback opens the voice-reply seam EXACTLY
+    /// once and closes it EXACTLY once. This is the regression pin for
+    /// the cut-transcript saga: the seam contract changed twice on
+    /// 2026-10-14 (loud category switch → removed entirely → mode-only
+    /// switch), and each un-pinned change broke either the gap or the
+    /// loudness. Balance here + mode-only pin in AudioSessionPresetTests
+    /// + seam-free pin in AckFastLaneTests = the whole chain is pinned.
+    func testSuccessfulPlaybackBalancesTheSeamExactlyOnce() async throws {
+        try installFakeVoice(ModelCatalog.piperNepali)
+
+        let savedBegin = ResponsePlaybackModeSeam.begin
+        let savedEnd = ResponsePlaybackModeSeam.end
+        var begins = 0
+        var ends = 0
+        ResponsePlaybackModeSeam.begin = { begins += 1 }
+        ResponsePlaybackModeSeam.end = { ends += 1 }
+        defer {
+            ResponsePlaybackModeSeam.begin = savedBegin
+            ResponsePlaybackModeSeam.end = savedEnd
+        }
+
+        await speaker.speak("औषधि खानुहोस्", locale: Locale(identifier: "ne-NP"))
+
+        XCTAssertEqual(begins, 1, "one playback = exactly one seam begin")
+        XCTAssertEqual(ends, 1, "one playback = exactly one seam end — the "
+                       + "session is never left in the playback mode")
+    }
+
     // MARK: - [AUDIT-SPOKEN] speaker-boundary normalization seam
 
     /// The shared normalization pass runs INSIDE speak() — the one stop
