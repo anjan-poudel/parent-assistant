@@ -44,10 +44,10 @@ final class VADHangoverTrimTests: XCTestCase {
 
     func testAdaptiveWindowBeforeFirstPauseIsInitial() {
         var policy = AdaptiveEndpointPolicy.production
-        XCTAssertEqual(policy.effectiveWindowMs, 1200,
-                       "before any pause is observed the window is the generous initial value")
-        XCTAssertFalse(policy.shouldEnd(currentQuietMs: 1_199))
-        XCTAssertTrue(policy.shouldEnd(currentQuietMs: 1_200))
+        XCTAssertEqual(policy.effectiveWindowMs, 2800,
+                       "before any pause is observed the window is the full cap — the speaker always finishes")
+        XCTAssertFalse(policy.shouldEnd(currentQuietMs: 2_799))
+        XCTAssertTrue(policy.shouldEnd(currentQuietMs: 2_800))
     }
 
     func testAdaptiveWindowScalesWithTheSpeakersPauses() {
@@ -55,25 +55,27 @@ final class VADHangoverTrimTests: XCTestCase {
         // The speaker pauses 800 ms mid-thought, twice.
         policy.recordPause(800)
         policy.recordPause(800)
-        // p75 = 800 -> window = max(900, 800 x 1.6 = 1280) = 1280.
-        XCTAssertEqual(policy.effectiveWindowMs, 1280)
+        // p75 = 800 -> window = max(1800, 800 x 1.6 = 1280) = 1800
+        // (the raised floor).
+        XCTAssertEqual(policy.effectiveWindowMs, 1800)
         XCTAssertFalse(policy.shouldEnd(currentQuietMs: 1_000),
                        "a 1 s pause no longer ends the capture once the speaker is known to pause long")
-        XCTAssertTrue(policy.shouldEnd(currentQuietMs: 1_280))
+        XCTAssertFalse(policy.shouldEnd(currentQuietMs: 1_799))
+        XCTAssertTrue(policy.shouldEnd(currentQuietMs: 1_800))
     }
 
     func testAdaptiveWindowNeverFallsBelowFloor() {
         var policy = AdaptiveEndpointPolicy.production
         policy.recordPause(100)   // a fast speaker's short pauses
-        XCTAssertEqual(policy.effectiveWindowMs, 900,
-                       "the 900 ms floor still bounds a fast speaker's window")
+        XCTAssertEqual(policy.effectiveWindowMs, 1800,
+                       "the 1800 ms floor still bounds a fast speaker's window")
     }
 
     func testAdaptiveWindowCapsAtForceEnd() {
         var policy = AdaptiveEndpointPolicy.production
         policy.recordPause(2_500)
-        XCTAssertEqual(policy.effectiveWindowMs, 3_000,
-                       "the window never exceeds the force-end cap")
+        XCTAssertEqual(policy.effectiveWindowMs, 2_800,
+                       "the window caps just under the 3 s force end")
     }
 
     func testFixedPolicyIsTheOldFixedBehavior() {
@@ -87,8 +89,8 @@ final class VADHangoverTrimTests: XCTestCase {
         var policy = AdaptiveEndpointPolicy.production
         policy.recordPause(800)
         policy.resetForCapture()
-        XCTAssertEqual(policy.effectiveWindowMs, 1_200,
-                       "a new capture recalibrates from its own pauses")
+        XCTAssertEqual(policy.effectiveWindowMs, 2_800,
+                       "a new capture recalibrates from its own pauses — back to the full initial cap")
     }
 
     // MARK: - EnergyVAD end latency at the trimmed hangover
@@ -305,6 +307,26 @@ final class VADHangoverTrimTests: XCTestCase {
     // सम्झाउनु" — natural pauses of 0.7-1.2 s. The detector learns the
     // speaker's pause from the FIRST pause and never cuts the second.
 
+    /// The measured field case: the FIRST pause exceeds the old 1200 ms
+    /// initial window (the owner's cut at "७ बजे"). 2000 ms rides through
+    /// it, and the learned window covers every later pause.
+    func testFirstPauseUpToTwoSecondsIsProtected() {
+        let vad = EnergyVAD()
+        var ended = false
+        vad.onEndOfUtterance = { ended = true }
+
+        vad.start(policy: .production)
+        for f in frames(3_000, count: 8) { vad.process(f) }     // "मलाई भोलि बिहान ७ बजे"
+        for f in frames(0, count: 84) { vad.process(f) }        // ~2.69 s first breath
+        XCTAssertFalse(ended, "a 2.69 s first pause must not cut the capture")
+        for f in frames(3_000, count: 6) { vad.process(f) }     // "औषधि खान सम्झाउनु"
+        // The learned window is the full 2800 ms cap (the 2.69 s pause) —
+        // the final silence must exceed it: 90 frames = 2880 ms, still
+        // under the 3 s force end.
+        for f in frames(0, count: 90) { vad.process(f) }        // ~2.88 s final silence
+        XCTAssertTrue(ended, "the finished utterance still ends after the final silence")
+    }
+
     func testDeliberateSpeakerIsNeverCutAtTheirOwnPause() {
         let vad = EnergyVAD()
         var ended = false
@@ -318,9 +340,10 @@ final class VADHangoverTrimTests: XCTestCase {
         for f in frames(0, count: 30) { vad.process(f) }        // ~0.96 s pause — below the learned 1280 window
         XCTAssertFalse(ended, "the learned window rides through the second pause")
         for f in frames(3_000, count: 6) { vad.process(f) }     // "औषधि खान सम्झाउनु"
-        // The two pauses taught a 1536 ms window — the final silence must
-        // exceed it (52 frames = 1664 ms; still below the 3 s force end).
-        for f in frames(0, count: 52) { vad.process(f) }        // ~1.66 s final silence
+        // The two pauses taught a 1800 ms window (the raised floor) — the
+        // final silence must exceed it (60 frames = 1920 ms; still below
+        // the 3 s force end).
+        for f in frames(0, count: 60) { vad.process(f) }        // ~1.92 s final silence
         XCTAssertTrue(ended, "after the last word the capture ends within the learned window")
     }
 }

@@ -124,11 +124,17 @@ struct AdaptiveEndpointPolicy: Equatable {
         AdaptiveEndpointPolicy(floorMs: ms, scale: 1, capMs: ms, initialMs: ms)
     }
 
-    /// The production default: 900 ms floor (the 2026-09-07 field
-    /// value), 1.6x the speaker's p75 pause, capped at the 3 s
-    /// force-end, 1200 ms before the first pause is observed.
+    /// The production default — recalibrated on 2026-10-14 field
+    /// evidence: this household's mid-sentence pauses exceed 1.2 s (the
+    /// owner's phrase still cut at "७ बजे" with the adaptive build, at
+    /// the FIRST pause, before any learning). STARTING RULE: the
+    /// speaker finishes their sentence, period — the initial window is
+    /// the full cap (2800 ms, just under the 3 s force end), so any
+    /// pause under ~2.8 s rides through and only a real stop ends the
+    /// capture. The adaptive learning stays armed to tighten later for
+    /// fast speakers once the field confirms sentences finish.
     static let production = AdaptiveEndpointPolicy(
-        floorMs: 900, scale: 1.6, capMs: 3000, initialMs: 1200)
+        floorMs: 1800, scale: 1.6, capMs: 2800, initialMs: 2800)
 }
 
 /// Factory for the per-capture policy — the flag gate stays here so the
