@@ -23,6 +23,7 @@ Foundation group. First applies the review-l2 findings (F-1..F-7) and the securi
 - Fresh-worktree note: a new worktree needs the whisper medium ne model and the kws assets symlinked from the main checkout before a link can succeed; see the house build notes.
 - Dependency values are plain unit ids in both the table above and each section's Metadata. The coordinator file is the feature's serialization resource: every unit that names it as owned is ordered by file overlap (T-146 and T-147 here; T-148 through T-153 in later groups).
 - Requirement links climb two levels to the requirements folder, for example [FR-CDP-007](../../define-requirements/FR/FR-CDP-007-chain-preferred-secondary-phone.md).
+- Input discipline: the inputs of a unit are exactly the landed units named in its dependency line plus the design records; nothing is read across group boundaries without a declared edge.
 
 ## T-144: Design-record corrections (M-1a, M-2, V-1..V-5)
 

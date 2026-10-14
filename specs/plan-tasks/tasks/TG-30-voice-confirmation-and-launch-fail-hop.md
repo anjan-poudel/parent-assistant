@@ -21,6 +21,7 @@ The voice path of the feature: the settings primary becomes the resolver default
 - All three units own the coordinator file and are serialized by file overlap; the resolution suite is shared between T-149 and T-150 and is serialized by the same mechanism.
 - Scoped-suite gate and the pre-existing baseline note hold here as in TG-29. Fresh worktrees need the whisper model and kws symlinks before linking.
 - Announcement text composes from one source: fellBackFrom plus the routed channel. An empty provenance keeps the shipped prompt byte-identical; this is pinned by test, not by convention.
+- Input discipline: the inputs of a unit are exactly the landed units named in its dependency line plus the design records; nothing is read across group boundaries without a declared edge.
 
 ## T-148: Voice confirmation: chain-before-prompt and the disclosure clause
 

@@ -22,6 +22,7 @@ The tap and dial-back surfaces of the feature plus the settings screen that feed
 - The coordinator file is shared by T-152 and T-153 and is serialized by file overlap; T-151 owns the row view plus the resolution suite, and T-154 owns only the settings view and its suite, so both are file-disjoint from the coordinator chain.
 - Every announcement in this group is speech only; nothing here writes to logs beyond the shipped lanes. The tap announcement names the channel that actually opens, and the dial-back announcement names the channel actually dispatched.
 - Scoped-suite gate, baseline note and fresh-worktree symlink note hold as in TG-29.
+- Input discipline: the inputs of a unit are exactly the landed units named in its dependency line plus the design records; nothing is read across group boundaries without a declared edge.
 
 ## T-151: Tap rows: row channel state, announce and hop
 
