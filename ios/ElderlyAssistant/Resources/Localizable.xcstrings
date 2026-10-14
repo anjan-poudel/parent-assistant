@@ -6857,6 +6857,23 @@
         }
       }
     },
+    "feeds.readerTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full article"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पूरा लेख"
+          }
+        }
+      }
+    },
     "feeds.refresh": {
       "extractionState": "manual",
       "localizations": {

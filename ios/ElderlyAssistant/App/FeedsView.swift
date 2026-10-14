@@ -9,11 +9,14 @@ import AVKit
 /// Settings → Feeds.
 ///
 /// Per-card affordances (spec: ONE action per card, ≥44pt targets):
-/// - text card  → "Read aloud" (SpeakQueue via the coordinator's single
-///   speech path — the `AVSpeech`-free house rule);
-/// - image card → the image itself (async-loaded, no action);
+/// - text card  → the published photo (when the feed carries one), then
+///   "Translate", "Read aloud" and "Read full article" (SpeakQueue via
+///   the coordinator's single speech path — the `AVSpeech`-free house
+///   rule); tapping the news text itself opens the full-article reader;
+/// - image card → the photo; tapping it opens the same reader;
 /// - audio/video → "Play", which presents the `FeedMediaPlayerSheet`.
-/// Nothing autoplays — playback only ever starts from the user's tap.
+/// Nothing autoplays — playback only ever starts from the user's tap,
+/// and nothing is ever spoken until a read button is tapped.
 struct FeedsView: View {
     @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
@@ -22,6 +25,11 @@ struct FeedsView: View {
 
     /// The item whose play sheet is open (audio or video), nil = closed.
     @State private var playingItem: FeedItem?
+
+    /// The item whose full-article reader is open (news-feed-images task,
+    /// 2026-10-14), nil = closed. Set by tapping a text or image card's
+    /// news text — "tap news to read the news text full".
+    @State private var readingItem: FeedItem?
 
     /// Per-card toggle state (feed translation task, 2026-09-08): ids
     /// the user reverted to the ORIGINAL after a translation was shown —
@@ -42,6 +50,15 @@ struct FeedsView: View {
         .task { await coordinator.refreshFeedIfNeeded() }
         .sheet(item: $playingItem) { item in
             FeedMediaPlayerSheet(item: item)
+        }
+        // The tap-through reader (news-feed-images task, 2026-10-14).
+        // FULL-SCREEN, because the article is the whole task once opened
+        // — and the house leaf chrome (`LeafScreen`) gives it the same
+        // back chevron and Emergency icon as every other leaf, so
+        // leaving is a control the elder already knows. The play sheet
+        // stays a sheet: a video wants a stage, an article wants a page.
+        .fullScreenCover(item: $readingItem) { item in
+            FeedArticleReaderView(item: item)
         }
     }
 
@@ -183,14 +200,29 @@ struct FeedsView: View {
         }
     }
 
-    /// Text card: title, a few lines of summary, source + time caption,
-    /// and the card's actions — "Translate" (feed translation task),
-    /// "Read aloud" (SpeakQueue via the coordinator's canonical path, the
-    /// BriefingView precedent — no AVSpeech), and "Read full article"
-    /// (feeds readaloud task, 2026-09-19) when the source published a
-    /// body beyond the summary. The AI-translated marker shows only while
-    /// the translation is displayed; the "New" marker (feeds readaloud
-    /// task) shows until the item has been read aloud to the end.
+    /// Text card: the published photo (news-feed-images task, 2026-10-14)
+    /// when the feed carries one, title, a few lines of summary, source +
+    /// time caption, and the card's actions — "Translate" (feed
+    /// translation task), "Read aloud" (SpeakQueue via the coordinator's
+    /// canonical path, the BriefingView precedent — no AVSpeech), and
+    /// "Read full article" (feeds readaloud task, 2026-09-19) when the
+    /// source published a body beyond the summary. The AI-translated
+    /// marker shows only while the translation is displayed; the "New"
+    /// marker (feeds readaloud task) shows until the item has been read
+    /// aloud to the end.
+    ///
+    /// Tapping the card's NEWS TEXT — photo, markers, headline, summary,
+    /// caption — opens the full-article reader ("tap news to read the
+    /// news text full", news-feed-images task). The tap is scoped to
+    /// that glance area rather than the whole card on purpose: the three
+    /// buttons below stay siblings, not children, of the tappable view,
+    /// so a tap can never do two things at once — pressing "Read aloud"
+    /// reads, pressing the text opens the reader, with no gesture
+    /// arbitration to get wrong. VoiceOver: the glance combines into ONE
+    /// element carrying the card's text and the button trait, so a card
+    /// is a single swipe that announces the story and opens it on
+    /// double-tap; the action buttons remain their own elements after
+    /// it.
     ///
     /// The unread marker lives on TEXT cards only: reading aloud is the
     /// one thing that marks an item read, and text cards are the only
@@ -200,37 +232,45 @@ struct FeedsView: View {
     private func textCard(_ item: FeedItem) -> some View {
         let display = display(for: item)
         return VStack(alignment: .leading, spacing: 10) {
-            if display.isShowingTranslation || !coordinator.isFeedItemRead(item) {
-                HStack(spacing: 8) {
-                    if !coordinator.isFeedItemRead(item) {
-                        unreadMarker
-                    }
-                    if display.isShowingTranslation {
-                        translatedMarker
+            VStack(alignment: .leading, spacing: 10) {
+                FeedArticleImageView(urlString: item.imageURL)
+                if display.isShowingTranslation || !coordinator.isFeedItemRead(item) {
+                    HStack(spacing: 8) {
+                        if !coordinator.isFeedItemRead(item) {
+                            unreadMarker
+                        }
+                        if display.isShowingTranslation {
+                            translatedMarker
+                        }
                     }
                 }
-            }
-            Text(display.title)
-                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                .foregroundStyle(appearance.colors.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let summary = displaySummary(display) {
-                Text(summary)
-                    .font(.system(size: appearance.typography.captionPointSize))
+                Text(display.title)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
-                    // [AX-VIEWPORT] Four lines of caption text at
-                    // accessibility sizes is a fraction of the article —
-                    // the summary wraps fully there instead of stopping
-                    // mid-sentence. Standard sizes keep the 4-line cap.
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 4)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                if let summary = displaySummary(display) {
+                    Text(summary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textPrimary)
+                        // [AX-VIEWPORT] Four lines of caption text at
+                        // accessibility sizes is a fraction of the article —
+                        // the summary wraps fully there instead of stopping
+                        // mid-sentence. Standard sizes keep the 4-line cap.
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                captionRow(item)
+                if coordinator.isFeedItemTranslating(item), !display.hasTranslation {
+                    translatingCaption
+                } else if coordinator.feedTranslationFailed(for: item), !display.hasTranslation {
+                    translationUnavailableCaption
+                }
             }
-            captionRow(item)
-            if coordinator.isFeedItemTranslating(item), !display.hasTranslation {
-                translatingCaption
-            } else if coordinator.feedTranslationFailed(for: item), !display.hasTranslation {
-                translationUnavailableCaption
-            }
+            .contentShape(Rectangle())
+            .onTapGesture { openReader(item) }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { openReader(item) }
             HStack(spacing: 10) {
                 translateButton(item)
                 readAloudButton(item)
@@ -246,37 +286,20 @@ struct FeedsView: View {
         .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
-    /// Image card: the photo (async), then title + caption. No action —
-    /// the image IS the content.
+    /// Image card: the photo, then title + caption. The photo now loads
+    /// through the house downsampling cache (`FeedArticleImageView`,
+    /// news-feed-images task, 2026-10-14) in a fixed full-width band —
+    /// the old raw `AsyncImage` reserved 160pt for its placeholder and
+    /// then reflowed the card to the photo's natural height when it
+    /// landed, which this slot cannot do. The whole photo shows
+    /// (letterboxed): this card is where the elder comes to LOOK at the
+    /// picture, so cropping it would hide what the card promised.
+    ///
+    /// Tapping the card opens the full-article reader — the card has no
+    /// buttons, so the whole card is the target.
     private func imageCard(_ item: FeedItem) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let url = item.imageURL.flatMap(URL.init(string:)) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFit()
-                    case .empty:
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 160)
-                    case .failure:
-                        // Honest placeholder — the image failed to load,
-                        // the card still says what the item is.
-                        Image(systemName: "photo")
-                            .font(.system(size: 40))
-                            .foregroundStyle(appearance.colors.textSecondary)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 160)
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
-                .accessibilityHidden(true)
-            }
+            FeedArticleImageView(urlString: item.imageURL, fit: .fit)
             Text(item.title)
                 .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
@@ -285,6 +308,23 @@ struct FeedsView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
+        .contentShape(Rectangle())
+        .onTapGesture { openReader(item) }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { openReader(item) }
+    }
+
+    /// The card tap's one action (news-feed-images task, 2026-10-14):
+    /// open the full-article reader for `item`. Shared by the tap
+    /// gesture and the VoiceOver activation so both go through one path;
+    /// the light press confirmation is the house card-action feel
+    /// (`HapticsPolicy` withholds it wholesale under reduceMotion and
+    /// VoiceOver — for the latter, VoiceOver's own speech is the
+    /// confirmation).
+    private func openReader(_ item: FeedItem) {
+        Haptics.play(.tap)
+        readingItem = item
     }
 
     /// Audio/video card: kind badge, title, source caption, and two

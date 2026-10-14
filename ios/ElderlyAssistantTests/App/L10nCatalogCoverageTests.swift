@@ -177,8 +177,12 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// (the 18 design-l2 §16 entries plus `dialogue.correction.ask`, moved
     /// into the family block at this rebase). The dialogue family adds
     /// exactly its keys and removes none, so the total is pinned (the
-    /// Spotify-localisation suite's count discipline).
-    private static let dialogueBaselineKeyCount = 1_398
+    /// Spotify-localisation suite's count discipline). Re-measured at the
+    /// news-feed-images merge (2026-10-14): three non-dialogue keys landed
+    /// on master since the T-147 measurement (`launcher.chipCancel`,
+    /// `launcher.chipOpen`, `settings.gemini.change`), and that branch
+    /// adds `feeds.readerTitle` — total 1,421, so this baseline is 1,402.
+    private static let dialogueBaselineKeyCount = 1_402
 
     /// The design-l2 §16 draft copy, verbatim, both languages. The owner
     /// copy review is a later step recorded in the plan; this pin makes
@@ -462,8 +466,10 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// + 21 family-contacts). The calling family adds exactly its five keys
     /// and removes none, so the total is pinned at 1,415; the dialogue and
     /// family pins are rebased in the same merge (one rebase point per
-    /// merge, all three families accounted).
-    private static let callingBaselineKeyCount = 1_412
+    /// merge, all three families accounted). Re-measured at the
+    /// news-feed-images merge (2026-10-14): total 1,421 (three post-T-144
+    /// master keys plus `feeds.readerTitle`), so this baseline is 1,416.
+    private static let callingBaselineKeyCount = 1_416
 
     /// The authored copy, both languages. The design freezes the keys and
     /// the parameter contracts, not the wording (catalog-time copy), so
@@ -1010,8 +1016,10 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// calling + 21 family-contacts). The +21 delta is the constant, not
     /// the absolute; the absolute is re-measured per merge deliberately
     /// rather than guessed (TG-29 failure-path scenario: no stale pin, no
-    /// guessing).
-    private static let familyContactsBaselineKeyCount = 1_394
+    /// guessing). Re-measured at the news-feed-images merge (2026-10-14):
+    /// total 1,421 (three post-T-144 master keys plus
+    /// `feeds.readerTitle`), so this baseline is 1,398.
+    private static let familyContactsBaselineKeyCount = 1_398
 
     /// Scenario: All 21 keys exist in both languages — the behavioural
     /// half. Every key resolves through the shipped lproj bundles in both
