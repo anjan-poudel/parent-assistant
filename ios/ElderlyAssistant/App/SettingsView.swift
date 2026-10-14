@@ -6258,7 +6258,7 @@ struct TTSVoicesSettingsView: View {
         }
     }
 
-    // MARK: - [VOLUME-BOOST] Spoken-reply volume (50–200 %, default 100)
+    // MARK: - [VOLUME-BOOST] Spoken-reply volume (50–300 %, default 100 — the loud baseline)
 
     /// The one loudness control for the assistant's spoken replies. Two
     /// big tap targets in 10 % steps rather than a slider: a drag is the

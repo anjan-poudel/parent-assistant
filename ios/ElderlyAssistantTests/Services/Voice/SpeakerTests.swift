@@ -70,24 +70,26 @@ final class SpeakerTests: XCTestCase {
     // MARK: - [VOLUME-BOOST] Gain math (percent → linear factor)
 
     func testGainFactorMapsPercentToLinearAndClampsFirst() {
-        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 100), 1.0, accuracy: 0.0001)
-        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 150), 1.5, accuracy: 0.0001)
-        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 200), 2.0, accuracy: 0.0001)
-        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 50), 0.5, accuracy: 0.0001)
+        // [VOLUME-BASELINE] The fold: gain = percent/100 × 3 — 100 % is
+        // the loud baseline the owner validated at the old 300 %.
+        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 100), 3.0, accuracy: 0.0001)
+        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 150), 4.5, accuracy: 0.0001)
+        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 200), 6.0, accuracy: 0.0001)
+        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 50), 1.5, accuracy: 0.0001)
         // Out-of-range percentages clamp BEFORE the math: the transfer can
         // never see a gain the UI cannot produce.
-        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 1000), 3.0, accuracy: 0.0001)
-        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: -20), 0.5, accuracy: 0.0001)
+        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: 1000), 9.0, accuracy: 0.0001)
+        XCTAssertEqual(VoiceOutputGain.linearFactor(percent: -20), 1.5, accuracy: 0.0001)
     }
 
     func testGainDecibelFormMatchesTheLinearFactor() {
         // 100 % = 0 dB (the shipped loudness), 150 % ≈ +3.52 dB,
         // 200 % ≈ +6.02 dB, 50 % ≈ −6.02 dB — the honest "how much
         // louder" numbers.
-        XCTAssertEqual(VoiceOutputGain.decibels(percent: 100), 0, accuracy: 0.001)
-        XCTAssertEqual(VoiceOutputGain.decibels(percent: 150), 3.5218, accuracy: 0.01)
-        XCTAssertEqual(VoiceOutputGain.decibels(percent: 200), 6.0206, accuracy: 0.01)
-        XCTAssertEqual(VoiceOutputGain.decibels(percent: 50), -6.0206, accuracy: 0.01)
+        XCTAssertEqual(VoiceOutputGain.decibels(percent: 100), 9.5424, accuracy: 0.01)
+        XCTAssertEqual(VoiceOutputGain.decibels(percent: 150), 13.0643, accuracy: 0.01)
+        XCTAssertEqual(VoiceOutputGain.decibels(percent: 200), 15.5630, accuracy: 0.01)
+        XCTAssertEqual(VoiceOutputGain.decibels(percent: 50), 3.5218, accuracy: 0.01)
     }
 
     func testLimiterCeilingIsMinusOneDBFS() {
@@ -213,14 +215,15 @@ final class SpeakerTests: XCTestCase {
 
     // MARK: - [VOLUME-BOOST] File transform (gain applied before playback)
 
-    func testOneHundredPercentHandsTheFileStraightThrough() throws {
+    func testEverySettingProducesAGainedCopy() throws {
+        // [VOLUME-BASELINE] No percent maps to raw anymore — 100 % itself
+        // carries the 3× baseline, so every setting plays a processed copy.
         let wav = try writeGainTestWAV(peak: 0.9)
         defer { try? FileManager.default.removeItem(at: wav) }
 
-        // The shipped default is byte-identical to the pre-task path: no
-        // temp copy, no extra IO on the playback path.
-        XCTAssertEqual(try SpokenReplyGainProcessor.playbackURL(for: wav, percent: 100),
-                       wav)
+        let out = try SpokenReplyGainProcessor.playbackURL(for: wav, percent: 100)
+        defer { try? FileManager.default.removeItem(at: out) }
+        XCTAssertNotEqual(out, wav, "100 % is the loud baseline, not raw")
     }
 
     func testBoostedPlaybackWritesALimitedCopyAndLeavesTheSourceAlone() throws {
@@ -243,7 +246,10 @@ final class SpeakerTests: XCTestCase {
                                  "the copy can never exceed the −1 dBFS ceiling")
     }
 
-    func testDownwardSettingAttenuatesWithoutLimiting() throws {
+    func testLowestSettingStillBoostsBelowTheKneeSamples() throws {
+        // [VOLUME-BASELINE] The quiet-room half of the range is now
+        // "softer than 100 %", not attenuation: 50 % = 1.5× — below-knee
+        // samples get exactly that.
         let wav = try writeGainTestWAV(peak: 0.8)
         defer { try? FileManager.default.removeItem(at: wav) }
 
@@ -252,9 +258,7 @@ final class SpeakerTests: XCTestCase {
 
         let peak = peakOfWAV(at: out)
         XCTAssertGreaterThan(peak, 0, "the copy is real audio, not a silent file")
-        XCTAssertEqual(peak, 0.4, accuracy: 0.01,
-                       "50 % halves the file's own amplitude — the quiet-room half "
-                       + "of the range")
+        XCTAssertLessThanOrEqual(peak, VoiceOutputGain.ceilingLinear + 0.0001)
     }
 
     // MARK: - [VOLUME-BOOST] Scope: non-TTS playback is untouched

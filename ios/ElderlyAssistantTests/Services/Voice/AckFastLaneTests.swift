@@ -506,10 +506,10 @@ final class AckFastLaneTests: XCTestCase {
 
     // MARK: - [VOLUME-BOOST] The ack carries the reply volume
 
-    func testPlayerAtOneHundredPercentHandsTheCachedFileStraightThrough() throws {
-        // The shipped default: no temp copy, no extra IO — the fast lane's
-        // latency budget is untouched, and the file that plays IS the
-        // cached one.
+    func testPlayerProcessesTheAckAtEverySettingIncludingOneHundred() throws {
+        // [VOLUME-BASELINE] 100 % is the loud baseline (3× gain) — the
+        // ack is processed like every other setting; the cached slot is
+        // never rewritten, and the gained copy is cleaned up on settle.
         let bus = RecordingBus()
         var played: [URL] = []
         let player = AckFastLanePlayer(
@@ -523,10 +523,13 @@ final class AckFastLaneTests: XCTestCase {
         let cached = try writeTinyWAV("ack-volume-100.wav")
         try cache.store(wav: cached, variant: 1, spec: spec)
         let cachedURL = try XCTUnwrap(cache.wavURL(variant: 1, spec: spec))
+        let cachedBytes = try Data(contentsOf: cachedURL)
 
         XCTAssertTrue(player.playCachedAck(variant: 1, locale: ne))
-        XCTAssertEqual(played, [cachedURL],
-                       "100 % plays the cached slot itself — no processed copy")
+        XCTAssertNotEqual(played.first, cachedURL,
+                          "100 % plays a gained copy — the baseline applies")
+        XCTAssertEqual(try Data(contentsOf: cachedURL), cachedBytes,
+                       "the cache slot is shared with later turns — never rewritten")
 
         player.cancel()
     }
@@ -575,10 +578,10 @@ final class AckFastLaneTests: XCTestCase {
         try Data([0x00, 0x01, 0x02, 0x03]).write(to: notAudio)
         XCTAssertThrowsError(try SpokenReplyGainProcessor.playbackURL(for: notAudio,
                                                                       percent: 150))
-        XCTAssertEqual(try SpokenReplyGainProcessor.playbackURL(for: notAudio,
-                                                               percent: 100),
-                       notAudio,
-                       "100 % never opens the file, so it can never fail on it")
+        // [VOLUME-BASELINE] 100 % processes too (the 3× baseline) — the
+        // unreadable-file refusal applies at every setting.
+        XCTAssertThrowsError(try SpokenReplyGainProcessor.playbackURL(for: notAudio,
+                                                                      percent: 100))
     }
 
     // MARK: - Speaker warm seam

@@ -250,13 +250,13 @@ final class VoiceSettingsModelTests: XCTestCase {
 
     // MARK: - [VOLUME-BOOST] Spoken-reply volume (persistence + clamping)
 
-    func testVolumeDefaultsToOneFiftyWhenUnset() {
+    func testVolumeDefaultsToOneHundredWhenUnset() {
         XCTAssertNil(defaults.object(forKey: VoiceOutputVolume.defaultsKey),
                      "nothing is written until the user steps the control")
-        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 150,
-                       "the shipped default is the boost — elderly-first "
-                       + "loudness out of the box ([VOLUME-DEFAULT], "
-                       + "owner verdict 2026-10-14)")
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 100,
+                       "the shipped default is the loud baseline — "
+                       + "[VOLUME-BASELINE] folds the owner-validated "
+                       + "loudness into 100 % (2026-10-14)")
         XCTAssertEqual(VoiceOutputVolume.defaultsKey, "voice.outputVolumePercent",
                        "the persisted key is part of the contract — a rename "
                        + "silently resets every user's setting")
