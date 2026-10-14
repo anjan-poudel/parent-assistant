@@ -1,268 +1,46 @@
-# implement — running unit log (family-contacts-unify)
+# implement — running unit log (conversational-nepali-replies)
 
 Short per-unit summaries for the engine record (full notes per unit live in
 `specs/T-NNN-notes.md`).
 
-## T-145 — FamilyContact identity model and nicknames — DONE
+- **Description:** Implementation log for the unit-based `implement` task of the conversational-nepali-replies feature (worktree elderly-ai-assistant-conversational-nepali-replies, branch feat/conversational-nepali-replies). One section per unit, appended as waves complete.
 
-Commit 5914777e. Model: `nicknames: [String]` replaces the single nickname
-(no shim); new `SystemContactLink` struct; decoder per design §3.4 (presence
-wins, separate legacy-key container, corrupt link → nil, synthesized encoder
-kept); `normalizedNicknames` trim/drop/order; 64-char cap (F5).
-Compile-forced shared-file minimums (marked in code as T-156 debt):
-AppCoordinator add/update still take the single nickname for now;
-SettingsView loadDraft/save; ProfileInterviewSteps pass-through.
-Gate (run before the speed-mode directive): FamilyContactStoreTests 31/31,
-KinDesignationTests 4/4, whole-module build green, zero errors.
-Handoff: T-156 must widen the coordinator seam to `nicknames: [String]` +
-normalization, otherwise multi-nickname contacts lose entries through the
-interim single-field paths.
+## T-166 — Nepali chat style spec and its loader — DONE
 
-## T-147 — Frozen L10n keys + disclosure — DONE
+Wave 0. The single source of truth for Nepali conversation style plus its
+stdlib-only loader and executable drift check. Artifact
+`tools/train-intent/seeds/nepali-chat-style-spec`: sectioned text with prose
+rule text (byte-mirrorable) and JSON machine blocks; 10 required sections
+(register, particles, sentence_shape, small_talk, code_switch, ai_isms,
+persona_clause, rubric, guard_checks, coverage); style_spec_version 1;
+content sha256 recorded in the unit notes. Loader
+`tools/train-intent/src/style_spec.py`: typed accessors, no-default failures
+naming the missing section, version+sha256 evidence, executable consumer
+drift check with a documented marker contract, CLI exit 0/1/2, stdlib-only
+(proven under an isolated interpreter). Tests
+`tools/train-intent/tests/test_style_spec.py`: 42 tests, all OK (python3 -m
+unittest tests.test_style_spec). Recorded deviation: JSON machine blocks
+instead of a whole-file YAML document (the stdlib-only contract rules out
+PyYAML; JSON is a subset of YAML so the design intent holds). rubric and
+coverage are required sections beyond design section 6.1 because the
+acceptance criteria and T-178/T-181 cite them. Training-box (anjan-ubuntu)
+execution not performed here; owned by T-179/T-183. Full notes: the unit
+notes file in specs.
 
-Commit 4ffc9389. 21 keys en+ne at the design §7 placements (22-line span
-pin; the 3 pre-existing photo keys at 16-18); NSContactsUsageDescription
-replaced with the frozen write disclosure; L10nCatalogCoverageTests extended
-(coverage + span functions, 14 fixtures, verbatim copy table, the #16
-ASCII-exemption pin). Baseline re-measured: 1389 → 1410 (+21).
-Whole-module typecheck green (build-for-testing, exit 0). Scoped suite
-deferred to T-163 per speed mode. Open: T-144 merge must re-measure the
-absolute baseline; SpotifyLocalizationTests count pin pre-existing red at
-HEAD (untouched, flagged).
+## T-172 — CloudChatConsentGate: fail-closed consent record — DONE
 
-## T-148a — ContactsAccess .limited + identifier plumbing — DONE
-
-Commit d162aa16. ContactsAccess gains .limited + allowsReading + from(_:) as
-the single iOS-18 gate; access() delegates; AddressBookEntry.identifier
-plumbing (make default, CNContactIdentifierKey, allEntries pass-through).
-Compile-forced fallout: MissedCallContactResolver resolve gains the .limited
-readable arm (own file); ONE mechanical shared-file fix — wizard searchSection
-:2117 case .allowed, .limited (T-148b debt marked in code). New suite
-ContactsAccessTests (9 tests incl. the module-wide single-gate scan).
-Whole-module typecheck green (build-for-testing, exit 0, 0 errors). Scoped run
-deferred to T-163 per speed mode.
-
-## T-151 — FamilyContactIndex — DONE
-
-Commit 7b041b2d. Pure value type per design §1.2/§5.4: Entry set, multi-valued
-idsByNickname map, empty anchor, lookups; normalization via the existing
-NepaliTextNormalizer only (grapheme pin honored). New suite FamilyContactIndexTests
-(17 tests: O(1) map contract, 12x8 perf ceilings incl. 256-char F5 worst case,
-Devanagari positive pin, deliberate negative pin, canonical-variant unification,
-duplicate holders roster order, rebuild, empty parity, legacy payload decode).
-Whole-module build-for-testing green, 0 errors. Scoped run deferred to T-163.
-Not wired: coordinator publish (T-156), search tiers (T-152), resolver provider
-(T-153).
-
-## T-153 — ContactResolver nickname bands — DONE
-
-Commit 65f6fee9. indexProvider init param (nil = per-call build, test-parity);
-band ladder 1.00/0.90/0.85/0.80/0.75/0.60 with the strict < rival rule and
-tie-ambiguity unchanged; nearMiss extended over nickname spellings (exactly-one
-rule counts contacts). Tests 13 -> 37: the F2 consequence table (three
-at-margin decisive rows pinned at 0.15000000000000002, four sub-margin
-ambiguous), index-path parity, Devanagari grapheme pin, 12x8 <=20 ms ceiling
-(measured ~1.7-2.4 ms in the pre-commit harness). Whole-module build green,
-0 errors. Scoped run deferred; handoff: T-156 passes the published index at
-the coordinator construction site.
-
-## T-154 — SystemContactPhotoWriter — DONE
-
-Commit 307928d0. The app's first CNSaveRequest surface, confined to one file:
-exact §1.4 attempt sequence (attempt-time fingerprint, checked mutableCopy as?,
-update-only request, do/catch, read-back byte equality with unverifiable never
-success); closed §5.2 event vocabulary; FamilyPhotoEditorState.from exhaustive
-no-default; six internal decisions recorded in the unit notes. Suite: 37 tests
-incl. the F1 source-level pins (only imageData assigned, update-only request,
-ten-marker order pin) and module-wide FeatureSourceScan confinement scans; a
-pre-commit dry-run caught and fixed two defects in the scan tests themselves.
-Whole-module build green, 0 errors. Scoped run deferred. Handoffs: T-155
-FEATURE_ROOTS registration; T-158 injection + preAttemptOutcome use; T-160 label
-rendering.
-
-## T-149 — SystemContactLinkService — DONE
-
-Commit 64727330. VerifiedLinksSnapshot + the two reading seams + actor service:
-one batched verification fetch (identifier+phoneNumbers keys only), fingerprint
-rule reused unchanged, duplicate claims first-in-roster-order, single-flight
-drain with latest-roster capture (one documented Task.yield window), photo cache
-(24/16 MiB/16-hex sha256 keys, no negative caching), closed-vocabulary events,
-no console writes. AddressBookDirectory gains the SystemContactReading
-conformance. Suite: 27 tests incl. deterministic gate-forced drain cases.
-Whole-module build green + release log-safety gate passes. Scoped run deferred.
-Handoff: T-156 must pass the FULL roster to refresh.
-
-## T-152 — UnifiedContactSearch tiers and dedupe — DONE
-
-Commit b0e8dc7f. FamilyMatchTier.nickname at raw 2 (containment renumbered 3);
-Outcome.linkedBookNames defaulted; search requires index:, five passes per
-design (nickname exact via O(1) map + Character-safe substring; Pass 3
-drop/synthesize with name-equal suppression; Pass 4 unchanged; Pass 5 recount;
-.empty short-circuit = structural parity). Guards: no phantom drop, one-row-per
-person, stale stored claims never merge. Shared-file fixes: 3 call sites in
-LeafViews (inline index hoists, T-156 interim). Wizard does not call the unified
-search yet (T-159 scope, verified). Tests: 22 existing + 17 new (tier order,
-Devanagari pins positive+negative, Pass 3-5, parity anchors, ambiguity, failure
-paths, <=20 ms ceiling); the one uncertain Foundation behavior probed standalone.
-Whole-module build green, 0 errors. Scoped run deferred.
-
-## T-155 — FEATURE_ROOTS + release-gate coverage — DONE
-
-Commit 432584b8. The three Contacts seam files registered as feature-role
-roots in check-release-log-safety.py (design §5.3 block); 3 positive + 3
-negative fixtures + 3 expect pins. Evidence: full shell gate exit 0 (24
-fixtures/12 rules); injected-PII fixture names each planted file+line;
-falsify green; registration-drift caught in an isolated copy. Whole-module
-typecheck green (attempt 1 red only on T-150's concurrent mid-wave state, per
-protocol waited and retried). Scoped run deferred. One documented limitation
-(rule-3 Debug framing) recorded in the notes.
-
-## T-150 — MissedCallContactResolver link-aware — DONE
-
-Commit 56605e1d. linkedFamilyMatch (roster order, snapshot-only, matches
-reused unchanged) + resolve(snapshot:) with the §1.8 precedence: family own
-phones -> verified links -> native half gated on allowsReading with verified
-link identifier remap; notDetermined -> needsPermission; denial -> unresolved.
-Default .empty keeps all 4-arg callers unchanged; AppCoordinator untouched
-(T-158 wires the real snapshot). Tests: 18 new (32 total) — linked resolution,
-precedence, remap, .limited, denial, unlinked parity matrix, roster-order
-determinism (5x), single-snapshot semantics, dial-back mirror. Whole-module
-build green on a forced recompile of both files (0 errors); release log-safety
-gate passes. Scoped run deferred.
-
-## T-144 — Sequencing gate (master merge) — DONE
-
-Call-dialer PR #171 merged to master (81de796a, marker CallChannelChain.swift
-present); master merged into feat/family-contacts-unify (commit 78d9a34d).
-Conflict resolutions: spec files ours (per-feature records); evidence JSONL
-unioned; L10n baseline pins re-measured to the combined catalog (1,415 keys:
-dialogue 1_396, calling 1_410, family 1_394); FEATURE_ROOTS unioned (our 3
-files + call-dialer's Services/Calls). Merged-tree build-for-testing GREEN
-(exit 0). Frozen call-dialer suites deferred to T-163 per speed mode.
-Line-anchor drift: L10nCatalogCoverageTests + check-release-log-safety.py are
-the union points; downstream units read current file state, not old anchors.
-
-## T-156 — Coordinator identity and link refresh — DONE
-
-Commit 6751cc50. familyContacts.didSet = single roster choke point (index
-rebuild + refreshVerifiedLinks); published familyIndex/verifiedLinks/faceEpoch;
-lazy link-service seam (first use, never init); generation-guarded publish;
-duplicate-claim guard refuses before any write (reason-coded PII-free event);
-add/update widened to nicknames: [String] + link: (interim shims removed);
-ContactResolver reads the published index. Foreground hook appended after
-syncCalendarShare; call-dialer chain untouched (no secondaryCallApp symbols in
-the diff). New suite: 9 tests. Log-safety gate exit 0 (24/24 fixtures);
-whole-module build green, 0 errors. Scoped run deferred.
-
-## T-157 — Coordinator face identity — DONE
-
-Commit a8bc3986 (+ notes 995e6ddb). faceIdentity/faceImage/faceThumbnail async
-accessors; 16-hex sha256 system-photo tokens written only inside the @MainActor
-face path; §10.1 precedence (system > app-local > nil/initials); sysphoto:/contact:
-content-addressed cache families + ViewCaches invalidation-contract doc note; all
-four sync contactPhoto(for:) call sites migrated to .task(id:) with post-await
-identity guards; the sync resolver DELETED per §8.1 (scan: 0 code refs remain).
-New suite: 8 tests incl. format pins, precedence, no-stale-serve, source pins.
-Whole-module build green, 0 errors. Notes use a disambiguated filename
-(T-157-notes.md is call-dialer's merged record). Scoped run deferred.
-
-## T-161 — CallView faces and caption — DONE
-
-Commit 44846df3. UnifiedContactResultRow caption seam (defaulted var) + pure
-composer on the frozen key; all six §3.5 gate sites moved to allowsReading
-(.denied only blocked arm, grantAccess re-reads status); accessLimited caption
-leads the readable block; three search sites read coordinator.familyIndex +
-verifiedLinks (interim hoists gone); call-dialer dial layer untouched (pinned).
-New suite: 10 tests (33 source pins pre-verified via a Python mirror).
-Whole-module build green, 0 errors; concurrent T-158 compiled clean too.
-Deviations recorded (suite naming, dial-back tests untouched). Scoped run
-deferred.
-
-## T-158 — Link/unlink seam and missed-call names — DONE
-
-Commit b23f190b. SystemContactUnlinkMode + pure unlinkMode rule +
-setFamilyContactLink (the only unlink path; F3 copy-before-clear with
-never-lose refusal; one atomic record write; no write-seam symbols in the
-unlink body — source-pinned); lazy injected photo-writer seam +
-syncSystemPhoto outcome mapping (byte-identical payload; .written invalidates
-+ bumps; recordGone/identityMismatch refresh); link-aware
-familyContact(matchingPhone:) (own phone first, snapshot only); R4 gate shape
-in refreshNativeMissedCallNames (post-prompt re-read, allowsReading, real
-access + snapshot passthrough). New suite: 16 tests. Whole-module build green,
-0 errors (contention handled by waiting for T-161's build). Scoped run
-deferred.
-
-## T-159 — Wizard find and link steps — DONE
-
-Commit 2bc3817a. Find step converted to UnifiedContactSearch with the
-published roster/index/verified links; pure seam FamilyWizardFindPresentation
-(rows/storedClaimant/draftLink/linkState/bookName); draft link + 4-state link
-section with unlink through setFamilyContactLink; steering micro-flow
-(onSteerTo + parent in-place sheet swap); allowsReading gates + limited
-caption; draftLink passed through Save. New suite FamilyWizardFindStepTests
-(pure seams, engine-integrated Gherkin paths, drift pin, source pins).
-Whole-module build green, 0 errors. CallingSettingsView untouched. 7
-decisions/deviations recorded in the notes. Scoped run deferred.
-
-## T-160 — Wizard photo step and save — DONE
-
-Commit 3294a397. Photo step per §2.4 (source caption pure rule; write-access
-cards for verified-link editing only — shared askCard reusing grantAccess,
-denied line with Settings door; state line with the F4 label mapping); save
-flow per §2.6/§10.2 (store write first, photo Task via syncSystemPhoto, §10.4
-remove recheck through the same resolver, non-nil state stays open with
-common.close footer, nil dismisses); nickname step per §2.5 (enumerated rows,
-≥44pt labeled remove, 8-entry cap, F5 cappedNickname, full list through the
-coordinator seam — interim loss window closed). One production deviation:
-faceImageWithSource coordinator seam (recorded). New suite:
-FamilyWizardPhotoSaveTests. Whole-module build green, 0 errors. Scoped run
-deferred.
-
-## T-162 — Family list chip + legacy deletion — DONE
-
-Commit d8f6fed9. Link chip via pure seam (verified links only) appended to the
-role-chip row; ≥44pt tap floor, VoiceOver label, opens the editor (the
-copy-preserving unlink flow). T-157 face migration verified complete (one
-batch .task(id:) pass, post-await re-check, single publication) + one stale
-doc comment fixed. loadDraft preview confirmed on the T-160 async path.
-Legacy contactPhoto(for:) deletion CONFIRMED: 0 code references across the
-391-file production module (both scan patterns). New suite
-FamilyListLinkChipTests incl. the named deletion pin. Whole-module build
-green, 0 errors (195 warnings, one fewer than baseline). Scoped run deferred.
-
-## T-163 — Acceptance and release gates — DONE
-
-Commit e46c3ed1. Scoped sweep 32/32 suites green (five first-run failures
-were test-side bugs, fixed with in-code markers; ZERO production changes).
-Full unit bundle once on the final tree: 7062 total, 7030 passed, 22 failed,
-10 skipped — zero FCU suites failed; all 22 attributed category (b)
-pre-existing at baseline 81de796a with per-suite baseline evidence; zero (a),
-zero (c). Attempt 1 hung in the pre-existing Piper simulator-audio wedge
-(aborted, recorded); completing run used a disclosed 120s per-test timeout
-guard. Gates: log-safety exit 0, prompt-mirror green, L10n pins held
-(1396/1410/1415), no-egress pins green. Perf all within 20ms ceilings
-(index <=1.6ms, voice <=10.3ms, search 2.78ms). Evidence in
-specs/T-163-acceptance-notes.md. DV-1..6 is T-164, outstanding.
-
-## T-165 — Security evidence and feasibility honesty — DONE
-
-Commit 6e86ebd9. FCU-security-evidence-index.md (F1-F8 closure with verifier
-commands, 21-row STRIDE index, residuals + gaps) + feasibility-honesty report
-(all three asks delivered as specified; device verdicts OUTSTANDING pending
-T-164). F4 comment aligned in design-l2 §2.6 and design-l1 §10.2 step 3; F6
-§3.5 footnote with the post-T-144 verified anchor. F1/F2/F3/F5 CLOSED via the
-T-163 sweep pins; F7 no-action recorded; F8 accepted residual recorded for
-the DV session. 35/35 cited test tokens verified; log gate re-run exit 0.
-No production code touched.
-
-## T-164 — Device validation DV-1..6 protocol — DONE (execution PENDING)
-
-Commit 32e2382f. FCU-device-validation-protocol.md: the six DV items verbatim
-from the constitution with preconditions, shipped-copy steps, expected
-outcomes, pass/fail criteria, a11y spot-checks, evidence slots, record
-templates, build/install pointers (device-install.sh artifact-derived bundle
-id). HONEST STATUS: protocol written, execution PENDING — no Anzaan session;
-every item recorded BLOCKED with its named dependency; no PASS claimed; final
-sign-off gated until a device session executes all six (FR-FCU-017). Owner
-actions OA-1..OA-6 + the pre-release device console check are named in the
-protocol.
+Wave 0. The cloud chat consent record and its one-writer gate in the shipped
+OD-12 shape (LiveTranslate/PointAsk precedent reused, not forked). Decision
+with four states (granted, notRecorded, denied, unreadable); allowsEgress
+true only for granted; ConsentRecord {granted, recordedAt,
+disclosureVersion} over the same encrypted-at-rest consent storage with the
+same key-store composition; stale disclosure version re-asks (notRecorded),
+never granted; unreadable distinct from notRecorded and denied, fail-closed,
+never crashes; one writer under NSLock with read-back verification, revoke
+clears memory before the stored record is rewritten, a write that does not
+persist is surfaced (never a false success); per-turn read with no caching.
+Disclosure stamp placeholder cloudchat.disclosure.draft.14oct2026.r1 (final
+copy owned by T-176). Classification-only events (component cloud_chat, five
+types, metadata only disclosureVersion). Tests: 37 executed, 0 failures
+(./build.sh test:unit CloudChatConsentGateTests; the release-log and
+prompt-mirror pre-test guards passed; full test log in the suite).
