@@ -192,8 +192,11 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// adds `feeds.readerTitle` — total 1,421, so this baseline is 1,402.
     /// Re-measured at the T-171 cloud-chat copy landing (2026-10-14): the
     /// 18-key cloud-chat family (design-l1 §17) lands on the same tree —
-    /// total 1,439 — so this baseline is 1,420.
-    private static let dialogueBaselineKeyCount = 1_420
+    /// total 1,439 — so this baseline is 1,420. Re-measured at the T-012
+    /// medication localisation landing (2026-10-15): the 42-key medication
+    /// family (design-l2 C13) lands on this W0 tree — total 1,481 — so
+    /// this baseline is 1,462.
+    private static let dialogueBaselineKeyCount = 1_462
 
     /// The design-l2 §16 draft copy, verbatim, both languages. The owner
     /// copy review is a later step recorded in the plan; this pin makes
@@ -482,8 +485,11 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// master keys plus `feeds.readerTitle`), so this baseline is 1,416.
     /// Re-measured at the T-171 cloud-chat copy landing (2026-10-14): the
     /// 18-key cloud-chat family (design-l1 §17) lands on the same tree —
-    /// total 1,439 — so this baseline is 1,434.
-    private static let callingBaselineKeyCount = 1_434
+    /// total 1,439 — so this baseline is 1,434. Re-measured at the T-012
+    /// medication localisation landing (2026-10-15): the 42-key medication
+    /// family (design-l2 C13) lands on this W0 tree — total 1,481 — so
+    /// this baseline is 1,476.
+    private static let callingBaselineKeyCount = 1_476
 
     /// The authored copy, both languages. The design freezes the keys and
     /// the parameter contracts, not the wording (catalog-time copy), so
@@ -1035,8 +1041,11 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// `feeds.readerTitle`), so this baseline is 1,398. Re-measured at the
     /// T-171 cloud-chat copy landing (2026-10-14): the 18-key cloud-chat
     /// family (design-l1 §17) lands on the same tree — total 1,439 — so
-    /// this baseline is 1,416.
-    private static let familyContactsBaselineKeyCount = 1_416
+    /// this baseline is 1,416. Re-measured at the T-012 medication
+    /// localisation landing (2026-10-15): the 42-key medication family
+    /// (design-l2 C13) lands on this W0 tree — total 1,481 — so this
+    /// baseline is 1,458.
+    private static let familyContactsBaselineKeyCount = 1_458
 
     /// Scenario: All 21 keys exist in both languages — the behavioural
     /// half. Every key resolves through the shipped lproj bundles in both
@@ -1655,9 +1664,12 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// unit's landing (2026-10-14): the tree carried 1,421 keys (the
     /// news-feed-images measurement, 1,402 + 19 dialogue keys) and this
     /// unit adds exactly its 18 — total 1,439 — so the baseline is 1,421.
-    /// The +18 delta is the constant, not the absolute; a later landing on
-    /// the same tree re-measures this pin deliberately rather than guessing.
-    private static let cloudChatBaselineKeyCount = 1_421
+    /// Re-measured at the T-012 medication localisation landing
+    /// (2026-10-15): the 42-key medication family (design-l2 C13) lands on
+    /// this W0 tree — total 1,481 — so the baseline is 1,463. The +18
+    /// delta is the constant, not the absolute; a later landing on the
+    /// same tree re-measures this pin deliberately rather than guessing.
+    private static let cloudChatBaselineKeyCount = 1_463
 
     /// The design-l1 §17 copy as authored by this unit, verbatim, both
     /// languages. T-176 owns the final disclosure-copy review; this pin
@@ -2689,6 +2701,105 @@ final class L10nCatalogCoverageTests: XCTestCase {
         localizations[language] = languageEntry
         entry["localizations"] = localizations
         catalog[key] = entry
+    }
+
+    // MARK: T-012 — the medication schedules family (design-l2 C13)
+
+    /// The pinned inventory: design-l2 C13's key sets for the medication
+    /// schedules feature — 42 new keys, the slot/meal/quantity labels, the
+    /// Medicine-times mapping section, the editor controls, the walk's
+    /// sanctioned clarification forms and its honest ended line, the
+    /// evidence lines, the two new significant-event family alert bodies,
+    /// and the three calendar significant-event phrases. The amended
+    /// `calendarShare.consent.whoCanSee` is deliberately NOT here: it is a
+    /// modified shipped key, not a new one, and its M-1 pin lives in
+    /// `CalendarShareConsentCopyTests`.
+    private static let medicationKeys: [String] = [
+        // Slot / meal / quantity labels (C1, C2; design-l2 C13).
+        "meds.slot.morning",
+        "meds.slot.afternoon",
+        "meds.slot.evening",
+        "meds.meal.before",
+        "meds.meal.after",
+        "meds.quantity.amount",
+        "meds.quantity.unit",
+        "meds.quantity.customUnit",
+        "meds.unit.tablet",
+        "meds.unit.capsule",
+        "meds.unit.milliliter",
+        "meds.unit.teaspoon",
+        "meds.unit.drop",
+        "meds.unit.puff",
+        "meds.unit.sachet",
+        // The Medicine-times mapping section (C8; m-5's one-shot note).
+        "settings.meds.times.title",
+        "settings.meds.times.morning",
+        "settings.meds.times.afternoon",
+        "settings.meds.times.evening",
+        "settings.meds.times.reset",
+        "settings.meds.times.saveFailed",
+        "settings.meds.times.unresolved",
+        "settings.meds.times.retimeNote",
+        "settings.meds.times.retimeNote.dismiss",
+        // The editor's slot/quantity/meal controls (C8).
+        "settings.meds.useSlotModel",
+        "settings.meds.keepTimes",
+        "settings.meds.slotRequired",
+        "meds.addDose",
+        // The walk: the sanctioned forms and the honest ended line (C4).
+        "meds.ack.clarifyOne",
+        "meds.ack.clarifyPair",
+        "meds.ack.clarifyEnded",
+        // Evidence (C5; the spoken line names the bound medication, D11).
+        "meds.evidence.capture",
+        "meds.evidence.spoken",
+        "meds.evidence.attached",
+        "meds.evidence.failed",
+        "meds.evidence.notYetDelivered",
+        "meds.takenToday.title",
+        // The two new significant-event bodies and the calendar phrases
+        // (C6, C10, C11).
+        "family.alertIntakeRecorded",
+        "family.alertEscalationStarted",
+        "calendarShare.alert.missed",
+        "calendarShare.alert.doubleDose",
+        "calendarShare.alert.escalation",
+    ]
+
+    /// Scenario: A key resolves in ne and en, differently. Every new key
+    /// resolves through the shipped lproj bundles in both languages, both
+    /// resolutions exist (non-empty — `L10n.str` answers a total miss with
+    /// ""), neither returns the key itself, and the two resolutions differ,
+    /// so a key whose `ne` copy was forgotten or copy-pasted from `en`
+    /// fails here rather than shipping a screen that reads English to a
+    /// Nepali household. The Nepali resolution is Devanagari (or `%@`
+    /// only), the catalog convention every family in this suite carries.
+    func testMedicationFamiliesResolveInBothLanguages() {
+        XCTAssertEqual(Self.medicationKeys.count, 42,
+                       "the family is exactly the 42 keys design-l2 C13 adds "
+                       + "(25 `meds.*` + 12 `settings.meds.*` + 2 `family.*` "
+                       + "+ 3 `calendarShare.*`)")
+
+        for key in Self.medicationKeys {
+            let en = L10n.str(key, locale: english)
+            let ne = L10n.str(key, locale: nepali)
+            XCTAssertNotEqual(en, key,
+                              "\(key) does not resolve in en — the catalog "
+                              + "entry is missing")
+            XCTAssertNotEqual(ne, key,
+                              "\(key) does not resolve in ne — the catalog "
+                              + "entry is missing")
+            XCTAssertFalse(en.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "\(key) resolves to empty en copy")
+            XCTAssertFalse(ne.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "\(key) resolves to empty ne copy")
+            XCTAssertNotEqual(en, ne,
+                              "\(key) resolves to the SAME string in en and ne "
+                              + "— the Nepali copy is missing (or the key was "
+                              + "forgotten in one language)")
+            XCTAssertTrue(Self.isDevanagariOrPlaceholderOnly(ne),
+                          "\(key) resolves to non-Devanagari Nepali copy: \(ne)")
+        }
     }
 
 }

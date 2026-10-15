@@ -350,6 +350,84 @@ final class MedicationSchedulerTests: XCTestCase {
         XCTAssertTrue(prompt!.contains("small white tablet"))
     }
 
+    /// R-2: both challenge construction sites — the first-call-issues path
+    /// and `startConfirmationChallenge` — pass the scheduler's configured
+    /// `challengeTimeoutSeconds` explicitly, so an injected shorter window
+    /// is honored end-to-end: the answer is evaluated after that window
+    /// elapsed and both sites take the timeout path (re-enter escalation),
+    /// where the named default would have recorded the dose instead.
+    ///
+    /// The injected window is negative — shorter than any real window, so
+    /// its deadline already predates the answer. That is the one shape
+    /// that drives the first-call-issues site into its timeout arm
+    /// deterministically, because that call issues the challenge AND
+    /// evaluates the answer in the same call; no clock waiting needed.
+    func testInjectedTimeoutIsUsedByBothChallengeSites() {
+        let injectedWindowSeconds: TimeInterval = -1
+        scheduler = MedicationScheduler(
+            storage: mockStorage,
+            alarmScheduler: mockAlarm,
+            observabilityBus: mockObservability,
+            familyNotifier: mockFamilyNotifier,
+            caregiverNotifySettings: caregiverNotifySettings,
+            challengeTimeoutSeconds: injectedWindowSeconds
+        )
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        scheduler.loadSchedule(entries: [entry])
+
+        // Path 1 — the first-call-issues challenge (MedicationScheduler
+        // :269): this call both issues the challenge and evaluates the
+        // answer, which lands after the injected window elapsed.
+        _ = scheduler.acknowledgeWithConfirmation(entryId: entry.id, at: Date(),
+                                                  confirmationResponse: .yes)
+
+        // Path 2 — startConfirmationChallenge (:449) issues its own
+        // challenge with the same configured value; the answer then
+        // arrives late through the shipped response seam.
+        XCTAssertNotNil(scheduler.startConfirmationChallenge(for: entry.id))
+        _ = scheduler.acknowledgeWithConfirmation(entryId: entry.id, at: Date(),
+                                                  confirmationResponse: .yes)
+
+        let eventTypes = mockObservability.emittedEvents.map(\.eventType)
+        XCTAssertEqual(eventTypes.filter { $0 == "confirmation_challenged" }.count, 2,
+                       "one challenge issued by each construction site")
+        XCTAssertEqual(eventTypes.filter { $0 == "confirmation_denied" }.count, 2,
+                       "both sites time out on the injected short window and re-enter escalation")
+        XCTAssertEqual(eventTypes.filter { $0 == "acknowledged" }.count, 0,
+                       "with the named default the same drive would have recorded instead")
+        XCTAssertEqual(eventTypes.filter { $0 == "double_dose_blocked" }.count, 0,
+                       "the timeout path records nothing")
+        XCTAssertGreaterThanOrEqual(mockAlarm.scheduleCallCount, 3,
+                                    "each timeout re-armed the next refire (1 arm at load + 2 re-entries)")
+
+        // Control — the SAME drive on a scheduler using the named default:
+        // both sites accept the answer and record. The flip to the timeout
+        // path in the drive above is therefore caused by the injected
+        // value alone, not by the drive's shape.
+        let controlBus = MockObservabilityBus()
+        let controlScheduler = MedicationScheduler(
+            storage: MockEncryptedLocalStorage(),
+            alarmScheduler: MockAlarmScheduler(),
+            observabilityBus: controlBus,
+            familyNotifier: mockFamilyNotifier,
+            caregiverNotifySettings: CaregiverNotifySettings.isolated()
+        )
+        let pathOneEntry = makeMedicationEntry(name: "Metformin", timeHour: 9, timeMinute: 0)
+        let pathTwoEntry = makeMedicationEntry(name: "Lisinopril", timeHour: 10, timeMinute: 0)
+        controlScheduler.loadSchedule(entries: [pathOneEntry, pathTwoEntry])
+
+        _ = controlScheduler.acknowledgeWithConfirmation(entryId: pathOneEntry.id, at: Date(),
+                                                         confirmationResponse: .yes)
+        XCTAssertNotNil(controlScheduler.startConfirmationChallenge(for: pathTwoEntry.id))
+        _ = controlScheduler.acknowledgeWithConfirmation(entryId: pathTwoEntry.id, at: Date(),
+                                                         confirmationResponse: .yes)
+
+        let controlEventTypes = controlBus.emittedEvents.map(\.eventType)
+        XCTAssertEqual(controlEventTypes.filter { $0 == "acknowledged" }.count, 2,
+                       "the default window accepts and records the same drive at both sites")
+        XCTAssertEqual(controlEventTypes.filter { $0 == "confirmation_denied" }.count, 0)
+    }
+
     // MARK: - Caregiver event alerts (2026-09-13)
 
     /// First delivery of a reminder, toggle ON → exactly one event alert,
