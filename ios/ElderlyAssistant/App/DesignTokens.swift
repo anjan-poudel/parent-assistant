@@ -154,10 +154,11 @@ enum DesignTokens {
     /// keeps the dock visible without scrolling at normal size.
     static let talkSubHeroSlotHeightCompact: CGFloat = 104
     static let chipHeight: CGFloat = 60
-    /// [DOCK-FIT] (2026-10-14) Two-row Home dock budget after the
-    /// tightened paddings (owner: "too much space at the bottom"):
-    /// ~56pt action row + ~72pt rail + 6pt gap, documented for the
-    /// DesignTokens pin test — the dock itself is intrinsic-height.
-    static let dockHeight: CGFloat = 134
+    /// [DOCK-FIT] (2026-10-15) Two-row Home dock budget after the
+    /// medium-display pass (owner: "too much space at the bottom"):
+    /// ~48pt action row (28pt glyphs) + 8pt gap + ~76pt rail (44pt
+    /// glyphs + 10pt lower inset, no safe-area band), documented for
+    /// the DesignTokens pin test — the dock itself is intrinsic-height.
+    static let dockHeight: CGFloat = 132
     static let iconBadgeDiameter: CGFloat = 44
 }

@@ -77,7 +77,9 @@ struct HomeTopBar: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        .padding(.top, 8)
+        // [MEDIUM-FIT] (2026-10-15) Slimmer top clearance at ordinary
+        // type sizes — every point goes to fitting Home in the viewport.
+        .padding(.top, dynamicTypeSize.isAccessibilitySize ? 8 : 4)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home.header")
     }
@@ -276,7 +278,9 @@ struct TalkStage: View {
                 ConfirmationChips(titleKey: visuals.captionKey)
             } else {
                 // Separate the button, its status and the suggested phrase.
-                VStack(spacing: 16) {
+                // [MEDIUM-FIT] (2026-10-15) 16pt hero↔slot gap at
+                // accessibility sizes, 12pt at ordinary type sizes.
+                VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 16 : 12) {
                     TalkButton(session: session,
                                // [AUDIO-REACTIVE-HERO] The hero's live
                                // signal feed — observed by the hero
@@ -833,10 +837,14 @@ struct HomeDock: View {
     }
 
     var body: some View {
-        // [DOCK-FIT] (2026-10-14) Tightened in every mode — owner: "the
-        // dock menu has too much space at the bottom". 8→6 row gap and a
-        // slimmer rail inset; every tile keeps its 44pt tap floor.
-        VStack(spacing: 6) {
+        // [DOCK-FIT] (2026-10-15) Medium-display pass — owner: "the dock
+        // menu has too much space at the bottom". Ordinary type sizes
+        // get 28/44pt glyphs, a 4+4pt row gap and a slim 10pt rail
+        // inset; the rail surface no longer bleeds through the home-
+        // indicator safe area (the empty band under the tiles is gone).
+        // Every tile keeps its 44pt tap floor; accessibility sizes keep
+        // the generous 32/48pt glyphs.
+        VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 6 : 4) {
             LazyVGrid(columns: topColumns, alignment: .center, spacing: 8) {
                 Button(action: onAppliance) {
                     tile(artwork: "settings", titleKey: "plugin.applianceHelper.name", onRail: false)
@@ -865,11 +873,14 @@ struct HomeDock: View {
                          onRail: true, identifier: "home.action.reminders")
             }
             .padding(.horizontal, 8)
-            .padding(.top, 6)
+            .padding(.top, dynamicTypeSize.isAccessibilitySize ? 6 : 4)
+            // [MEDIUM-FIT] (2026-10-15) The surface ends ~10pt under the
+            // tiles instead of bleeding through the home-indicator safe
+            // area — the empty band below the dock is gone.
+            .padding(.bottom, 10)
             .background {
                 Color.clear
                     .appSurface(role: .dock, cornerRadius: 20)
-                    .ignoresSafeArea(.container, edges: edgeAttached ? .bottom : [])
             }
             .accessibilityIdentifier("home.dock")
         }
@@ -888,7 +899,12 @@ struct HomeDock: View {
 
     private func tile(artwork: String, titleKey: String, onRail: Bool) -> some View {
         VStack(spacing: onRail ? 2 : 4) {
-            ReferenceIconArtwork(name: artwork, diameter: onRail ? 48 : 32)
+            // [MEDIUM-FIT] (2026-10-15) 44/28pt glyphs at ordinary type
+            // sizes, the full 48/32pt at accessibility sizes.
+            ReferenceIconArtwork(name: artwork,
+                                 diameter: onRail
+                                     ? (dynamicTypeSize.isAccessibilitySize ? 48 : 44)
+                                     : (dynamicTypeSize.isAccessibilitySize ? 32 : 28))
             Text(LocalizedStringKey(titleKey))
                 .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(onRail ? appearance.colors.onAccent : appearance.colors.textPrimary)

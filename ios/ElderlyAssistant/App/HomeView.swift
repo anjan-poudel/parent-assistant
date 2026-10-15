@@ -114,7 +114,9 @@ struct HomeView: View {
                     }
                     .equatable()
                     .padding(.horizontal, 20)
-                    .padding(.top, 8)
+                    // [MEDIUM-FIT] (2026-10-15) 4pt top clearance at
+                    // ordinary type sizes, 8pt at accessibility sizes.
+                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 8 : 4)
 
                     // [VOICE-OOM] F (2026-10-10) — the degraded-mode
                     // status pill: visible while the turn in force runs a
@@ -130,7 +132,11 @@ struct HomeView: View {
                     // height above the fixed two-row dock, so activity cards
                     // rendered behind it and were awkward to pan.
                     ScrollView(showsIndicators: false) {
-                        VStack(spacing: 16) {
+                        // [MEDIUM-FIT] (2026-10-15) 12pt section gap at
+                        // ordinary type sizes keeps the whole Home flow
+                        // inside the viewport; 16pt at accessibility
+                        // sizes where the dock scrolls with the content.
+                        VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 16 : 12) {
                             if !homePresentation.favoriteApps.isEmpty {
                                 QuickAccessStrip(apps: homePresentation.favoriteApps) { app in
                                     // [APP-UI-CONFIRM] (2026-10-14) The
@@ -184,8 +190,10 @@ struct HomeView: View {
                             }
                         }
                         .padding(.horizontal, 20)
-                        .padding(.top, 24)
-                        .padding(.bottom, 16)
+                        // [MEDIUM-FIT] (2026-10-15) Tighter scroll
+                        // insets at ordinary type sizes.
+                        .padding(.top, dynamicTypeSize.isAccessibilitySize ? 24 : 16)
+                        .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 16 : 12)
                         .frame(maxWidth: .infinity, minHeight: conversationViewportHeight)
                     }
                     .clipped()
@@ -197,7 +205,9 @@ struct HomeView: View {
                     .accessibilityIdentifier("home.content")
                     if pinsDock {
                         homeDock
-                            .padding(.top, 12)
+                            // [MEDIUM-FIT] (2026-10-15) 8pt dock clearance
+                            // at ordinary type sizes.
+                            .padding(.top, dynamicTypeSize.isAccessibilitySize ? 12 : 8)
                     }
                 }
             }
@@ -1030,7 +1040,10 @@ struct TalkButton: View {
             // [HERO-SIZE] Slimmer vertical reserve than the old 32pt: the
             // disc is 132pt constant now, and every saved point goes to
             // fitting the stage + dock in the viewport without scrolling.
-            .padding(.vertical, 20)
+            // [MEDIUM-FIT] (2026-10-15) 16pt at ordinary type sizes
+            // (still clears the hero's 160pt halo footprint), 20pt at
+            // accessibility sizes.
+            .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 20 : 16)
             if !transientStatusLine.isEmpty {
                 Text(transientStatusLine)
                     .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
