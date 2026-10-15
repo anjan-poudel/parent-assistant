@@ -51,12 +51,14 @@ struct MedicationLabelCandidate: Equatable {
     var scheduleTimes: [DateComponents]
     /// The parser's frequency guess, or nil when the label did not say.
     var frequency: MedicationFrequency?
-    /// The meal context the label's stated schedule carries, or nil when
-    /// the schedule's shape states none [MED-OCR-FREQ]. Only the frequency
-    /// table produces one: "one tablet twice a day" is an after-food
-    /// schedule (the owner's own reading — after lunch and after dinner),
-    /// while the day-pattern and time-word shapes state actual times and
-    /// no meal context at all.
+    /// The meal context the label's schedule carries [MED-OCR-FREQ]. The
+    /// label's own statement wins ("before breakfast", "खानु अघि"), and a
+    /// label that states none carries the after-food default on every
+    /// row-producing shape (2026-10-15, the owner's rule — "one tablet
+    /// twice a day" is an after-food schedule, and so is every other
+    /// label-derived row the family did not say otherwise about). nil
+    /// when the read produced no rows, or when the label states both
+    /// before and after food — a split schedule no single value holds.
     var mealRelation: MealRelation?
 
     init(name: String? = nil,
@@ -183,14 +185,22 @@ enum MedicationLabelParser {
     ///  - **A frequency phrase** — [MED-OCR-FREQ] "twice a day", "BD",
     ///    "दिनमा दुई पटक": the frequency table below turns HOW OFTEN into
     ///    the conventional slot hours its meaning implies ("twice a day" =
-    ///    after lunch and after dinner) and states the after-food context
-    ///    those rows carry. This is the ONE shape that produces a
-    ///    `mealRelation`.
+    ///    after lunch and after dinner).
     ///
     /// The order IS the precedence rule: the first shape that matches
     /// decides. A label that states actual times (a pattern, a time word)
     /// never gets an extra frequency inference — "mixed signals" resolve
     /// to the stated time and record nothing else.
+    ///
+    /// Every row-producing shape also states a `mealRelation` (2026-10-15,
+    /// the owner's after-food-default rule): a relation the label states
+    /// explicitly ("before breakfast", "खानु अघि") wins, and a label that
+    /// states none defaults to after food — the household convention for
+    /// every label-derived row, not just the frequency table's. A label
+    /// that mentions BOTH ("before breakfast, after dinner") states none:
+    /// a split schedule no single value holds, and none is defaulted over
+    /// an explicit mention. Shapes that produce no rows state none either —
+    /// there are no label-derived rows to carry a context.
     ///
     /// Failing all of these, a bare daily/weekly token yields a frequency
     /// with no times — the once-a-day family (which includes digits:
@@ -203,25 +213,26 @@ enum MedicationLabelParser {
         let text = normalizedDigits(lines.joined(separator: "\n")).lowercased()
         // The phrase tables below match against a whitespace-collapsed
         // copy, so a phrase OCR split across two lines ("twice a\nday") or
-        // double-spaced still reads. Only the new frequency matchers use
-        // it — every shipped matcher reads `text`, exactly as before.
+        // double-spaced still reads. The frequency and meal-relation
+        // matchers use it — every shipped matcher reads `text`, exactly
+        // as before.
         let phraseText = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
 
         let weekly = weeklyTokens.contains { text.contains($0) }
         // The day pattern first: an explicit 1-0-1 outranks a stray "morning"
         // in a warning line, and outranks the count table below.
         if let pattern = dayPatternTimes(in: text) {
-            return (pattern, weekly ? .weekly : .daily, nil)
+            return (pattern, weekly ? .weekly : .daily, rowMealRelation(in: phraseText))
         }
         let words = timeWordTimes(in: text)
         if !words.isEmpty {
-            return (words, weekly ? .weekly : .daily, nil)
+            return (words, weekly ? .weekly : .daily, rowMealRelation(in: phraseText))
         }
         if let counted = countedDoseTimes(in: text) {
-            return (counted, weekly ? .weekly : .daily, nil)
+            return (counted, weekly ? .weekly : .daily, rowMealRelation(in: phraseText))
         }
         if let frequencyTimes = frequencyRowTimes(in: phraseText) {
-            return (frequencyTimes, weekly ? .weekly : .daily, .afterMeal)
+            return (frequencyTimes, weekly ? .weekly : .daily, rowMealRelation(in: phraseText))
         }
         if weekly { return ([], .weekly, nil) }
         if isOnceDaily(in: phraseText) { return ([], .daily, nil) }
@@ -298,8 +309,9 @@ enum MedicationLabelParser {
     ///
     /// Every row matched here is a FREQUENCY-derived row, and a
     /// frequency-derived row is an after-food row ("take twice a day" =
-    /// with meals) — which is why its one caller states `.afterMeal`
-    /// beside the times it returns.
+    /// with meals) — consistent with the after-food default its caller
+    /// states beside the times it returns (`rowMealRelation(in:)`; the
+    /// table's rows are an unstated-relation shape like every other).
     ///
     /// Conservative on purpose: the phrase lists are the families a label
     /// actually states this way, and nothing else is inferred ("twice a
@@ -318,6 +330,9 @@ enum MedicationLabelParser {
     /// The abbreviation row of the frequency table: "BD" / "b.i.d" and
     /// "TDS" / "t.i.d", as STANDALONE tokens — dots between the letters
     /// optional, non-alphanumerics required on both sides.
+    ///
+    /// (The meal-relation matchers live below this table; they read the
+    /// same whitespace-collapsed phrase text.)
     ///
     /// Deliberately regexes and not phrase-list substrings: two- and
     /// three-letter ASCII abbreviations matched as substrings would fire
@@ -342,6 +357,43 @@ enum MedicationLabelParser {
     private static let onceDailyPhrases = ["once daily", "once a day",
                                            "1 time daily", "1 time a day",
                                            "दिनमा एक पटक"]
+
+    // MARK: - The meal-relation rule (2026-10-15, the owner's default)
+
+    /// The meal context a row-producing read carries [MED-OCR-FREQ]: the
+    /// relation the label STATES wins, and a label that states none
+    /// defaults to after food — the household convention for every
+    /// label-derived row, whatever shape produced it. A label that
+    /// mentions BOTH ("before breakfast, after dinner") is a split
+    /// schedule no single column can hold: the read states none, and none
+    /// is defaulted over an explicit mention — the family picks.
+    ///
+    /// Only row-producing shapes call this; a read with no rows carries
+    /// no relation at all. The lists below match on the whitespace-
+    /// collapsed phrase text, so an OCR line split still reads.
+    static func rowMealRelation(in phraseText: String) -> MealRelation? {
+        let before = beforeMealPhrases.contains { phraseText.contains($0) }
+        let after = afterMealPhrases.contains { phraseText.contains($0) }
+        if before && !after { return .beforeMeal }
+        if before && after { return nil }
+        return .afterMeal
+    }
+
+    /// The words that name a before-food context, ne + en. The meal names
+    /// are here because "before breakfast" states exactly the relation
+    /// "before food" states — a label that names the meal is if anything
+    /// more specific, not less.
+    static let beforeMealPhrases = ["before meal", "before food", "before eating",
+                                    "before breakfast", "before lunch", "before dinner",
+                                    "खानु अघि", "खाना अघि", "खाने अघि", "भोजन अघि"]
+
+    /// The after-food twins. An unstated read lands on the same after-food
+    /// default, so these exist to keep an explicit after-food statement
+    /// from reading as "no statement" — and to catch the mixed case above.
+    static let afterMealPhrases = ["after meal", "after food", "after eating",
+                                   "after breakfast", "after lunch", "after dinner",
+                                   "खानु पछि", "खाना पछि", "खाने पछि", "भोजन पछि",
+                                   "खाना खाएपछि"]
 
     /// The `d` `sep` `d` `sep` `d` day pattern, ASCII digits only (the input
     /// is digit-normalized before this runs). The lookarounds keep it from

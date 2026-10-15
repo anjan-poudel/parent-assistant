@@ -229,11 +229,13 @@ struct MedicationEditorDraft: Equatable {
     ///  - **Nothing is inferred.** A scan never fills the quantity and
     ///    never touches the purpose step: those are the family's
     ///    statements, and the label does not print them. The meal relation
-    ///    is the one context a label CAN state [MED-OCR-FREQ] — the
-    ///    frequency table's rows are after-food rows ("one tablet twice a
-    ///    day" = after lunch and after dinner) — and it fills exactly like
-    ///    text: into a blank relation only. A relation the family picked
-    ///    is their statement and stands.
+    ///    is the one context a label's rows carry [MED-OCR-FREQ]: the
+    ///    label's own statement when it says one ("before food"), and the
+    ///    after-food default when it says none (2026-10-15, the owner's
+    ///    rule). It fills exactly like text: into a blank relation only. A
+    ///    relation the family picked in the form — manual entry keeps
+    ///    their explicit choice, shown in the editor — is their statement
+    ///    and stands.
     mutating func applyScan(_ candidate: MedicationLabelCandidate) {
         if let scannedName = candidate.name, isBlank(name) {
             name = scannedName
@@ -283,13 +285,14 @@ struct MedicationEditorDraft: Equatable {
         fillBlankMealRelation(from: candidate)
     }
 
-    /// The label's stated meal context, into a BLANK relation only
-    /// [MED-OCR-FREQ]: a frequency-table read ("twice a day") states
-    /// after-food beside its rows, and it lands the way text does — only
-    /// while the family has stated none. A relation they picked is their
-    /// statement and survives the scan, and a read that states no
-    /// relation (every shape but the frequency table) changes nothing
-    /// here.
+    /// The label's meal context, into a BLANK relation only
+    /// [MED-OCR-FREQ]: a candidate with rows carries the label's stated
+    /// relation, or the after-food default when the label states none
+    /// (2026-10-15, the owner's rule), and it lands the way text does —
+    /// only while the family has stated none. A relation they picked —
+    /// manual entry keeps their explicit choice, shown in the editor —
+    /// is their statement and survives the scan. A read that produced no
+    /// rows carries no relation and changes nothing here.
     private mutating func fillBlankMealRelation(from candidate: MedicationLabelCandidate) {
         guard let scannedRelation = candidate.mealRelation, mealRelation == nil else { return }
         mealRelation = scannedRelation

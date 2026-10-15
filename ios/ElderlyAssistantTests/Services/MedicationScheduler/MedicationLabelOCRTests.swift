@@ -133,7 +133,7 @@ final class MedicationLabelOCRTests: XCTestCase {
 
     /// The day pattern decides on its own, and a nonzero slot is the only
     /// thing that becomes a dose: "1-0-1" is two tablets, not three.
-    func testDayPatternDosesFollowTheNonZeroSlots() {
+    func testDayPatternDosesFollowOnlyTheNonZeroSlots() {
         XCTAssertEqual(hours(MedicationLabelParser.candidate(fromLines: ["1-1-1"])), [8, 13, 20])
         XCTAssertEqual(hours(MedicationLabelParser.candidate(fromLines: ["0-0-1"])), [20])
         XCTAssertEqual(hours(MedicationLabelParser.candidate(fromLines: ["1 0 1"])), [8, 20])
@@ -238,24 +238,91 @@ final class MedicationLabelOCRTests: XCTestCase {
         XCTAssertNil(candidate.mealRelation)
     }
 
-    /// Stated times outrank a frequency phrase, and nothing from the
-    /// frequency table is recorded beside them — the "mixed signals" rule.
+    /// Stated times outrank a frequency phrase — the "mixed signals" rule:
+    /// the first shape that matches decides the TIMES, and no frequency
+    /// table context is recorded as such beside them. The relation the
+    /// rows carry is the blanket after-food default (2026-10-15, the
+    /// owner's rule), not an inference from the frequency phrase — the
+    /// rows are label-derived either way, so the default applies.
     func testStatedTimesOutrankAConflictingFrequency() {
         let words = MedicationLabelParser.candidate(
             fromLines: ["Amlodipine", "morning and twice a day"])
         XCTAssertEqual(hours(words), [8], "the stated time word decides")
         XCTAssertEqual(words.frequency, .daily)
-        XCTAssertNil(words.mealRelation, "the frequency's after-food context is not recorded")
+        XCTAssertEqual(words.mealRelation, .afterMeal)
 
         let pattern = MedicationLabelParser.candidate(
             fromLines: ["Amlodipine", "1-0-1", "twice a day"])
         XCTAssertEqual(hours(pattern), [8, 20], "the explicit day pattern decides")
-        XCTAssertNil(pattern.mealRelation)
+        XCTAssertEqual(pattern.mealRelation, .afterMeal)
 
         let counted = MedicationLabelParser.candidate(
             fromLines: ["Amlodipine", "2 times a day", "three times daily"])
         XCTAssertEqual(hours(counted), [8, 20], "the digit count table decides")
-        XCTAssertNil(counted.mealRelation)
+        XCTAssertEqual(counted.mealRelation, .afterMeal,
+                       "the digit count rows default after food like every shape")
+    }
+
+    // MARK: - The after-food default (2026-10-15, the owner's rule)
+
+    /// A label that states times but says nothing about meals still gets
+    /// the household's after-food default on its rows — the rule covers
+    /// EVERY scanned schedule shape, not just the frequency table.
+    func testTimeWordRowsDefaultAfterFood() {
+        let candidate = MedicationLabelParser.candidate(
+            fromLines: ["Amlodipine", "morning and evening"])
+
+        XCTAssertEqual(hours(candidate), [8, 19])
+        XCTAssertEqual(candidate.frequency, .daily)
+        XCTAssertEqual(candidate.mealRelation, .afterMeal, "unstated defaults after food")
+    }
+
+    /// The day-pattern shape states times and no meal context — the
+    /// default reaches it too.
+    func testDayPatternRowsDefaultAfterFood() {
+        let candidate = MedicationLabelParser.candidate(
+            fromLines: ["Amlodipine", "1-0-1"])
+
+        XCTAssertEqual(hours(candidate), [8, 20])
+        XCTAssertEqual(candidate.mealRelation, .afterMeal)
+    }
+
+    /// The digit count table states hours and no meal context — the
+    /// default reaches it too. This supersedes the earlier pin that digit
+    /// rows recorded no relation (2026-10-15, the owner's rule: every
+    /// label-derived row defaults after food unless the label says more).
+    func testDigitCountRowsDefaultAfterFood() {
+        let candidate = MedicationLabelParser.candidate(
+            fromLines: ["Paracetamol", "2 times a day"])
+
+        XCTAssertEqual(hours(candidate), [8, 20])
+        XCTAssertEqual(candidate.mealRelation, .afterMeal)
+    }
+
+    /// A relation the label STATES always wins over the default — the
+    /// owner's own example ("before breakfast"), and the Nepali before
+    /// phrase.
+    func testBeforeFoodOnTheLabelIsKept() {
+        let pattern = MedicationLabelParser.candidate(
+            fromLines: ["Amlodipine", "1-0-1", "before breakfast"])
+        XCTAssertEqual(hours(pattern), [8, 20])
+        XCTAssertEqual(pattern.mealRelation, .beforeMeal)
+
+        let words = MedicationLabelParser.candidate(
+            fromLines: ["एमोक्सिसिलिन", "बिहान र बेलुका", "खानु अघि"])
+        XCTAssertEqual(hours(words), [8, 19])
+        XCTAssertEqual(words.mealRelation, .beforeMeal)
+    }
+
+    /// A label naming BOTH contexts ("before breakfast, after dinner") is
+    /// a split schedule no single relation holds: the read states none —
+    /// and none is defaulted over an explicit mention.
+    func testMixedMealMentionsStateNothing() {
+        let candidate = MedicationLabelParser.candidate(
+            fromLines: ["Amlodipine", "morning", "before food", "after dinner"])
+
+        XCTAssertEqual(hours(candidate), [8], "the stated time still decides the rows")
+        XCTAssertNil(candidate.mealRelation, "mixed mentions state nothing — no default either")
     }
 
     /// Unknown frequency phrasing gets NO schedule — the refuse-to-guess

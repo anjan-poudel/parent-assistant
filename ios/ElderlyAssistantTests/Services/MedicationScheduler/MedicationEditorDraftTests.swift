@@ -66,7 +66,7 @@ final class MedicationEditorDraftTests: XCTestCase {
 
     /// One time row, nothing typed, nothing saveable — the shape the editor
     /// has always opened with.
-    func testFreshDraftHasOneTimeAndCannotBeSaved() {
+    func testFreshDraftHasOneTimeCannotBeSaved() {
         let draft = makeDraft()
 
         XCTAssertEqual(draft.name, "")
@@ -117,7 +117,7 @@ final class MedicationEditorDraftTests: XCTestCase {
 
     /// A field holding only spaces counts as blank — the family touched it and
     /// typed nothing.
-    func testScanFillsFieldsHoldingOnlyWhitespace() {
+    func testScanFillsFieldsHoldingOnlyWhitespaceRuns() {
         var draft = makeDraft()
         draft.name = "   "
 
@@ -144,7 +144,7 @@ final class MedicationEditorDraftTests: XCTestCase {
     /// The label's times replace the form's — including a time the family had
     /// set, because they just asked the label to fill this form and the rows
     /// are visible pickers.
-    func testScanReplacesTheFormTimesWithTheLabel() {
+    func testScanReplacesTheFormTimesWithLabelValues() {
         var draft = makeDraft()
 
         draft.applyScan(MedicationLabelCandidate(
@@ -582,21 +582,47 @@ final class MedicationEditorDraftTests: XCTestCase {
                        "the family's statement stands")
     }
 
-    /// A read whose shape states no relation (a day pattern) still picks
-    /// none: the after-food context is the frequency table's alone.
-    func testPatternScanStillStatesNoRelation() {
+    /// A row-producing read now picks the after-food default when the
+    /// label states no relational context (2026-10-15, the owner's rule):
+    /// a day pattern names no meal, and unstated means after food on
+    /// every label-derived row — not just the frequency table's.
+    func testPatternScanDefaultsAfterFood() {
         var draft = makeSlotDraft()
 
         draft.applyScan(MedicationLabelParser.candidate(fromText: "1-0-1"))
 
         XCTAssertEqual(draft.slotRows, [.morning, .evening])
-        XCTAssertNil(draft.mealRelation)
+        XCTAssertEqual(draft.mealRelation, .afterMeal, "unstated defaults after food")
+    }
+
+    /// The owner's time-word case through the real parser: "morning and
+    /// evening" with no meal mention fills the slot rows AND the
+    /// after-food default the rows carry.
+    func testTimeWordScanDefaultsAfterFood() {
+        var draft = makeSlotDraft()
+
+        draft.applyScan(MedicationLabelParser.candidate(fromText: "morning and evening"))
+
+        XCTAssertEqual(draft.slotRows, [.morning, .evening])
+        XCTAssertEqual(draft.mealRelation, .afterMeal)
+    }
+
+    /// A label that states "before food" fills the blank relation with
+    /// its own statement — the default never overwrites an explicit
+    /// mention.
+    func testBeforeFoodScanFillsBeforeMeal() {
+        var draft = makeSlotDraft()
+
+        draft.applyScan(MedicationLabelParser.candidate(fromText: "morning before food"))
+
+        XCTAssertEqual(draft.slotRows, [.morning])
+        XCTAssertEqual(draft.mealRelation, .beforeMeal)
     }
 
     /// "Once daily" states a frequency and no time of day: nothing is
     /// filled, cleared or assigned — on the fresh form, one blank row for
     /// the family to pick, and the request gate waits for their choice.
-    func testOnceDailyScanLeavesTheRowToTheFamily() {
+    func testOnceDailyScanLeavesTheRowToFamily() {
         var draft = makeSlotDraft()
         draft.name = "Amlodipine"
         let before = draft

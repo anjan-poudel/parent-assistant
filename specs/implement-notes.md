@@ -21,7 +21,7 @@ description: Implementation notes for the medication-schedules-reminders impleme
 | W5 | T-019, T-020 | code + typecheck only (speed directive) | GREEN — combined-tree module emit 0 errors; probes green |
 | W6 | T-021 | code + typecheck only (speed directive) | GREEN — combined-tree module emit 0 errors; 3 suites typechecked; probes exit 1 at injected lines |
 | W6.5 | T-023 | 7 classes — 139 tests (2026-10-15) | PASS — 139/139, 0 failures; xcresult result Passed |
-| W6.6 | T-024 | scoped pass at wave close (amendment 7 — NOT under the strip directive) | pending |
+| W6.6 | T-024 | 3 classes — 72 tests (2026-10-15) | PASS — 72/72, 0 failures; xcresult result Passed |
 | W7 | T-022 | full suite vs documented baseline (the tail's single test gate) | pending |
 
 > **Speed directive (owner, mid-run 2026-10-15):** W5 and W6 are code + typecheck
@@ -270,6 +270,26 @@ description: Implementation notes for the medication-schedules-reminders impleme
   the same bytes. (6) The `medication.entries` write sites confirmed: :266
   (`setVisualAids` precedent), :394 (the new write-first `loadSchedule` tail),
   :587 (removal payload, guarded).
+- W6.6/T-024 recorded deviations (all disclosed): (1) delivery was an
+  isolated-worktree patch applied by the coordinator with `git am` (am
+  commit `58071bd4`), not an sdd-dev subagent run — provenance verified
+  cryptographically (all ten pre/post-image blob prefixes in the patch's
+  index lines matched the worktree before and after the apply; patch
+  `/tmp/msr-scanner-frequency.patch`, 34,978 B, source commit `79c915d0…`,
+  base master `85349303`); the commit's `Co-Authored-By` trailer is
+  preserved. (2) `ScannedSchedule.swift` production was NOT touched by the
+  delivered patch — narrower than the amendment's owned-file list; the
+  pinned hour-table conversion was already the correct seam, and no change
+  was needed there. (3) SEC-002: the patch
+  introduced five NEW test method names that are exactly 40 `[A-Za-z0-9]`
+  characters (new content must avoid the hash-like-token pattern: 42+ or
+  ≤39 are safe). Identifier-only renames of all five landed in the W6.6
+  close commit; the exactly-40 maximal-run scan over the five final files
+  is 0. The am commit stays byte-authentic in history. (4) Owner rule delta
+  folded in before the recorded pass (see the W6.6 verification block): the
+  after-food default for label-derived rows; the recorded pass covers its
+  new pins. (5) NO `SettingsView` changes and NO new strings: the L10n pins
+  were not re-measured (unchanged from the W6.5 close).
 
 ## Verification
 
@@ -613,6 +633,60 @@ description: Implementation notes for the medication-schedules-reminders impleme
     armed behind an unpersisted schedule.
   - On-device confirmation of the round trip (save → row → kill → relaunch →
     row + re-armed) rides DV-1..DV-7 at final-sign-off.
+- **W6.6 (scoped pass at wave close — amendment 7; NOT under the strip directive; T-024, scanner frequency→slot grouping):**
+  Delivered as an isolated-worktree patch
+  (`/tmp/msr-scanner-frequency.patch`, 34,978 B; source commit `79c915d0…`
+  on a scratch branch, base master `85349303`) and applied with `git am` in
+  the feature worktree → commit `58071bd4` (5 files, +432/−25). Provenance
+  verified before and after the apply: all ten pre/post-image blob prefixes
+  in the patch's index lines matched the worktree; the commit message
+  carries the as-delivered evidence (65 tests, 0 failures — xcresult bundle
+  `…22-56-23`) and the `Co-Authored-By: Claude Code` trailer. An
+  as-delivered in-worktree pass also ran green (65/65, bundle `…23-00-41`).
+  SEC-002 (see deviations): five new 40-character test method names from
+  the patch were renamed identifier-only in the W6.6 close commit; the
+  exactly-40 maximal-run scan over all five final files is 0.
+- **W6.6 owner rule delta (coordinator relay, 2026-10-15 — folded in before the recorded pass):**
+  when the scanned label states NO before/after-meal context, the
+  label-derived schedule rows default to AFTER FOOD for EVERY row-producing
+  shape (frequency rows already carried it; time-word, day-pattern and
+  digit-count rows now do too). A relation the label states explicitly
+  ("before breakfast", "खानु अघि") always wins; a label mentioning BOTH
+  ("before breakfast, after dinner") states none — nothing is defaulted
+  over an explicit mention. Fill-blank-only semantics stay: manual entry
+  keeps the family's explicit choice (the editor shows the chosen value);
+  the default is for label-derived rows only. Implementation:
+  `MedicationLabelParser.rowMealRelation(in:)` + ne+en phrase lists, matched
+  on the whitespace-collapsed text; the draft's fill logic is unchanged.
+- **W6.6 design notes (as handed over; behavior pinned by the recorded pass):**
+  (1) the old count table's count-1 row (which guessed 08:00 morning for
+  "1 time a day") is REMOVED — refuse-to-guess; "1 time a day" falls
+  through to the once-daily phrases (frequency, no times). (2) "2 times a
+  day" (digit form) keeps the shipped count-table result [8:00, 20:00] —
+  pinned; under the owner delta its rows also carry the after-food default
+  like every shape. (3) Meal relation fills BLANK rows only. (4) The
+  abbreviation matchers are token-safe ("od" inside "food" cannot fire).
+  (5) Nepali phrase variants included. (6) Whitespace-collapsed matching
+  handles OCR line splits.
+- **W6.6 unit outcomes:** parser: 5 new pins (time-word / day-pattern /
+  digit-count rows default after food; explicit before-food kept; mixed
+  mentions state nothing) and 3 earlier nil pins flipped to the default
+  (the "mixed signals" test); draft: 2 new pins through the real parser
+  (time-word default; explicit before-food lands in the blank relation) and
+  1 earlier no-relation test rewritten to the default. No-rows shapes
+  (once-daily, weekly, refused phrases, no-schedule reads) keep nil — the
+  default reaches rows only.
+- **W6.6 recorded scoped pass (on the final close-commit bytes):** 3 classes
+  — `MedicationLabelOCRTests` 37, `ScannedScheduleTests` 5,
+  `MedicationEditorDraftTests` 30 — **72/72, 0 failures, TEST SUCCEEDED**
+  (xcresult `…23-09-06`, result Passed, iPhone 17 Pro simulator iOS 26.5;
+  "Scoped unit run passed (baseline not advanced)"). Guard preflights green
+  (release-log-safety self-tests + prompt-mirror drift classes). Final file
+  hashes (shortened): `MedicationEditorDraft.swift` `e47ef130…`,
+  `MedicationLabelOCR.swift` `6a3b097e…`, `MedicationEditorDraftTests.swift`
+  `14836550…`, `MedicationLabelOCRTests.swift` `5ed20863…`,
+  `ScannedScheduleTests.swift` `5a789f99…` (ScannedSchedule tests file
+  content unchanged from the am commit; still hashed at close).
 - **Carry-forward baseline note (for the W7 full-suite comparison):** the
   Spotify localization suite's absolute key-count pin is red at the branch
   base (pin 1,381 vs catalog 1,439 pre-W0) and is untouched by this feature —
