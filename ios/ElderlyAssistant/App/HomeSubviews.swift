@@ -191,13 +191,29 @@ struct QuickAccessStrip: View {
     let onLaunch: (AppLauncher.App) -> Void
 
     private var tileWidth: CGFloat {
+        // [MEDIUM-FIT] (2026-10-15) At medium and below every curated
+        // app fits the viewport — the row does not scroll (owner: apps
+        // were hidden behind the horizontal scroll). Larger sizes keep
+        // the 4-across baseline.
+        if dynamicTypeSize <= .medium {
+            let count = apps.count + 1  // favourites + the add tile
+            let totalSpacing = horizontalSpacing * CGFloat(max(count - 1, 0))
+            return max(DesignTokens.minTapTargetSize,
+                       (availableWidth - totalSpacing) / CGFloat(max(count, 1)))
+        }
         let fourAcrossWidth = max(DesignTokens.minTapTargetSize, (availableWidth - 24) / 4)
         return dynamicTypeSize > .large ? max(largeTypeTileWidth, fourAcrossWidth) : fourAcrossWidth
     }
 
+    /// [MEDIUM-FIT] (2026-10-15) 4pt tile gaps at medium and below,
+    /// 8pt at larger sizes.
+    private var horizontalSpacing: CGFloat {
+        dynamicTypeSize <= .medium ? 4 : 8
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: horizontalSpacing) {
                 ForEach(apps) { app in
                     tile(app)
                 }
