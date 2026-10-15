@@ -543,6 +543,7 @@
 		9C75E6F0E39A18009FCD59CA /* PluginRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D5E46F84DD8C7E7CE2161C5 /* PluginRegistry.swift */; };
 		9C96265EE22D20A71A658513 /* CaregiverNotifySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D2ED01FCF99CA9D9BE6B255 /* CaregiverNotifySettings.swift */; };
 		9CB9E925CDC39C5E575F6AF4 /* InputSanitiserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1C241D106EFDAF7D5F92FA9 /* InputSanitiserTests.swift */; };
+		9CE316FC912F95082A9075EA /* MedicationAckClarificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034B2248EA0404D34582576D /* MedicationAckClarificationTests.swift */; };
 		9D0C7077CABE513A354A77FF /* LiveTranslateSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 644CF8F1EBA36091AA24E2B9 /* LiveTranslateSettingsTests.swift */; };
 		9D24F9EBA4C36A8236B698F7 /* SpokenTextNormalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7583B0AB7BE6ADAE3ACAA79 /* SpokenTextNormalizerTests.swift */; };
 		9D562603E3D5DF1C3CC30DF6 /* CommandRouterYouTubeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E9E90B47A12C2406E4569D5 /* CommandRouterYouTubeTests.swift */; };
@@ -948,6 +949,7 @@
 		029572625927FA28AB472E38 /* DoubleDoseDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoubleDoseDetectorTests.swift; sourceTree = "<group>"; };
 		02B49CE098CF265F2E49046B /* NepaliTextNormalizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliTextNormalizerTests.swift; sourceTree = "<group>"; };
 		02BF4CFB905FD4E254952BF2 /* OnboardingDraftsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingDraftsTests.swift; sourceTree = "<group>"; };
+		034B2248EA0404D34582576D /* MedicationAckClarificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationAckClarificationTests.swift; sourceTree = "<group>"; };
 		035A6B3D6A6D69D345838A01 /* UpdatesCompositionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdatesCompositionTests.swift; sourceTree = "<group>"; };
 		035C53FE0D3B7A5E398E8009 /* TimerAlarmSystemWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerAlarmSystemWidget.swift; sourceTree = "<group>"; };
 		040169ACAC28343657CF901A /* IntentCommandCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentCommandCacheTests.swift; sourceTree = "<group>"; };
@@ -2477,6 +2479,7 @@
 				133BC94926927C45132262BF /* HomeProfileLinkTests.swift */,
 				FF46FF3BB62902DB1FC16086 /* KinDesignationTests.swift */,
 				91B220F3E406C71B4549529A /* L10nCatalogCoverageTests.swift */,
+				034B2248EA0404D34582576D /* MedicationAckClarificationTests.swift */,
 				22577ED90A48390A73B44C47 /* MedicationVisualAidPresentationTests.swift */,
 				15F0074FD67707356D249845 /* MissedCallDialBackTests.swift */,
 				02BF4CFB905FD4E254952BF2 /* OnboardingDraftsTests.swift */,
@@ -4249,6 +4252,7 @@
 				0130C646AE4A818DA307F4E8 /* ManualTalkReadinessStateTests.swift in Sources */,
 				EFDC4B51D2D329542F79E6DA /* MapsLinksTests.swift in Sources */,
 				E20F7EA877A6B73C7D38B9DC /* MedicalAppointmentParserTests.swift in Sources */,
+				9CE316FC912F95082A9075EA /* MedicationAckClarificationTests.swift in Sources */,
 				F7465FA62069BADC7DAA2860 /* MedicationAckResolverTests.swift in Sources */,
 				8E14FBA399E9B6E5632215DB /* MedicationEditorDraftTests.swift in Sources */,
 				62A23CDEF97ACF55906EEE6D /* MedicationEntryMigrationTests.swift in Sources */,

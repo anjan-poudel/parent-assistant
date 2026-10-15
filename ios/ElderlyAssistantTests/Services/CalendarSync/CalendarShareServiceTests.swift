@@ -68,7 +68,8 @@ final class CalendarShareServiceTests: XCTestCase {
 
     private func makeService(signedIn: Bool = true, consented: Bool = true,
                              configured: Bool = true,
-                             hasScopes: Bool = true) -> Rig {
+                             hasScopes: Bool = true,
+                             failStoreWrites: Bool = false) -> Rig {
         let session = FakeShareSession()
         session.isConfigured = configured
         session.isSignedIn = signedIn
@@ -78,7 +79,9 @@ final class CalendarShareServiceTests: XCTestCase {
         // A fresh ledger per rig: two services in one test must not share
         // a mapping store, or the "signed out" half would see the
         // "consented" half's work.
-        let store = LocalGoogleEventMappingStore(storage: MockEncryptedLocalStorage(),
+        let storage = MockEncryptedLocalStorage()
+        storage.shouldFailWrite = failStoreWrites
+        let store = LocalGoogleEventMappingStore(storage: storage,
                                                  defaults: defaults)
         let consent = CalendarShareConsent(defaults: defaults)
         consent.isAccepted = consented
@@ -1550,6 +1553,276 @@ final class CalendarShareServiceTests: XCTestCase {
                        "the ledger remembers the twin, so switching sharing on "
                        + "still cleans it up")
         XCTAssertTrue(rig.gateway.callLog.isEmpty)
+    }
+
+    // MARK: - Significant events (C11, D7)
+
+    private func significantEvent(
+        kind: SignificantMedicationEvent.Kind = .missedMedication,
+        entryId: UUID,
+        occurredAt: Date? = nil
+    ) -> SignificantMedicationEvent {
+        SignificantMedicationEvent(kind: kind, entryId: entryId,
+                                   occurredAt: occurredAt ?? fakeNow)
+    }
+
+    private func significantKey(_ event: SignificantMedicationEvent) -> String {
+        CalendarShareKey.oneOff(kind: .medicationReminder, eventIdentifier: event.id)
+    }
+
+    private func significantTitle(_ kind: SignificantMedicationEvent.Kind,
+                                  _ name: String) -> String {
+        CalendarShareMapper.significantEventTitle(
+            kind: kind, medicationName: name, locale: Locale(identifier: "en"))
+    }
+
+    /// Gate scenario: with the disclosure not accepted — and, in the
+    /// signed-out half, no account at all — nothing is written for that
+    /// household, and the skip is REPORTED (the shipped honest-event
+    /// rule), never silence.
+    func testSignificantEventSkippedWithoutConsent() async {
+        let rig = makeService(consented: false)
+        let event = significantEvent(entryId: UUID())
+
+        let result = rig.service.writeSignificantEvent(event, entry: medicationEntry())
+        await drainMain()
+
+        XCTAssertEqual(result, .skippedNotActive)
+        XCTAssertEqual(rig.store.pendingCount, 0,
+                       "a gated alert accumulates NO queue — the pending count must mean \"waiting on Google\"")
+        XCTAssertTrue(rig.store.knownKeys.isEmpty)
+        XCTAssertTrue(rig.store.outboundKeys.isEmpty)
+        XCTAssertTrue(rig.gateway.callLog.isEmpty,
+                      "not even the family calendar is opened")
+        let skipped = rig.bus.emittedEvents.filter {
+            $0.eventType == "calendar_share_skipped_not_active"
+        }
+        XCTAssertEqual(skipped.count, 1,
+                       "the gate still says WHY it shared nothing")
+        XCTAssertEqual(skipped.first?.metadata["kind"],
+                       EventNotifyKind.medicationReminder.rawValue)
+
+        // The other half of the same gate reports identically.
+        let signedOut = makeService(signedIn: false)
+        let otherEvent = significantEvent(entryId: UUID())
+        XCTAssertEqual(signedOut.service.writeSignificantEvent(otherEvent,
+                                                              entry: medicationEntry()),
+                       .skippedNotActive)
+        await drainMain()
+        XCTAssertEqual(signedOut.store.pendingCount, 0)
+        XCTAssertTrue(signedOut.gateway.callLog.isEmpty)
+    }
+
+    /// The write scenario: one enqueued CREATE under the deterministic
+    /// 2-component one-off key, carrying the significant-event copy and
+    /// the full family audience — and deliberately NO outbound mark
+    /// (D7), because the stale-twin sweep only ever considers outbound
+    /// keys.
+    func testSignificantEventWrittenAsOneOffWithoutMarkOutbound() async {
+        let rig = makeService()
+        let entry = medicationEntry(name: "Metformin 500")
+        let event = significantEvent(entryId: entry.id)
+        let key = significantKey(event)
+
+        let result = rig.service.writeSignificantEvent(event, entry: entry)
+        await drainMain()
+
+        XCTAssertEqual(result, .enqueued)
+        XCTAssertEqual(rig.store.pending.map(\.key), [key],
+                       "one enqueued create under the one-off key")
+        XCTAssertEqual(rig.store.pending.first?.action, .create)
+        XCTAssertEqual(rig.store.pending.first?.title,
+                       significantTitle(.missedMedication, "Metformin 500"),
+                       "the family reads the significant-event copy, not the raw medicine name")
+        XCTAssertEqual(rig.store.pending.first?.attendeeEmails, ["maa@example.com"])
+        XCTAssertNil(rig.store.pending.first?.recurrence,
+                     "a significant event is a one-off — nothing repeats")
+        XCTAssertFalse(rig.store.isOutbound(key),
+                       "D7: never marked outbound — the sweep must never consider these keys")
+        XCTAssertFalse(rig.store.outboundKeys.contains(key))
+
+        // A re-trigger of the same logical event is the SAME key, so
+        // `enqueue` replaces: one entry, never one per fire.
+        XCTAssertEqual(rig.service.writeSignificantEvent(event, entry: entry), .enqueued)
+        await drainMain()
+        XCTAssertEqual(rig.store.pending.count, 1)
+
+        // The shipped flush path owns the Google write, and the twin
+        // lands as a one-off (no recurrence).
+        rig.gateway.createResults = ["g-sig-1"]
+        await rig.service.flushPending()
+        await waitUntil("the significant twin's id to land in the ledger") {
+            rig.store.googleEventID(for: key) == "g-sig-1"
+        }
+
+        XCTAssertEqual(rig.gateway.createdDrafts.count, 1)
+        XCTAssertNil(rig.gateway.createdDrafts.first?.recurrence)
+        XCTAssertEqual(rig.gateway.createdDrafts.first?.title,
+                       significantTitle(.missedMedication, "Metformin 500"))
+    }
+
+    /// D7, the snapshot half: the reconcile's known-key slice is the
+    /// SLOT-shaped keys of the kind only — a significant-event one-off
+    /// can never be part of it, which is what makes "absent from the
+    /// desired set" mean "removed" for slot keys and nothing at all for
+    /// the one-offs.
+    func testOneOffKeyNotInReconcileSnapshot() {
+        let entryId = UUID()
+        let twinKey = slotKey(entryId)
+        let event = significantEvent(entryId: entryId)
+        let oneOffKey = significantKey(event)
+
+        let snapshot = CalendarShareMapper.reconcileSnapshotKeys(
+            from: [twinKey, oneOffKey], prefix: "medicationReminder:")
+
+        XCTAssertEqual(snapshot, [twinKey])
+        XCTAssertFalse(snapshot.contains(oneOffKey),
+                       "a written one-off is not the schedule mirror's to judge")
+
+        // The grammar distinction the slice reads, spelled out: the
+        // one-off form is 2 components; the slot form is 3.
+        XCTAssertEqual(oneOffKey.split(separator: ":").count, 2)
+        XCTAssertEqual(twinKey.split(separator: ":").count, 3)
+        XCTAssertNil(CalendarShareKey.parts(oneOffKey)?.slot)
+        XCTAssertEqual(CalendarShareKey.parts(twinKey)?.slot, 0)
+
+        // Nothing else of the kind's prefix qualifies either: another
+        // kind's one-off and a malformed key are not this mirror's.
+        let stray: Set<String> = [
+            oneOffKey,
+            CalendarShareKey.oneOff(kind: .routineReminder, eventIdentifier: event.id),
+            "not-a-key",
+        ]
+        XCTAssertEqual(CalendarShareMapper.reconcileSnapshotKeys(
+            from: stray, prefix: "medicationReminder:"), [])
+    }
+
+    /// D7, the sweep half — end to end: a WRITTEN one-off (its Google id
+    /// recorded, as the flush leaves it) survives a later reconcile,
+    /// even the harshest one, in which the schedule is emptied and every
+    /// slot twin of the kind IS tombstoned. Without the snapshot
+    /// narrowing this pass would read the one-off as removed and queue a
+    /// tombstone that deletes the family's alert.
+    func testReconcileDoesNotTombstoneWrittenOneOff() async {
+        let rig = makeService()
+        rig.gateway.createResults = ["g-sig-1", "g-slot-1"]
+        let entry = medicationEntry(name: "Metformin 500")
+        let event = significantEvent(entryId: entry.id)
+        let oneOffKey = significantKey(event)
+        let twinKey = slotKey(entry.id)
+
+        // The alert lands: enqueue → the shipped flush creates it.
+        XCTAssertEqual(rig.service.writeSignificantEvent(event, entry: entry), .enqueued)
+        await rig.service.flushPending()
+        await waitUntil("the significant twin to be created") {
+            rig.store.googleEventID(for: oneOffKey) == "g-sig-1"
+        }
+
+        // The schedule exists and is shared too. A fresh family-calendar
+        // answer rides along: the canned answers are consumed in call
+        // order, and the reconcile's own flush opens the calendar first
+        // (an exhausted list fails the pass at the calendar, before the
+        // twin is ever attempted).
+        rig.gateway.ensureFamilyCalendarResults = ["family-cal"]
+        rig.service.reconcileMedication([entry])
+        await waitUntil("the schedule twin to be created") {
+            rig.store.googleEventID(for: twinKey) == "g-slot-1"
+        }
+        XCTAssertEqual(rig.store.knownKeys, [oneOffKey, twinKey],
+                       "the ledger holds the one-off AND the slot twin now")
+
+        // The household deletes the medicine: the kind's next reconcile
+        // runs with an EMPTY desired set — and its tombstone flush opens
+        // the calendar again, so it needs its own answer too.
+        rig.gateway.ensureFamilyCalendarResults = ["family-cal"]
+        rig.gateway.deleteResults = [true]
+        rig.service.reconcileMedication([])
+        await waitUntil("the emptied schedule's tombstone to be applied") {
+            rig.gateway.deletedIDs == ["g-slot-1"]
+                && rig.store.googleEventID(for: twinKey) == nil
+                && rig.store.pendingCount == 0
+        }
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.deletedIDs, ["g-slot-1"],
+                       "only the schedule twin was deleted on Google — the written one-off was never tombstoned (D7)")
+        XCTAssertEqual(rig.store.googleEventID(for: oneOffKey), "g-sig-1",
+                       "and the alert's mapping survives the pass")
+        XCTAssertTrue(rig.store.knownKeys.contains(oneOffKey))
+        XCTAssertFalse(rig.store.pending.contains { $0.key == oneOffKey },
+                       "nothing is queued against the one-off")
+    }
+
+    /// D7, the marker half: the outbound set — the stale-twin sweep's
+    /// only input — never gains a significant-event key, while the
+    /// ordinary one-off path keeps marking its own, so the sweep can
+    /// still clean up an elder-created event.
+    func testOutboundKeysExcludesOneOffKeys() async {
+        let rig = makeService()
+        let event = significantEvent(entryId: UUID())
+
+        XCTAssertEqual(rig.service.writeSignificantEvent(event, entry: medicationEntry()),
+                       .enqueued)
+        await drainMain()
+        let alertKey = significantKey(event)
+        XCTAssertFalse(rig.store.outboundKeys.contains(alertKey),
+                       "a significant-event key must never enter the sweep's input (D7)")
+
+        rig.service.eventCreated(localEventId: "evt-7", title: "Doctor",
+                                 startDate: fakeNow, durationMinutes: 45)
+        await drainMain()
+        let eventKey = CalendarShareKey.oneOff(kind: .calendarEvent,
+                                               eventIdentifier: "evt-7")
+        XCTAssertTrue(rig.store.isOutbound(eventKey),
+                      "the elder's own events are still marked — the exclusion is the significant-event rule, not \"one-offs never mark\"")
+        XCTAssertEqual(rig.store.outboundKeys, [eventKey],
+                       "the sweep sees the elder's events and nothing else")
+        XCTAssertFalse(rig.store.outboundKeys.contains(alertKey))
+    }
+
+    /// The error-catalogue row (IF-17 enqueue): a failed local store
+    /// write is reported per item as `.failed(reason:)` — nothing is
+    /// claimed delivered, and the console says why.
+    func testSignificantEventStoreWriteFailureIsReportedPerItem() async {
+        let rig = makeService(failStoreWrites: true)
+        let event = significantEvent(entryId: UUID())
+
+        let result = rig.service.writeSignificantEvent(event, entry: medicationEntry())
+        await drainMain()
+
+        guard case .failed(let reason) = result else {
+            XCTFail("a failed enqueue must be reported as .failed, got \(result)")
+            return
+        }
+        XCTAssertEqual(reason, "store_write_failed")
+        XCTAssertEqual(rig.store.pendingCount, 0)
+        XCTAssertTrue(rig.gateway.callLog.isEmpty)
+        let failed = rig.bus.emittedEvents.filter {
+            $0.eventType == "calendar_share_write_failed"
+        }
+        XCTAssertEqual(failed.count, 1,
+                       "the failure is on the record, never silent")
+        XCTAssertEqual(failed.first?.metadata["reason"], "store_write_failed")
+    }
+
+    /// Without the entry there is no medication NAME to title the alert
+    /// with, and an anonymous entry on the family's calendar would be a
+    /// claim the local truth cannot back — reported, never guessed at.
+    func testSignificantEventWithoutAnEntryIsReportedHonestly() async {
+        let rig = makeService()
+        let event = significantEvent(entryId: UUID())
+
+        let result = rig.service.writeSignificantEvent(event, entry: nil)
+        await drainMain()
+
+        XCTAssertEqual(result, .failed(reason: "entry_missing"))
+        XCTAssertEqual(rig.store.pendingCount, 0)
+        XCTAssertTrue(rig.gateway.callLog.isEmpty)
+        let failed = rig.bus.emittedEvents.filter {
+            $0.eventType == "calendar_share_write_failed"
+        }
+        XCTAssertEqual(failed.count, 1)
+        XCTAssertEqual(failed.first?.metadata["reason"], "entry_missing")
     }
 
     // MARK: - Main-queue helpers

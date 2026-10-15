@@ -53,8 +53,11 @@ extension FamilyNotifierProtocol {
 /// whether the caregiver app receives the event title, an entry id it
 /// resolves against its own synced copy, or a coarse category. Until
 /// that decision is made, the honest state is: context is prepared and
-/// recorded locally, delivery is unchanged (the APNs provider is still
-/// the stub it always was).
+/// recorded locally (title in memory only, never encoded) and delivery
+/// reports itself honestly — the APNs transport is still the unimplemented
+/// stub it always was, and since [MSR] T-011 it says so in data
+/// (`.notDelivered("transport_unimplemented")`, FR-MSR-016) instead of
+/// returning a fabricated success.
 struct FamilyAlertContext: Equatable {
     /// Which firing system produced the alert.
     let kind: EventNotifyKind
@@ -71,13 +74,59 @@ struct FamilyAlertContext: Equatable {
     let fireAt: Date
 }
 
+// MARK: - Delivery rollup (FR-MSR-016)
+
+/// The honest rollup of one `notifyAll` fan-out.
+///
+/// Partial is its own answer: a mixed set is never rounded up to a
+/// delivery, and an empty set is never a delivery either (the vacuous
+/// truth `allSatisfy` walks into). Before this seam existed the only
+/// signal was the stub provider's fabricated success, so "some caregivers
+/// were reached" and "none were" looked identical — the false success
+/// FR-MSR-016 forbids.
+enum FamilyDeliveryRollup: Equatable {
+    /// No contact was targeted — nothing was attempted, and nothing
+    /// attempted is not a delivery.
+    case noRecipients
+    /// Every attempted delivery reached its contact.
+    case deliveredAll
+    /// Some contacts were reached and some were not.
+    case partial
+    /// No attempt reached its contact.
+    case noneDelivered
+}
+
+extension Array where Element == NotificationResult {
+    /// The per-contact result set read as one outcome. `deliveredAll` is
+    /// the only case that may be described as every caregiver notified
+    /// (FR-MSR-016).
+    var deliveryRollup: FamilyDeliveryRollup {
+        if isEmpty { return .noRecipients }
+        let delivered = filter { $0.success }.count
+        if delivered == 0 { return .noneDelivered }
+        if delivered == count { return .deliveredAll }
+        return .partial
+    }
+}
+
 // MARK: - iOS APNs Implementation
 
 #if os(iOS)
+/// Family-alert sender over the push transport.
+///
+/// Delivery honesty (FR-MSR-016, [MSR] T-011): the transport is the
+/// unimplemented stub, so every result this class returns says what
+/// actually happened — `success: false` with the transport's own reason
+/// code, and a mixed fan-out rolling up as `.partial`. No string in this
+/// file describes a contact as notified when the outcome was not
+/// delivered.
 final class APNsFamilyNotifier: FamilyNotifierProtocol {
 
     private var contacts: [EmergencyContact]
-    private let apnsProvider: APNsProvider
+    /// The transport, held as the seam rather than the concrete stub: the
+    /// delivered half of the rollup is unreachable through `APNsProvider`
+    /// (it is unimplemented by design), so a test supplies it here.
+    private let apnsProvider: any PushTransport
     /// The app's observability sink. Required (no default): the whole
     /// point of `family_event_alerted` is that the event-alert path is
     /// observable, and a silent default would hide it — the composition
@@ -90,7 +139,7 @@ final class APNsFamilyNotifier: FamilyNotifierProtocol {
     var locale: Locale = Locale(identifier: "en")
 
     init(contacts: [EmergencyContact],
-         apnsProvider: APNsProvider = APNsProvider(),
+         apnsProvider: any PushTransport = APNsProvider(),
          observabilityBus: ObservabilityBus) {
         self.contacts = contacts.filter { $0.isFamilyNotificationTarget }
         self.apnsProvider = apnsProvider
@@ -114,17 +163,25 @@ final class APNsFamilyNotifier: FamilyNotifierProtocol {
         var results: [NotificationResult] = []
 
         for contact in contacts {
-            let payload = buildPayload(alertType: alertType, timestamp: timestamp)
+            let payload = buildPayload(alertType: alertType,
+                                       timestamp: timestamp,
+                                       entryIdHash: entryIdHash(for: alertType,
+                                                                context: context))
 
-            let pushResult = await apnsProvider.sendPush(
+            let outcome = await apnsProvider.sendPush(
                 payload: payload,
                 deviceToken: contact.deviceToken
             )
 
+            // The result carries what actually happened, not what was
+            // hoped for (FR-MSR-016): an unimplemented transport is a
+            // `false` success with its own reason code — never the
+            // fabricated `true` the stub used to return, and never the
+            // generic "apns_delivery_failed" that hid the real reason.
             let result = NotificationResult(
                 contactIdHash: idHash(contact.id),
-                success: pushResult,
-                errorCode: pushResult ? nil : "apns_delivery_failed",
+                success: outcome.isDelivered,
+                errorCode: outcome.errorCode,
                 channel: context == nil ? nil : contact.notifyChannel.rawValue
             )
             results.append(result)
@@ -137,21 +194,57 @@ final class APNsFamilyNotifier: FamilyNotifierProtocol {
             if let context {
                 emitEventAlerted(alertType: alertType,
                                  context: context,
-                                 channel: contact.notifyChannel)
+                                 channel: contact.notifyChannel,
+                                 outcome: outcome)
             }
         }
 
-        // Partial delivery is acceptable -- log failures
-        let failureCount = results.filter { !$0.success }.count
-        if failureCount > 0 {
-            print("[FamilyNotifier] \(failureCount)/\(results.count) notifications failed")
+        // Partial delivery is acceptable, and it is reported AS partial:
+        // the per-contact results above are the record, and the
+        // `family_event_alerted` event carries the honest outcome. This
+        // debug aid keeps the not-delivered count visible without claiming
+        // any delivery (FR-MSR-016) — counts only, never contact identity,
+        // and never compiled into Release (NFR-MSR-002: the feature's log
+        // surfaces are the sanitised observability bus).
+        #if DEBUG
+        let notDeliveredCount = results.filter { !$0.success }.count
+        if notDeliveredCount > 0 {
+            print("[FamilyNotifier] \(notDeliveredCount)/\(results.count) alerts not delivered")
         }
+        #endif
 
         return results
     }
 
-    private func buildPayload(alertType: FamilyAlertType, timestamp: Date) -> [String: Any] {
-        var aps: [String: Any] = [
+    /// Which alert types may carry `entry_id_hash` (design-l2 §C10, D9):
+    /// the four medication significant events and nothing else. The
+    /// `eventReminder` type and the legacy alerts keep their shipped
+    /// shape — their context stays in memory, so an event's identity never
+    /// reaches the wire.
+    private static let medicationSignificantEvents: Set<FamilyAlertType> = [
+        .missedMedication, .possibleDoubleDose, .intakeRecorded, .escalationStarted
+    ]
+
+    /// The one-way correlation handle a payload may carry, or nil where
+    /// the design pins none. `context` is the only source: a
+    /// significant-event call that supplies no context gets no hash — the
+    /// key is omitted, never filled with a substitute.
+    private func entryIdHash(for alertType: FamilyAlertType,
+                             context: FamilyAlertContext?) -> String? {
+        Self.medicationSignificantEvents.contains(alertType) ? context?.eventIdHash : nil
+    }
+
+    /// The APNs envelope (FR-MSR-017, D9). Keys: `aps`, `v`, `alert_type`,
+    /// `timestamp`, and `entry_id_hash` ONLY when one is supplied. No
+    /// medication name, dose, label text or title on this wire, ever.
+    ///
+    /// Internal rather than private on purpose: this is the exact seam
+    /// `notifyAll` sends through, so the wire rules are asserted against
+    /// the payload that would actually leave the device.
+    func buildPayload(alertType: FamilyAlertType,
+                      timestamp: Date,
+                      entryIdHash: String?) -> [String: Any] {
+        var envelope: [String: Any] = [
             "aps": [
                 "alert": alertBody(for: alertType),
                 "sound": alertType == .emergencyCall ? "critical-alert.aiff" : "default",
@@ -160,11 +253,22 @@ final class APNsFamilyNotifier: FamilyNotifierProtocol {
             ]
         ]
 
+        // Additive version key (D9). The envelope stays v:1: the optional
+        // `entry_id_hash` is additive on a key set no deployed consumer
+        // reads yet (the transport is unimplemented), recorded as the
+        // honest state to be revisited at transport landing.
+        envelope["v"] = 1
         // Payload contains alert type + timestamp only (no PII, no health values)
-        aps["alert_type"] = alertType.rawValue
-        aps["timestamp"] = ISO8601DateFormatter().string(from: timestamp)
+        envelope["alert_type"] = alertType.rawValue
+        envelope["timestamp"] = ISO8601DateFormatter().string(from: timestamp)
+        // Hash-only, and only where the design pins it (the four
+        // medication significant events). One-way `IdHashing.shortHash`,
+        // never a UUID, never a name or a dose.
+        if let entryIdHash {
+            envelope["entry_id_hash"] = entryIdHash
+        }
 
-        return aps
+        return envelope
     }
 
     private func alertBody(for alertType: FamilyAlertType) -> String {
@@ -193,15 +297,21 @@ final class APNsFamilyNotifier: FamilyNotifierProtocol {
     /// PII-free record of one event alert: the wire alert type, the app
     /// kind, the channel the push rode, and the hashed event id. The
     /// event TITLE is never a metadata value (constitution C9).
+    ///
+    /// The outcome is the per-contact result of THIS delivery
+    /// (FR-MSR-016): `success` / `failed` with the transport's own
+    /// `error_code` — not the hardcoded `"success"` this event used to
+    /// carry regardless of what happened.
     private func emitEventAlerted(alertType: FamilyAlertType,
                                   context: FamilyAlertContext,
-                                  channel: NotifyChannel) {
+                                  channel: NotifyChannel,
+                                  outcome: PushOutcome) {
         observabilityBus.emit(ObservabilityEvent(
             component: "family_notifier",
             eventType: "family_event_alerted",
             durationMs: nil,
-            outcome: "success",
-            errorCode: nil,
+            outcome: outcome.isDelivered ? "success" : "failed",
+            errorCode: outcome.errorCode,
             metadata: [
                 "alert_type": alertType.rawValue,
                 "kind": context.kind.rawValue,
@@ -216,18 +326,63 @@ final class APNsFamilyNotifier: FamilyNotifierProtocol {
     }
 }
 
+// MARK: - Push transport (IF-19)
+
+/// What a push attempt actually did (IF-19).
+///
+/// The shipped transport is unimplemented, so the only honest outcome it
+/// can report is `.notDelivered`. The type exists so that state is DATA a
+/// caller and a test can see — the boolean the stub used to return could
+/// only ever say "yes".
+enum PushOutcome: Equatable {
+    case delivered
+    case notDelivered(reason: String)
+
+    /// What a `NotificationResult` reports as `success` (FR-MSR-016).
+    /// Delivery is the only thing that may be reported as delivered.
+    var isDelivered: Bool {
+        switch self {
+        case .delivered: return true
+        case .notDelivered: return false
+        }
+    }
+
+    /// The failure code a result and the `family_event_alerted` event
+    /// carry, or nil when the push was delivered.
+    var errorCode: String? {
+        switch self {
+        case .delivered: return nil
+        case .notDelivered(let reason): return reason
+        }
+    }
+}
+
+/// The narrow seam `APNsFamilyNotifier` sends through.
+///
+/// `APNsProvider` is the only production conformer; the protocol exists so
+/// a test can supply the delivered half of the rollup (unreachable through
+/// the deliberately-unimplemented stub) and observe the exact payload the
+/// notifier would send. It adds no egress of its own.
+protocol PushTransport {
+    func sendPush(payload: [String: Any], deviceToken: String) async -> PushOutcome
+}
+
 // MARK: - APNs Provider Stub
 
-final class APNsProvider {
-    /// Sends a push notification payload to a device token.
-    /// Returns true if delivery was successful.
-    /// In production: uses URLSession with HTTP/2 to api.push.apple.com,
-    /// JWT token auth, pinned certificate.
-    func sendPush(payload: [String: Any], deviceToken: String) async -> Bool {
-        // Stub implementation -- T-028-a requires APNs integration
-        // This will be replaced with real APNs HTTP/2 client in production
-        print("[APNsProvider] Push sent to token: \(deviceToken.prefix(8))...")
-        return true
+final class APNsProvider: PushTransport {
+    /// Reports what actually happened to a push attempt.
+    ///
+    /// The transport is NOT implemented — that is inherited, tracked work
+    /// (docs/family-notifier-e2e-implementation-plan.md) — so this returns
+    /// `.notDelivered(reason: "transport_unimplemented")` and performs no
+    /// network work. It no longer prints "Push sent…" (which claimed a
+    /// delivery that never happened) or returns a fabricated `true`
+    /// (FR-MSR-016). In production: URLSession with HTTP/2 to
+    /// api.push.apple.com, JWT token auth, pinned certificate; when that
+    /// lands the provider is swapped and this honesty contract is
+    /// unchanged.
+    func sendPush(payload: [String: Any], deviceToken: String) async -> PushOutcome {
+        .notDelivered(reason: "transport_unimplemented")
     }
 }
 

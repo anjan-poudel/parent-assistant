@@ -24,6 +24,22 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
     /// box photo in the right dose's banner.
     private let visualAidStore: VisualAidStore?
 
+    /// The household slot → clock mapping this scheduler resolves slot
+    /// entries through at arming time (C1, IF-11 / FR-MSR-002). A thin,
+    /// stateless façade over the encrypted store: every resolution call
+    /// reads the persisted record, so a mapping edit is picked up by the
+    /// next arming pass and nothing is cached that could drift.
+    ///
+    /// Defaulted to a store composed over the SAME storage seam the
+    /// scheduler already reads and writes — the record it reads is the one
+    /// the household mapping is persisted under (`medication.slot_clock`),
+    /// and an absent record loads as the household defaults (morning
+    /// 08:00, afternoon 13:00, evening 19:00) per the store's own contract.
+    /// That default is what keeps every existing construction site
+    /// reading the real mapping rather than guessing one; the shared
+    /// instance can still be passed explicitly where composition wants it.
+    private let slotClockStore: MedicationSlotClockStore
+
     /// The response window every `ConfirmationChallenge` this scheduler
     /// constructs receives (review-l2 R-2). The initializer default is
     /// the one named home (`ConfirmationChallenge
@@ -177,6 +193,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         familyNotifier: FamilyNotifierProtocol,
         caregiverNotifySettings: CaregiverNotifySettings,
         visualAidStore: VisualAidStore? = nil,
+        slotClockStore: MedicationSlotClockStore? = nil,
         challengeTimeoutSeconds: TimeInterval = ConfirmationChallenge.defaultChallengeTimeoutSeconds
     ) {
         self.storage = storage
@@ -185,6 +202,13 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         self.familyNotifier = familyNotifier
         self.caregiverNotifySettings = caregiverNotifySettings
         self.visualAidStore = visualAidStore
+        // The mapping store is stateless over the storage seam, so
+        // composing one here is equivalent to being handed the shared
+        // instance — and it is what makes a house that has never opened
+        // the slot settings read the ONE mapping record instead of a
+        // second, divergent clock. No IO happens in init: the store reads
+        // only when resolution asks (arming time).
+        self.slotClockStore = slotClockStore ?? MedicationSlotClockStore(storage: storage)
         self.challengeTimeoutSeconds = challengeTimeoutSeconds
         self.doubleDoseDetector = DoubleDoseDetector()
     }
@@ -218,6 +242,43 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
     func scheduleAll() {
         restoreState()
         rearmAllPendingReminders()
+    }
+
+    // MARK: - Arming resolution feed (IF-11)
+
+    /// The times this entry is armed at, resolved freshly at schedule /
+    /// arming time (IF-11, FR-MSR-002).
+    ///
+    /// - A legacy entry (no slot) resolves to its stored times, VERBATIM:
+    ///   the shipped behaviour stays first-class, and no mapping, clock or
+    ///   guess is consulted for it.
+    /// - A slot entry resolves through the household mapping (C1) — never
+    ///   through its own stored `scheduleTimes`, which for a slot entry is
+    ///   only the resolved-time MIRROR (D2). That mirror is not read here
+    ///   and not written here: the save gate and the mapping-change re-arm
+    ///   pass are its only writers.
+    ///
+    /// The mapping is read through the injected store on EVERY call, so a
+    /// mapping edit reaches the next arming pass with nothing cached in
+    /// between. Resolution happens at arming time only — never at fire
+    /// time — so the firing path keeps its shipped shape.
+    ///
+    /// The one failure is `SlotClockError.indeterminate(slot:)`: a stored
+    /// mapping value with no determinate hour/minute. It is returned
+    /// as-is (fail-closed); the arming consumer arms NOTHING for that
+    /// entry and surfaces the slot. No time is guessed, clamped or
+    /// defaulted on any path.
+    func resolvedScheduleTimes(for entry: MedicationEntry) -> Result<[DateComponents], SlotClockError> {
+        guard let slot = entry.slot else {
+            return .success(entry.scheduleTimes)
+        }
+
+        switch slotClockStore.load().resolve(slot: slot) {
+        case .success(let time):
+            return .success([time.dateComponents])
+        case .failure(let error):
+            return .failure(error)
+        }
     }
 
     // MARK: - Acknowledge (Baseline FR-026 to FR-029)
@@ -724,7 +785,27 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         let calendar = Calendar.current
 
         for entry in entries {
-            for scheduleTime in entry.scheduleTimes {
+            // The arming times come from the resolution feed (IF-11): a
+            // slot entry is resolved against the household mapping NOW,
+            // and a legacy entry keeps its stored times verbatim.
+            let scheduleTimes: [DateComponents]
+            switch resolvedScheduleTimes(for: entry) {
+            case .success(let resolved):
+                scheduleTimes = resolved
+            case .failure(.indeterminate(let slot)):
+                // Fail-closed: this entry arms nothing and no time is
+                // guessed for it. The slot is the ONLY thing surfaced —
+                // no medication name, no quantity, no clock value
+                // (NFR-MSR-002). Other entries in the pass are unaffected:
+                // one unresolvable slot must never take the whole
+                // household's schedule down with it.
+                emit("medication_slot_unresolved",
+                     metadata: ["slot": slot.rawValue],
+                     outcome: "unresolved")
+                continue
+            }
+
+            for scheduleTime in scheduleTimes {
                 guard let scheduledAt = nextOccurrence(of: scheduleTime, after: now, calendar: calendar) else {
                     continue
                 }
@@ -746,6 +827,11 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
             }
         }
 
+        // Persist BEFORE arming — the order is the invariant, not an
+        // implementation detail: the elder's reminder state (with its
+        // resolved exact time) is on disk before the platform alarm
+        // exists, so an interruption between the two can only ever re-arm
+        // a dose, never lose one. A failed write arms nothing.
         guard persistReminders() else { return }
 
         for reminder in pendingRemindersList.values {
@@ -813,12 +899,18 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         IdHashing.shortHash(of: id)
     }
 
-    private func emit(_ eventType: String, metadata: [String: String]) {
+    /// The events below are classification only — `entry_id_hash` and
+    /// categorical fields, never a medication name, a dose, a clock value
+    /// or any other content (NFR-MSR-002). `outcome` is defaulted so every
+    /// shipped emission keeps its exact payload and only the paths that
+    /// have something else to say (an unresolved slot) deviate.
+    private func emit(_ eventType: String, metadata: [String: String],
+                      outcome: String = "success") {
         observabilityBus.emit(ObservabilityEvent(
             component: "medication_scheduler",
             eventType: eventType,
             durationMs: nil,
-            outcome: "success",
+            outcome: outcome,
             errorCode: nil,
             metadata: metadata
         ))

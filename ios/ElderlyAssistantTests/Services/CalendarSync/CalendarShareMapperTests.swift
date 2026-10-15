@@ -565,4 +565,125 @@ final class CalendarShareMapperTests: XCTestCase {
         XCTAssertEqual(firstEverPass.created, ["a"])
         XCTAssertTrue(firstEverPass.removed.isEmpty)
     }
+
+    // MARK: - Significant events (C11 / IF-18, D7)
+
+    private func significantEvent(
+        kind: SignificantMedicationEvent.Kind = .missedMedication,
+        entryId: UUID = UUID(),
+        occurredAt: Date? = nil
+    ) -> SignificantMedicationEvent {
+        SignificantMedicationEvent(kind: kind, entryId: entryId,
+                                   occurredAt: occurredAt ?? now)
+    }
+
+    /// The audience is the family-notification set the M-1 amended
+    /// disclosure names: EVERY family contact with an email —
+    /// de-duplicated case-insensitively with the first spelling kept,
+    /// emergency-first. The toggles are not consulted at all (the
+    /// builder takes no `CaregiverNotifySettings`: the signature is the
+    /// structural proof that this audience cannot be gated).
+    func testSignificantEventDraftAudienceIsEveryFamilyContactWithEmail() {
+        let mother = contact(name: "आमा", email: "maa@example.com", emergency: true)
+        let son = contact(name: "छोरा", email: "Son@Example.com")
+        let daughter = contact(name: "छोरी", email: "daughter@example.com")
+        let noAddress = contact(name: "no address", email: nil)
+        let blankAddress = contact(name: "blank", email: "   ")
+        let duplicate = contact(name: "आमा (second row)", email: "MAA@example.com",
+                                emergency: true)
+
+        let event = significantEvent(entryId: UUID(), occurredAt: now)
+        let draft = CalendarShareMapper.significantEventDraft(
+            event: event,
+            medicationName: "Metformin 500",
+            contacts: [son, mother, duplicate, noAddress, blankAddress, daughter],
+            timeZone: kathmandu,
+            locale: testLocale)
+
+        XCTAssertEqual(draft?.attendeeEmails,
+                       ["maa@example.com", "Son@Example.com", "daughter@example.com"],
+                       "every contact with an email, emergency-first, de-duplicated case-insensitively — the M-1 disclosure's audience")
+        XCTAssertEqual(draft?.title,
+                       "\(L10n.str("calendarShare.alert.missed", locale: testLocale)) — Metformin 500")
+        XCTAssertTrue(draft?.title.contains("Metformin 500") == true,
+                      "the family reads which medicine it is about")
+        XCTAssertEqual(draft?.startDate, now)
+        XCTAssertEqual(draft?.durationMinutes, CalendarShareMapper.defaultDurationMinutes)
+        XCTAssertEqual(draft?.timeZoneIdentifier, "Asia/Kathmandu")
+        XCTAssertNil(draft?.recurrence, "a significant event is a one-off")
+        XCTAssertEqual(draft?.kind, EventNotifyKind.medicationReminder)
+        XCTAssertNil(draft?.location)
+
+        // Every kind opens with its own catalog phrase (both locales carry
+        // all three — the catalog coverage test pins the copy).
+        let kinds: [(SignificantMedicationEvent.Kind, String)] = [
+            (.missedMedication, "calendarShare.alert.missed"),
+            (.possibleDoubleDose, "calendarShare.alert.doubleDose"),
+            (.escalationStarted, "calendarShare.alert.escalation"),
+        ]
+        for (kind, key) in kinds {
+            let phrase = L10n.str(key, locale: testLocale)
+            XCTAssertFalse(phrase.isEmpty, "\(key) must resolve")
+            XCTAssertEqual(CalendarShareMapper.significantEventTitle(
+                kind: kind, medicationName: "Metformin 500", locale: testLocale),
+                "\(phrase) — Metformin 500")
+        }
+
+        // Nobody with an email → no draft at all: the no-op stays in the
+        // mapper (no attendee-less entry ever reaches Google).
+        XCTAssertNil(CalendarShareMapper.significantEventDraft(
+            event: event, medicationName: "Metformin 500",
+            contacts: [noAddress, blankAddress], timeZone: kathmandu,
+            locale: testLocale))
+        XCTAssertNil(CalendarShareMapper.significantEventDraft(
+            event: event, medicationName: "Metformin 500", contacts: [],
+            timeZone: kathmandu, locale: testLocale))
+    }
+
+    /// D7, at the grammar: the significant-event key is the 2-component
+    /// ONE-OFF form — so the reconcile snapshot (slot keys only, see the
+    /// service suite's `testOneOffKeyNotInReconcileSnapshot`) can never
+    /// read it as a removed series — and its opaque id contains no
+    /// colon, so the composed key stays parseable by the shipped
+    /// grammar.
+    func testOneOffGrammarTwoComponents() {
+        let entryId = UUID()
+        let instant = utcDate(2026, 9, 16, 8, 0)
+        let event = significantEvent(entryId: entryId, occurredAt: instant)
+        let key = CalendarShareKey.oneOff(kind: .medicationReminder,
+                                          eventIdentifier: event.id)
+
+        XCTAssertEqual(key.split(separator: ":").count, 2)
+
+        let parts = CalendarShareKey.parts(key)
+        XCTAssertEqual(parts?.kind, EventNotifyKind.medicationReminder)
+        XCTAssertNil(parts?.entryId, "the one-off form carries no uuid — the id is opaque")
+        XCTAssertNil(parts?.slot)
+        XCTAssertEqual(CalendarShareKey.oneOffIdentifier(key), event.id)
+
+        // The 3-component slot form is the other side of the distinction.
+        let twinKey = CalendarShareKey.slot(kind: .medicationReminder,
+                                            entryId: entryId, slot: 0)
+        XCTAssertEqual(twinKey.split(separator: ":").count, 3)
+        XCTAssertEqual(CalendarShareKey.parts(twinKey)?.slot, 0)
+        XCTAssertNil(CalendarShareKey.oneOffIdentifier(twinKey))
+
+        // Deterministic identity (D7): the same logical event composes
+        // the same id; a different kind or occurrence does not.
+        XCTAssertEqual(SignificantMedicationEvent(kind: .missedMedication,
+                                                  entryId: entryId,
+                                                  occurredAt: instant).id, event.id)
+        XCTAssertNotEqual(SignificantMedicationEvent(kind: .possibleDoubleDose,
+                                                     entryId: entryId,
+                                                     occurredAt: instant).id, event.id)
+        XCTAssertNotEqual(SignificantMedicationEvent(kind: .missedMedication,
+                                                     entryId: entryId,
+                                                     occurredAt: instant.addingTimeInterval(60)).id,
+                          event.id)
+
+        // The stamp is UTC and minute-truncated.
+        XCTAssertTrue(event.id.hasSuffix("_202609160800"), event.id)
+        XCTAssertFalse(event.id.contains(":"),
+                       "no colon may enter the key grammar's id component")
+    }
 }
