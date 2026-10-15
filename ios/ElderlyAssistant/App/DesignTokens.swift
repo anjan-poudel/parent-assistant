@@ -190,10 +190,6 @@ extension UIScreen {
         guard let current = currentMode else { return false }
         let nativeArea = nativeBounds.width * nativeBounds.height
         let currentArea = current.size.width * current.size.height
-        let zoomed = nativeArea > currentArea * 1.001
-        #if DEBUG
-        print("[MEDIUM-FIT] currentMode=\(current.size) nativeBounds=\(nativeBounds) zoomed=\(zoomed)")
-        #endif
-        return zoomed
+        return nativeArea > currentArea * 1.001
     }
 }
