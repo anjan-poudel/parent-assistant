@@ -187,9 +187,7 @@ extension UIScreen {
               }) else { return false }
         let zoomed = current.size != largest.size
         #if DEBUG
-        MediumFitLogger.shared.info(
-            "currentMode=\(current.size.width)x\(current.size.height) "
-            + "largest=\(largest.size.width)x\(largest.size.height) zoomed=\(zoomed)")
+        MediumFitLogger.shared.info("currentMode=\(current.size.width, privacy: .public)x\(current.size.height, privacy: .public) largest=\(largest.size.width, privacy: .public)x\(largest.size.height, privacy: .public) zoomed=\(zoomed, privacy: .public)")
         #endif
         return zoomed
     }
