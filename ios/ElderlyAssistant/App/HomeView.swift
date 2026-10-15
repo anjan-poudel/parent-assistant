@@ -185,9 +185,10 @@ struct HomeView: View {
                             // no-mockups rule. Tap pushes the Phone
                             // screen's call log.
                             // [MEDIUM-FIT] (2026-10-15) The missed-call
-                            // tile stands down at medium text size and
-                            // below — the space goes to the viewport fit.
-                            if dynamicTypeSize > .medium,
+                            // tile stands down at large text size and
+                            // below — the space goes to the viewport fit
+                            // (owner: large and medium look identical).
+                            if dynamicTypeSize > .large,
                                let missedCall = homePresentation.lastMissedCall {
                                 HomeMissedCallTile(presentation: missedCall) {
                                     navPath.append(LeafDestination.call)

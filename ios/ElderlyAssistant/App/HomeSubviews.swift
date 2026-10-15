@@ -46,12 +46,13 @@ struct HomeTopBar: View {
 
     var body: some View {
         Group {
-            if dynamicTypeSize <= .medium {
-                // [MEDIUM-FIT] (2026-10-15) The medium-size compact bar —
-                // owner: profile below settings, notifications below
-                // emergency, and the Nepali calendar date between the two
-                // menu columns, so the date gets room and the bar saves
-                // horizontal space.
+            if dynamicTypeSize <= .large {
+                // [MEDIUM-FIT] (2026-10-15) The compact bar — owner:
+                // "large and medium text/display mode should have the
+                // same look and feel": profile below settings,
+                // notifications below emergency, and the Nepali calendar
+                // date between the two menu columns, so the date gets
+                // room and the bar saves horizontal space.
                 stackedBar
             } else {
                 wideBar
@@ -64,7 +65,7 @@ struct HomeTopBar: View {
         .accessibilityIdentifier("home.header")
     }
 
-    /// Medium size and below: settings over profile on the left, the
+    /// Large and below: settings over profile on the left, the
     /// Nepali date in the middle, emergency over notifications on the
     /// right.
     private var stackedBar: some View {
@@ -82,26 +83,19 @@ struct HomeTopBar: View {
         }
     }
 
-    /// Large and above: one icon row with the date inline at ordinary
-    /// sizes, the date on its own row at accessibility sizes.
+    /// Above large (accessibility sizes): one icon row, the date on
+    /// its own row.
     private var wideBar: some View {
         VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 4 : 8) {
             HStack(spacing: 8) {
                 settingsButton
                 profileButton
-                if dynamicTypeSize <= .large {
-                    calendarButton
-                        .frame(maxWidth: .infinity)
-                } else {
-                    Spacer(minLength: 8)
-                }
+                Spacer(minLength: 8)
                 NotificationBellButton(count: notificationCount, action: onOpenUpdates)
                 EmergencyIconButton()
             }
-            if dynamicTypeSize > .large {
-                calendarButton
-                    .frame(maxWidth: .infinity)
-            }
+            calendarButton
+                .frame(maxWidth: .infinity)
         }
     }
 
@@ -191,11 +185,11 @@ struct QuickAccessStrip: View {
     let onLaunch: (AppLauncher.App) -> Void
 
     private var tileWidth: CGFloat {
-        // [MEDIUM-FIT] (2026-10-15) At medium and below every curated
+        // [MEDIUM-FIT] (2026-10-15) At large and below every curated
         // app fits the viewport — the row does not scroll (owner: apps
         // were hidden behind the horizontal scroll). Larger sizes keep
         // the 4-across baseline.
-        if dynamicTypeSize <= .medium {
+        if dynamicTypeSize <= .large {
             let count = apps.count + 1  // favourites + the add tile
             let totalSpacing = horizontalSpacing * CGFloat(max(count - 1, 0))
             let fitAll = (availableWidth - totalSpacing) / CGFloat(max(count, 1))
@@ -208,10 +202,10 @@ struct QuickAccessStrip: View {
         return dynamicTypeSize > .large ? max(largeTypeTileWidth, fourAcrossWidth) : fourAcrossWidth
     }
 
-    /// [MEDIUM-FIT] (2026-10-15) 4pt tile gaps at medium and below,
+    /// [MEDIUM-FIT] (2026-10-15) 4pt tile gaps at large and below,
     /// 8pt at larger sizes.
     private var horizontalSpacing: CGFloat {
-        dynamicTypeSize <= .medium ? 4 : 8
+        dynamicTypeSize <= .large ? 4 : 8
     }
 
     var body: some View {
