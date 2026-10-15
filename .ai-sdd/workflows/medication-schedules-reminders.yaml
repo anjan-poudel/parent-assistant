@@ -120,6 +120,12 @@ tasks:
       # parallelism: waves is the default when absent — the plan's units are
       # topologically sorted into dependency waves and dispatched in parallel
       # groups (set "sequential" to opt out).
+      # owner directive 2026-10-15: maximize parallelism — the LE must
+      # decompose units for maximum wave width (parallel-safe seams:
+      # models / editor / voice-ack / photo-evidence / notifier / calendar;
+      # no two units may own the same file). Shared-worktree xcodebuild is
+      # serialized (git-index contention + ENOSPC hazards): per-unit work is
+      # code + typecheck only, ONE consolidated build/test pass per wave.
       # test cadence (amendment-4, 2026-10-14 owner directive): per-unit work
       # is code + build/typecheck only; each wave closes with ONE
       # consolidated scoped (-only-testing) pass over the wave's touched
