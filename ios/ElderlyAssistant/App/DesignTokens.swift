@@ -181,13 +181,18 @@ extension UIScreen {
     /// the area-ratio check reads 1.0 (that bug shipped one round as
     /// "nothing changed on the 17 Pro Max").
     var isDisplayZoomed: Bool {
-        guard let current = currentMode,
-              let largest = availableModes.max(by: {
-                  $0.size.width * $0.size.height < $1.size.width * $1.size.height
-              }) else { return false }
-        let zoomed = current.size != largest.size
+        let current = currentMode
+        let largest = availableModes.max(by: {
+            $0.size.width * $0.size.height < $1.size.width * $1.size.height
+        })
+        let zoomed: Bool
+        if let current, let largest {
+            zoomed = current.size != largest.size
+        } else {
+            zoomed = false
+        }
         #if DEBUG
-        MediumFitLogger.shared.info("currentMode=\(current.size.width, privacy: .public)x\(current.size.height, privacy: .public) largest=\(largest.size.width, privacy: .public)x\(largest.size.height, privacy: .public) zoomed=\(zoomed, privacy: .public)")
+        MediumFitLogger.shared.info("currentMode=\(String(describing: current?.size), privacy: .public) modesCount=\(availableModes.count, privacy: .public) largest=\(String(describing: largest?.size), privacy: .public) bounds=\(Int(bounds.width), privacy: .public)x\(Int(bounds.height), privacy: .public) nativeBounds=\(Int(nativeBounds.width), privacy: .public)x\(Int(nativeBounds.height), privacy: .public) scale=\(nativeScale, privacy: .public) zoomed=\(zoomed, privacy: .public)")
         #endif
         return zoomed
     }
