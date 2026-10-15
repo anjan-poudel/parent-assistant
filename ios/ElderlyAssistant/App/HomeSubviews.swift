@@ -198,8 +198,11 @@ struct QuickAccessStrip: View {
         if dynamicTypeSize <= .medium {
             let count = apps.count + 1  // favourites + the add tile
             let totalSpacing = horizontalSpacing * CGFloat(max(count - 1, 0))
-            return max(DesignTokens.minTapTargetSize,
-                       (availableWidth - totalSpacing) / CGFloat(max(count, 1)))
+            let fitAll = (availableWidth - totalSpacing) / CGFloat(max(count, 1))
+            let fourAcross = (availableWidth - 3 * horizontalSpacing) / 4
+            // Capped at the 4-across width so a single favourite never
+            // balloons to a half-screen tile.
+            return max(DesignTokens.minTapTargetSize, min(fitAll, fourAcross))
         }
         let fourAcrossWidth = max(DesignTokens.minTapTargetSize, (availableWidth - 24) / 4)
         return dynamicTypeSize > .large ? max(largeTypeTileWidth, fourAcrossWidth) : fourAcrossWidth
