@@ -154,11 +154,42 @@ enum DesignTokens {
     /// keeps the dock visible without scrolling at normal size.
     static let talkSubHeroSlotHeightCompact: CGFloat = 104
     static let chipHeight: CGFloat = 60
-    /// [DOCK-FIT] (2026-10-15) Two-row Home dock budget after the
-    /// medium-display pass (owner: "too much space at the bottom"):
-    /// ~48pt action row (28pt glyphs) + 8pt gap + ~76pt rail (44pt
-    /// glyphs + 10pt lower inset, no safe-area band), documented for
-    /// the DesignTokens pin test — the dock itself is intrinsic-height.
-    static let dockHeight: CGFloat = 132
+    /// [DOCK-FIT] (2026-10-15) Two-row Home dock budget at Medium/Large
+    /// display sizes (owner: "too much space at the bottom"): ~48pt
+    /// action row (28pt glyphs) + 8pt gap + ~70pt rail (44pt glyphs;
+    /// the HomeView shift puts the tiles ~12pt above the physical
+    /// bottom and the surface bleeds to the screen edge). The Default
+    /// display size keeps the original 134pt budget — documented for
+    /// the DesignTokens pin test, the dock itself is intrinsic-height.
+    static let dockHeight: CGFloat = 126
     static let iconBadgeDiameter: CGFloat = 44
+}
+
+// MARK: - Display size zoom (Medium/Large display options)
+
+extension UIScreen {
+    /// [MEDIUM-FIT] (2026-10-15) True when the iPhone's display size
+    /// option is Medium or Large (Settings → Display & Brightness →
+    /// Display Size: Default/Medium/Large — not Dynamic Type).
+    ///
+    /// Detection: a zoomed display mode renders a SMALLER pixel grid
+    /// than the panel's native mode, so `currentMode` (the mode in
+    /// use) differs from the largest entry in `availableModes` (the
+    /// panel). `nativeBounds` is deliberately NOT used — on zoomed
+    /// devices it reports the zoomed render size, not the panel, so
+    /// the area-ratio check reads 1.0 (that bug shipped one round as
+    /// "nothing changed on the 17 Pro Max").
+    var isDisplayZoomed: Bool {
+        // Device-verified (17 Pro Max, Medium display option, 2026-10-15):
+        //   currentMode = (1125, 2436)  — the zoomed render grid
+        //   nativeBounds = (1320, 2868) — the panel, reported correctly
+        //   availableModes = [current only] — useless on iOS 26
+        // On Default display size the current mode IS the native panel
+        // (Anzaan: 1290x2796 == 1290x2796), so the area comparison is
+        // 1.0; on Medium/Large it is ~1.38.
+        guard let current = currentMode else { return false }
+        let nativeArea = nativeBounds.width * nativeBounds.height
+        let currentArea = current.size.width * current.size.height
+        return nativeArea > currentArea * 1.001
+    }
 }

@@ -64,7 +64,12 @@ final class SpotifyLocalizationTests: XCTestCase {
     /// feature HEAD). 1,341 + 3 + 17 = 1,361: the catalog total must stay
     /// exactly this plus the 20 added keys — the feature's edit list adds
     /// keys and modifies none.
-    private let baselineKeyCount = 1361
+    /// Re-measured at the home medium-fit dock labels (2026-10-15): this
+    /// pin had drifted as later master merges added keys (the L10n
+    /// coverage suite's `dialogueBaselineKeyCount` measurement stayed
+    /// current and reads 1,420 + 19). With the two new medium-mode dock
+    /// keys the catalog totals 1,441, so the baseline is 1,421.
+    private let baselineKeyCount = 1421
 
     private let english = Locale(identifier: "en")
     private let nepali = Locale(identifier: "ne-NP")

@@ -91,9 +91,28 @@ struct HomeView: View {
     /// through the same stack.
     @State private var navPath = NavigationPath()
     @State private var conversationViewportHeight: CGFloat = 0
+    /// [MEDIUM-FIT] (2026-10-15) The bottom safe-area inset, read from
+    /// the home layout geometry — the "low hug" dock shifts down past
+    /// it so its tiles end ~12pt above the physical screen bottom.
+    @State private var bottomSafeInset: CGFloat = 0
+
+    /// [MEDIUM-FIT] (2026-10-15) True when the iPhone display size is
+    /// Medium or Large (Settings → Display & Brightness) — the optimized
+    /// viewport-fitting layout then applies; Default keeps the original.
+    private var zoomed: Bool { UIScreen.main.isDisplayZoomed }
 
     private var pinsDock: Bool {
-        dynamicTypeSize <= .large && verticalSizeClass != .compact
+        // Zoomed display sizes pin the dock at every type size; Default
+        // keeps the original behavior (pinned through .large only).
+        (zoomed || dynamicTypeSize <= .large) && verticalSizeClass != .compact
+    }
+
+    /// How far the pinned dock shifts down past the safe area (owner v3,
+    /// "low hug": tiles ~12pt above the physical bottom; zero on
+    /// home-button devices where there is no home indicator). Only at
+    /// Medium/Large display sizes.
+    private var dockSafeAreaShift: CGFloat {
+        zoomed ? max(0, bottomSafeInset - 12) : 0
     }
 
     private var homeDock: some View {
@@ -115,8 +134,9 @@ struct HomeView: View {
                     .equatable()
                     .padding(.horizontal, 20)
                     // [MEDIUM-FIT] (2026-10-15) 4pt top clearance at
-                    // ordinary type sizes, 8pt at accessibility sizes.
-                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 8 : 4)
+                    // Medium/Large display sizes, the original 8pt at
+                    // Default.
+                    .padding(.top, zoomed ? 4 : 8)
 
                     // [VOICE-OOM] F (2026-10-10) — the degraded-mode
                     // status pill: visible while the turn in force runs a
@@ -133,10 +153,10 @@ struct HomeView: View {
                     // rendered behind it and were awkward to pan.
                     ScrollView(showsIndicators: false) {
                         // [MEDIUM-FIT] (2026-10-15) 12pt section gap at
-                        // ordinary type sizes keeps the whole Home flow
-                        // inside the viewport; 16pt at accessibility
-                        // sizes where the dock scrolls with the content.
-                        VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 16 : 12) {
+                        // Medium/Large display sizes keeps the whole
+                        // Home flow inside the viewport; the original
+                        // 16pt at Default.
+                        VStack(spacing: zoomed ? 12 : 16) {
                             if !homePresentation.favoriteApps.isEmpty {
                                 QuickAccessStrip(apps: homePresentation.favoriteApps) { app in
                                     // [APP-UI-CONFIRM] (2026-10-14) The
@@ -173,7 +193,11 @@ struct HomeView: View {
                             // is nil) — no dead card, the redesign's
                             // no-mockups rule. Tap pushes the Phone
                             // screen's call log.
-                            if let missedCall = homePresentation.lastMissedCall {
+                            // [MEDIUM-FIT] (2026-10-15) The missed-call
+                            // tile stands down at Medium/Large display
+                            // sizes — the space goes to the viewport fit.
+                            if !zoomed,
+                               let missedCall = homePresentation.lastMissedCall {
                                 HomeMissedCallTile(presentation: missedCall) {
                                     navPath.append(LeafDestination.call)
                                 }
@@ -191,9 +215,10 @@ struct HomeView: View {
                         }
                         .padding(.horizontal, 20)
                         // [MEDIUM-FIT] (2026-10-15) Tighter scroll
-                        // insets at ordinary type sizes.
-                        .padding(.top, dynamicTypeSize.isAccessibilitySize ? 24 : 16)
-                        .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 16 : 12)
+                        // insets at Medium/Large display sizes; the
+                        // original insets at Default.
+                        .padding(.top, zoomed ? 16 : 24)
+                        .padding(.bottom, zoomed ? 12 : 16)
                         .frame(maxWidth: .infinity, minHeight: conversationViewportHeight)
                     }
                     .clipped()
@@ -206,10 +231,22 @@ struct HomeView: View {
                     if pinsDock {
                         homeDock
                             // [MEDIUM-FIT] (2026-10-15) 8pt dock clearance
-                            // at ordinary type sizes.
-                            .padding(.top, dynamicTypeSize.isAccessibilitySize ? 12 : 8)
+                            // at Medium/Large display sizes, the original
+                            // 12pt at Default.
+                            .padding(.top, zoomed ? 8 : 12)
+                            // [MEDIUM-FIT] (2026-10-15) Owner v3 "low
+                            // hug": pull the dock down so its tiles end
+                            // ~12pt above the physical screen bottom.
+                            .padding(.bottom, -dockSafeAreaShift)
                     }
                 }
+            }
+            // [MEDIUM-FIT] (2026-10-15) Read the bottom safe-area inset
+            // the dock shift is computed from.
+            .onGeometryChange(for: CGFloat.self) { geometry in
+                geometry.safeAreaInsets.bottom
+            } action: { inset in
+                bottomSafeInset = inset
             }
             // Home paints its own top bar (HomeTopBar), so the system
             // navigation bar is hidden entirely. `.toolbar(.hidden,
@@ -1040,10 +1077,10 @@ struct TalkButton: View {
             // [HERO-SIZE] Slimmer vertical reserve than the old 32pt: the
             // disc is 132pt constant now, and every saved point goes to
             // fitting the stage + dock in the viewport without scrolling.
-            // [MEDIUM-FIT] (2026-10-15) 16pt at ordinary type sizes
-            // (still clears the hero's 160pt halo footprint), 20pt at
-            // accessibility sizes.
-            .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 20 : 16)
+            // [MEDIUM-FIT] (2026-10-15) 16pt at Medium/Large display
+            // sizes (still clears the hero's 160pt halo footprint),
+            // the original 20pt at Default.
+            .padding(.vertical, UIScreen.main.isDisplayZoomed ? 16 : 20)
             if !transientStatusLine.isEmpty {
                 Text(transientStatusLine)
                     .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,

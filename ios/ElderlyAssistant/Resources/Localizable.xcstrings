@@ -7928,6 +7928,40 @@
         }
       }
     },
+    "home.dock.appliance": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appliance"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उपकरण"
+          }
+        }
+      }
+    },
+    "home.dock.translate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translate"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद"
+          }
+        }
+      }
+    },
     "home.greeting.morning": {
       "extractionState": "manual",
       "localizations": {
