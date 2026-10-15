@@ -181,8 +181,7 @@ extension UIScreen {
     /// "nothing changed on the 17 Pro Max").
     var isDisplayZoomed: Bool {
         guard let current = currentMode,
-              let modes = availableModes,
-              let largest = modes.max(by: {
+              let largest = availableModes.max(by: {
                   $0.size.width * $0.size.height < $1.size.width * $1.size.height
               }) else { return false }
         let zoomed = current.size != largest.size
