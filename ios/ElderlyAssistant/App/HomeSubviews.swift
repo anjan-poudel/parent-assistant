@@ -901,10 +901,10 @@ struct HomeDock: View {
     var body: some View {
         // [DOCK-FIT] (2026-10-15) Medium-display pass — owner: "the dock
         // menu has too much space at the bottom". Ordinary type sizes
-        // get 28/44pt glyphs, a 4+4pt row gap and a snug 4pt rail
-        // inset, while the rail surface keeps hugging the screen edge
-        // through the home-indicator area — no floating band, no
-        // page-colored gap. Every tile keeps its 44pt tap floor;
+        // get 28/44pt glyphs, an 8pt row gap and ~10pt rail insets; the
+        // tiles ride low (~12pt above the physical bottom — HomeView
+        // shifts the dock into the safe area) and the surface flows to
+        // the screen edge. Every tile keeps its 44pt tap floor;
         // accessibility sizes keep the generous 32/48pt glyphs.
         VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 6 : 4) {
             LazyVGrid(columns: topColumns, alignment: .center, spacing: 8) {
@@ -944,12 +944,15 @@ struct HomeDock: View {
                 dockItem(.reminders, artwork: "clock", titleKey: "home.hub.reminders",
                          onRail: true, identifier: "home.action.reminders")
             }
-            .padding(.horizontal, 8)
-            .padding(.top, dynamicTypeSize.isAccessibilitySize ? 6 : 4)
-            // [MEDIUM-FIT] (2026-10-15) Owner v2: the rail surface hugs
-            // the screen edge (bleeds through the home-indicator area)
-            // with a snug 4pt inset under the tiles at ordinary sizes.
-            .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 10 : 4)
+            .padding(.horizontal, 10)
+            .padding(.top, dynamicTypeSize.isAccessibilitySize ? 10 : 8)
+            // [MEDIUM-FIT] (2026-10-15) Owner v3 ("low hug"): the tiles
+            // ride ~12pt above the physical screen bottom — HomeView
+            // shifts the dock past the safe area and the surface bleeds
+            // to the bottom edge, so there is no empty band under the
+            // tiles. No internal bottom inset at ordinary sizes: the
+            // shift provides the 12pt clearance itself.
+            .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 10 : 0)
             .background {
                 Color.clear
                     .appSurface(role: .dock, cornerRadius: 20)

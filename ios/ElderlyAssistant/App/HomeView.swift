@@ -91,9 +91,20 @@ struct HomeView: View {
     /// through the same stack.
     @State private var navPath = NavigationPath()
     @State private var conversationViewportHeight: CGFloat = 0
+    /// [MEDIUM-FIT] (2026-10-15) The bottom safe-area inset, read from
+    /// the home layout geometry — the "low hug" dock shifts down past
+    /// it so its tiles end ~12pt above the physical screen bottom.
+    @State private var bottomSafeInset: CGFloat = 0
 
     private var pinsDock: Bool {
         dynamicTypeSize <= .large && verticalSizeClass != .compact
+    }
+
+    /// How far the pinned dock shifts down past the safe area (owner v3,
+    /// "low hug": tiles ~12pt above the physical bottom; zero on
+    /// home-button devices where there is no home indicator).
+    private var dockSafeAreaShift: CGFloat {
+        max(0, bottomSafeInset - 12)
     }
 
     private var homeDock: some View {
@@ -212,8 +223,19 @@ struct HomeView: View {
                             // [MEDIUM-FIT] (2026-10-15) 8pt dock clearance
                             // at ordinary type sizes.
                             .padding(.top, dynamicTypeSize.isAccessibilitySize ? 12 : 8)
+                            // [MEDIUM-FIT] (2026-10-15) Owner v3 "low
+                            // hug": pull the dock down so its tiles end
+                            // ~12pt above the physical screen bottom.
+                            .padding(.bottom, -dockSafeAreaShift)
                     }
                 }
+            }
+            // [MEDIUM-FIT] (2026-10-15) Read the bottom safe-area inset
+            // the dock shift is computed from.
+            .onGeometryChange(for: CGFloat.self) { geometry in
+                geometry.safeAreaInsets.bottom
+            } action: { inset in
+                bottomSafeInset = inset
             }
             // Home paints its own top bar (HomeTopBar), so the system
             // navigation bar is hidden entirely. `.toolbar(.hidden,
