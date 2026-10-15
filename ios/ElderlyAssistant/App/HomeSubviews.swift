@@ -31,6 +31,10 @@ import UIKit
 struct HomeTopBar: View {
     @Environment(\.appAppearance) private var appearance
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// [MEDIUM-FIT] (2026-10-15) True when the iPhone display size is
+    /// Medium or Large (Settings → Display & Brightness) — the compact
+    /// bar then applies; at Default the original layout renders.
+    private var zoomed: Bool { UIScreen.main.isDisplayZoomed }
     /// Today's composed date line — nil until the first offline
     /// composition lands (one launch frame), which renders as an empty
     /// date area, exactly as before the split.
@@ -46,28 +50,28 @@ struct HomeTopBar: View {
 
     var body: some View {
         Group {
-            if dynamicTypeSize <= .large {
-                // [MEDIUM-FIT] (2026-10-15) The compact bar — owner:
-                // "large and medium text/display mode should have the
-                // same look and feel": profile below settings,
-                // notifications below emergency, and the Nepali calendar
-                // date between the two menu columns, so the date gets
-                // room and the bar saves horizontal space.
+            if zoomed {
+                // [MEDIUM-FIT] (2026-10-15) Medium/Large display size:
+                // the compact stacked bar — profile below settings,
+                // notifications below emergency, the Nepali calendar
+                // date between the two menu columns.
                 stackedBar
+                    .padding(.top, 4)
             } else {
-                wideBar
+                // Default display size: the original bar — one icon row
+                // with the date inline at ordinary type sizes, the date
+                // on its own row at accessibility sizes.
+                originalBar
+                    .padding(.top, 8)
             }
         }
-        // [MEDIUM-FIT] (2026-10-15) Slimmer top clearance at ordinary
-        // type sizes — every point goes to fitting Home in the viewport.
-        .padding(.top, dynamicTypeSize.isAccessibilitySize ? 8 : 4)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home.header")
     }
 
-    /// Large and below: settings over profile on the left, the
-    /// Nepali date in the middle, emergency over notifications on the
-    /// right.
+    /// Settings over profile on the left, the Nepali date in the
+    /// middle, emergency over notifications on the right (zoomed
+    /// display sizes).
     private var stackedBar: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(spacing: 2) {
@@ -83,19 +87,25 @@ struct HomeTopBar: View {
         }
     }
 
-    /// Above large (accessibility sizes): one icon row, the date on
-    /// its own row.
-    private var wideBar: some View {
+    /// The pre-medium-fit bar (default display size).
+    private var originalBar: some View {
         VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 4 : 8) {
             HStack(spacing: 8) {
                 settingsButton
                 profileButton
-                Spacer(minLength: 8)
+                if dynamicTypeSize <= .large {
+                    calendarButton
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Spacer(minLength: 8)
+                }
                 NotificationBellButton(count: notificationCount, action: onOpenUpdates)
                 EmergencyIconButton()
             }
-            calendarButton
-                .frame(maxWidth: .infinity)
+            if dynamicTypeSize > .large {
+                calendarButton
+                    .frame(maxWidth: .infinity)
+            }
         }
     }
 
@@ -185,28 +195,32 @@ struct QuickAccessStrip: View {
     let onLaunch: (AppLauncher.App) -> Void
 
     private var tileWidth: CGFloat {
-        // [MEDIUM-FIT] (2026-10-15) At large and below every curated
-        // app fits the viewport — the row does not scroll (owner: apps
-        // were hidden behind the horizontal scroll). Larger sizes keep
-        // the 4-across baseline.
-        if dynamicTypeSize <= .large {
+        // [MEDIUM-FIT] (2026-10-15) At Medium/Large display sizes every
+        // curated app fits the viewport — the row does not scroll
+        // (owner: apps were hidden behind the horizontal scroll).
+        // Capped at the 4-across width so a single favourite never
+        // balloons to a half-screen tile. Default display size keeps
+        // the original 4-across baseline.
+        if zoomed {
             let count = apps.count + 1  // favourites + the add tile
             let totalSpacing = horizontalSpacing * CGFloat(max(count - 1, 0))
             let fitAll = (availableWidth - totalSpacing) / CGFloat(max(count, 1))
             let fourAcross = (availableWidth - 3 * horizontalSpacing) / 4
-            // Capped at the 4-across width so a single favourite never
-            // balloons to a half-screen tile.
             return max(DesignTokens.minTapTargetSize, min(fitAll, fourAcross))
         }
         let fourAcrossWidth = max(DesignTokens.minTapTargetSize, (availableWidth - 24) / 4)
         return dynamicTypeSize > .large ? max(largeTypeTileWidth, fourAcrossWidth) : fourAcrossWidth
     }
 
-    /// [MEDIUM-FIT] (2026-10-15) 4pt tile gaps at large and below,
-    /// 8pt at larger sizes.
+    /// [MEDIUM-FIT] (2026-10-15) 4pt tile gaps at Medium/Large display
+    /// sizes, the original 8pt at Default.
     private var horizontalSpacing: CGFloat {
-        dynamicTypeSize <= .large ? 4 : 8
+        zoomed ? 4 : 8
     }
+
+    /// [MEDIUM-FIT] (2026-10-15) True when the iPhone display size is
+    /// Medium or Large (Settings → Display & Brightness).
+    private var zoomed: Bool { UIScreen.main.isDisplayZoomed }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -287,6 +301,8 @@ extension QuickAccessStrip: Equatable {
 struct TalkStage: View {
     @Environment(\.appAppearance) private var appearance
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// [MEDIUM-FIT] (2026-10-15) True at Medium/Large display sizes.
+    private var zoomed: Bool { UIScreen.main.isDisplayZoomed }
     /// The state the stage renders (branch, hint carousel, tap behavior).
     let state: VoiceSessionState
     /// Handed to the hero, which observes it for its own live updates
@@ -334,9 +350,10 @@ struct TalkStage: View {
                 ConfirmationChips(titleKey: visuals.captionKey)
             } else {
                 // Separate the button, its status and the suggested phrase.
-                // [MEDIUM-FIT] (2026-10-15) 16pt hero↔slot gap at
-                // accessibility sizes, 12pt at ordinary type sizes.
-                VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 16 : 12) {
+                // [MEDIUM-FIT] (2026-10-15) 12pt hero↔slot gap at
+                // Medium/Large display sizes, the original 16pt at
+                // Default.
+                VStack(spacing: zoomed ? 12 : 16) {
                     TalkButton(session: session,
                                // [AUDIO-REACTIVE-HERO] The hero's live
                                // signal feed — observed by the hero
@@ -876,31 +893,40 @@ private struct SetupStrip: View {
 struct HomeDock: View {
     @Environment(\.appAppearance) private var appearance
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// [MEDIUM-FIT] (2026-10-15) True at Medium/Large display sizes —
+    /// the dock then uses the compact geometry; at Default the
+    /// original geometry renders.
+    private var zoomed: Bool { UIScreen.main.isDisplayZoomed }
     var edgeAttached: Bool = false
     let onAppliance: () -> Void
     let onLiveTranslate: () -> Void
 
     private var topColumns: [GridItem] {
-        dynamicTypeSize.isAccessibilitySize
+        if zoomed {
+            return Array(repeating: GridItem(.flexible(minimum: 44), spacing: 8, alignment: .top), count: 4)
+        }
+        return dynamicTypeSize.isAccessibilitySize
             ? [GridItem(.adaptive(minimum: 140), spacing: 8, alignment: .top)]
             : Array(repeating: GridItem(.flexible(minimum: 44), spacing: 8, alignment: .top), count: 4)
     }
 
     private var bottomColumns: [GridItem] {
-        dynamicTypeSize.isAccessibilitySize
+        if zoomed {
+            return Array(repeating: GridItem(.flexible(minimum: 44), spacing: 8, alignment: .top), count: 3)
+        }
+        return dynamicTypeSize.isAccessibilitySize
             ? [GridItem(.adaptive(minimum: 140), spacing: 8, alignment: .top)]
             : Array(repeating: GridItem(.flexible(minimum: 44), spacing: 8, alignment: .top), count: 3)
     }
 
     var body: some View {
-        // [DOCK-FIT] (2026-10-15) Medium-display pass — owner: "the dock
-        // menu has too much space at the bottom". Ordinary type sizes
-        // get 28/44pt glyphs, an 8pt row gap and ~10pt rail insets; the
-        // tiles ride low (~12pt above the physical bottom — HomeView
-        // shifts the dock into the safe area) and the surface flows to
-        // the screen edge. Every tile keeps its 44pt tap floor;
-        // accessibility sizes keep the generous 32/48pt glyphs.
-        VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 6 : 4) {
+        // [DOCK-FIT] (2026-10-15) Medium/Large display sizes: 28/44pt
+        // glyphs, 4pt row gap, ~10pt rail insets, and the tiles ride
+        // low (~12pt above the physical bottom — HomeView shifts the
+        // dock into the safe area) with the surface flowing to the
+        // screen edge. Default display size keeps the original 32/48pt
+        // geometry. Every tile keeps its 44pt tap floor.
+        VStack(spacing: zoomed ? 4 : 6) {
             LazyVGrid(columns: topColumns, alignment: .center, spacing: 8) {
                 Button(action: onAppliance) {
                     // [MEDIUM-FIT] (2026-10-15) The dock label is always
@@ -938,15 +964,15 @@ struct HomeDock: View {
                 dockItem(.reminders, artwork: "clock", titleKey: "home.hub.reminders",
                          onRail: true, identifier: "home.action.reminders")
             }
-            .padding(.horizontal, 10)
-            .padding(.top, dynamicTypeSize.isAccessibilitySize ? 10 : 8)
-            // [MEDIUM-FIT] (2026-10-15) Owner v3 ("low hug"): the tiles
-            // ride ~12pt above the physical screen bottom — HomeView
-            // shifts the dock past the safe area and the surface bleeds
-            // to the bottom edge, so there is no empty band under the
-            // tiles. No internal bottom inset at ordinary sizes: the
-            // shift provides the 12pt clearance itself.
-            .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 10 : 0)
+            .padding(.horizontal, zoomed ? 10 : 8)
+            .padding(.top, zoomed ? 8 : 6)
+            // [MEDIUM-FIT] (2026-10-15) Owner v3 ("low hug") at
+            // Medium/Large display sizes: the tiles ride ~12pt above
+            // the physical screen bottom — HomeView shifts the dock
+            // past the safe area and the surface bleeds to the bottom
+            // edge, so there is no empty band under the tiles. No
+            // internal bottom inset there: the shift provides the 12pt
+            // clearance itself.
             .background {
                 Color.clear
                     .appSurface(role: .dock, cornerRadius: 20)
@@ -969,12 +995,12 @@ struct HomeDock: View {
 
     private func tile(artwork: String, titleKey: String, onRail: Bool) -> some View {
         VStack(spacing: onRail ? 2 : 4) {
-            // [MEDIUM-FIT] (2026-10-15) 44/28pt glyphs at ordinary type
-            // sizes, the full 48/32pt at accessibility sizes.
+            // [MEDIUM-FIT] (2026-10-15) 44/28pt glyphs at Medium/Large
+            // display sizes, the original 48/32pt at Default.
             ReferenceIconArtwork(name: artwork,
                                  diameter: onRail
-                                     ? (dynamicTypeSize.isAccessibilitySize ? 48 : 44)
-                                     : (dynamicTypeSize.isAccessibilitySize ? 32 : 28))
+                                     ? (zoomed ? 44 : 48)
+                                     : (zoomed ? 28 : 32))
             Text(LocalizedStringKey(titleKey))
                 .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(onRail ? appearance.colors.onAccent : appearance.colors.textPrimary)

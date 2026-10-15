@@ -154,12 +154,31 @@ enum DesignTokens {
     /// keeps the dock visible without scrolling at normal size.
     static let talkSubHeroSlotHeightCompact: CGFloat = 104
     static let chipHeight: CGFloat = 60
-    /// [DOCK-FIT] (2026-10-15) Two-row Home dock budget after the
-    /// medium-display pass (owner: "too much space at the bottom"):
-    /// ~48pt action row (28pt glyphs) + 8pt gap + ~70pt rail (44pt
-    /// glyphs + snug 4pt lower inset; the surface bleeds to the screen
-    /// edge), documented for the DesignTokens pin test — the dock
-    /// itself is intrinsic-height.
+    /// [DOCK-FIT] (2026-10-15) Two-row Home dock budget at Medium/Large
+    /// display sizes (owner: "too much space at the bottom"): ~48pt
+    /// action row (28pt glyphs) + 8pt gap + ~70pt rail (44pt glyphs;
+    /// the HomeView shift puts the tiles ~12pt above the physical
+    /// bottom and the surface bleeds to the screen edge). The Default
+    /// display size keeps the original 134pt budget — documented for
+    /// the DesignTokens pin test, the dock itself is intrinsic-height.
     static let dockHeight: CGFloat = 126
     static let iconBadgeDiameter: CGFloat = 44
+}
+
+// MARK: - Display size zoom (Medium/Large display options)
+
+extension UIScreen {
+    /// [MEDIUM-FIT] (2026-10-15) True when the iPhone's display size
+    /// option is Medium or Large (Settings → Display & Brightness →
+    /// Display Size: Default/Medium/Large — not Dynamic Type). The
+    /// zoomed options shrink the logical point grid, so the native
+    /// pixel area exceeds `bounds × scale²`; at Default the ratio is
+    /// exactly 1 (measured: 17 Pro Max Medium = 375×812pt logical on a
+    /// 440×956pt native panel, ratio ≈1.38). The optimized Home layout
+    /// applies at any non-default display size.
+    var isDisplayZoomed: Bool {
+        let nativeArea = nativeBounds.width * nativeBounds.height
+        let pointArea = bounds.width * bounds.height * nativeScale * nativeScale
+        return nativeArea > pointArea * 1.005
+    }
 }
