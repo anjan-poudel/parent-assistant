@@ -256,6 +256,69 @@ struct SlotClockSaveResult: Equatable {
     }
 }
 
+// MARK: - Medication evidence capture (IF-14, IF-24; T-021)
+
+/// What a photo being taken as evidence is FOR (design-l2 IF-14). The two
+/// cases are the whole safety model of the capture path: there is no
+/// `.create` case, so no photo can ever bring a record into existence —
+/// the record exists because the acknowledgement and confirmation chain
+/// completed, and a capture only ever HOLDS for or ATTACHES to one.
+enum EvidenceCaptureContext: Equatable {
+    /// The fired-dose screen: the elder photographs the dose BEFORE the
+    /// chain finalizes. The capture is held (IF-15) and the finalize that
+    /// writes the record claims it under the SAME identity (R-1(a)).
+    case pendingDose(entryId: UUID)
+    /// The record surface ("Taken today"): the record already exists —
+    /// the capture attaches to that log and to nothing else. An unknown
+    /// log id is declined, never created (safety delta (c)).
+    case recordedDose(logId: UUID)
+}
+
+/// What one capture produced (design-l2 IF-14). Every path out of the
+/// capture seam ends in exactly one of these — a store failure is a
+/// typed, surfaced outcome, never a silent claim that a photo was saved
+/// (FR-MSR-018).
+enum EvidenceCaptureOutcome: Equatable {
+    /// The capture is stored on-device and held for `entryId`; the
+    /// finalize that writes the dose's record attaches it (IF-15). The
+    /// hold is in-memory only: a process kill loses it honestly — the
+    /// record ends up evidence-free, and nothing was ever claimed.
+    case held(entryId: UUID)
+    /// The photo is stored and attached to the EXISTING record at
+    /// `logId`. The record's own identity mints the file name
+    /// (`<logId>.jpg`) — the same R-1(a) scheme the held path uses.
+    case attached(logId: UUID)
+    /// No bound record context exists for this capture: the pending
+    /// dose's chain already finalized (R-3 late hold) or the record log
+    /// id is unknown. The capture is discarded — nothing stored, nothing
+    /// recorded, nothing claimed.
+    case declinedNoContext
+    /// The photo could not be stored; the typed store error says what
+    /// was true on disk. Never presented as evidence.
+    case failed(EvidenceStoreError)
+}
+
+/// One confirmed intake of today, as the record surface ("Taken today")
+/// draws it (IF-24). Pure values snapshotted at read time: the surface
+/// never re-derives a name or a time while it draws, and the `id` is the
+/// ADHERENCE-LOG id — the identity the record-surface capture attaches
+/// its evidence under.
+struct TakenDoseRow: Identifiable, Equatable {
+    /// The adherence-log id — `Identifiable` so the row can drive a
+    /// `ForEach`, and the `.recordedDose(logId:)` the row's capture
+    /// attaches through.
+    let id: UUID
+    let entryId: UUID
+    let medicationName: String
+    /// When the dose was scheduled for (the record's own `scheduledAt`).
+    let scheduledAt: Date
+    /// Whether the record already claims an evidence photo
+    /// (`evidencePhotoFileName` set). A claim is what the record holds;
+    /// the reader loads the file honestly and shows "no photo" if it
+    /// has gone missing.
+    let hasEvidence: Bool
+}
+
 /// Central coordinator that wires all services together.
 /// Starts safety-critical services first (medication scheduler, health monitor),
 /// then voice pipeline, then LLM.
@@ -3209,7 +3272,17 @@ final class AppCoordinator: ObservableObject {
         // the visual-aid store and with the same no-IO construction rule
         // (path resolution only; the directory appears on the first
         // write). The cascade itself is a fail-soft Void call.
-        self.medicationEvidenceStore = medicationEvidenceStore ?? MedicationEvidenceStore()
+        //
+        // [MED-EVIDENCE] (T-021) Resolved ONCE into a local and then
+        // stored AND handed to the scheduler below: the capture path
+        // (IF-14) stores through this instance and the hold/attach path
+        // (IF-15) deletes orphans through the scheduler's — two
+        // instances would mean the late-hold cleanup could miss files
+        // one of them wrote. One composition, one instance, both
+        // consumers (the `no evidence store = held files leak`
+        // obligation the scheduler's init doc states).
+        let resolvedEvidenceStore = medicationEvidenceStore ?? MedicationEvidenceStore()
+        self.medicationEvidenceStore = resolvedEvidenceStore
         // [LIVE-TRANSLATE T-032] The feature's two payloads (the translation
         // cache and the consent record) are sealed with AES-GCM before they
         // reach the file channel — Data Protection Complete alone is "locked
@@ -3382,6 +3455,13 @@ final class AppCoordinator: ObservableObject {
             // with the MEDICATION prefix, so dose photos never resolve
             // into a routine entry's folder.
             visualAidStore: medicationVisualAidStore,
+            // [MED-EVIDENCE] (T-021) The shared on-device evidence store
+            // — the SAME instance this coordinator resolves at :3212 for
+            // the remove cascade and the capture path (IF-14 stores
+            // through it; IF-15's late-hold and failed-attach cleanup
+            // deletes through it). A nil here would let held captures
+            // register while their discarded files leak.
+            evidenceStore: resolvedEvidenceStore,
             // [MED-SLOT] (T-020) The mapping store flows to the scheduler
             // VERBATIM from this initializer's seam. In the app the
             // argument is nil and the scheduler composes its own store
@@ -3832,6 +3912,17 @@ final class AppCoordinator: ObservableObject {
         // time), so the buttons work the first time they are tapped.
         medicationLabelScanner = makeMedicationLabelScanner()
         medicationPurposeLookup = makeMedicationPurposeLookup()
+
+        // [MED-EVIDENCE] (T-021) The evidence capture's camera seam —
+        // the SAME `PhotoCameraPresenter` the label scanner and the voice
+        // launcher present through, so the permission flow (asked at
+        // point of use) and the no-camera / permission-denied /
+        // cannot-present guidance are the shipped ones and no second
+        // camera plumbing exists. A stored, assignable property so a
+        // test can put a scripted presenter in its place; built here
+        // because construction resolves no window and asks no permission
+        // (the presenter probes both at presentation time).
+        evidenceCameraPresenter = PhotoCameraPresenter()
 
         // All stored properties are initialised — push the restored
         // language into services that build user-facing strings.
@@ -13389,6 +13480,257 @@ self.noteTalkContractChanged()
             errorCode: nil,
             metadata: entryId.map { ["entry_id_hash": IdHashing.shortHash(of: $0)] } ?? [:]
         ))
+    }
+
+    // MARK: - Medication evidence capture and the "Taken today" read (IF-14, IF-24; T-021)
+
+    /// The camera seam an evidence capture presents through. The SAME
+    /// `PhotoCameraPresenter` plumbing the label scanner and the voice
+    /// launcher use (one camera system camera sheet, permissions asked at
+    /// point of use, the shipped availability copy) — a stored, assignable
+    /// property so a test can put a scripted presenter in its place;
+    /// production is built once in `init` (the `medicationLabelScanner`
+    /// precedent). Nil would mean no camera stack is installed: the honest
+    /// "cannot open the camera" answer instead of a button that does
+    /// nothing (the `scanMedicationLabel` precedent).
+    var evidenceCameraPresenter: CameraCapturePresenting?
+
+    /// The store work's serial home (IF-14): every evidence file write and
+    /// cleanup for the WHOLE app runs here, one at a time, so two captures
+    /// can never interleave their compression/writes even if they are
+    /// triggered from different threads. The scheduler half of a capture
+    /// (`holdPendingEvidence` / `attachEvidence`) runs on the caller's
+    /// thread — in every real flow the main thread, which is the
+    /// scheduler's own discipline.
+    private let evidenceStoreQueue = DispatchQueue(label: "medication.evidence.store")
+
+    /// One capture at a time (IF-14). True from the moment a camera session
+    /// begins until its outcome is delivered: a second request while a
+    /// session is up is answered immediately (nil — no capture was made)
+    /// and never stacked into a second sheet, because the presenter has one
+    /// completion slot and overwriting it is how a capture goes missing
+    /// (the `MedicationLabelScanner.isRunning` contract, verbatim).
+    private var isEvidenceCaptureActive = false
+
+    /// Bumped whenever the on-device evidence for a recorded dose changes
+    /// in a way a visible surface must re-draw (a record-surface attach).
+    /// The rows themselves are read fresh (`takenDosesToday()`); this is
+    /// only the refresh seam, so no view has to assume it will be redrawn
+    /// because some OTHER published value moved.
+    @Published private(set) var medicationEvidenceRevision = 0
+
+    /// One photo captured as evidence for a dose (IF-14) — the whole
+    /// plumbing seam between the camera and the record.
+    ///
+    /// Main-thread entry. The OUTCOME carries exactly what happened:
+    ///
+    ///  - `.pendingDose(entryId)`: the record does not exist yet — the log
+    ///    id is MINTED HERE, at capture time (R-1(a)), the store names the
+    ///    file by it (`<logId>.jpg`), and the hold (IF-15) binds the
+    ///    finalize that writes the record to that same identity. A hold
+    ///    whose chain already finalized is refused by the scheduler (R-3)
+    ///    and its file deleted there — reported honestly as
+    ///    `.declinedNoContext`.
+    ///  - `.recordedDose(logId)`: the record EXISTS (the record surface
+    ///    only ever offers confirmed records); the capture stores and
+    ///    attaches to that log and nothing else. An unknown log id is
+    ///    declined BEFORE anything is stored, so the misuse guard holds
+    ///    with no orphan file either: a photo never creates a record.
+    ///
+    /// Threading, in the frozen signature's terms: the store work runs on
+    /// the serial store queue (never on the caller/main thread), and the
+    /// outcome is applied on the caller's thread — main for every real
+    /// flow — where the scheduler's hold/attach also run. The synchronous
+    /// signature is the design's; the caller waits for the store step, and
+    /// the WORK is off main as C5 requires.
+    ///
+    /// Nothing here touches the network and nothing references the
+    /// dementia photo-verification machinery (FR-MSR-020, NFR-MSR-003): the
+    /// photo is stored on-device through `MedicationEvidenceStore` and
+    /// stops there.
+    func captureEvidence(image: UIImage, context: EvidenceCaptureContext) -> EvidenceCaptureOutcome {
+        switch context {
+        case .pendingDose(let entryId):
+            let logId = UUID()  // R-1(a): the capture-time identity
+            switch storeEvidence(image: image, logId: logId, entryId: entryId) {
+            case .failure(let error):
+                emitEvidenceCapture(outcome: "failed", entryId: entryId,
+                                    errorCode: Self.evidenceErrorName(error))
+                return .failed(error)
+            case .success(let fileName):
+                let held = medicationScheduler.holdPendingEvidence(
+                    logId: logId, fileName: fileName, for: entryId)
+                if held {
+                    emitEvidenceCapture(outcome: "held", entryId: entryId)
+                    return .held(entryId: entryId)
+                }
+                // R-3: the chain finalized before the store completed —
+                // the scheduler already deleted the just-stored file.
+                // Nothing to hold, nothing to claim.
+                emitEvidenceCapture(outcome: "declinedNoContext", entryId: entryId)
+                return .declinedNoContext
+            }
+
+        case .recordedDose(let logId):
+            guard let log = medicationScheduler.takenLogs(on: Date())
+                .first(where: { $0.id == logId }) else {
+                // No such confirmed record: decline before storing — a
+                // photo alone must not leave anything behind, and it
+                // must never create the record it came to decorate.
+                emitEvidenceCapture(outcome: "declinedNoContext", entryId: nil)
+                return .declinedNoContext
+            }
+            let entryId = log.medicationEntryId
+            switch storeEvidence(image: image, logId: logId, entryId: entryId) {
+            case .failure(let error):
+                emitEvidenceCapture(outcome: "failed", entryId: entryId,
+                                    errorCode: Self.evidenceErrorName(error))
+                return .failed(error)
+            case .success(let fileName):
+                switch medicationScheduler.attachEvidence(fileName: fileName, toLog: logId) {
+                case .success:
+                    medicationEvidenceRevision += 1
+                    emitEvidenceCapture(outcome: "attached", entryId: entryId)
+                    return .attached(logId: logId)
+                case .failure:
+                    // The attach never landed, so the just-stored file can
+                    // never be claimed: idempotent cleanup here (the
+                    // scheduler's failure arm deletes it too — absent =
+                    // success either way), and the honest typed failure
+                    // outward. Never a claim (FR-MSR-018).
+                    deleteEvidence(fileName: fileName, entryId: entryId)
+                    emitEvidenceCapture(outcome: "failed", entryId: entryId,
+                                        errorCode: "storageUnavailable")
+                    return .failed(.storageUnavailable)
+                }
+            }
+        }
+    }
+
+    /// One capture from the camera to the stored outcome — the flow the
+    /// capture surfaces call. Presents the system camera (the shipped
+    /// `CameraCapturePresenting` seam, permissions asked at point of use,
+    /// the shared availability copy), runs `captureEvidence` on the shot,
+    /// speaks what happened, and hands `onOutcome` exactly one answer on
+    /// the main thread: the outcome, or nil when no capture was made
+    /// (cancelled, camera unavailable, or a session already running).
+    ///
+    /// D11: before the camera opens, the announce names the medication the
+    /// capture is FOR — the caller passes the bound presentation's own
+    /// name, so the line can never name a different one.
+    ///
+    /// Single-flight: a request that arrives while a session is up is
+    /// answered with nil and nothing else happens — no second sheet, no
+    /// second listen for the first session's completion.
+    func captureMedicationEvidence(medicationName: String,
+                                   context: EvidenceCaptureContext,
+                                   onOutcome: @escaping (EvidenceCaptureOutcome?) -> Void) {
+        guard !isEvidenceCaptureActive else {
+            onOutcome(nil)
+            return
+        }
+        guard let presenter = evidenceCameraPresenter,
+              presenter.availability == .available else {
+            // Never present a sheet that cannot appear: the honest
+            // guidance is the whole answer (the scanner's rule, and its
+            // shared copy table).
+            speak(key: CameraCaptureFlow.unavailableKey(for: evidenceCameraPresenter?.availability
+                                                        ?? .cannotPresent))
+            onOutcome(nil)
+            return
+        }
+        isEvidenceCaptureActive = true
+        // D11: the announce names the bound medication, from the ONE
+        // composition the presentation suite pins.
+        speak(text: MedicationVisualAidsPresentation.evidenceAnnounceLine(
+            medicationName: medicationName, locale: activeLocale))
+        presenter.presentCamera { [weak self] cameraOutcome in
+            guard let self else { return }
+            // The presenter's contract is a main-thread completion (the
+            // shipped `PhotoCameraPresenter` hops; scripted doubles call
+            // synchronously), the same contract the label scanner runs on.
+            self.isEvidenceCaptureActive = false
+            switch cameraOutcome {
+            case .cancelled:
+                // One word — never silence mid-conversation (the scanner's
+                // shipped line).
+                self.speak(key: "apps.camera.cancelled")
+                onOutcome(nil)
+            case .unavailable(let reason):
+                self.speak(key: CameraCaptureFlow.unavailableKey(for: reason))
+                onOutcome(nil)
+            case .captured(let image):
+                let outcome = self.captureEvidence(image: image, context: context)
+                if let key = MedicationVisualAidsPresentation.evidenceOutcomeKey(for: outcome) {
+                    self.speak(key: key)
+                }
+                onOutcome(outcome)
+            }
+        }
+    }
+
+    /// Today's CONFIRMED intakes (IF-24) — the "Taken today" record
+    /// surface's one read. Main thread, pure read: no disk IO, no state
+    /// change, and this seam never writes a record (it exists to show the
+    /// day, not to make one).
+    ///
+    /// The day key is `Calendar.current` over `scheduledAt` (the
+    /// scheduler seam's documented choice, matching
+    /// `MedicalView.todaysReminders`); rows exist only for records whose
+    /// ENTRY still exists — a removed medication's history must not draw
+    /// a row with no name — and only for `.acknowledged` records: a photo
+    /// or a double-dose attempt can never make a row appear.
+    func takenDosesToday() -> [TakenDoseRow] {
+        medicationScheduler.takenLogs(on: Date())
+            .compactMap { log in
+                guard let entry = medicationEntry(for: log.medicationEntryId) else {
+                    return nil
+                }
+                return TakenDoseRow(id: log.id,
+                                    entryId: log.medicationEntryId,
+                                    medicationName: entry.medicationName,
+                                    scheduledAt: log.scheduledAt,
+                                    hasEvidence: log.evidencePhotoFileName != nil)
+            }
+            .sorted { $0.scheduledAt < $1.scheduledAt }
+    }
+
+    /// The store half of one capture, on the serial store queue.
+    private func storeEvidence(image: UIImage, logId: UUID,
+                               entryId: UUID) -> Result<String, EvidenceStoreError> {
+        evidenceStoreQueue.sync {
+            medicationEvidenceStore.store(image: image, for: logId, entryId: entryId)
+        }
+    }
+
+    /// The cleanup half (never-claim paths), on the same serial queue.
+    private func deleteEvidence(fileName: String, entryId: UUID) {
+        _ = evidenceStoreQueue.sync {
+            medicationEvidenceStore.delete(fileName: fileName, entryId: entryId)
+        }
+    }
+
+    /// The capture's ledger row: outcome classification, the entry-id hash
+    /// where an entry is known, and — for a store failure — the typed
+    /// error's name. No image, no file name, no medication name, no text
+    /// (C9; design-l2 §5.2).
+    private func emitEvidenceCapture(outcome: String, entryId: UUID?, errorCode: String? = nil) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "medication_evidence",
+            eventType: "medication_evidence_captured",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: errorCode,
+            metadata: entryId.map { ["entry_id_hash": IdHashing.shortHash(of: $0)] } ?? [:]
+        ))
+    }
+
+    private static func evidenceErrorName(_ error: EvidenceStoreError) -> String {
+        switch error {
+        case .compressionFailed: return "compressionFailed"
+        case .storageUnavailable: return "storageUnavailable"
+        case .removeFailed: return "removeFailed"
+        }
     }
 
     /// Today's medication reminders as localized "name — time" lines for

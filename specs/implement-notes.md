@@ -5,7 +5,7 @@ description: Implementation notes for the medication-schedules-reminders impleme
 ## Summary
 
 - Task: `implement` (contract `implementation`), feature `medication-schedules-reminders`.
-- Plan: `specs/plan-tasks/plan.md` — 22 units, 8 waves (W0:4, W1:4, W2:5, W3:3, W4:2, W5:2, W6:1, W7:1), file-disjoint within each wave.
+- Plan: `specs/plan-tasks/plan.md` — 23 units, 9 waves (W0:4, W1:4, W2:5, W3:3, W4:2, W5:2, W6:1, W6.5:1, W7:1), file-disjoint within each wave (W6.5/T-023 inserted by amendment 6, owner-directed).
 - Cadence: per-unit code + typecheck; ONE consolidated scoped test pass per wave (`ios/build.sh test:unit <Classes...>`); a single full-suite run at W7 (compared against the documented pre-existing baseline).
 - Resolution pins carried: R-1(a) at T-019/T-021, R-2 at T-006, R-3 at T-019, R-4 at T-014.
 
@@ -19,7 +19,8 @@ description: Implementation notes for the medication-schedules-reminders impleme
 | W3 | T-010, T-014, T-017 | 4 classes — 65 tests (2026-10-15) | PASS — 65/65, 0 failures |
 | W4 | T-016, T-018 | 4 classes — 77 tests (2026-10-15) | PASS — 77/77, 0 failures |
 | W5 | T-019, T-020 | code + typecheck only (speed directive) | GREEN — combined-tree module emit 0 errors; probes green |
-| W6 | T-021 | code + typecheck only (speed directive) | pending |
+| W6 | T-021 | code + typecheck only (speed directive) | GREEN — combined-tree module emit 0 errors; 3 suites typechecked; probes exit 1 at injected lines |
+| W6.5 | T-023 | scoped pass at wave close (amendment 6 — NOT under the strip directive) | pending |
 | W7 | T-022 | full suite vs documented baseline (the tail's single test gate) | pending |
 
 > **Speed directive (owner, mid-run 2026-10-15):** W5 and W6 are code + typecheck
@@ -31,6 +32,14 @@ description: Implementation notes for the medication-schedules-reminders impleme
 > final-sign-off (T2 + HIL + DV-1..7 + advisory safety pass). The trade-off is
 > owner-accepted: a defect introduced in W5/W6 surfaces only at the W7 suite.
 > Do not re-add the scoped passes.
+
+> **Amendment 6 (owner-directed, 2026-10-15):** the owner-reported Settings
+> defect (the medication UI always showed the add-new form, never existing
+> schedules) inserts **T-023** (medication manage-list screen, W6.5) between W6
+> and W7. Its scoped (`-only-testing`) pass runs at the wave close — the strip
+> directive above does NOT extend to it — and the W7 full suite then covers it.
+> T-023 rides the W5–W7 PR. See
+> `specs/plan-tasks/amendments/amendment-6-t023-medication-manage-list-2026-10-15.md`.
 
 ## Deviations
 
@@ -197,6 +206,33 @@ description: Implementation notes for the medication-schedules-reminders impleme
   internal for the reset round-trip test; a literal `.frame(minHeight: 56)` the
   suite's own token pin caught was fixed in the source, not by weakening the
   test.
+- T-021 recorded judgment calls (7): the frozen IF-14 case name
+  `recordedDose(logId:)` wins over the task prose's `.record(logId:entryId:)` —
+  the entryId is resolved from the log itself, which yields the
+  decline-before-store property for free; R-3 late hold → `.declinedNoContext`
+  (never a claimed hold; the caption and spoken line say the honest "could not
+  be saved" — the file really is gone); attach failure → idempotent
+  coordinator-side delete + `.failed(.storageUnavailable)` (no path can claim a
+  file that is not there); single-flight for the synchronous frozen signature =
+  a flow-level active-session flag (a second call answers nil = exactly "no
+  capture made") plus the serial store queue; "Taken today" day key =
+  `Calendar.current isDate(inSameDayAs:)` over `scheduledAt` (mirrors
+  `MedicalView.todaysReminders`), confirmed-only, rows only for surviving
+  entries, section hidden when empty; held-state line = the
+  `meds.evidence.notYetDelivered` one-shot caption; the capture affordance is a
+  property of the dose SCREEN, so `MedicationVisualAidFireHandler.swift` is
+  deliberately untouched (its suite hosts the IF-24 named test for the read
+  seam under the handler's presentation), and `MedicationVisualAidOverlay`
+  reads the coordinator from the environment (root injection verified present).
+  **Ownership extension (wave-coordinator, disclosed):**
+  `MedicationScheduler.swift` + `LeafViews.swift` — ONLY the IF-24 read seam
+  (`takenLogs(on:)`, internal, same visibility discipline as
+  `pendingReminders`) and the `MedicalView` "Taken today" section, both
+  mandated by the frozen design (design-l2 :82 / :133 / :845) while the plan's
+  owned-list omitted them; W6 is a single-unit wave, so the extension is
+  conflict-free. pbxproj wiring for the new test file was added by the unit;
+  the coordinator canonicalized the project via xcodegen at wave close (the
+  agent's hand-written UUIDs were the only diff — identical 4-point wiring).
 
 ## Verification
 
@@ -442,6 +478,37 @@ description: Implementation notes for the medication-schedules-reminders impleme
     `onSignificantEvent` → main hop → `calendarShareService.writeSignificantEvent`
     and `onSlotEntryRetimeRefused` → main hop → surface the note; no caregiver
     toggle anywhere in the region. Suite 7 named tests.
+- **W6 (code + typecheck only — speed directive; no scoped pass):**
+  - T-021: `swiftc -parse` 0 on all 7 touched/created files; frozen-snapshot
+    module emit exit 0 / 0 errors over the combined tree (T-019/T-020 landed),
+    164 warnings = the unchanged baseline; all three test suites typecheck
+    exit 0 against the emitted module; three error-sensitivity probes (app +
+    evidence suite + tail probe on the extended fire-handler suite) exit 1 at
+    the injected lines; sha256 re-verified after every run with 0 drift, and
+    all 8 reported on-disk hashes matched the report at wave close; the
+    forbidden-symbol greps on the capture path are 0 (PhotoVerifier and the
+    whole network family — the doc comment was reworded so even the identifier
+    substring is absent; FR-MSR-020 clean with no caveat); all 8 consumed
+    catalog keys verified non-empty in en+ne; secret-scanner 40-char scan: 2
+    pre-existing hits only (pbxproj VariantTables path, presentation-suite
+    :179 pre-existing name), 0 introduced.
+  - Not run by directive: the W6 `-only-testing` pass — the W7 full suite is
+    the tail's single gate (T-021's 9 named tests are typechecked only; the
+    report lists the behaviors W7 should target, incl. serial-execution
+    storage-key discipline in the three new/extended suites).
+- **W6 unit outcomes:**
+  - T-021 — `AppCoordinator.swift` (IF-14 `captureEvidence` with the serial
+    `medication.evidence.store` queue and main-thread outcome;
+    `captureMedicationEvidence` single-flight flow with availability guard and
+    the D11 announce; `takenDosesToday()`; `medication_evidence_captured`
+    classification-only emission), `MedicationScheduler.swift` (IF-24
+    `takenLogs(on:)`), `LeafViews.swift` ("Taken today" section in
+    `MedicalView`), `MedicationVisualAidViews.swift` (dose-screen capture
+    affordance + one-shot outcome caption). Composition: the shared
+    `medicationEvidenceStore` now flows into the `MedicationScheduler`
+    construction (object-identity asserted in the first named test). Named
+    tests: 6 (evidence capture) + 2 (presentation) + 1 (fire handler) across
+    three suites — authored and typechecked; execution rides W7.
 - **Carry-forward baseline note (for the W7 full-suite comparison):** the
   Spotify localization suite's absolute key-count pin is red at the branch
   base (pin 1,381 vs catalog 1,439 pre-W0) and is untouched by this feature —

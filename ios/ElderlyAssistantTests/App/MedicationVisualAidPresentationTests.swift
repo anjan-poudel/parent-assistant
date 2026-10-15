@@ -205,4 +205,182 @@ final class MedicationVisualAidPresentationTests: XCTestCase {
             XCTAssertFalse(multiple.contains("%"), "no placeholder may survive formatting")
         }
     }
+
+    // MARK: - Evidence capture surfaces ([MED-EVIDENCE], T-021)
+
+    /// The photo-as-evidence affordance belongs to the FIRED dose and to
+    /// nothing else, and everything about it is pinned here: the pure seam
+    /// decides it, the dose screen's own source renders it under that seam
+    /// as an elderly-fit control, and its copy — the button, the one
+    /// outcome mapping shared with the spoken line, every key the surfaces
+    /// render — resolves in both app languages rather than putting a raw
+    /// key in front of an elder.
+    func testAffordancePresentOnFiredDoseScreen() {
+        XCTAssertTrue(MedicationVisualAidsPresentation.showsEvidenceAffordance(mode: .dose),
+                      "a fired dose invites the photo of it")
+        XCTAssertFalse(MedicationVisualAidsPresentation.showsEvidenceAffordance(mode: .identify),
+                       "an identify screen must not grow a capture path — a photo there "
+                       + "would be evidence for a dose that is not happening")
+
+        let screen = viewSource(named: "MedicationDoseFireScreen")
+        XCTAssertTrue(screen.contains("meds.evidence.capture"),
+                      "the dose screen carries the capture affordance")
+        XCTAssertTrue(screen.contains("showsEvidenceAffordance(mode: mode)"),
+                      "…rendered under the pinned seam, never an ad-hoc mode check")
+        XCTAssertTrue(screen.contains("onCaptureEvidence"),
+                      "…routed through the capture closure the host binds")
+
+        // The control itself: the elderly-fit tap floor and a type token,
+        // never a literal point size.
+        let button = region(screen, from: "Label(\"meds.evidence.capture\"",
+                            to: "if let evidenceNoticeKey")
+        XCTAssertTrue(button.contains("frame(minHeight: DesignTokens.minTapTargetSize)"),
+                      "the capture control clears the elderly-fit tap floor")
+        XCTAssertTrue(button.contains(".appSurface(role: .control"),
+                      "…and draws as a control, the house surface role")
+        let fontLines = button.split(separator: "\n").map(String.init)
+            .filter { $0.contains(".font(") }
+        XCTAssertFalse(fontLines.isEmpty, "the capture label carries a font")
+        for line in fontLines {
+            XCTAssertTrue(line.contains("appearance.typography."),
+                          "a new control's type comes from the appearance tokens: \(line)")
+        }
+
+        // The ONE outcome mapping — the drawn caption and the spoken line
+        // share it — pinned case by case: nil shows nothing; a deferred
+        // capture says "not yet delivered"; a failed or declined capture is
+        // the honest "could not be saved" (in the declined case the photo
+        // really is gone).
+        XCTAssertNil(MedicationVisualAidsPresentation.evidenceOutcomeKey(for: nil))
+        XCTAssertEqual(MedicationVisualAidsPresentation.evidenceOutcomeKey(
+                           for: .held(entryId: UUID())),
+                       "meds.evidence.notYetDelivered")
+        XCTAssertEqual(MedicationVisualAidsPresentation.evidenceOutcomeKey(
+                           for: .attached(logId: UUID())),
+                       "meds.evidence.attached")
+        XCTAssertEqual(MedicationVisualAidsPresentation.evidenceOutcomeKey(
+                           for: .declinedNoContext),
+                       "meds.evidence.failed")
+        XCTAssertEqual(MedicationVisualAidsPresentation.evidenceOutcomeKey(
+                           for: .failed(.compressionFailed)),
+                       "meds.evidence.failed")
+
+        // Every key the capture surfaces render resolves in both app
+        // languages.
+        let keys = ["meds.evidence.capture", "meds.evidence.attached",
+                    "meds.evidence.failed", "meds.evidence.notYetDelivered",
+                    "meds.evidence.spoken", "meds.takenToday.title", "meds.taken"]
+        for key in keys {
+            for identifier in ["en", "ne"] {
+                let value = L10n.str(key, locale: Locale(identifier: identifier))
+                XCTAssertNotEqual(value, key, "\(key) must resolve for \(identifier)")
+                XCTAssertFalse(value.isEmpty, "\(key) is empty for \(identifier)")
+            }
+        }
+    }
+
+    /// D11: the announce that opens a capture NAMES the medicine it is for —
+    /// the BOUND presentation's own name, composed through the one catalog
+    /// line, spoken BEFORE the camera opens. The overlay may only pass what
+    /// is on screen, and the flow may only speak the shared composition.
+    func testAnnounceNamesTheBoundMedication() {
+        for identifier in ["en", "ne"] {
+            let locale = Locale(identifier: identifier)
+            let line = MedicationVisualAidsPresentation.evidenceAnnounceLine(
+                medicationName: "Amlodipine", locale: locale)
+            XCTAssertNotEqual(line, "meds.evidence.spoken",
+                              "the announce is composed, never the raw key")
+            XCTAssertTrue(line.contains("Amlodipine"),
+                          "the announce names the bound medicine (\(identifier)): \(line)")
+            XCTAssertFalse(line.contains("%"), "no placeholder may survive formatting")
+
+            let devanagari = MedicationVisualAidsPresentation.evidenceAnnounceLine(
+                medicationName: "अम्लोडिपिन", locale: locale)
+            XCTAssertTrue(devanagari.contains("अम्लोडिपिन"))
+            XCTAssertFalse(devanagari.contains("Amlodipine"),
+                           "the line names exactly the medicine it was composed with")
+        }
+
+        // The overlay binds the SAME presentation that is on screen: the
+        // name the announce speaks and the entry the hold binds are read
+        // off `fired`, never re-resolved.
+        let overlay = viewSource(named: "MedicationVisualAidOverlay")
+        XCTAssertTrue(overlay.contains("medicationName: fired.medicationName"),
+                      "the announce takes the displayed medicine's own name")
+        XCTAssertTrue(overlay.contains("context: .pendingDose(entryId: fired.entryId)"),
+                      "…and the hold binds the displayed entry's own id")
+
+        // …and the flow speaks the ONE shared composition, before the
+        // camera opens (the announce is the elder's context for the photo).
+        let flow = coordinatorRegion("func captureMedicationEvidence(",
+                                     to: "func takenDosesToday()")
+        XCTAssertTrue(flow.contains("MedicationVisualAidsPresentation.evidenceAnnounceLine("),
+                      "the announce is the one shared composition")
+        XCTAssertTrue(flow.contains("speak(text:"),
+                      "…spoken, not merely composed")
+        guard let announce = flow.range(of: "evidenceAnnounceLine("),
+              let present = flow.range(of: "presentCamera") else {
+            return XCTFail("the capture flow must both announce and present")
+        }
+        XCTAssertLessThan(announce.lowerBound, present.lowerBound,
+                          "D11: the medicine is named BEFORE the camera opens")
+    }
+
+    // MARK: - Source slicing (the editor-suite idiom)
+
+    /// The text of one top-level declaration in
+    /// `MedicationVisualAidViews.swift`, comment-stripped and sliced at
+    /// column-0 boundaries: a key rendered by a neighbouring view in the
+    /// same file cannot pass for this one's.
+    private func viewSource(named name: String) -> String {
+        let url = FeatureSourceScan.iosDirectory(file: #filePath)
+            .appendingPathComponent("ElderlyAssistant/App/MedicationVisualAidViews.swift")
+        let text = FeatureSourceScan.codeText(of: url)
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+        guard let start = lines.firstIndex(where: {
+            $0.hasPrefix("struct \(name)")
+        }) else {
+            XCTFail("MedicationVisualAidViews.swift has no top-level struct \(name)")
+            return ""
+        }
+        let end = lines[(start + 1)...].firstIndex { line in
+            ["struct ", "enum ", "extension ", "final class ", "class "]
+                .contains { line.hasPrefix($0) }
+        } ?? lines.count
+        return lines[start..<end].joined(separator: "\n")
+    }
+
+    /// A region of the coordinator's own source (comment-stripped), between
+    /// two code markers — for the flow arrangements that must hold in the
+    /// code, not just in the pieces.
+    private func coordinatorRegion(_ start: String, to end: String) -> String {
+        let url = FeatureSourceScan.iosDirectory(file: #filePath)
+            .appendingPathComponent("ElderlyAssistant/App/AppCoordinator.swift")
+        let text = FeatureSourceScan.codeText(of: url)
+        guard let startRange = text.range(of: start) else {
+            XCTFail("AppCoordinator.swift has no `\(start)`")
+            return ""
+        }
+        guard let endRange = text.range(of: end, range: startRange.upperBound..<text.endIndex) else {
+            XCTFail("no `\(end)` after `\(start)`")
+            return ""
+        }
+        return String(text[startRange.lowerBound..<endRange.lowerBound])
+    }
+
+    /// The text between two code markers within an already-sliced source, or
+    /// an explicit failure — the house `region` convention.
+    private func region(_ text: String, from start: String, to end: String,
+                        file: StaticString = #filePath, line: UInt = #line) -> String {
+        guard let startRange = text.range(of: start) else {
+            XCTFail("no `\(start)` in the sliced source", file: file, line: line)
+            return ""
+        }
+        guard let endRange = text.range(of: end, range: startRange.upperBound..<text.endIndex) else {
+            XCTFail("no `\(end)` after `\(start)`", file: file, line: line)
+            return ""
+        }
+        return String(text[startRange.lowerBound..<endRange.lowerBound])
+    }
 }

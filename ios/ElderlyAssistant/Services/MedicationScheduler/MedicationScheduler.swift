@@ -184,6 +184,33 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         Array(pendingRemindersList.values).filter { $0.state != .completed }
     }
 
+    /// IF-24 (T-021): the CONFIRMED intake records for one calendar day.
+    ///
+    /// "Taken" is exactly one thing: a record whose status is
+    /// `.acknowledged` — the status `finalizeAcknowledgement` writes only
+    /// after the acknowledgement and confirmation chain completed. A
+    /// `.missed`, `.pending` or `.doubleDoseAttempt` record is never part
+    /// of this list, whatever its day: a read surface that mixed them
+    /// would tell the family a dose was taken when it was not.
+    ///
+    /// The day key is `Calendar.current.isDate(_:inSameDayAs:)` over
+    /// `scheduledAt` — the day the dose BELONGED to, matching the shipped
+    /// `MedicalView.todaysReminders` precedent, and `Calendar.current`
+    /// matching every other day boundary the medication surfaces draw.
+    ///
+    /// Same visibility discipline as `pendingReminders` above: an
+    /// internal, read-only projection over the in-memory log — no new
+    /// storage, no new state, and this seam never writes anything. The
+    /// coordinator's `takenDosesToday()` (IF-24's caller-facing half)
+    /// resolves entry names over it and drops records whose entry is
+    /// gone; this seam answers the log question alone.
+    func takenLogs(on day: Date) -> [MedicationAdherenceLog] {
+        adherenceLog.filter {
+            $0.status == .acknowledged
+                && Calendar.current.isDate($0.scheduledAt, inSameDayAs: day)
+        }
+    }
+
     /// Configured medication entries — used by the Settings medication
     /// schedule editor and the voice `set_reminder` path to read/append
     /// entries through the same storage the scheduler persists to.
