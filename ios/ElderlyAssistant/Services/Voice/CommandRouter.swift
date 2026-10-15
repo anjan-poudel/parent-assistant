@@ -511,6 +511,55 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// Same requirement-with-extension-default pattern as the members
     /// above.
     func handleCloudChatVoiceRequest(_ request: KeywordIntentRule.CloudChatVoiceRequest)
+
+    /// [MED-ACK-WALK] (T-013/T-014; design-l2 §C4, IF-7 + IF-8) The
+    /// clarification walk's seams. The walk's state lives in the
+    /// coordinator and ONLY the walk ops below write it; the router
+    /// consults the flag, hands the walk's ops their inputs and speaks
+    /// nothing of its own on any walk arm — the coordinator owns every
+    /// walk line and state transition (the navigation-walk precedent).
+    /// Requirements with inert extension defaults (the pattern described
+    /// above): `CommandRouter` holds its coordinator as
+    /// `VoiceCommandCoordinating?`, so an extension-only member would
+    /// bind statically and `AppCoordinator`'s implementation could never
+    /// be reached.
+
+    /// IF-7 — the pending reminders as resolver candidates, in the FIXED
+    /// order (`scheduledAt`, canonical medication name, entry id; never
+    /// firing order, pending order or recency). A pure in-memory read:
+    /// the empty case IS the empty array, which the T-004 resolver
+    /// reports as `.nothingPending`.
+    func medicationAckCandidates() -> [MedicationAckCandidate]
+
+    /// True while a clarification walk is open. The router's [MED-ACK-WALK]
+    /// consult sits immediately ahead of the confirmation block (R-4), so
+    /// while this is true the walk — not the shipped challenge yes/no
+    /// interpreter — owns the turn (`yes`/`no` route to the walk; the
+    /// generic ambiguous re-prompt is unreachable, N-4).
+    var isAwaitingAckClarification: Bool { get }
+
+    /// IF-8 — open the walk over these candidates. The coordinator
+    /// re-validates them against the live pending set, restores the fixed
+    /// order, cancels any prior walk (`.bargedIn` — the design's
+    /// begin-replaces rule) and speaks the first sanctioned question
+    /// itself ("did you mean X?" / "did you mean X or Y?" — never a
+    /// numbered list, never a leading question).
+    func beginAckClarification(orderedCandidates: [MedicationAckCandidate])
+
+    /// IF-8 — one spoken answer, with the router's SHIPPED yes/no
+    /// verdicts passed in (`isYesResponse`/`isNoResponse`; the walk mints
+    /// no vocabulary). The coordinator speaks its own lines on every
+    /// outcome and ends the walk on `.ended`/`.resolved`; only
+    /// `.resolved(entryId:)` asks the caller to continue the shipped
+    /// safety sequence for that entry.
+    @discardableResult
+    func ackClarificationResponse(raw: String, isYes: Bool, isNo: Bool) -> AckClarifyOutcome
+
+    /// IF-8 — end the walk. Idempotent. `.rejected`/`.expired` also speak
+    /// the honest ended line; `.denied` and `.bargedIn` stay silent
+    /// because the utterance's own path (the refusal ladder / the
+    /// acknowledgement path) speaks next.
+    func endAckClarification(reason: AckClarifyEndReason)
 }
 
 /// [INTENT-TOOLS] (2026-09-07) Tool-capability default. The default keeps
@@ -650,6 +699,22 @@ extension VoiceCommandCoordinating {
     // under test) asks or revokes anything.
     var isAwaitingCloudChatConsentConfirmation: Bool { false }
     func handleCloudChatVoiceRequest(_ request: KeywordIntentRule.CloudChatVoiceRequest) {}
+    // [MED-ACK-WALK] (T-013/T-014; design-l2 §C4) Inert defaults — a
+    // conformer that does not opt in (every mock/double) has no pending
+    // reminders to resolve over (`medicationAckCandidates()` = `[]` ⇒ the
+    // resolver reports `.nothingPending` and the acknowledgement handler
+    // takes its shipped fallback leg), never has a walk open (so the
+    // [MED-ACK-WALK] consult never fires and every pre-feature
+    // expectation holds byte-identically) and answers every walk op with
+    // the honest silence of an empty state. Only a coordinator that
+    // explicitly implements the members (AppCoordinator, and a scripted
+    // mock under test) walks anything.
+    func medicationAckCandidates() -> [MedicationAckCandidate] { [] }
+    var isAwaitingAckClarification: Bool { false }
+    func beginAckClarification(orderedCandidates: [MedicationAckCandidate]) {}
+    @discardableResult
+    func ackClarificationResponse(raw: String, isYes: Bool, isNo: Bool) -> AckClarifyOutcome { .unanswered }
+    func endAckClarification(reason: AckClarifyEndReason) {}
 }
 
 // MARK: - [CNR T-174] Chat guard seam (flag resolution at the dispatch seam)
@@ -1042,6 +1107,52 @@ final class CommandRouter {
             return .emergencyTriggered
         }
 
+        // [MED-ACK-WALK] (T-014, R-4; design-l2 §C4 router wiring) The
+        // clarification walk consults HERE — a sibling IMMEDIATELY AHEAD
+        // of the confirmation block below, never if-inside it, so the
+        // block's first test and its body stay byte-identical and a walk
+        // answer can never be parsed as a challenge answer. Refusal
+        // first, then the barge-in acknowledgement, then the walk's own
+        // consume; every arm returns or falls through exactly as the
+        // design pins:
+        //   1. An explicit acknowledgement (the shipped gate, which
+        //      excludes denials itself) re-enters resolution from
+        //      scratch: the walk is ended FIRST as `.bargedIn`, then the
+        //      shipped acknowledgement handler runs — an ack is never
+        //      consumed as a yes/no answer (L1 §7.3 barge-in).
+        //   2. A refusal (the ONE shipped denial vocabulary, via the one
+        //      extracted helper — no second list) ends the walk `.denied`
+        //      and FALLS THROUGH unchanged: the walk's end flips
+        //      `isAwaitingConfirmation` false, so the confirmation block
+        //      cannot swallow the denial, and the refusal ladder's denial
+        //      arm below speaks its own line (FR-MSR-011).
+        //   3. Every other utterance belongs to the walk: yes/no verdicts
+        //      through the SHIPPED classifiers, anything else consumed as
+        //      the walk's own re-ask (the generic ambiguous re-prompt
+        //      below is unreachable while the walk is open, N-4). The
+        //      coordinator speaks its own lines; a resolution continues
+        //      the shipped safety sequence for the entry it names.
+        if coordinator?.isAwaitingAckClarification == true {
+            if Self.isExplicitMedicationAcknowledgement(raw) {
+                coordinator?.endAckClarification(reason: .bargedIn)
+                handleMedicationAcknowledgement(transcript: raw)
+                return .acknowledgedMedication
+            }
+            if Self.isMedicationDenial(raw) {
+                coordinator?.endAckClarification(reason: .denied)
+            } else {
+                let outcome = coordinator?.ackClarificationResponse(
+                    raw: raw,
+                    isYes: Self.isYesResponse(raw),
+                    isNo: Self.isNoResponse(raw))
+                if case .resolved(let entryId)? = outcome {
+                    continueMedicationAcknowledgement(entryId: entryId)
+                    return .acknowledgedMedication
+                }
+                return .unrecognised(transcript: raw)
+            }
+        }
+
         // Confirmation-follow-up path: if a challenge is outstanding,
         // treat this transcript as the user's yes/no response, not a new
         // command. Runs the dementia-aware `acknowledgeWithConfirmation`
@@ -1190,7 +1301,7 @@ final class CommandRouter {
             // excludes it).
             if isAppLaunchConfirmation, Self.isExplicitMedicationAcknowledgement(raw) {
                 emit(eventType: "confirmation_medication_ack", outcome: "success")
-                handleMedicationAcknowledgement()
+                handleMedicationAcknowledgement(transcript: raw)
                 return .acknowledgedMedication
             }
             if Self.isYesResponse(raw) {
@@ -2458,14 +2569,31 @@ final class CommandRouter {
     /// vocabulary instead of at one call site, so no caller can wire the
     /// list up without it.
     static func isExplicitMedicationAcknowledgement(_ raw: String) -> Bool {
+        if isMedicationDenial(raw) { return false }
         let text = raw
             .lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if medicationDenialPhrases.contains(where: { containsPhrase($0, in: text) }) {
-            return false
-        }
         return medicationAckPhrases.contains(where: { containsPhrase($0, in: text) })
             || medicationAckTokens.contains(where: { containsToken($0, in: text) })
+    }
+
+    /// [MED-ACK-WALK] (T-014; design-l2 §C4) The refusal-first guard's ONE
+    /// home — "one extracted helper, one list, no second vocabulary". The
+    /// shipped refusal list with the shipped containment; every caller
+    /// that has to tell a refusal from an acknowledgement asks this
+    /// (refusal semantics are never duplicated at a call site):
+    /// `isExplicitMedicationAcknowledgement` (an ack is never a denial,
+    /// including mixed denial-with-ack-token utterances),
+    /// `routeSafetyNet`'s refusal arm, and the clarification walk's
+    /// consult (a refusal ends the walk `.denied` and falls through to
+    /// the ladder). Behaviour is byte-identical to the two shipped call
+    /// sites it replaced — same lowercasing, same trim, same substring
+    /// containment.
+    static func isMedicationDenial(_ raw: String) -> Bool {
+        let text = raw
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return medicationDenialPhrases.contains(where: { containsPhrase($0, in: text) })
     }
 
     /// The safety-critical slice of the keyword layer, runnable on its
@@ -2487,15 +2615,16 @@ final class CommandRouter {
         }
 
         // Guard first: explicit negations must never fall through to the
-        // ack list (see `medicationDenialPhrases`).
-        if Self.medicationDenialPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
+        // ack list (see `medicationDenialPhrases` — the one list, checked
+        // via the one extracted helper).
+        if Self.isMedicationDenial(text) {
             emit(eventType: "command_ack_denied_keyword", outcome: "info")
             speak(key: "router.ackDenied")
             return .unrecognised(transcript: raw)
         }
 
         if Self.isExplicitMedicationAcknowledgement(raw) {
-            handleMedicationAcknowledgement()
+            handleMedicationAcknowledgement(transcript: raw)
             return .acknowledgedMedication
         }
         return nil
@@ -4632,7 +4761,8 @@ final class CommandRouter {
             // no-override path already speaks (router.confirmationYes),
             // and emits `llama_response_rejected_sanity`. The raw text
             // never reaches the speaker.
-            handleMedicationAcknowledgement(replyOverride: sanitisedModelReply(command.reply))
+            handleMedicationAcknowledgement(transcript: raw,
+                                            replyOverride: sanitisedModelReply(command.reply))
         case .emergency:
             emit(eventType: "command_emergency", outcome: "success")
             handleEmergency()
@@ -5386,9 +5516,48 @@ final class CommandRouter {
                           locale: locale)
     }
 
-    private func handleMedicationAcknowledgement(replyOverride: String? = nil) {
-        guard let coordinator = coordinator,
-              let oldest = coordinator.oldestPendingReminderEntryId() else {
+    /// [MED-ACK] (T-014; design-l1 §7.2–§7.4, FR-MSR-007/008) One spoken
+    /// medication acknowledgement, resolved by WHAT THE ELDER SAID. The
+    /// oldest-pending selection is no longer the primary path — the
+    /// utterance and the coordinator's pending candidates (IF-7) go into
+    /// the T-004 resolver (IF-6): name first, then slot, then the simple
+    /// acknowledgement, never a guess and never firing/pending order.
+    ///
+    ///   - `.resolved(entryId:)` continues the SHIPPED safety sequence
+    ///     for that entry (`continueMedicationAcknowledgement`): the
+    ///     FR-D01 challenge and its next-transcript yes/no, then the
+    ///     FR-D03 double-dose detector. Nothing in that chain is touched
+    ///     — resolution only decides WHICH entry the chain runs for.
+    ///   - `.ambiguous(ordered:)` opens the clarification walk (IF-8)
+    ///     with exactly the resolver's candidate set, in the resolver's
+    ///     fixed order; the coordinator speaks the sanctioned question
+    ///     itself ("did you mean X / X or Y" — the router mints no copy).
+    ///   - `.nothingPending` keeps the shipped `router.noPendingReminder`
+    ///     leg byte-identically. The shipped `oldestPendingReminderEntryId`
+    ///     selection survives ONLY as this leg's fallback (C12): a
+    ///     conformer that does not implement the candidate read (inert
+    ///     default `[]` — every legacy mock/double) still gets the exact
+    ///     pre-feature behaviour, and in production IF-7 and the oldest
+    ///     read agree, so the fallback never fires there.
+    ///   - `.unmatched` (a slot named with nothing pending there) answers
+    ///     with the honest no-match line and opens nothing: no walk, no
+    ///     recording — the resolver's `orderedPending` exists so this
+    ///     answer can be honest, and design-l1 §7.6 fixes the outcome
+    ///     ("honest 'nothing to acknowledge' line", recorded? no).
+    ///
+    /// Resolution outcomes emit PII-free observations —
+    /// `medication_ack_resolved` / `_ambiguous` / `_unmatched` — with the
+    /// entry id HASH only (`IdHashing.shortHash`), never the raw id and
+    /// never a name. `transcript` is the text the calling gate admitted
+    /// (the safety-slice transcript at the safety-net call site — D-1:
+    /// the ORIGINAL transcript on a correction re-route). `replyOverride`
+    /// is unchanged: the interpreter arm's sanitised reply is what the
+    /// baseline leg speaks.
+    private func handleMedicationAcknowledgement(transcript: String,
+                                                 replyOverride: String? = nil) {
+        guard let coordinator = coordinator else {
+            // No coordinator at all: nothing can be pending, so the
+            // shipped honest no-pending leg stands (byte-identical).
             postLocalizedNotification(titleKey: "notif.nothingToAcknowledge.title",
                                       bodyKey: "notif.nothingToAcknowledge.body")
             emit(eventType: "command_ack_no_pending", outcome: "info")
@@ -5396,12 +5565,60 @@ final class CommandRouter {
             return
         }
 
-        // Dementia flow: issue the FR-D01 challenge before recording the
-        // dose. The user's yes/no on the next transcript runs through
-        // `handleConfirmationResponse`, which triggers the FR-D03
-        // double-dose check. Falls back to baseline ack only if the
-        // challenge cannot be issued (no pending reminder, etc).
-        if let prompt = coordinator.startVoiceAckConfirmation(for: oldest) {
+        let candidates = coordinator.medicationAckCandidates()
+        let resolution = MedicationAckResolver.resolve(utterance: transcript,
+                                                       candidates: candidates)
+        switch resolution {
+        case .resolved(let entryId):
+            emitAckResolution("medication_ack_resolved", entryId: entryId)
+            continueMedicationAcknowledgement(entryId: entryId,
+                                              replyOverride: replyOverride)
+
+        case .ambiguous(let ordered):
+            // No single entry named: nothing is recorded; the walk's
+            // sanctioned question is the only copy the elder hears (the
+            // coordinator's own op speaks it and owns the order).
+            emitAckResolution("medication_ack_ambiguous", entryId: ordered.first)
+            openAckClarification(ordered: ordered, candidates: candidates)
+
+        case .unmatched:
+            // A slot was named with nothing pending there: say so
+            // honestly — never the no-pending line (other slots ARE
+            // pending; that line would claim otherwise), never a guess,
+            // never a walk (there is nothing to walk over).
+            emit(eventType: "medication_ack_unmatched", outcome: "info")
+            speak(key: "meds.ack.clarifyEnded")
+
+        case .nothingPending:
+            // C12 fallback: the pre-candidate-read conformers (inert
+            // default `[]`) still owe the shipped behaviour — exactly
+            // one legacy path remains reachable, and only from here.
+            guard let oldest = coordinator.oldestPendingReminderEntryId() else {
+                postLocalizedNotification(titleKey: "notif.nothingToAcknowledge.title",
+                                          bodyKey: "notif.nothingToAcknowledge.body")
+                emit(eventType: "command_ack_no_pending", outcome: "info")
+                speak(key: "router.noPendingReminder")
+                return
+            }
+            continueMedicationAcknowledgement(entryId: oldest,
+                                              replyOverride: replyOverride)
+        }
+    }
+
+    /// The SHIPPED safety sequence's entry point, factored so both arms
+    /// that name one entry run it identically: the resolver's direct
+    /// `.resolved` and a walk that resolved to one candidate (T-013's
+    /// contract: "the caller continues the shipped safety sequence").
+    /// Body unchanged from the pre-T-014 handler — dementia flow: issue
+    /// the FR-D01 challenge before recording the dose; the user's yes/no
+    /// on the next transcript runs through `handleConfirmationResponse`,
+    /// which triggers the FR-D03 double-dose check. Falls back to the
+    /// baseline ack only if the challenge cannot be issued (no pending
+    /// reminder, etc).
+    private func continueMedicationAcknowledgement(entryId: UUID,
+                                                   replyOverride: String? = nil) {
+        guard let coordinator = coordinator else { return }
+        if let prompt = coordinator.startVoiceAckConfirmation(for: entryId) {
             emit(eventType: "command_ack_challenge_issued", outcome: "success")
             postLocalizedNotification(titleKey: "notif.confirmingDose.title",
                                       body: prompt)
@@ -5409,7 +5626,7 @@ final class CommandRouter {
             return
         }
 
-        coordinator.handleMedicationAcknowledgement(entryId: oldest)
+        coordinator.handleMedicationAcknowledgement(entryId: entryId)
         emit(eventType: "command_ack_medication_baseline", outcome: "success")
         postLocalizedNotification(titleKey: "notif.medicationAcknowledged.title",
                                   bodyKey: "notif.medicationAcknowledged.body")
@@ -5418,6 +5635,44 @@ final class CommandRouter {
         } else {
             speak(key: "router.confirmationYes")
         }
+    }
+
+    /// IF-8 open, from the resolver's answer: the walk's candidate set is
+    /// exactly the resolver's ambiguous set (a name/slot narrowing may
+    /// make it a PROPER subset of the pending candidates), restored from
+    /// the ids the resolver returned with their multiplicities preserved
+    /// (two pending doses of one medication are two candidates with one
+    /// id) and handed in the resolver's fixed order. The coordinator
+    /// re-validates against the live set, re-sorts and speaks the
+    /// sanctioned question — the router speaks nothing here.
+    private func openAckClarification(ordered: [UUID],
+                                      candidates: [MedicationAckCandidate]) {
+        var remaining = candidates
+        let orderedCandidates = ordered.compactMap { entryId -> MedicationAckCandidate? in
+            guard let index = remaining.firstIndex(where: { $0.entryId == entryId }) else {
+                return nil
+            }
+            return remaining.remove(at: index)
+        }
+        coordinator?.beginAckClarification(orderedCandidates: orderedCandidates)
+    }
+
+    /// PII-free ack-resolution observation: the event plus, when one
+    /// entry is named, its id HASH only — never the raw id, never a name
+    /// (the metadata key is the one the messaging/photo seams already
+    /// use; the full key inventory is declared at the release gate,
+    /// T-022). The router's `emit(eventType:outcome:)` helper hardcodes
+    /// empty metadata, so this builds the event directly, the way the
+    /// coordinator's `entry_id_hash` events do.
+    private func emitAckResolution(_ eventType: String, entryId: UUID?) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: "success",
+            errorCode: nil,
+            metadata: entryId.map { ["entry_id_hash": IdHashing.shortHash(of: $0)] } ?? [:]
+        ))
     }
 
     /// Whole-token match — the ONLY safe way to match "हो" (yes), because

@@ -16,7 +16,7 @@ description: Implementation notes for the medication-schedules-reminders impleme
 | W0 | T-001, T-006, T-007, T-012 | 6 classes — 92 tests (2026-10-15) | PASS — 92/92, 0 failures |
 | W1 | T-002, T-003, T-004, T-005 | 5 classes — 42 tests (2026-10-15) | PASS — 42/42, 0 failures |
 | W2 | T-008, T-009, T-011, T-013, T-015 | 7 classes — 176 tests (2026-10-15) | PASS — 176/176, 0 failures |
-| W3 | T-010, T-014, T-017 | pending | pending |
+| W3 | T-010, T-014, T-017 | 4 classes — 65 tests (2026-10-15) | PASS — 65/65, 0 failures |
 | W4 | T-016, T-018 | pending | pending |
 | W5 | T-019, T-020 | pending | pending |
 | W6 | T-021 | pending | pending |
@@ -93,6 +93,37 @@ description: Implementation notes for the medication-schedules-reminders impleme
   `calendar_share_*` observability events (shipped metadata keys, no PII);
   write is enqueue-only (no outbound marker, no auto-flush — the shipped flush
   path owns the Google write); test-harness store-failure knob.
+- T-010 recorded judgment calls: the finalize-in-flight guard is
+  deadline-inclusive (`Date() <= deadline`) — an unanswered challenge never
+  clears from the map, so a bare presence check would permanently lock an entry
+  out of every future re-arm (a lapsed window is not a live finalize; covered by
+  a lapsed-window control test); `keptLiveCount` counts reminders (guarded
+  entries' live reminders plus re-armed entries' fired reminders);
+  `createPendingReminders` gained `@discardableResult -> Int?` as the minimal
+  reuse seam (no second arming implementation); IF-12 deliberately lives on the
+  concrete scheduler, not `MedicationSchedulerProtocol` (T-020 calls the
+  concrete runtime-scoped instance).
+- T-014 recorded judgment calls (5): होइन inside a walk is consumed by the walk
+  as the resolver's `isNo: true` (the shipped denial vocabulary carries
+  छैन/भएन/नखाए but not होइन, per design-l2 step 3) — genuine refusals fall
+  through to the refusal ladder; pinned by both risk-5 tests. `.unmatched`
+  speaks the shipped `meds.ack.clarifyEnded` key and opens no walk (one
+  vocabulary, asserts nothing false); `oldestPendingReminderEntryId()` survives
+  only as the legacy-double fallback (production IF-7 and oldest agree); the
+  walk consult reads the raw transcript; observation metadata carries entry-id
+  hashes only (resolved: the resolved entry's; ambiguous: the first candidate's;
+  unmatched/nothing-pending: none).
+- T-017 recorded judgment calls (8): an unknown-id update degrades to add
+  (documented; no invented error key); gates — empty rows ->
+  `settings.meds.timeRequired`, mixed row shapes -> `settings.meds.slotRequired`
+  (fail-closed; the view emits single-shape rows from the draft);
+  `photoVerificationEnabled` false at every new-entry construction and carried
+  verbatim on edit; `editedEntry` names every field memberwise (copy-self
+  trap); copied visual aids re-save bytes under the new entry id (fail-soft);
+  a slot-resolution failure leaves an empty mirror and never fails the save
+  (arming surfaces the unresolved line later); the verification harness
+  typechecked a frozen module snapshot (deterministic under concurrent sibling
+  edits); no notes file per the binding rules.
 
 ## Verification
 
@@ -207,6 +238,49 @@ description: Implementation notes for the medication-schedules-reminders impleme
     into the reconcile pass so a written one-off is never tombstoned; mapper
     gains the M-1 family audience (every contact with an email, emergency-first)
     and the one-off draft/title. Suites: calendar share service 67, mapper 27.
+- **W3 consolidated scoped pass (2026-10-15):** `ios/build.sh test:unit
+  MedicationSchedulerTests CommandRouterMedicationWalkTests AckFastLaneTests
+  MedicationSavePlumbingTests` — 65 tests, 0 failures, `TEST SUCCEEDED`
+  (xcresult 65/65, result Passed). Suite coverage: scheduler 25, router walk 9,
+  ack fast lane 21, save plumbing 10. Green on the first attempt; guards green;
+  a scoped run does not advance the impact baseline.
+- **Unit outcomes (W3):**
+  - T-010 — `MedicationScheduler.swift`: IF-12 `rearmForSlotClockChange()` —
+    slot entries walked deterministically; finalize-in-flight entries kept whole
+    (challenge-active guard, deadline-inclusive); resolution fail-closed with
+    the honest `medication_slot_unresolved`; staleness judged by resolution
+    equality so a second unchanged pass is a true no-op; mirrors persist before
+    in-memory apply and alarm movement; reminders re-placed through the standard
+    creation path (no parallel arming code); `SlotClockRearmReport`
+    (`rearmedCount`, `keptLiveCount`, `unresolvedSlots`, `persistenceFailed`)
+    for T-020's leaf lines. Suite 25 tests (20 shipped + 5 named); an 82-check
+    runtime harness ran green.
+  - T-014 — `CommandRouter.swift`: `handleMedicationAcknowledgement` resolves
+    through the T-004 resolver over the IF-7 candidates (resolved -> the shipped
+    challenge/baseline sequence; ambiguous -> the walk; unmatched -> the honest
+    line; nothingPending -> the shipped line; the oldest-pending selection
+    survives only as the fallback). The R-4 walk consult is a sibling at :1135
+    immediately ahead of the confirmation block (:1160): the denial guard runs
+    first (one `isMedicationDenial` helper over the shipped phrase list), a
+    refusal ends the walk and falls through to the refusal ladder, yes/no inside
+    a walk route to the walk. Five new `VoiceCommandCoordinating` requirements
+    with inert extension defaults; verified that AppCoordinator's concrete
+    members carry all five exact spellings (the app never hits the defaults).
+    PII-free `medication_ack_resolved`/`_ambiguous`/`_unmatched`. Suites: walk
+    9 (all named, incl. both risk-5 guards) and ack fast lane 21 (19 + 2).
+  - T-017 — `AppCoordinator.swift`: IF-21 slot-model save plumbing —
+    `MedicationSaveRequest` (file scope); `addMedication(_:)` /
+    `updateMedication(id:_:)` / `removeMedication(id:)`; one entry per slot row
+    (D1) with the D2 mirror composed through C1 at save time (resolution
+    failure leaves an empty mirror, never fails the save); `doseDescription`
+    through the T-002 composer; the SHIPPED duplicate expression verbatim
+    (exact name equality + effective-time intersection) — mixed legacy/slot
+    pairs flag, same-save entries participate, update excludes self, corrupt
+    mapping/empty mirror never flags; the evidence cascade on removal
+    (fail-soft); `photoVerificationEnabled` false at construction; the shipped
+    legacy path untouched. New suite 10 tests. Anchors for T-020: rows built
+    from `MedicationEditorDraft.storedRows`, errors are catalog keys
+    (`settings.meds.*`).
 - **Carry-forward baseline note (for the W7 full-suite comparison):** the
   Spotify localization suite's absolute key-count pin is red at the branch
   base (pin 1,381 vs catalog 1,439 pre-W0) and is untouched by this feature —
