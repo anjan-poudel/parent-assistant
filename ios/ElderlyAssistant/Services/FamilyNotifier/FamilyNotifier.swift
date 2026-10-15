@@ -183,6 +183,10 @@ final class APNsFamilyNotifier: FamilyNotifierProtocol {
             return L10n.str("family.alertInactivity", locale: locale)
         case .eventReminder:
             return L10n.str("family.alertEventReminder", locale: locale)
+        case .intakeRecorded:
+            return L10n.str("family.alertIntakeRecorded", locale: locale)
+        case .escalationStarted:
+            return L10n.str("family.alertEscalationStarted", locale: locale)
         }
     }
 
