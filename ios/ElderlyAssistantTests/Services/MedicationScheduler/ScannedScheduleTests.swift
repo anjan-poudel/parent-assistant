@@ -84,6 +84,20 @@ final class ScannedScheduleTests: XCTestCase {
         XCTAssertEqual(ScannedSchedule.slots(from: []), [])
     }
 
+    // MARK: - The frequency table's emission [MED-OCR-FREQ] (2026-10-15)
+
+    /// The frequency table's hours are chosen so they convert through THIS
+    /// pinned table with no second mapping: "twice a day" (13:00, 19:00)
+    /// is [afternoon, evening] — the owner's "after lunch and after
+    /// dinner" — and "three times a day" (8:00, 13:00, 19:00) adds
+    /// morning. The conversion stays a lookup of the emitted hours.
+    func testFrequencyTableHoursConvertToTheExpectedSlotRows() {
+        XCTAssertEqual(ScannedSchedule.slots(from: read([13, 19])),
+                       [.afternoon, .evening])
+        XCTAssertEqual(ScannedSchedule.slots(from: read([8, 13, 19])),
+                       [.morning, .afternoon, .evening])
+    }
+
     // MARK: - Independence from the household re-timing record
 
     func testConversionIsMappingIndependent() {

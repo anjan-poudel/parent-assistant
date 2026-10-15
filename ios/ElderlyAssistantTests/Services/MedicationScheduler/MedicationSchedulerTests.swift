@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import ElderlyAssistant
 
 // MARK: - Mock Dependencies
@@ -271,12 +272,20 @@ final class MedicationSchedulerTests: XCTestCase {
         mockStorage.shouldFailWrite = true
 
         let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
-        scheduler.loadSchedule(entries: [entry])
+        let loadResult = scheduler.loadSchedule(entries: [entry])
 
-        // scheduleAll restores from storage; with failing storage,
-        // pending reminders won't be persisted but scheduled reminders
-        // from loadSchedule should still have been written
+        // The write-first order ([T-023]): loadSchedule persists the
+        // entries BEFORE it adopts or arms anything, so with failing
+        // storage that first write is ATTEMPTED and refused — the attempt
+        // count below is the witness that persistence ran at all, and
+        // nothing was adopted or armed on top of a schedule that never
+        // reached the store.
         XCTAssertGreaterThanOrEqual(mockStorage.writeCallCount, 1)
+        XCTAssertFalse(loadResult,
+                       "the refused write is reported to the caller, never absorbed")
+        XCTAssertTrue(scheduler.medicationEntries().isEmpty,
+                      "nothing is adopted behind a refused write")
+        XCTAssertTrue(scheduler.pendingReminders.isEmpty)
     }
 
     // MARK: - Acknowledgement flow
@@ -691,28 +700,74 @@ final class MedicationSchedulerTests: XCTestCase {
     /// FR-MSR-022's other half, on the slot path: when the persistence the
     /// arm depends on fails, nothing is armed and the shipped failure
     /// surface reports it — resolution is NOT the thing that failed.
+    ///
+    /// [T-023] The write-first-or-fail tail moves the FIRST failure
+    /// point: with `shouldFailWrite` the ENTRIES write (the gate that
+    /// precedes adoption and arming) refuses before the reminder write
+    /// is ever reached, and the shipped `entry_persistence_failed`
+    /// reports it — nothing is adopted, not merely unarmed. Both halves
+    /// of the invariant stay covered: this half pins the entries failure
+    /// point; the second half below fails ONLY the reminder write and
+    /// keeps the shipped `reminder_persistence_failed` coverage.
     func testStorageFailureBlocksArming() {
         installMapping(MedicationSlotClock.default, into: mockStorage)
         let entry = makeSlotEntry(slot: .morning, mirrorHour: 8, mirrorMinute: 0)
         mockStorage.shouldFailWrite = true
 
-        scheduler.loadSchedule(entries: [entry])
+        XCTAssertFalse(scheduler.loadSchedule(entries: [entry]),
+                       "the failed persist is the caller's failure — never a silent success")
 
         XCTAssertEqual(mockAlarm.scheduleCallCount, 0,
                        "a storage failure on the reminder state arms no platform alarm")
         XCTAssertTrue(mockAlarm.scheduledReminders.isEmpty)
         XCTAssertTrue(mockObservability.emittedEvents.contains {
-            $0.eventType == "reminder_persistence_failed"
-        }, "the shipped failure path reports the write")
+            $0.eventType == "entry_persistence_failed"
+        }, "the shipped failure path reports the refused entries write, the gate write")
         XCTAssertFalse(mockObservability.emittedEvents.contains {
             $0.eventType == "medication_slot_unresolved"
         }, "the slot resolved — the WRITE is what failed")
+
+        // Nothing was adopted behind the refused write: no entry, no
+        // pending state — the previous (empty) schedule is intact.
+        XCTAssertTrue(scheduler.medicationEntries().isEmpty,
+                      "the schedule the store never received is not adopted in memory")
+        XCTAssertTrue(scheduler.pendingReminders.isEmpty)
 
         // The failing write left no payload behind, so nothing can be
         // resurrected at the next launch as if it had armed.
         if case .success = mockStorage.read(key: "medication.pending_reminders",
                                             type: [String: ScheduledReminder].self) {
             XCTFail("a failed write must not leave a reminder payload")
+        }
+        if case .success = mockStorage.read(key: "medication.entries",
+                                            type: [MedicationEntry].self) {
+            XCTFail("a failed write must not leave an entries payload")
+        }
+
+        // The reminder-write half (T-023): the entries write LANDS and
+        // only the pending-state write refuses — the shipped
+        // `reminder_persistence_failed` still reports it, and the
+        // unpersisted pending state still arms nothing.
+        mockObservability.emittedEvents.removeAll()
+        mockStorage.shouldFailWrite = false
+        mockStorage.failingWriteKeys = ["medication.pending_reminders"]
+
+        XCTAssertTrue(scheduler.loadSchedule(entries: [entry]),
+                      "the entries write lands this time — the failure points are distinct")
+        XCTAssertEqual(scheduler.medicationEntries().count, 1,
+                       "…and the entry is adopted (the persist it depends on succeeded)")
+        XCTAssertEqual(mockAlarm.scheduleCallCount, 0,
+                       "the unpersisted pending state arms no platform alarm")
+        XCTAssertTrue(mockAlarm.scheduledReminders.isEmpty)
+        XCTAssertTrue(mockObservability.emittedEvents.contains {
+            $0.eventType == "reminder_persistence_failed"
+        }, "the reminder-write failure keeps its shipped report")
+        XCTAssertFalse(mockObservability.emittedEvents.contains {
+            $0.eventType == "medication_slot_unresolved"
+        }, "the slot resolved — the WRITE is what failed")
+        if case .success = mockStorage.read(key: "medication.pending_reminders",
+                                            type: [String: ScheduledReminder].self) {
+            XCTFail("a failed reminder write must not leave a reminder payload")
         }
     }
 
@@ -1556,7 +1611,449 @@ final class MedicationSchedulerTests: XCTestCase {
         XCTAssertEqual(observed.first?.first?.scheduleTimes.first?.hour, 7)
     }
 
+    // MARK: - Evidence hold and finalize attach (T-019, IF-15)
+
+    /// R-1(a): the log id the coordinator minted at capture time is the id
+    /// the finalize writes — one identity for the log, the file and the
+    /// record's claim, end to end (`<logId>.jpg` stays true everywhere).
+    func testHoldIdEqualsFinalizedLogId() {
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        let (store, root) = makeEvidenceStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        scheduler = schedulerWithEvidenceStore(store)
+        scheduler.loadSchedule(entries: [entry])
+        guard let reminderId = scheduler.pendingReminders.first?.id else {
+            return XCTFail("expected a pending reminder")
+        }
+        scheduler.triggerReminder(for: reminderId)
+
+        // The capture: the coordinator minted the log id, the store named
+        // the file by it, and the hold carries both (IF-15's logId shape,
+        // T-021's `.pendingDose` path).
+        let heldLogId = UUID()
+        guard case .success(let fileName) =
+            store.store(image: makeEvidenceImage(), for: heldLogId, entryId: entry.id) else {
+            return XCTFail("the capture must store")
+        }
+        XCTAssertEqual(fileName, heldLogId.uuidString + ".jpg",
+                       "the store names the file by the capture-time log id")
+        XCTAssertTrue(scheduler.holdPendingEvidence(logId: heldLogId, fileName: fileName,
+                                                    for: entry.id))
+
+        let result = scheduler.acknowledgeWithConfirmation(entryId: entry.id, at: Date(),
+                                                           confirmationResponse: .yes)
+        guard case .success = result else {
+            return XCTFail("the chain must finalize")
+        }
+
+        guard case .success(let logs) = mockStorage.read(key: "medication.adherence_log",
+                                                         type: [MedicationAdherenceLog].self),
+              let recorded = logs.first(where: { $0.medicationEntryId == entry.id }) else {
+            return XCTFail("the acknowledgement must persist one record for the entry")
+        }
+        XCTAssertEqual(recorded.status, .acknowledged)
+        XCTAssertEqual(recorded.id, heldLogId,
+                       "the written log's id IS the held log id (R-1(a))")
+        XCTAssertEqual(recorded.evidencePhotoFileName, fileName,
+                       "the record's evidence photo file name is the stored bare file name")
+        XCTAssertEqual(recorded.evidencePhotoFileName, recorded.id.uuidString + ".jpg",
+                       "the name equals the log id everywhere")
+        XCTAssertTrue(fileExists(fileName, entryId: entry.id, in: store),
+                      "the claimed file is never deleted on the success path")
+        XCTAssertTrue(mockObservability.emittedEvents.contains {
+            $0.eventType == "medication_evidence_attached"
+        }, "the attach is classified, PII-free")
+    }
+
+    /// R-3: a capture whose store completes after the chain finalized is
+    /// cleared AT REGISTRATION — no un-finalized reminder exists for the
+    /// entry, the stored file is deleted, no hold is registered, and the
+    /// record stays honestly evidence-free (never claimed attached).
+    func testLateHoldClearedAtRegistration() {
+        let entry = makeMedicationEntry(name: "Metformin", timeHour: 9, timeMinute: 0)
+        let (store, root) = makeEvidenceStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        scheduler = schedulerWithEvidenceStore(store)
+        scheduler.loadSchedule(entries: [entry])
+        guard let reminderId = scheduler.pendingReminders.first?.id else {
+            return XCTFail("expected a pending reminder")
+        }
+        scheduler.triggerReminder(for: reminderId)
+
+        // The chain finalizes with nothing held.
+        guard case .success = scheduler.acknowledgeWithConfirmation(
+            entryId: entry.id, at: Date(), confirmationResponse: .yes) else {
+            return XCTFail("the chain must finalize")
+        }
+        XCTAssertTrue(scheduler.pendingReminders.allSatisfy { $0.medicationEntryId != entry.id },
+                      "no un-finalized reminder exists for the entry (the R-3 precondition)")
+
+        // NOW the capture's store completes — too late for the record.
+        let lateLogId = UUID()
+        guard case .success(let fileName) =
+            store.store(image: makeEvidenceImage(), for: lateLogId, entryId: entry.id) else {
+            return XCTFail("the capture must store")
+        }
+        let registered = scheduler.holdPendingEvidence(logId: lateLogId, fileName: fileName,
+                                                       for: entry.id)
+
+        XCTAssertFalse(registered, "the late hold is refused at registration")
+        XCTAssertFalse(fileExists(fileName, entryId: entry.id, in: store),
+                       "the stored file is deleted at registration")
+        let discarded = mockObservability.emittedEvents.filter {
+            $0.eventType == "medication_evidence_discarded"
+        }
+        XCTAssertEqual(discarded.map(\.outcome), ["late_hold"])
+        XCTAssertEqual(discarded.first?.metadata,
+                       ["entry_id_hash": IdHashing.shortHash(of: entry.id)],
+                       "the entry-id hash and nothing else (NFR-MSR-002)")
+
+        // The record stays honestly evidence-free: nothing new was written
+        // and the finalized record claims no photo.
+        guard case .success(let logs) = mockStorage.read(key: "medication.adherence_log",
+                                                         type: [MedicationAdherenceLog].self) else {
+            return XCTFail("the finalized record must be on disk")
+        }
+        XCTAssertEqual(logs.filter { $0.medicationEntryId == entry.id }.count, 1,
+                       "the hold registered nothing — no record was created")
+        XCTAssertNil(logs.first(where: { $0.medicationEntryId == entry.id })?.evidencePhotoFileName,
+                     "the record is honestly evidence-free, never claimed attached")
+        XCTAssertFalse(mockObservability.emittedEvents.contains {
+            $0.eventType == "medication_evidence_attached"
+        }, "nothing was ever attached")
+    }
+
+    /// The failure arm claims nothing: a failed adherence write returns the
+    /// shipped failure, the held file is deleted (no orphan), intakeRecorded
+    /// does not fire — and even when a later successful write flushes the
+    /// retained in-memory record, it carries no evidence name.
+    func testPersistFailureDeletesHeldFileAndClaimsNothing() async {
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        let (store, root) = makeEvidenceStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        scheduler = schedulerWithEvidenceStore(store)
+        scheduler.loadSchedule(entries: [entry])
+        guard let reminderId = scheduler.pendingReminders.first?.id else {
+            return XCTFail("expected a pending reminder")
+        }
+        scheduler.triggerReminder(for: reminderId)
+
+        let heldLogId = UUID()
+        guard case .success(let fileName) =
+            store.store(image: makeEvidenceImage(), for: heldLogId, entryId: entry.id) else {
+            return XCTFail("the capture must store")
+        }
+        XCTAssertTrue(scheduler.holdPendingEvidence(logId: heldLogId, fileName: fileName,
+                                                    for: entry.id))
+
+        mockStorage.failingWriteKeys = ["medication.adherence_log"]
+        let noIntakeAlert = expectation(description: "no intake alert")
+        noIntakeAlert.isInverted = true
+        mockFamilyNotifier.onNotify = { noIntakeAlert.fulfill() }
+
+        let result = scheduler.acknowledgeWithConfirmation(entryId: entry.id, at: Date(),
+                                                           confirmationResponse: .yes)
+        guard case .failure(.reminderPersistenceFailed) = result else {
+            return XCTFail("the shipped persistence failure must come back")
+        }
+        await fulfillment(of: [noIntakeAlert], timeout: 0.3)
+        mockFamilyNotifier.onNotify = nil
+
+        XCTAssertTrue(mockFamilyNotifier.contexts.isEmpty,
+                      "intakeRecorded does not fire when the record did not land")
+        XCTAssertFalse(fileExists(fileName, entryId: entry.id, in: store),
+                       "the held file is deleted — no orphan")
+        if case .success = mockStorage.read(key: "medication.adherence_log",
+                                            type: [MedicationAdherenceLog].self) {
+            XCTFail("the failed write must leave no adherence payload")
+        }
+
+        // The claim must not survive in memory either: a later successful
+        // write flushes the retained record WITHOUT the evidence name.
+        mockStorage.failingWriteKeys = []
+        if case .failure = scheduler.acknowledge(entryId: entry.id, at: Date()) {
+            return XCTFail("the second acknowledgement must finalize")
+        }
+        guard case .success(let flushed) = mockStorage.read(
+            key: "medication.adherence_log", type: [MedicationAdherenceLog].self) else {
+            return XCTFail("the second acknowledgement must persist")
+        }
+        let records = flushed.filter { $0.medicationEntryId == entry.id }
+        XCTAssertEqual(records.count, 2,
+                       "the failed record is retained and flushed beside the new one")
+        XCTAssertEqual(records.first?.id, heldLogId,
+                       "the retained record keeps the identity finalize wrote")
+        XCTAssertNil(records.first?.evidencePhotoFileName,
+                     "…and claims nothing — the file it named no longer exists")
+        XCTAssertNotEqual(records.last?.id, heldLogId,
+                          "the hold was cleared: the second finalize mints a fresh id")
+        XCTAssertNil(records.last?.evidencePhotoFileName)
+    }
+
+    /// The deny path (a "no" and a lapsed window both land here): the hold
+    /// is discarded — file deleted — and a later confirming chain records
+    /// WITHOUT the denied capture anywhere near it.
+    func testDenyAndReEnterDiscardTheHold() {
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        let (store, root) = makeEvidenceStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        scheduler = schedulerWithEvidenceStore(store)
+        scheduler.loadSchedule(entries: [entry])
+        guard let reminderId = scheduler.pendingReminders.first?.id else {
+            return XCTFail("expected a pending reminder")
+        }
+        scheduler.triggerReminder(for: reminderId)
+
+        let heldLogId = UUID()
+        guard case .success(let fileName) =
+            store.store(image: makeEvidenceImage(), for: heldLogId, entryId: entry.id) else {
+            return XCTFail("the capture must store")
+        }
+        XCTAssertTrue(scheduler.holdPendingEvidence(logId: heldLogId, fileName: fileName,
+                                                    for: entry.id))
+
+        // "No" re-enters escalation — the shipped deny path.
+        _ = scheduler.acknowledgeWithConfirmation(entryId: entry.id, at: Date(),
+                                                  confirmationResponse: .no)
+        XCTAssertTrue(mockObservability.emittedEvents.contains {
+            $0.eventType == "confirmation_denied"
+        }, "the drive really denied")
+        XCTAssertFalse(fileExists(fileName, entryId: entry.id, in: store),
+                       "the deny discards the held file")
+        let discarded = mockObservability.emittedEvents.filter {
+            $0.eventType == "medication_evidence_discarded"
+        }
+        XCTAssertEqual(discarded.map(\.outcome), ["denied"])
+        XCTAssertEqual(discarded.first?.metadata,
+                       ["entry_id_hash": IdHashing.shortHash(of: entry.id)])
+
+        // The dose is still un-acknowledged: the elder answers the NEW
+        // challenge with yes and the record lands — evidence-free, because
+        // the hold died with the deny.
+        guard case .success = scheduler.acknowledgeWithConfirmation(
+            entryId: entry.id, at: Date(), confirmationResponse: .yes) else {
+            return XCTFail("the confirming answer must record")
+        }
+        guard case .success(let logs) = mockStorage.read(key: "medication.adherence_log",
+                                                         type: [MedicationAdherenceLog].self),
+              let recorded = logs.first(where: { $0.medicationEntryId == entry.id }) else {
+            return XCTFail("the confirmed intake must persist")
+        }
+        XCTAssertEqual(recorded.status, .acknowledged)
+        XCTAssertNotEqual(recorded.id, heldLogId,
+                          "the denied capture's identity is gone with its hold")
+        XCTAssertNil(recorded.evidencePhotoFileName,
+                     "no photo is claimed for the record the deny preceded")
+    }
+
+    /// A re-capture replaces the hold: the superseded file is deleted (no
+    /// orphan), the replacement is the one the finalize claims, and the
+    /// discard is classified honestly.
+    func testRecaptureReplacesAndDeletesThePreviousFile() {
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        let (store, root) = makeEvidenceStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        scheduler = schedulerWithEvidenceStore(store)
+        scheduler.loadSchedule(entries: [entry])
+        guard let reminderId = scheduler.pendingReminders.first?.id else {
+            return XCTFail("expected a pending reminder")
+        }
+        scheduler.triggerReminder(for: reminderId)
+
+        let firstLogId = UUID()
+        let secondLogId = UUID()
+        guard case .success(let firstFile) =
+            store.store(image: makeEvidenceImage(), for: firstLogId, entryId: entry.id),
+            case .success(let secondFile) =
+            store.store(image: makeEvidenceImage(), for: secondLogId, entryId: entry.id) else {
+            return XCTFail("both captures must store")
+        }
+        XCTAssertTrue(scheduler.holdPendingEvidence(logId: firstLogId, fileName: firstFile,
+                                                    for: entry.id))
+        XCTAssertTrue(scheduler.holdPendingEvidence(logId: secondLogId, fileName: secondFile,
+                                                    for: entry.id))
+
+        XCTAssertFalse(fileExists(firstFile, entryId: entry.id, in: store),
+                       "the superseded capture's file is deleted (no orphan)")
+        XCTAssertTrue(fileExists(secondFile, entryId: entry.id, in: store),
+                      "the replacement stands — the caller just stored it")
+        let discarded = mockObservability.emittedEvents.filter {
+            $0.eventType == "medication_evidence_discarded"
+        }
+        XCTAssertEqual(discarded.map(\.outcome), ["replaced"])
+
+        guard case .success = scheduler.acknowledgeWithConfirmation(
+            entryId: entry.id, at: Date(), confirmationResponse: .yes) else {
+            return XCTFail("the chain must finalize")
+        }
+        guard case .success(let logs) = mockStorage.read(key: "medication.adherence_log",
+                                                         type: [MedicationAdherenceLog].self),
+              let recorded = logs.first(where: { $0.medicationEntryId == entry.id }) else {
+            return XCTFail("the acknowledgement must persist")
+        }
+        XCTAssertEqual(recorded.id, secondLogId, "the REPLACEMENT is the held identity")
+        XCTAssertEqual(recorded.evidencePhotoFileName, secondFile)
+        XCTAssertTrue(fileExists(secondFile, entryId: entry.id, in: store),
+                      "the claimed replacement is never deleted")
+    }
+
+    /// The record-surface attach (IF-15) attaches only to an EXISTING log —
+    /// an unknown id creates nothing — and a failed attach claims nothing
+    /// while never orphaning or stealing a file.
+    func testAttachEvidenceNeverCreatesARecord() {
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        let (store, root) = makeEvidenceStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        scheduler = schedulerWithEvidenceStore(store)
+        scheduler.loadSchedule(entries: [entry])
+        guard let reminderId = scheduler.pendingReminders.first?.id else {
+            return XCTFail("expected a pending reminder")
+        }
+        scheduler.triggerReminder(for: reminderId)
+
+        // A photo alone — no log exists for this id, so nothing may be
+        // created and nothing may be claimed. The intake still requires
+        // the acknowledgement and confirmation sequence.
+        let ghostLogId = UUID()
+        guard case .success(let ghostFile) =
+            store.store(image: makeEvidenceImage(), for: ghostLogId, entryId: entry.id) else {
+            return XCTFail("the capture must store")
+        }
+        guard case .failure(.reminderPersistenceFailed) =
+            scheduler.attachEvidence(fileName: ghostFile, toLog: ghostLogId) else {
+            return XCTFail("an unknown log never attaches")
+        }
+        if case .success = mockStorage.read(key: "medication.adherence_log",
+                                            type: [MedicationAdherenceLog].self) {
+            XCTFail("the attach seam may never create a record")
+        }
+        XCTAssertTrue(scheduler.pendingReminders.contains { $0.medicationEntryId == entry.id },
+                      "the acknowledgement flow is untouched")
+
+        // The chain records, then a capture attaches to the EXISTING log.
+        guard case .success = scheduler.acknowledgeWithConfirmation(
+            entryId: entry.id, at: Date(), confirmationResponse: .yes) else {
+            return XCTFail("the chain must finalize")
+        }
+        guard case .success(let logs) = mockStorage.read(key: "medication.adherence_log",
+                                                         type: [MedicationAdherenceLog].self),
+              let recorded = logs.first(where: { $0.medicationEntryId == entry.id }) else {
+            return XCTFail("the acknowledgement must persist")
+        }
+        XCTAssertNil(recorded.evidencePhotoFileName, "the record starts evidence-free")
+
+        guard case .success(let recordFile) =
+            store.store(image: makeEvidenceImage(), for: recorded.id, entryId: entry.id) else {
+            return XCTFail("the record-surface capture must store")
+        }
+        guard case .success = scheduler.attachEvidence(fileName: recordFile, toLog: recorded.id) else {
+            return XCTFail("attaching to an existing log must persist")
+        }
+        guard case .success(let attached) = mockStorage.read(
+            key: "medication.adherence_log", type: [MedicationAdherenceLog].self),
+              let attachedRecord = attached.first(where: { $0.id == recorded.id }) else {
+            return XCTFail("the attached log must be readable")
+        }
+        XCTAssertEqual(attachedRecord.evidencePhotoFileName, recordFile)
+
+        // The failure arm is never a claim: a failed persist deletes the
+        // just-stored file, keeps the previously attached photo, and
+        // reverts the record to the version the store holds.
+        mockStorage.failingWriteKeys = ["medication.adherence_log"]
+        guard case .failure(.reminderPersistenceFailed) =
+            scheduler.attachEvidence(fileName: ghostFile, toLog: recorded.id) else {
+            return XCTFail("a failed attach must return the shipped failure")
+        }
+        XCTAssertFalse(fileExists(ghostFile, entryId: entry.id, in: store),
+                       "the just-stored file is deleted (no orphan)")
+        XCTAssertTrue(fileExists(recordFile, entryId: entry.id, in: store),
+                      "the previously attached photo is untouched")
+        guard case .success(let afterFailure) = mockStorage.read(
+            key: "medication.adherence_log", type: [MedicationAdherenceLog].self),
+              let unchanged = afterFailure.first(where: { $0.id == recorded.id }) else {
+            return XCTFail("the record must still be readable")
+        }
+        XCTAssertEqual(unchanged.evidencePhotoFileName, recordFile,
+                       "reverted to the version the store holds — the failed claim persists nowhere")
+    }
+
+    /// The shipped path, untouched: a finalize with no hold writes the
+    /// shipped fresh-id record with no evidence field — the hold is the
+    /// only way a photo ever reaches a log.
+    func testNoHoldMeansNoEvidenceFieldOnTheLog() {
+        let entry = makeMedicationEntry(name: "Metformin", timeHour: 10, timeMinute: 0)
+        let (store, root) = makeEvidenceStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        scheduler = schedulerWithEvidenceStore(store)
+        scheduler.loadSchedule(entries: [entry])
+        guard let reminderId = scheduler.pendingReminders.first?.id else {
+            return XCTFail("expected a pending reminder")
+        }
+        scheduler.triggerReminder(for: reminderId)
+
+        guard case .success = scheduler.acknowledgeWithConfirmation(
+            entryId: entry.id, at: Date(), confirmationResponse: .yes) else {
+            return XCTFail("the chain must finalize")
+        }
+        guard case .success(let logs) = mockStorage.read(key: "medication.adherence_log",
+                                                         type: [MedicationAdherenceLog].self),
+              let recorded = logs.first else {
+            return XCTFail("the acknowledgement must persist")
+        }
+        XCTAssertEqual(recorded.status, .acknowledged)
+        XCTAssertNil(recorded.evidencePhotoFileName,
+                     "no hold, no evidence field — never a claim")
+        XCTAssertFalse(mockObservability.emittedEvents.contains {
+            $0.eventType == "medication_evidence_attached"
+        }, "nothing attached — nothing may be classified as attached")
+    }
+
     // MARK: - Helpers
+
+    /// A scheduler wired like `setUp`, plus the evidence store under test
+    /// (T-019). Every hold test constructs its own — the store is a real
+    /// on-disk one over a throwaway root, never a mock.
+    private func schedulerWithEvidenceStore(_ store: MedicationEvidenceStore) -> MedicationScheduler {
+        MedicationScheduler(
+            storage: mockStorage,
+            alarmScheduler: mockAlarm,
+            observabilityBus: mockObservability,
+            familyNotifier: mockFamilyNotifier,
+            caregiverNotifySettings: caregiverNotifySettings,
+            evidenceStore: store
+        )
+    }
+
+    /// A throwaway evidence root + store (the MedicationEvidenceStoreTests
+    /// pattern): every hold test asserts file existence literally on its
+    /// own disk, so no run can see another run's files.
+    private func makeEvidenceStore() -> (store: MedicationEvidenceStore, root: URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("medication-evidence-hold-\(UUID().uuidString)",
+                                    isDirectory: true)
+        return (MedicationEvidenceStore(rootDirectory: root), root)
+    }
+
+    /// A flat colour at scale 1, deterministic and well under the store's
+    /// cap — a capture that stores on every run.
+    private func makeEvidenceImage() -> UIImage {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64),
+                                               format: format)
+        return renderer.image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+        }
+    }
+
+    /// Whether the store's own resolution of `bareName` points at a file
+    /// that exists right now.
+    private func fileExists(_ bareName: String, entryId: UUID,
+                            in store: MedicationEvidenceStore) -> Bool {
+        guard let url = store.fileURL(for: bareName, entryId: entryId) else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
 
     /// A slot entry (T-003's model): its dose lives in `slot`, and
     /// `scheduleTimes` carries the resolved-time MIRROR — passed here as a

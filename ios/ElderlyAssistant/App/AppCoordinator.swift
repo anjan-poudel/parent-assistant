@@ -177,6 +177,148 @@ struct MedicationSaveRequest: Equatable {
     var photo: UIImage?
 }
 
+/// The honest outcome of one "Medicine times" save — the household
+/// mapping's ONE write path (`saveMedicationSlotClock`, IF-9; T-020).
+///
+/// A flat value, not a rule-carrying one: by the time this is built the
+/// coordinator has already judged everything (validate, then persist,
+/// then re-arm), so the settings card renders the fields and re-derives
+/// nothing.
+///
+/// The fields mirror IF-9's three outcomes and IF-12's report, losing no
+/// fact between the scheduler and the screen:
+///
+///  - `persisted == false` with `invalidSlot != nil`: validation (IF-2)
+///    refused the mapping BEFORE any write — the offending slot rides
+///    along, nothing was stored and nothing re-armed;
+///  - `persisted == false` with `persistenceFailed == true`: the store
+///    (IF-4) refused or failed the write — the stored mapping is
+///    unchanged and no re-arm ran;
+///  - `persisted == true`: the mapping is stored and
+///    `rearmForSlotClockChange` (IF-12) ran; its four facts travel back
+///    verbatim (m-1).
+///
+/// `lineKeys` is the honest line set for the settings card, as CATALOG
+/// KEYS (the house convention: the view resolves them in the active
+/// locale, and the tests pin the keys, never a rendered string) — one
+/// line per fact, failure first:
+///
+///  - `saveFailedLineKey` for a refused save or a failed re-arm write;
+///  - `unresolvedLineKey` when the re-arm left slots unresolved;
+///  - `savedLineKey` (exactly alone) for a clean commit.
+///
+/// Catalog gaps, flagged as T-012 follow-ups: no key exists for a
+/// count-bearing "saved and re-armed N" line, so the counts stay in the
+/// fields above and the line stays the plain saved key — this type never
+/// claims a number the catalog cannot speak — and the T-012
+/// `unresolvedLineKey` value carries NO placeholder, so no slot name is
+/// interpolated into its sentence; the unresolved slots ride the field
+/// for the caller and are deliberately not re-worded here.
+struct SlotClockSaveResult: Equatable {
+
+    /// True when the mapping itself was validated and persisted through
+    /// the C1 store. False covers both refusal points.
+    let persisted: Bool
+
+    /// The slot validation (IF-2) refused, or nil when validation passed.
+    let invalidSlot: MedicationSlot?
+
+    /// IF-12 report facts, verbatim — all zero/false when no re-arm ran.
+    let rearmedCount: Int
+    let keptLiveCount: Int
+    let unresolvedSlots: [MedicationSlot]
+    let persistenceFailed: Bool
+
+    /// The honest lines for the settings card, as catalog keys — never
+    /// empty (a save always says something).
+    let lineKeys: [String]
+
+    /// The failure line: a refused save, or a re-arm write that failed.
+    static let saveFailedLineKey = "settings.meds.times.saveFailed"
+    /// The unresolved line: the re-arm left slots without a determinate
+    /// time under the new mapping.
+    static let unresolvedLineKey = "settings.meds.times.unresolved"
+    /// The clean acknowledgment. Catalog gap (T-012 follow-up): the
+    /// closest existing key; a `settings.meds.times.saved` key is the
+    /// eventual home.
+    static let savedLineKey = "profile.saved"
+
+    /// The line set one re-arm report surfaces (m-1). Pure, so the suite
+    /// pins all four report shapes without staging device states: a
+    /// failed write is the failure line, a non-empty unresolved list the
+    /// unresolved line, and a clean pass the plain saved line.
+    static func lineKeys(for report: SlotClockRearmReport) -> [String] {
+        var keys: [String] = []
+        if report.persistenceFailed { keys.append(saveFailedLineKey) }
+        if !report.unresolvedSlots.isEmpty { keys.append(unresolvedLineKey) }
+        if keys.isEmpty { keys.append(savedLineKey) }
+        return keys
+    }
+}
+
+// MARK: - Medication evidence capture (IF-14, IF-24; T-021)
+
+/// What a photo being taken as evidence is FOR (design-l2 IF-14). The two
+/// cases are the whole safety model of the capture path: there is no
+/// `.create` case, so no photo can ever bring a record into existence —
+/// the record exists because the acknowledgement and confirmation chain
+/// completed, and a capture only ever HOLDS for or ATTACHES to one.
+enum EvidenceCaptureContext: Equatable {
+    /// The fired-dose screen: the elder photographs the dose BEFORE the
+    /// chain finalizes. The capture is held (IF-15) and the finalize that
+    /// writes the record claims it under the SAME identity (R-1(a)).
+    case pendingDose(entryId: UUID)
+    /// The record surface ("Taken today"): the record already exists —
+    /// the capture attaches to that log and to nothing else. An unknown
+    /// log id is declined, never created (safety delta (c)).
+    case recordedDose(logId: UUID)
+}
+
+/// What one capture produced (design-l2 IF-14). Every path out of the
+/// capture seam ends in exactly one of these — a store failure is a
+/// typed, surfaced outcome, never a silent claim that a photo was saved
+/// (FR-MSR-018).
+enum EvidenceCaptureOutcome: Equatable {
+    /// The capture is stored on-device and held for `entryId`; the
+    /// finalize that writes the dose's record attaches it (IF-15). The
+    /// hold is in-memory only: a process kill loses it honestly — the
+    /// record ends up evidence-free, and nothing was ever claimed.
+    case held(entryId: UUID)
+    /// The photo is stored and attached to the EXISTING record at
+    /// `logId`. The record's own identity mints the file name
+    /// (`<logId>.jpg`) — the same R-1(a) scheme the held path uses.
+    case attached(logId: UUID)
+    /// No bound record context exists for this capture: the pending
+    /// dose's chain already finalized (R-3 late hold) or the record log
+    /// id is unknown. The capture is discarded — nothing stored, nothing
+    /// recorded, nothing claimed.
+    case declinedNoContext
+    /// The photo could not be stored; the typed store error says what
+    /// was true on disk. Never presented as evidence.
+    case failed(EvidenceStoreError)
+}
+
+/// One confirmed intake of today, as the record surface ("Taken today")
+/// draws it (IF-24). Pure values snapshotted at read time: the surface
+/// never re-derives a name or a time while it draws, and the `id` is the
+/// ADHERENCE-LOG id — the identity the record-surface capture attaches
+/// its evidence under.
+struct TakenDoseRow: Identifiable, Equatable {
+    /// The adherence-log id — `Identifiable` so the row can drive a
+    /// `ForEach`, and the `.recordedDose(logId:)` the row's capture
+    /// attaches through.
+    let id: UUID
+    let entryId: UUID
+    let medicationName: String
+    /// When the dose was scheduled for (the record's own `scheduledAt`).
+    let scheduledAt: Date
+    /// Whether the record already claims an evidence photo
+    /// (`evidencePhotoFileName` set). A claim is what the record holds;
+    /// the reader loads the file honestly and shows "no photo" if it
+    /// has gone missing.
+    let hasEvidence: Bool
+}
+
 /// Central coordinator that wires all services together.
 /// Starts safety-critical services first (medication scheduler, health monitor),
 /// then voice pipeline, then LLM.
@@ -1337,6 +1479,32 @@ final class AppCoordinator: ObservableObject {
         }
     }
     private static let appointmentSmsNoteDismissedKey = "appointmentSmsNoteDismissed.v1"
+
+    /// One-shot retime-refused note (IF-10, m-5; T-020): a slot entry's
+    /// retime was refused, so the medication settings leaf's "Medicine
+    /// times" section explains the slot-model rule once. The persist half
+    /// is exactly the `appointmentSmsNoteDismissed` precedent above —
+    /// dismissal is a preference, not a secret: persisted on every write
+    /// through the property's own didSet, allow-listed in
+    /// `SettingsPersistence` so a reinstall keeps it, and read back in
+    /// init. Dismissal is confined to `dismissMedicationRetimeNote`.
+    @Published private(set) var medicationRetimeNoteDismissed: Bool {
+        didSet {
+            SettingsPersistence.shared.set(medicationRetimeNoteDismissed,
+                                      forKey: Self.medicationRetimeNoteDismissedKey)
+        }
+    }
+    private static let medicationRetimeNoteDismissedKey = "medicationRetimeNoteDismissed.v1"
+
+    /// The note's PRESENTATION state — transient and deliberately not
+    /// persisted (the dismissal above is the durable half): a refusal
+    /// surfaces the note unless it was dismissed, and the note stays up
+    /// until dismissed once. `surfaceMedicationRetimeNote` is its only
+    /// setter of true and `dismissMedicationRetimeNote` the only clearer.
+    /// Not read back in init: a relaunch between a refusal and its
+    /// dismissal does not resurrect the note — the NEXT refusal brings it
+    /// back for a household that never dismissed it.
+    @Published private(set) var medicationRetimeNotePresented: Bool = false
 
     // Voice
     private let audioEngine: AVAudioEngine
@@ -3104,7 +3272,17 @@ final class AppCoordinator: ObservableObject {
         // the visual-aid store and with the same no-IO construction rule
         // (path resolution only; the directory appears on the first
         // write). The cascade itself is a fail-soft Void call.
-        self.medicationEvidenceStore = medicationEvidenceStore ?? MedicationEvidenceStore()
+        //
+        // [MED-EVIDENCE] (T-021) Resolved ONCE into a local and then
+        // stored AND handed to the scheduler below: the capture path
+        // (IF-14) stores through this instance and the hold/attach path
+        // (IF-15) deletes orphans through the scheduler's — two
+        // instances would mean the late-hold cleanup could miss files
+        // one of them wrote. One composition, one instance, both
+        // consumers (the `no evidence store = held files leak`
+        // obligation the scheduler's init doc states).
+        let resolvedEvidenceStore = medicationEvidenceStore ?? MedicationEvidenceStore()
+        self.medicationEvidenceStore = resolvedEvidenceStore
         // [LIVE-TRANSLATE T-032] The feature's two payloads (the translation
         // cache and the consent record) are sealed with AES-GCM before they
         // reach the file channel — Data Protection Complete alone is "locked
@@ -3255,6 +3433,13 @@ final class AppCoordinator: ObservableObject {
         appointmentStore.calendarWritesEnabled = appointmentsToCalendarValue
         self.appointmentSmsNoteDismissed =
             SettingsPersistence.shared.bool(forKey: Self.appointmentSmsNoteDismissedKey)
+        // [MED-SLOT] (T-020) The retime note's persisted half — the
+        // construction read, the precedent's exact shape (this is the
+        // property's ONLY initial assignment, so its didSet does not
+        // fire). The transient presentation half keeps its declaration
+        // default (false).
+        self.medicationRetimeNoteDismissed =
+            SettingsPersistence.shared.bool(forKey: Self.medicationRetimeNoteDismissedKey)
 
         // Safety-critical service (no LLM dependency)
         self.medicationScheduler = MedicationScheduler(
@@ -3269,7 +3454,26 @@ final class AppCoordinator: ObservableObject {
             // entry's photo folder when the medication is deleted. Built
             // with the MEDICATION prefix, so dose photos never resolve
             // into a routine entry's folder.
-            visualAidStore: medicationVisualAidStore
+            visualAidStore: medicationVisualAidStore,
+            // [MED-EVIDENCE] (T-021) The shared on-device evidence store
+            // — the SAME instance this coordinator resolves at :3212 for
+            // the remove cascade and the capture path (IF-14 stores
+            // through it; IF-15's late-hold and failed-attach cleanup
+            // deletes through it). A nil here would let held captures
+            // register while their discarded files leak.
+            evidenceStore: resolvedEvidenceStore,
+            // [MED-SLOT] (T-020) The mapping store flows to the scheduler
+            // VERBATIM from this initializer's seam. In the app the
+            // argument is nil and the scheduler composes its own store
+            // over the SAME storage seam — byte-identical to the T-017
+            // composition (the store is stateless, so both instances read
+            // the ONE record). Where a store IS injected, the scheduler,
+            // the IF-9 save gate and `currentMedicationSlotClock` are now
+            // the SAME instance: an injected mapping governs the re-arm
+            // and the arming feed exactly as it governs the save, and no
+            // composition can persist through one seam while arming
+            // through another.
+            slotClockStore: slotClockStore
         )
 
         // Routine reminders (v2 pivot Phase 1): the medication path's
@@ -3709,6 +3913,17 @@ final class AppCoordinator: ObservableObject {
         medicationLabelScanner = makeMedicationLabelScanner()
         medicationPurposeLookup = makeMedicationPurposeLookup()
 
+        // [MED-EVIDENCE] (T-021) The evidence capture's camera seam —
+        // the SAME `PhotoCameraPresenter` the label scanner and the voice
+        // launcher present through, so the permission flow (asked at
+        // point of use) and the no-camera / permission-denied /
+        // cannot-present guidance are the shipped ones and no second
+        // camera plumbing exists. A stored, assignable property so a
+        // test can put a scripted presenter in its place; built here
+        // because construction resolves no window and asks no permission
+        // (the presenter probes both at presentation time).
+        evidenceCameraPresenter = PhotoCameraPresenter()
+
         // All stored properties are initialised — push the restored
         // language into services that build user-facing strings.
         syncServiceLocales()
@@ -3754,6 +3969,60 @@ final class AppCoordinator: ObservableObject {
             // below rather than taking it here, so there is exactly one
             // path that decides what the mirror should contain.
             self?.calendarSync.syncNow(entries: self?.routineScheduler.entries() ?? [])
+            // [T-023] Third consumer, the medication surfaces' redraw
+            // signal: this seam fires ONLY for a committed write (the
+            // payload persisted, the reminders armed), so bumping the
+            // revision here is the exact moment the list's answer to
+            // "what is scheduled" changed. The manage list reads it in
+            // its body; a failed persist never reaches this line.
+            //
+            // The main hop follows the shipped `refreshActiveNotificationCount`
+            // pattern: the save paths call this on main and bump
+            // synchronously (the list is correct by the time the save
+            // call returns), while the calendar-driven retime relay — the
+            // one caller that can arrive off-main — hops instead of
+            // publishing from a background thread.
+            guard let self else { return }
+            if Thread.isMainThread {
+                self.medicationScheduleRevision += 1
+            } else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.medicationScheduleRevision += 1
+                }
+            }
+        }
+        // [MED-SLOT] (T-020) The medication scheduler's two remaining
+        // composition hooks (T-016's seams). Attached here, with the
+        // schedule seam above, because the closures capture self — legal
+        // only after every stored property holds its initial value.
+        //
+        //  - `onSignificantEvent` → the shared calendar's one-off write
+        //    path (T-015): the three at-risk events (missed dose, blocked
+        //    double dose, escalation started) additionally surface on the
+        //    family calendar. The MAIN HOP runs first — the hook may fire
+        //    off-main, and hopping keeps the LAZY `calendarShareService`
+        //    constructed on main. The write's result is deliberately
+        //    discarded HERE and only here: the service reports its own
+        //    honest outcome through observability, and a failure must
+        //    never affect the scheduler's local behaviour. NOTHING in
+        //    this wiring consults the caregiver notification toggle: the
+        //    calendar channel is consent-gated inside the service
+        //    (`canShare`), and gating it on the notify preference would
+        //    silently drop the at-risk alert types the preference was
+        //    never about (T-016's flag).
+        //  - `onSlotEntryRetimeRefused` → the one-shot settings note
+        //    (IF-10, m-5) through the same main hop. The entry id is
+        //    deliberately dropped: the note names no medication
+        //    (NFR-MSR-002).
+        medicationScheduler.onSignificantEvent = { [weak self] event, entry in
+            DispatchQueue.main.async { [weak self] in
+                _ = self?.calendarShareService.writeSignificantEvent(event, entry: entry)
+            }
+        }
+        medicationScheduler.onSlotEntryRetimeRefused = { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                self?.surfaceMedicationRetimeNote()
+            }
         }
         // Forward the external calendar service's publishes (Settings
         // status/lead, scan results reaching the Reminders + Calendar
@@ -11468,6 +11737,19 @@ self.noteTalkContractChanged()
     /// 2026-09-07).
     var medicationEntries: [MedicationEntry] { medicationScheduler.medicationEntries() }
 
+    /// [T-023] The medication schedule's redraw signal. `medicationEntries`
+    /// above is COMPUTED over the scheduler — no observable state changes
+    /// when a save lands, so a surface that reads it can keep drawing the
+    /// pre-save list until something unrelated re-renders it ("I entered a
+    /// medication schedule and it just disappeared"). This counter is the
+    /// explicit dependency: it is bumped on every COMMITTED medication
+    /// write (the `onScheduleChanged` seam — `loadSchedule` only fires it
+    /// after the payload is persisted and the reminders are armed), and
+    /// the manage list reads it in its body, so a landed save, an edit, a
+    /// removal or a voice `set_reminder` re-draws the list immediately.
+    /// A failed write bumps nothing — the schedule did not change.
+    @Published private(set) var medicationScheduleRevision = 0
+
     func medicationName(for entryId: UUID) -> String {
         medicationScheduler.medicationEntries()
             .first { $0.id == entryId }?
@@ -11896,7 +12178,13 @@ self.noteTalkContractChanged()
             visualAids: visualAids
         )
         entries.append(entry)
-        medicationScheduler.loadSchedule(entries: entries)
+        // [T-023] The persist result is LOAD-BEARING: a failed write must
+        // not be followed by an arming pass, a share sync or a count
+        // refresh, and the caller must hear about it — a nil here means
+        // "saved", and a lost entry must never be reported as one.
+        guard medicationScheduler.loadSchedule(entries: entries) else {
+            return "settings.meds.saveFailed"
+        }
         medicationScheduler.scheduleAll()
         calendarSync.syncNow(entries: routineScheduler.entries())
         // [BOOT-REVIEW P1-7] A schedule edit changes today's dose total —
@@ -11941,7 +12229,10 @@ self.noteTalkContractChanged()
     /// `doseDescription` is composed once through `DoseLine` (C2, IF-5) —
     /// the one documented composition of quantity and dose text — and
     /// every entry persists through the shipped `loadSchedule` + re-arm
-    /// path. The request's photo is written to the medication
+    /// path, whose persist result is checked ([T-023]): a failed write
+    /// returns `settings.meds.saveFailed` with nothing armed, so the one
+    /// code path that can lose a schedule is also the one that says so.
+    /// The request's photo is written to the medication
     /// `VisualAidStore` under EACH new entry's id, fail-soft, exactly the
     /// shipped scan path's rule.
     ///
@@ -11953,7 +12244,10 @@ self.noteTalkContractChanged()
     /// editor's own error line: `settings.meds.nameRequired` (the
     /// unchanged name gate), `settings.meds.timeRequired` (a save needs
     /// at least one dose row), `settings.meds.slotRequired` (mixed row
-    /// shapes) or `settings.meds.duplicateError` (the gate above, m-2).
+    /// shapes), `settings.meds.duplicateError` (the gate above, m-2) or
+    /// `settings.meds.saveFailed` ([T-023] the persist itself failed —
+    /// nothing was armed, and the form keeps everything the family
+    /// entered instead of resetting under a success it did not have).
     func addMedication(_ request: MedicationSaveRequest) -> String? {
         saveMedication(request, replacing: nil)
     }
@@ -12075,7 +12369,13 @@ self.noteTalkContractChanged()
             entries.append(updated)
         }
         entries.append(contentsOf: created)
-        medicationScheduler.loadSchedule(entries: entries)
+        // [T-023] Persist first, then arm — and say so honestly when the
+        // persist fails. The nil below means "saved"; the failure key is
+        // the editor's own error line, so a lost write can never read as
+        // a reset-to-success form (FR-MSR-022 / D2).
+        guard medicationScheduler.loadSchedule(entries: entries) else {
+            return "settings.meds.saveFailed"
+        }
         medicationScheduler.scheduleAll()
         calendarSync.syncNow(entries: routineScheduler.entries())
         // [BOOT-REVIEW P1-7] A schedule edit changes today's dose total —
@@ -12209,10 +12509,20 @@ self.noteTalkContractChanged()
     }
 
     /// Removes a medication entry and re-arms (spec §4.4.3).
-    func removeMedication(id: UUID) {
+    ///
+    /// [T-023] Removal is persisted FIRST and the cascade runs only over
+    /// a stored removal: on a failed write the entry stays exactly as it
+    /// was — same schedule, same armed reminders, same photos, same
+    /// evidence — and the caller sees `false` (the manage list surfaces
+    /// the shipped failure line rather than a row that silently snaps
+    /// back). Deleting an entry's photos behind a schedule that still
+    /// exists would be half-applied state, so nothing downstream of the
+    /// guard runs on failure.
+    @discardableResult
+    func removeMedication(id: UUID) -> Bool {
         var entries = medicationScheduler.medicationEntries()
         entries.removeAll { $0.id == id }
-        medicationScheduler.loadSchedule(entries: entries)
+        guard medicationScheduler.loadSchedule(entries: entries) else { return false }
         medicationScheduler.scheduleAll()
         // The dose's photos go WITH the medication (medication-visual-aids
         // task, 2026-09-16): a picture of a box the household no longer
@@ -12231,6 +12541,94 @@ self.noteTalkContractChanged()
         // [BOOT-REVIEW P1-7] Removing an entry can empty today's doses —
         // the row hides itself, so the count must follow.
         refreshActiveNotificationCount()
+        return true
+    }
+
+    // MARK: - Medicine times: the household mapping (IF-9/IF-10) [MED-SLOT]
+
+    /// The current household mapping, read through the coordinator's OWN
+    /// store — the T-018 deviation-3 follow-up this unit closes. The
+    /// "Medicine times" card seeds its three rows from here instead of
+    /// composing a second store over the storage seam, so the view reads
+    /// the ONE record through the ONE seam the save gate and the arming
+    /// path already read, and can never hold a divergent clock. A read,
+    /// never a cache: `load()` is the store's non-throwing read (defaults
+    /// on missing/corrupt), and nothing here writes.
+    func currentMedicationSlotClock() -> MedicationSlotClock {
+        slotClockStore.load()
+    }
+
+    /// Saves the household "Medicine times" mapping (IF-9; T-020) — the
+    /// ONE write path of the slot clock (the settings card is its caller).
+    ///
+    /// The order is the contract (persist-before-effect, design-l2 IF-9):
+    ///
+    ///  1. **Validate first** (IF-2): a mapping with any indeterminate
+    ///     slot is refused BEFORE anything is written or re-armed; the
+    ///     result names the offending slot and carries the failure line.
+    ///     The stored mapping is untouched;
+    ///  2. **Persist through the C1 store** (IF-4): a refused or failed
+    ///     write leaves the stored record unchanged and runs NO re-arm —
+    ///     nothing may arm against a mapping that was not stored;
+    ///  3. **Re-arm** (`rearmForSlotClockChange`, IF-12; T-010): the
+    ///     report's four facts travel back verbatim (m-1) and the result's
+    ///     lines follow the report, never a claim beside it.
+    ///
+    /// Main thread, like every scheduler call beside it. The result is
+    /// the complete honest outcome — no fact here is inferred later at
+    /// the view.
+    func saveMedicationSlotClock(_ clock: MedicationSlotClock) -> SlotClockSaveResult {
+        // 1. Validation before persist (IF-2). The offending slot is the
+        //    one fact the family-facing line does not carry; it rides the
+        //    result for the caller and the tests.
+        if case .failure(.indeterminate(let slot)) = MedicationSlotClock.validate(clock) {
+            return SlotClockSaveResult(persisted: false,
+                                       invalidSlot: slot,
+                                       rearmedCount: 0,
+                                       keptLiveCount: 0,
+                                       unresolvedSlots: [],
+                                       persistenceFailed: false,
+                                       lineKeys: [SlotClockSaveResult.saveFailedLineKey])
+        }
+        // 2. Persist (IF-4). The store validates again as its own
+        //    backstop; a refused or failed write is reported honestly and
+        //    re-arms nothing.
+        guard case .success = slotClockStore.save(clock) else {
+            return SlotClockSaveResult(persisted: false,
+                                       invalidSlot: nil,
+                                       rearmedCount: 0,
+                                       keptLiveCount: 0,
+                                       unresolvedSlots: [],
+                                       persistenceFailed: true,
+                                       lineKeys: [SlotClockSaveResult.saveFailedLineKey])
+        }
+        // 3. Re-arm under the mapping just stored (IF-12) and surface its
+        //    facts verbatim (m-1).
+        let report = medicationScheduler.rearmForSlotClockChange()
+        return SlotClockSaveResult(persisted: true,
+                                   invalidSlot: nil,
+                                   rearmedCount: report.rearmedCount,
+                                   keptLiveCount: report.keptLiveCount,
+                                   unresolvedSlots: report.unresolvedSlots,
+                                   persistenceFailed: report.persistenceFailed,
+                                   lineKeys: SlotClockSaveResult.lineKeys(for: report))
+    }
+
+    /// Surfaces the one-shot retime note (IF-10, m-5; T-020) — set from
+    /// the scheduler's refusal hook through a main hop. Shown until
+    /// dismissed ONCE; a household that dismissed it never sees it again,
+    /// whatever refuses retimes afterwards.
+    func surfaceMedicationRetimeNote() {
+        guard !medicationRetimeNoteDismissed else { return }
+        medicationRetimeNotePresented = true
+    }
+
+    /// Dismisses the retime note for good: the dismissal persists (the
+    /// property's own didSet) and the note is never shown again (IF-10).
+    /// Idempotent — dismissing twice writes the same value.
+    func dismissMedicationRetimeNote() {
+        medicationRetimeNotePresented = false
+        medicationRetimeNoteDismissed = true
     }
 
     // MARK: - Doctor's appointments (medical task, 2026-09-07)
@@ -13147,6 +13545,257 @@ self.noteTalkContractChanged()
         ))
     }
 
+    // MARK: - Medication evidence capture and the "Taken today" read (IF-14, IF-24; T-021)
+
+    /// The camera seam an evidence capture presents through. The SAME
+    /// `PhotoCameraPresenter` plumbing the label scanner and the voice
+    /// launcher use (one camera system camera sheet, permissions asked at
+    /// point of use, the shipped availability copy) — a stored, assignable
+    /// property so a test can put a scripted presenter in its place;
+    /// production is built once in `init` (the `medicationLabelScanner`
+    /// precedent). Nil would mean no camera stack is installed: the honest
+    /// "cannot open the camera" answer instead of a button that does
+    /// nothing (the `scanMedicationLabel` precedent).
+    var evidenceCameraPresenter: CameraCapturePresenting?
+
+    /// The store work's serial home (IF-14): every evidence file write and
+    /// cleanup for the WHOLE app runs here, one at a time, so two captures
+    /// can never interleave their compression/writes even if they are
+    /// triggered from different threads. The scheduler half of a capture
+    /// (`holdPendingEvidence` / `attachEvidence`) runs on the caller's
+    /// thread — in every real flow the main thread, which is the
+    /// scheduler's own discipline.
+    private let evidenceStoreQueue = DispatchQueue(label: "medication.evidence.store")
+
+    /// One capture at a time (IF-14). True from the moment a camera session
+    /// begins until its outcome is delivered: a second request while a
+    /// session is up is answered immediately (nil — no capture was made)
+    /// and never stacked into a second sheet, because the presenter has one
+    /// completion slot and overwriting it is how a capture goes missing
+    /// (the `MedicationLabelScanner.isRunning` contract, verbatim).
+    private var isEvidenceCaptureActive = false
+
+    /// Bumped whenever the on-device evidence for a recorded dose changes
+    /// in a way a visible surface must re-draw (a record-surface attach).
+    /// The rows themselves are read fresh (`takenDosesToday()`); this is
+    /// only the refresh seam, so no view has to assume it will be redrawn
+    /// because some OTHER published value moved.
+    @Published private(set) var medicationEvidenceRevision = 0
+
+    /// One photo captured as evidence for a dose (IF-14) — the whole
+    /// plumbing seam between the camera and the record.
+    ///
+    /// Main-thread entry. The OUTCOME carries exactly what happened:
+    ///
+    ///  - `.pendingDose(entryId)`: the record does not exist yet — the log
+    ///    id is MINTED HERE, at capture time (R-1(a)), the store names the
+    ///    file by it (`<logId>.jpg`), and the hold (IF-15) binds the
+    ///    finalize that writes the record to that same identity. A hold
+    ///    whose chain already finalized is refused by the scheduler (R-3)
+    ///    and its file deleted there — reported honestly as
+    ///    `.declinedNoContext`.
+    ///  - `.recordedDose(logId)`: the record EXISTS (the record surface
+    ///    only ever offers confirmed records); the capture stores and
+    ///    attaches to that log and nothing else. An unknown log id is
+    ///    declined BEFORE anything is stored, so the misuse guard holds
+    ///    with no orphan file either: a photo never creates a record.
+    ///
+    /// Threading, in the frozen signature's terms: the store work runs on
+    /// the serial store queue (never on the caller/main thread), and the
+    /// outcome is applied on the caller's thread — main for every real
+    /// flow — where the scheduler's hold/attach also run. The synchronous
+    /// signature is the design's; the caller waits for the store step, and
+    /// the WORK is off main as C5 requires.
+    ///
+    /// Nothing here touches the network and nothing references the
+    /// dementia photo-verification machinery (FR-MSR-020, NFR-MSR-003): the
+    /// photo is stored on-device through `MedicationEvidenceStore` and
+    /// stops there.
+    func captureEvidence(image: UIImage, context: EvidenceCaptureContext) -> EvidenceCaptureOutcome {
+        switch context {
+        case .pendingDose(let entryId):
+            let logId = UUID()  // R-1(a): the capture-time identity
+            switch storeEvidence(image: image, logId: logId, entryId: entryId) {
+            case .failure(let error):
+                emitEvidenceCapture(outcome: "failed", entryId: entryId,
+                                    errorCode: Self.evidenceErrorName(error))
+                return .failed(error)
+            case .success(let fileName):
+                let held = medicationScheduler.holdPendingEvidence(
+                    logId: logId, fileName: fileName, for: entryId)
+                if held {
+                    emitEvidenceCapture(outcome: "held", entryId: entryId)
+                    return .held(entryId: entryId)
+                }
+                // R-3: the chain finalized before the store completed —
+                // the scheduler already deleted the just-stored file.
+                // Nothing to hold, nothing to claim.
+                emitEvidenceCapture(outcome: "declinedNoContext", entryId: entryId)
+                return .declinedNoContext
+            }
+
+        case .recordedDose(let logId):
+            guard let log = medicationScheduler.takenLogs(on: Date())
+                .first(where: { $0.id == logId }) else {
+                // No such confirmed record: decline before storing — a
+                // photo alone must not leave anything behind, and it
+                // must never create the record it came to decorate.
+                emitEvidenceCapture(outcome: "declinedNoContext", entryId: nil)
+                return .declinedNoContext
+            }
+            let entryId = log.medicationEntryId
+            switch storeEvidence(image: image, logId: logId, entryId: entryId) {
+            case .failure(let error):
+                emitEvidenceCapture(outcome: "failed", entryId: entryId,
+                                    errorCode: Self.evidenceErrorName(error))
+                return .failed(error)
+            case .success(let fileName):
+                switch medicationScheduler.attachEvidence(fileName: fileName, toLog: logId) {
+                case .success:
+                    medicationEvidenceRevision += 1
+                    emitEvidenceCapture(outcome: "attached", entryId: entryId)
+                    return .attached(logId: logId)
+                case .failure:
+                    // The attach never landed, so the just-stored file can
+                    // never be claimed: idempotent cleanup here (the
+                    // scheduler's failure arm deletes it too — absent =
+                    // success either way), and the honest typed failure
+                    // outward. Never a claim (FR-MSR-018).
+                    deleteEvidence(fileName: fileName, entryId: entryId)
+                    emitEvidenceCapture(outcome: "failed", entryId: entryId,
+                                        errorCode: "storageUnavailable")
+                    return .failed(.storageUnavailable)
+                }
+            }
+        }
+    }
+
+    /// One capture from the camera to the stored outcome — the flow the
+    /// capture surfaces call. Presents the system camera (the shipped
+    /// `CameraCapturePresenting` seam, permissions asked at point of use,
+    /// the shared availability copy), runs `captureEvidence` on the shot,
+    /// speaks what happened, and hands `onOutcome` exactly one answer on
+    /// the main thread: the outcome, or nil when no capture was made
+    /// (cancelled, camera unavailable, or a session already running).
+    ///
+    /// D11: before the camera opens, the announce names the medication the
+    /// capture is FOR — the caller passes the bound presentation's own
+    /// name, so the line can never name a different one.
+    ///
+    /// Single-flight: a request that arrives while a session is up is
+    /// answered with nil and nothing else happens — no second sheet, no
+    /// second listen for the first session's completion.
+    func captureMedicationEvidence(medicationName: String,
+                                   context: EvidenceCaptureContext,
+                                   onOutcome: @escaping (EvidenceCaptureOutcome?) -> Void) {
+        guard !isEvidenceCaptureActive else {
+            onOutcome(nil)
+            return
+        }
+        guard let presenter = evidenceCameraPresenter,
+              presenter.availability == .available else {
+            // Never present a sheet that cannot appear: the honest
+            // guidance is the whole answer (the scanner's rule, and its
+            // shared copy table).
+            speak(key: CameraCaptureFlow.unavailableKey(for: evidenceCameraPresenter?.availability
+                                                        ?? .cannotPresent))
+            onOutcome(nil)
+            return
+        }
+        isEvidenceCaptureActive = true
+        // D11: the announce names the bound medication, from the ONE
+        // composition the presentation suite pins.
+        speak(text: MedicationVisualAidsPresentation.evidenceAnnounceLine(
+            medicationName: medicationName, locale: activeLocale))
+        presenter.presentCamera { [weak self] cameraOutcome in
+            guard let self else { return }
+            // The presenter's contract is a main-thread completion (the
+            // shipped `PhotoCameraPresenter` hops; scripted doubles call
+            // synchronously), the same contract the label scanner runs on.
+            self.isEvidenceCaptureActive = false
+            switch cameraOutcome {
+            case .cancelled:
+                // One word — never silence mid-conversation (the scanner's
+                // shipped line).
+                self.speak(key: "apps.camera.cancelled")
+                onOutcome(nil)
+            case .unavailable(let reason):
+                self.speak(key: CameraCaptureFlow.unavailableKey(for: reason))
+                onOutcome(nil)
+            case .captured(let image):
+                let outcome = self.captureEvidence(image: image, context: context)
+                if let key = MedicationVisualAidsPresentation.evidenceOutcomeKey(for: outcome) {
+                    self.speak(key: key)
+                }
+                onOutcome(outcome)
+            }
+        }
+    }
+
+    /// Today's CONFIRMED intakes (IF-24) — the "Taken today" record
+    /// surface's one read. Main thread, pure read: no disk IO, no state
+    /// change, and this seam never writes a record (it exists to show the
+    /// day, not to make one).
+    ///
+    /// The day key is `Calendar.current` over `scheduledAt` (the
+    /// scheduler seam's documented choice, matching
+    /// `MedicalView.todaysReminders`); rows exist only for records whose
+    /// ENTRY still exists — a removed medication's history must not draw
+    /// a row with no name — and only for `.acknowledged` records: a photo
+    /// or a double-dose attempt can never make a row appear.
+    func takenDosesToday() -> [TakenDoseRow] {
+        medicationScheduler.takenLogs(on: Date())
+            .compactMap { log in
+                guard let entry = medicationEntry(for: log.medicationEntryId) else {
+                    return nil
+                }
+                return TakenDoseRow(id: log.id,
+                                    entryId: log.medicationEntryId,
+                                    medicationName: entry.medicationName,
+                                    scheduledAt: log.scheduledAt,
+                                    hasEvidence: log.evidencePhotoFileName != nil)
+            }
+            .sorted { $0.scheduledAt < $1.scheduledAt }
+    }
+
+    /// The store half of one capture, on the serial store queue.
+    private func storeEvidence(image: UIImage, logId: UUID,
+                               entryId: UUID) -> Result<String, EvidenceStoreError> {
+        evidenceStoreQueue.sync {
+            medicationEvidenceStore.store(image: image, for: logId, entryId: entryId)
+        }
+    }
+
+    /// The cleanup half (never-claim paths), on the same serial queue.
+    private func deleteEvidence(fileName: String, entryId: UUID) {
+        _ = evidenceStoreQueue.sync {
+            medicationEvidenceStore.delete(fileName: fileName, entryId: entryId)
+        }
+    }
+
+    /// The capture's ledger row: outcome classification, the entry-id hash
+    /// where an entry is known, and — for a store failure — the typed
+    /// error's name. No image, no file name, no medication name, no text
+    /// (C9; design-l2 §5.2).
+    private func emitEvidenceCapture(outcome: String, entryId: UUID?, errorCode: String? = nil) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "medication_evidence",
+            eventType: "medication_evidence_captured",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: errorCode,
+            metadata: entryId.map { ["entry_id_hash": IdHashing.shortHash(of: $0)] } ?? [:]
+        ))
+    }
+
+    private static func evidenceErrorName(_ error: EvidenceStoreError) -> String {
+        switch error {
+        case .compressionFailed: return "compressionFailed"
+        case .storageUnavailable: return "storageUnavailable"
+        case .removeFailed: return "removeFailed"
+        }
+    }
+
     /// Today's medication reminders as localized "name — time" lines for
     /// the routine plugin's `routine.query` answer — one spoken list
     /// spanning both reminder systems. Spoken-form times (spoken-time
@@ -13805,7 +14454,16 @@ self.noteTalkContractChanged()
             confirmationDescription: nil
         )
         entries.append(entry)
-        medicationScheduler.loadSchedule(entries: entries)
+        // [T-023] The voice path persists through the same gate, and says
+        // so in the same words: a failed write surfaces the shipped
+        // failure line and offers NO undo — there is nothing to undo,
+        // and a "reminder set" card over a lost entry is the exact lie
+        // this unit removes.
+        guard medicationScheduler.loadSchedule(entries: entries) else {
+            setOutcome(icon: "exclamationmark.triangle.fill",
+                       text: L10n.str("settings.meds.saveFailed", locale: activeLocale))
+            return
+        }
         medicationScheduler.scheduleAll()
         // Genuinely reversible — `removeMedication` already exists and
         // re-arms alarms, so the outcome card's undo link does real work

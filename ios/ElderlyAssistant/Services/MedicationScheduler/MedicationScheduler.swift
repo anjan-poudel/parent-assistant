@@ -58,6 +58,38 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
     /// box photo in the right dose's banner.
     private let visualAidStore: VisualAidStore?
 
+    /// On-device photo evidence store (T-007; FR-MSR-013). Optional with
+    /// a nil default so every construction site written before the capture
+    /// plumbing keeps compiling unchanged — W6/T-021 is the unit that
+    /// passes the app's shared store. With a nil store the hold still
+    /// registers and finalizes identically (the id contract is
+    /// store-independent), but file deletions are SKIPPED: this seam
+    /// never touches a store it was not given, and the composition
+    /// obligation (pass the store) is explicit at the construction site.
+    private let evidenceStore: MedicationEvidenceStore?
+
+    /// The in-memory evidence hold (IF-15, C7.6; T-019): at most one held
+    /// capture per entry. The coordinator mints the log id at capture
+    /// time (T-021), the store names the file by it, and
+    /// `finalizeAcknowledgement` writes the record under that SAME id —
+    /// so the `<logId>.jpg` scheme stays true everywhere, including
+    /// pending captures (R-1(a)).
+    ///
+    /// In-memory only, and that is the design: process death loses the
+    /// hold and with it any claim — the photo was never attached to a
+    /// record, so the honest loss is no loss. Deregistration paths: attach
+    /// at finalize, discard on deny/re-enter, replace on re-capture,
+    /// clear-at-registration when no un-finalized reminder exists (R-3),
+    /// process death.
+    private var pendingEvidenceHold: [UUID: PendingEvidenceHold] = [:]
+
+    /// One held capture: the id the record will be written under and the
+    /// bare file name the store minted for it (`<logId>.jpg`).
+    private struct PendingEvidenceHold {
+        let logId: UUID
+        let fileName: String
+    }
+
     /// The household slot → clock mapping this scheduler resolves slot
     /// entries through at arming time (C1, IF-11 / FR-MSR-002). A thin,
     /// stateless façade over the encrypted store: every resolution call
@@ -150,6 +182,33 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
 
     var pendingReminders: [ScheduledReminder] {
         Array(pendingRemindersList.values).filter { $0.state != .completed }
+    }
+
+    /// IF-24 (T-021): the CONFIRMED intake records for one calendar day.
+    ///
+    /// "Taken" is exactly one thing: a record whose status is
+    /// `.acknowledged` — the status `finalizeAcknowledgement` writes only
+    /// after the acknowledgement and confirmation chain completed. A
+    /// `.missed`, `.pending` or `.doubleDoseAttempt` record is never part
+    /// of this list, whatever its day: a read surface that mixed them
+    /// would tell the family a dose was taken when it was not.
+    ///
+    /// The day key is `Calendar.current.isDate(_:inSameDayAs:)` over
+    /// `scheduledAt` — the day the dose BELONGED to, matching the shipped
+    /// `MedicalView.todaysReminders` precedent, and `Calendar.current`
+    /// matching every other day boundary the medication surfaces draw.
+    ///
+    /// Same visibility discipline as `pendingReminders` above: an
+    /// internal, read-only projection over the in-memory log — no new
+    /// storage, no new state, and this seam never writes anything. The
+    /// coordinator's `takenDosesToday()` (IF-24's caller-facing half)
+    /// resolves entry names over it and drops records whose entry is
+    /// gone; this seam answers the log question alone.
+    func takenLogs(on day: Date) -> [MedicationAdherenceLog] {
+        adherenceLog.filter {
+            $0.status == .acknowledged
+                && Calendar.current.isDate($0.scheduledAt, inSameDayAs: day)
+        }
     }
 
     /// Configured medication entries — used by the Settings medication
@@ -261,8 +320,11 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         var next = medicationEntries()
         guard let index = next.firstIndex(where: { $0.id == entryId }) else { return false }
         next[index] = entry.withScheduleTimes(times)
-        loadSchedule(entries: next)
-        return true
+        // [T-023] The persist result IS this call's result: a failed write
+        // must not be reported back as a successful retime (the schedule,
+        // its reminders and the calendar mirror all stay on the version
+        // that is actually stored).
+        return loadSchedule(entries: next)
     }
 
     init(
@@ -272,6 +334,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         familyNotifier: FamilyNotifierProtocol,
         caregiverNotifySettings: CaregiverNotifySettings,
         visualAidStore: VisualAidStore? = nil,
+        evidenceStore: MedicationEvidenceStore? = nil,
         slotClockStore: MedicationSlotClockStore? = nil,
         challengeTimeoutSeconds: TimeInterval = ConfirmationChallenge.defaultChallengeTimeoutSeconds
     ) {
@@ -281,6 +344,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         self.familyNotifier = familyNotifier
         self.caregiverNotifySettings = caregiverNotifySettings
         self.visualAidStore = visualAidStore
+        self.evidenceStore = evidenceStore
         // The mapping store is stateless over the storage seam, so
         // composing one here is equivalent to being handed the shared
         // instance — and it is what makes a house that has never opened
@@ -294,7 +358,44 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
 
     // MARK: - Load Schedule
 
-    func loadSchedule(entries newEntries: [MedicationEntry]) {
+    /// Replaces the whole schedule: persist FIRST, then adopt, rebuild and
+    /// arm — the write is the gate, not a footnote (FR-MSR-022 / D2,
+    /// "persistence precedes alarm arming"; T-023).
+    ///
+    /// Until T-023 this tail discarded its write result (`_ =`), so a
+    /// failed write surfaced as "saved": the caller armed and reported
+    /// success, the in-memory schedule looked right, and the entry was
+    /// gone at the next launch — the real-loss path behind the owner's
+    /// "I entered a medication schedule and it just disappeared". The
+    /// checked-write shape mirrors the two shipped precedents
+    /// (`setVisualAids` and the re-arm pass's mirror write): the same
+    /// PII-free `entry_persistence_failed` event, and nothing behind a
+    /// schedule that is not stored.
+    ///
+    /// On failure, in order:
+    ///
+    ///  - the caller sees `false` (the honest signal the AppCoordinator
+    ///    save paths propagate to the family as "could not save");
+    ///  - NOTHING is adopted: the in-memory entries, the pending
+    ///    reminders and the escalation engines keep the PREVIOUS
+    ///    schedule, which stays armed exactly as it was;
+    ///  - no `schedule_loaded`, no reminder write, no arming — and, most
+    ///    importantly, no `onScheduleChanged`, so the share layer is
+    ///    never told about a schedule that was not stored.
+    ///
+    /// On success the shipped order stands unchanged: adopt, emit
+    /// `schedule_loaded`, create (persist + arm) the pending reminders,
+    /// notify the share observer last. The write happens BEFORE the
+    /// adoption now; it persists bytes and touches no in-memory state, so
+    /// a failure leaves memory and storage in agreement — the version
+    /// stored IS the version in memory.
+    @discardableResult
+    func loadSchedule(entries newEntries: [MedicationEntry]) -> Bool {
+        guard case .success = storage.write(key: storageKeyEntries, value: newEntries) else {
+            emit("entry_persistence_failed", metadata: [:])
+            return false
+        }
+
         entries.removeAll()
         engines.removeAll()
         pendingRemindersList.removeAll()
@@ -302,8 +403,6 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         for entry in newEntries {
             entries[entry.id] = entry
         }
-
-        _ = storage.write(key: storageKeyEntries, value: newEntries)
 
         emit("schedule_loaded", metadata: ["entry_count": "\(newEntries.count)"])
 
@@ -314,6 +413,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         // reminders are the part the elder depends on — they are armed
         // before anything is offered to the share layer.
         onScheduleChanged?(newEntries)
+        return true
     }
 
     // MARK: - Schedule All
@@ -600,6 +700,12 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         case .reEnterEscalation:
             confirmationChallenges.removeValue(forKey: entryId)
             emit("confirmation_denied", metadata: ["entry_id_hash": idHash(entryId)])
+            // The chain did not confirm (a "no" or a lapsed window), so the
+            // held capture can never be claimed (IF-15, safety delta (c);
+            // T-019): the hold is cleared and the stored file deleted — the
+            // deny writes no record, and the evidence must not outlive it
+            // as an orphan. PII-free classification only.
+            discardPendingEvidence(for: entryId, outcome: "denied")
             return reEnterEscalation(entryId: entryId, entry: entry)
 
         case .noAction:
@@ -794,6 +900,91 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         return nil
     }
 
+    // MARK: - Evidence hold (IF-15; T-019, C7.6)
+
+    /// Registers the held capture for `entryId` (IF-15): the coordinator
+    /// minted `logId` at capture time (T-021) and the store named the file
+    /// by it, so the finalize that writes the record uses that SAME id —
+    /// the `<logId>.jpg` scheme stays true everywhere (R-1(a)).
+    ///
+    /// R-3 FIRST, before anything is registered: a capture whose store
+    /// completed after the chain finalized has no un-finalized reminder to
+    /// attach to — the stored file is deleted and no hold is registered.
+    /// The record stays honestly evidence-free; nothing is ever claimed.
+    ///
+    /// A re-capture REPLACES: the prior hold's file is deleted (no orphan)
+    /// and the new capture takes the entry's one hold slot — unless the
+    /// new capture IS that same file (the same log id re-held), which the
+    /// caller just re-stored and which must not be deleted.
+    ///
+    /// Returns `true` when a hold is registered for the entry and `false`
+    /// when the late-hold rule cleared the capture at registration — the
+    /// honest outcome W6/T-021 observes. With a nil evidence store the
+    /// hold still registers; only the file deletions are skipped (the
+    /// composition obligation is stated at `init`).
+    ///
+    /// The PII-free `medication_evidence_discarded` event classifies every
+    /// discard (`late_hold` here, `replaced` for a superseded capture) —
+    /// the entry-id hash and nothing else (NFR-MSR-002).
+    @discardableResult
+    func holdPendingEvidence(logId: UUID, fileName: String, for entryId: UUID) -> Bool {
+        guard activeReminderId(for: entryId) != nil else {
+            deleteEvidenceFile(fileName, entryId: entryId)
+            emit("medication_evidence_discarded",
+                 metadata: ["entry_id_hash": idHash(entryId)],
+                 outcome: "late_hold")
+            return false
+        }
+
+        if let prior = pendingEvidenceHold[entryId], prior.fileName != fileName {
+            deleteEvidenceFile(prior.fileName, entryId: entryId)
+            emit("medication_evidence_discarded",
+                 metadata: ["entry_id_hash": idHash(entryId)],
+                 outcome: "replaced")
+        }
+
+        pendingEvidenceHold[entryId] = PendingEvidenceHold(logId: logId, fileName: fileName)
+        return true
+    }
+
+    /// The record-surface attach (IF-15): sets `evidencePhotoFileName` on
+    /// an EXISTING adherence log and persists it. This seam NEVER creates
+    /// a record — an unknown `logId` returns the shipped failure without
+    /// writing anything and without creating a log, so by construction a
+    /// photo alone can never record a dose (safety delta (c)).
+    ///
+    /// A failed persist is never a claim: the just-stored file is deleted
+    /// (no orphan) and the in-memory record is reverted to the version the
+    /// store holds — to the previous name when that file still exists, or
+    /// to evidence-free when the deleted file WAS that name. The shipped
+    /// `.reminderPersistenceFailed` is returned on either failure arm.
+    ///
+    /// (`fileName` alone cannot resolve the file's entry directory, so the
+    /// unknown-log arm deletes nothing — it cannot prove which stored file
+    /// would be the orphan, and guessing is not this seam's business.)
+    @discardableResult
+    func attachEvidence(fileName: String, toLog logId: UUID) -> Result<Void, SafetyError> {
+        guard let index = adherenceLog.firstIndex(where: { $0.id == logId }) else {
+            return .failure(.reminderPersistenceFailed)
+        }
+
+        let previousName = adherenceLog[index].evidencePhotoFileName
+        adherenceLog[index].evidencePhotoFileName = fileName
+
+        if case .failure = storage.write(key: storageKeyAdherenceLog, value: adherenceLog) {
+            deleteEvidenceFile(fileName, entryId: adherenceLog[index].medicationEntryId)
+            adherenceLog[index].evidencePhotoFileName = previousName == fileName ? nil : previousName
+            emit("medication_evidence_discarded",
+                 metadata: ["entry_id_hash": idHash(adherenceLog[index].medicationEntryId)],
+                 outcome: "attach_failed")
+            return .failure(.reminderPersistenceFailed)
+        }
+
+        emit("medication_evidence_attached",
+             metadata: ["entry_id_hash": idHash(adherenceLog[index].medicationEntryId)])
+        return .success(())
+    }
+
     // MARK: - Private
 
     private func finalizeAcknowledgement(
@@ -804,8 +995,14 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
     ) -> Result<Void, SafetyError> {
         let reminderId = activeReminderId(for: entryId)
         let scheduledAt = reminderId.flatMap { engines[$0]?.scheduledTime } ?? Date()
+        // R-1(a): a held capture becomes the record's evidence under ONE
+        // identity — the log this finalize writes carries the held log id
+        // (the id the coordinator minted at capture time and the store
+        // named the file by) and the held bare file name. Without a hold
+        // this is exactly the shipped mint and an evidence-free record.
+        let held = pendingEvidenceHold[entryId]
         let logEntry = MedicationAdherenceLog(
-            id: UUID(),
+            id: held?.logId ?? UUID(),
             medicationEntryId: entryId,
             scheduledAt: scheduledAt,
             acknowledgedAt: acknowledgedAt,
@@ -814,14 +1011,34 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
             familyAlerted: false,
             photoVerification: entry.photoVerificationEnabled ? .pending : .notRequired,
             confirmationPassed: true,
-            confirmationDeniedAt: nil
+            confirmationDeniedAt: nil,
+            evidencePhotoFileName: held?.fileName
         )
 
+        let logIndex = adherenceLog.count
         adherenceLog.append(logEntry)
 
         // Persist adherence log
         if case .failure = storage.write(key: storageKeyAdherenceLog, value: adherenceLog) {
+            // The record never landed, so the held file can never be
+            // claimed: it is deleted (no orphan), the hold is cleared, and
+            // the un-persisted in-memory record is stripped of the name —
+            // a later successful write must not persist a claim to a file
+            // that no longer exists. `intakeRecorded` does not fire (it
+            // follows the write; T-016).
+            if held != nil {
+                discardPendingEvidence(for: entryId, outcome: "persistence_failed")
+                adherenceLog[logIndex].evidencePhotoFileName = nil
+            }
             return .failure(.reminderPersistenceFailed)
+        }
+
+        // The record claimed its evidence: the hold is cleared WITHOUT
+        // deleting the file — it now belongs to the stored log.
+        if held != nil {
+            pendingEvidenceHold.removeValue(forKey: entryId)
+            emit("medication_evidence_attached",
+                 metadata: ["entry_id_hash": idHash(entryId)])
         }
 
         // The intakeRecorded significant event (T-016, L1 §9.1) — the
@@ -974,6 +1191,30 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         }
 
         return .success(())
+    }
+
+    /// Clears the entry's hold and deletes its stored file — idempotent
+    /// (no hold = no-op: nothing happened, nothing is emitted). Fail-soft
+    /// toward truth: a store `.removeFailed` is swallowed (the file
+    /// survives; the hold does not) and a nil store skips the deletion
+    /// while the claim is still cleared. Every discard is classified by
+    /// the PII-free `medication_evidence_discarded` event.
+    private func discardPendingEvidence(for entryId: UUID, outcome: String) {
+        guard let hold = pendingEvidenceHold.removeValue(forKey: entryId) else { return }
+        deleteEvidenceFile(hold.fileName, entryId: entryId)
+        emit("medication_evidence_discarded",
+             metadata: ["entry_id_hash": idHash(entryId)],
+             outcome: outcome)
+    }
+
+    /// Deletes one stored evidence file, fail-soft: an absent store, an
+    /// absent file and a `.removeFailed` all leave the caller's flow
+    /// untouched — the honest truth is that the file may survive, and
+    /// nothing here may turn that into a crash or a blocked
+    /// acknowledgement.
+    private func deleteEvidenceFile(_ fileName: String, entryId: UUID) {
+        guard let evidenceStore else { return }
+        _ = evidenceStore.delete(fileName: fileName, entryId: entryId)
     }
 
     private func restoreState() {
