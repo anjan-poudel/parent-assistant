@@ -166,6 +166,27 @@ final class FamilyNotifierTests: XCTestCase {
 
     // MARK: - Wire type
 
+    /// Every alert type's wire raw value, pinned verbatim — the shipped
+    /// seven, plus the two medication significant events
+    /// (`intakeRecorded`, `escalationStarted`) appended by [MSR] T-003
+    /// (FR-MSR-015, FR-MSR-017). The raw values ARE the wire contract:
+    /// a case renumbered or renamed ahead of a shipped one silently
+    /// changes what an already-deployed family alert means.
+    private static let pinnedAlertWireValues: [(alertType: FamilyAlertType,
+                                                rawValue: String)] = [
+        (.emergencyCall, "emergencyCall"),
+        (.missedMedication, "missedMedication"),
+        (.healthMonitoringInterrupted, "healthMonitoringInterrupted"),
+        (.configurationUpdateApplied, "configurationUpdateApplied"),
+        (.possibleDoubleDose, "possibleDoubleDose"),
+        (.inactivityAlert, "inactivityAlert"),
+        (.eventReminder, "eventReminder"),
+        // [MSR T-003] Appended to the taxonomy — appended ONLY, so no
+        // shipped value above moves.
+        (.intakeRecorded, "intakeRecorded"),
+        (.escalationStarted, "escalationStarted")
+    ]
+
     /// One wire type covers all three event kinds — the kind travels in
     /// the in-memory context and in the local bus record, never in the
     /// envelope, so the payload keeps its `alert_type`-only shape.
@@ -175,11 +196,26 @@ final class FamilyNotifierTests: XCTestCase {
         XCTAssertEqual(String(data: encoded, encoding: .utf8), "\"eventReminder\"")
     }
 
+    /// The stability list, extended at [MSR] T-003 with the two new
+    /// taxonomy cases (FR-MSR-015's "appended, not renumbered" edge):
+    /// every shipped raw value still encodes to its own literal, and
+    /// each literal decodes back to the case it names — so a payload
+    /// written by any build of the app keeps its meaning.
     func testLegacyAlertWireValuesAreUnchanged() throws {
         let encoded = try JSONEncoder().encode(FamilyAlertType.missedMedication)
 
         XCTAssertEqual(String(data: encoded, encoding: .utf8), "\"missedMedication\"",
                        "adding a case must not renumber or rename the existing wire types")
+
+        for (alertType, pinned) in Self.pinnedAlertWireValues {
+            let data = try JSONEncoder().encode(alertType)
+            XCTAssertEqual(String(data: data, encoding: .utf8), "\"\(pinned)\"",
+                           "\(alertType) must keep its pinned wire value")
+
+            let decoded = try JSONDecoder().decode(FamilyAlertType.self, from: data)
+            XCTAssertEqual(decoded, alertType,
+                           "the wire value must decode back to the case that wrote it")
+        }
     }
 
     /// Every alert type has a family-facing body — the new wire type
@@ -190,7 +226,11 @@ final class FamilyNotifierTests: XCTestCase {
         let keys = ["family.alertEmergency", "family.alertMissedMedication",
                     "family.alertHealthMonitoringInterrupted",
                     "family.alertConfigurationApplied", "family.alertPossibleDoubleDose",
-                    "family.alertInactivity", "family.alertEventReminder"]
+                    "family.alertInactivity", "family.alertEventReminder",
+                    // [MSR T-003] The two appended significant events
+                    // (FR-MSR-015) — every alert type has a family-facing
+                    // body in both shipped languages.
+                    "family.alertIntakeRecorded", "family.alertEscalationStarted"]
 
         for key in keys {
             for locale in [Locale(identifier: "en"), Locale(identifier: "ne")] {
