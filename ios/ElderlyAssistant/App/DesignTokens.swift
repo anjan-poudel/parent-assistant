@@ -156,9 +156,10 @@ enum DesignTokens {
     static let chipHeight: CGFloat = 60
     /// [DOCK-FIT] (2026-10-15) Two-row Home dock budget after the
     /// medium-display pass (owner: "too much space at the bottom"):
-    /// ~48pt action row (28pt glyphs) + 8pt gap + ~76pt rail (44pt
-    /// glyphs + 10pt lower inset, no safe-area band), documented for
-    /// the DesignTokens pin test — the dock itself is intrinsic-height.
-    static let dockHeight: CGFloat = 132
+    /// ~48pt action row (28pt glyphs) + 8pt gap + ~70pt rail (44pt
+    /// glyphs + snug 4pt lower inset; the surface bleeds to the screen
+    /// edge), documented for the DesignTokens pin test — the dock
+    /// itself is intrinsic-height.
+    static let dockHeight: CGFloat = 126
     static let iconBadgeDiameter: CGFloat = 44
 }

@@ -45,24 +45,50 @@ struct HomeTopBar: View {
     let onOpenUpdates: () -> Void
 
     var body: some View {
+        Group {
+            if dynamicTypeSize <= .medium {
+                // [MEDIUM-FIT] (2026-10-15) The medium-size compact bar —
+                // owner: profile below settings, notifications below
+                // emergency, and the Nepali calendar date between the two
+                // menu columns, so the date gets room and the bar saves
+                // horizontal space.
+                stackedBar
+            } else {
+                wideBar
+            }
+        }
+        // [MEDIUM-FIT] (2026-10-15) Slimmer top clearance at ordinary
+        // type sizes — every point goes to fitting Home in the viewport.
+        .padding(.top, dynamicTypeSize.isAccessibilitySize ? 8 : 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("home.header")
+    }
+
+    /// Medium size and below: settings over profile on the left, the
+    /// Nepali date in the middle, emergency over notifications on the
+    /// right.
+    private var stackedBar: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(spacing: 2) {
+                settingsButton
+                profileButton
+            }
+            calendarButton
+                .frame(maxWidth: .infinity)
+            VStack(spacing: 2) {
+                EmergencyIconButton()
+                NotificationBellButton(count: notificationCount, action: onOpenUpdates)
+            }
+        }
+    }
+
+    /// Large and above: one icon row with the date inline at ordinary
+    /// sizes, the date on its own row at accessibility sizes.
+    private var wideBar: some View {
         VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 4 : 8) {
             HStack(spacing: 8) {
-                NavigationLink(value: LeafDestination.settings) {
-                    ReferenceIconArtwork(name: "settings", diameter: 32)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text("home.hub.settings"))
-                .accessibilityIdentifier("home.settings")
-                NavigationLink(value: LeafDestination.profile) {
-                    IconBadge(systemImage: "person.crop.circle.fill", tint: .profile, diameter: 32)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text("home.hub.profile"))
-                .accessibilityIdentifier("home.profile")
+                settingsButton
+                profileButton
                 if dynamicTypeSize <= .large {
                     calendarButton
                         .frame(maxWidth: .infinity)
@@ -77,11 +103,28 @@ struct HomeTopBar: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        // [MEDIUM-FIT] (2026-10-15) Slimmer top clearance at ordinary
-        // type sizes — every point goes to fitting Home in the viewport.
-        .padding(.top, dynamicTypeSize.isAccessibilitySize ? 8 : 4)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("home.header")
+    }
+
+    private var settingsButton: some View {
+        NavigationLink(value: LeafDestination.settings) {
+            ReferenceIconArtwork(name: "settings", diameter: 32)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("home.hub.settings"))
+        .accessibilityIdentifier("home.settings")
+    }
+
+    private var profileButton: some View {
+        NavigationLink(value: LeafDestination.profile) {
+            IconBadge(systemImage: "person.crop.circle.fill", tint: .profile, diameter: 32)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("home.hub.profile"))
+        .accessibilityIdentifier("home.profile")
     }
 
     private var calendarButton: some View {
@@ -839,11 +882,11 @@ struct HomeDock: View {
     var body: some View {
         // [DOCK-FIT] (2026-10-15) Medium-display pass — owner: "the dock
         // menu has too much space at the bottom". Ordinary type sizes
-        // get 28/44pt glyphs, a 4+4pt row gap and a slim 10pt rail
-        // inset; the rail surface no longer bleeds through the home-
-        // indicator safe area (the empty band under the tiles is gone).
-        // Every tile keeps its 44pt tap floor; accessibility sizes keep
-        // the generous 32/48pt glyphs.
+        // get 28/44pt glyphs, a 4+4pt row gap and a snug 4pt rail
+        // inset, while the rail surface keeps hugging the screen edge
+        // through the home-indicator area — no floating band, no
+        // page-colored gap. Every tile keeps its 44pt tap floor;
+        // accessibility sizes keep the generous 32/48pt glyphs.
         VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 6 : 4) {
             LazyVGrid(columns: topColumns, alignment: .center, spacing: 8) {
                 Button(action: onAppliance) {
@@ -874,13 +917,14 @@ struct HomeDock: View {
             }
             .padding(.horizontal, 8)
             .padding(.top, dynamicTypeSize.isAccessibilitySize ? 6 : 4)
-            // [MEDIUM-FIT] (2026-10-15) The surface ends ~10pt under the
-            // tiles instead of bleeding through the home-indicator safe
-            // area — the empty band below the dock is gone.
-            .padding(.bottom, 10)
+            // [MEDIUM-FIT] (2026-10-15) Owner v2: the rail surface hugs
+            // the screen edge (bleeds through the home-indicator area)
+            // with a snug 4pt inset under the tiles at ordinary sizes.
+            .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 10 : 4)
             .background {
                 Color.clear
                     .appSurface(role: .dock, cornerRadius: 20)
+                    .ignoresSafeArea(.container, edges: edgeAttached ? .bottom : [])
             }
             .accessibilityIdentifier("home.dock")
         }
