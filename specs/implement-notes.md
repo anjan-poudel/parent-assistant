@@ -1,11 +1,11 @@
 # implement-notes — Medication Schedules & Reminders
 
-description: Implementation notes for the medication-schedules-reminders implement task (unit_based, 22 units in 8 waves): per-wave unit outcomes, consolidated scoped test passes, deviations, and the final full-suite comparison.
+description: Implementation notes for the medication-schedules-reminders implement task (unit_based, 24 units in 10 waves): per-wave unit outcomes, consolidated scoped test passes, deviations, and the final full-suite comparison.
 
 ## Summary
 
 - Task: `implement` (contract `implementation`), feature `medication-schedules-reminders`.
-- Plan: `specs/plan-tasks/plan.md` — 23 units, 9 waves (W0:4, W1:4, W2:5, W3:3, W4:2, W5:2, W6:1, W6.5:1, W7:1), file-disjoint within each wave (W6.5/T-023 inserted by amendment 6, owner-directed).
+- Plan: `specs/plan-tasks/plan.md` — 24 units, 10 waves (W0:4, W1:4, W2:5, W3:3, W4:2, W5:2, W6:1, W6.5:1, W6.6:1, W7:1), file-disjoint within each wave (W6.5/T-023 and W6.6/T-024 inserted by amendments 6 and 7, owner-directed).
 - Cadence: per-unit code + typecheck; ONE consolidated scoped test pass per wave (`ios/build.sh test:unit <Classes...>`); a single full-suite run at W7 (compared against the documented pre-existing baseline).
 - Resolution pins carried: R-1(a) at T-019/T-021, R-2 at T-006, R-3 at T-019, R-4 at T-014.
 
@@ -20,7 +20,8 @@ description: Implementation notes for the medication-schedules-reminders impleme
 | W4 | T-016, T-018 | 4 classes — 77 tests (2026-10-15) | PASS — 77/77, 0 failures |
 | W5 | T-019, T-020 | code + typecheck only (speed directive) | GREEN — combined-tree module emit 0 errors; probes green |
 | W6 | T-021 | code + typecheck only (speed directive) | GREEN — combined-tree module emit 0 errors; 3 suites typechecked; probes exit 1 at injected lines |
-| W6.5 | T-023 | scoped pass at wave close (amendment 6 — NOT under the strip directive) | pending |
+| W6.5 | T-023 | 7 classes — 139 tests (2026-10-15) | PASS — 139/139, 0 failures; xcresult result Passed |
+| W6.6 | T-024 | scoped pass at wave close (amendment 7 — NOT under the strip directive) | pending |
 | W7 | T-022 | full suite vs documented baseline (the tail's single test gate) | pending |
 
 > **Speed directive (owner, mid-run 2026-10-15):** W5 and W6 are code + typecheck
@@ -40,6 +41,18 @@ description: Implementation notes for the medication-schedules-reminders impleme
 > directive above does NOT extend to it — and the W7 full suite then covers it.
 > T-023 rides the W5–W7 PR. See
 > `specs/plan-tasks/amendments/amendment-6-t023-medication-manage-list-2026-10-15.md`.
+
+> **Amendment 7 (owner-directed, 2026-10-15):** a second owner defect — scanning
+> "one tablet twice a day" captures no schedule — inserts **T-024** (scanner
+> frequency→slot grouping, W6.6) between W6.5 and W7. Owned files:
+> `MedicationLabelOCR.swift`, `ScannedSchedule.swift`, `MedicationEditorDraft.swift`
+> (+ their suites); NOT `SettingsView` and NOT the capture seam. Delivered as a
+> patch from an isolated temp worktree (`/tmp/msr-scanner-frequency.patch`),
+> applied by the coordinator at wave close; its scoped pass runs at the wave
+> close (the strip directive does NOT extend to it). Quiescence: no unit in
+> flight may touch the three owned files until T-024 lands (W6.5/T-023 does
+> not). See
+> `specs/plan-tasks/amendments/amendment-7-t024-scanner-frequency-slots-2026-10-15.md`.
 
 ## Deviations
 
@@ -233,6 +246,30 @@ description: Implementation notes for the medication-schedules-reminders impleme
   conflict-free. pbxproj wiring for the new test file was added by the unit;
   the coordinator canonicalized the project via xcodegen at wave close (the
   agent's hand-written UUIDs were the only diff — identical 4-point wiring).
+- W6.5/T-023 recorded judgment calls + deviations (all disclosed): (1)
+  `MedicationSchedulerProtocol.swift` edited — not in the enumerated owned
+  list; compilation-forced (the frozen-snapshot emit caught the `loadSchedule`
+  Void→Bool conformance break); a one-line signature mirror + doc; no other
+  conformer or existential exists; residual open 8 (the protocol extension
+  decision) closes here. (2) Editor presentation: `fullScreenCover` +
+  `EditorTarget` with fresh UUID identity per presentation (two taps on one
+  row present twice); a failed save leaves the cover up with the editor's own
+  error line. (3) The two shipped scheduler-suite pins the new semantics
+  require were read first and updated, never weakened:
+  `testPersistenceBeforeAlarmOnScheduleAll` now asserts the Bool and
+  nothing-adopted/nothing-armed; `testStorageFailureBlocksArming` was split to
+  also drive the reminders-key failure (entries land, one adoption,
+  `reminder_persistence_failed`, still nothing armed). (4) A coordinator-level
+  storage-failure drive is infeasible (the concrete `MigratingEncryptedStorage`
+  + Keychain fallback exposes no seam) — the failure path is driven at the
+  scheduler seam, and the coordinator propagation is pinned by source scan
+  (4 guard sites, 3 error renders, guard-before-`scheduleAll()` ordering).
+  (5) pbxproj canonicalized via xcodegen at wave close (diff vs the agent's
+  8 hand-added lines = ordering/UUIDs only; identical wiring); canonical sha
+  `f7514841…`; the wave-close build's own xcodegen regeneration re-produced
+  the same bytes. (6) The `medication.entries` write sites confirmed: :266
+  (`setVisualAids` precedent), :394 (the new write-first `loadSchedule` tail),
+  :587 (removal payload, guarded).
 
 ## Verification
 
@@ -509,6 +546,73 @@ description: Implementation notes for the medication-schedules-reminders impleme
     construction (object-identity asserted in the first named test). Named
     tests: 6 (evidence capture) + 2 (presentation) + 1 (fire handler) across
     three suites — authored and typechecked; execution rides W7.
+- **W6.5 (scoped pass at wave close — amendment 6; NOT under the strip directive):**
+  - T-023 agent verification (frozen snapshot `/tmp/msr-t023`, 418 app sources ==
+    appfiles.txt exactly; 5 test files byte-equal to the worktree): module emit
+    exit 0 / 0 errors, 164 warnings with the normalized warning multiset
+    identical to the W6 baseline (60 unique templates, diff empty); the first
+    emit attempt caught a REAL compile defect (the `loadSchedule` Void→Bool
+    change broke `MedicationScheduler`'s protocol conformance) — fixed in-unit
+    by the one-line protocol mirror; test typecheck exit 0/0/0 after one
+    harness-set correction (a duplicate `MockObservabilityBus` shim the agent
+    had copied in, removed); three error-sensitivity probes exit 1 at the
+    injected lines (app :279, test suites :36/:272); zero hash drift across all
+    runs; 40-char scan adds none (the 2 pre-existing hits only — the
+    scheduler-suite pre-existing name and the pbxproj VariantTables path).
+  - Wave-close scoped pass (coordinator-run, feature worktree; release-log-safety
+    + prompt-mirror guard preflight green, 0 failures): 7 classes —
+    MedicationManageListTests 10, MedicationEditorSurfaceTests 6,
+    MedicationSlotClockSettingsTests 7, MedicationSchedulerTests 41,
+    MedicationSavePlumbingTests 10, L10nCatalogCoverageTests 40,
+    SettingsTabMappingTests 25 — **139/139 passed, 0 failures** (2026-10-15,
+    simulator), xcresult result "Passed". SettingsTabMappingTests joined the
+    pass because `SettingsTabs.swift` changed and L10nCatalogCoverageTests
+    because the catalog gained the new key (the plan row's conditional
+    resolved to included).
+  - All 11 reported on-disk hashes matched the T-023 report at wave close
+    (zero drift); the pbxproj re-hash after the build's own xcodegen
+    regeneration equals the canonical sha `f7514841…`.
+- **W6.5 unit outcomes:**
+  - T-023 — NEW `MedicationManageListView.swift` (list-first screen: one card
+    row per entry — name, composed dose line via the T-018 `doseTextHalf` +
+    `DoseLine.compose` call, slot/meal "when" line via the shipped
+    `slotKey`/`mealKey` statics or `timesText` for legacy, purpose caption;
+    explicit add control at the raised tap floor; row tap presents the editor
+    PRE-FILLED through `draft(from:)` + `editingEntryId` — a call, never a
+    copy; the add form never auto-opens — `editorTarget` nil until a control
+    sets it, no `onAppear`/`task` pathway; empty state reuses
+    `settings.meds.empty`; the T-020 Medicine-times card stays reachable on
+    the manage screen; delete keeps its shipped refusal render;
+    44pt/18pt floors pinned). `SettingsTabs.swift` `.meds` route now hosts the
+    manage list. `MedicationScheduler.loadSchedule` became write-first-or-fail
+    (`Bool`; on failure `entry_persistence_failed` emitted, nothing adopted,
+    the previous schedule intact and armed — FR-MSR-022/D2); `setScheduleTimes`
+    returns the load result; all four coordinator writer paths guard on it and
+    render `settings.meds.saveFailed` on failure, arming nothing. Redraw:
+    `AppCoordinator.medicationScheduleRevision` (`@Published private(set)`)
+    bumped at the `onScheduleChanged` seam, read explicitly in the list body.
+    New catalog key `settings.meds.saveFailed` (en+ne); re-measured pins:
+    catalog 1,481 → 1,482, medication family 42 → 43, baselines 1_463 / 1_477 /
+    1_459 / 1_464. Suite: exactly the 10 named tests; the persist-failure test
+    drives the real scheduler over the mock store (fail write → false + event
+    + nothing adopted + previous still armed + disk unchanged) and pins the
+    coordinator propagation by source scan.
+- **W6.5 root-cause verdict (required deliverable — owner report 2, "it just disappeared"):**
+  TWO independent mechanisms confirmed; both made impossible:
+  - **Display-only half:** `medicationEntries` is a computed read with no
+    observable storage of its own, and the shipped leaf had no dedicated
+    redraw signal — a saved entry could fail to draw until unrelated
+    `@Published` churn while it was on disk. Now: the revision counter (bumped
+    only by committed medication writes) is read in the list body path.
+  - **Real-loss half:** the old `loadSchedule` tail discarded the
+    `medication.entries` write (`_ = storage.write(...)`) while adopting the
+    entries in memory regardless; all four coordinator save paths funnelled
+    through it, so a failed write read as "saved" and was gone after
+    relaunch/process death. Now: write-first-or-fail with the shipped
+    `entry_persistence_failed` event, caller-visible failure, and nothing
+    armed behind an unpersisted schedule.
+  - On-device confirmation of the round trip (save → row → kill → relaunch →
+    row + re-armed) rides DV-1..DV-7 at final-sign-off.
 - **Carry-forward baseline note (for the W7 full-suite comparison):** the
   Spotify localization suite's absolute key-count pin is red at the branch
   base (pin 1,381 vs catalog 1,439 pre-W0) and is untouched by this feature —

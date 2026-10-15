@@ -3969,6 +3969,27 @@ final class AppCoordinator: ObservableObject {
             // below rather than taking it here, so there is exactly one
             // path that decides what the mirror should contain.
             self?.calendarSync.syncNow(entries: self?.routineScheduler.entries() ?? [])
+            // [T-023] Third consumer, the medication surfaces' redraw
+            // signal: this seam fires ONLY for a committed write (the
+            // payload persisted, the reminders armed), so bumping the
+            // revision here is the exact moment the list's answer to
+            // "what is scheduled" changed. The manage list reads it in
+            // its body; a failed persist never reaches this line.
+            //
+            // The main hop follows the shipped `refreshActiveNotificationCount`
+            // pattern: the save paths call this on main and bump
+            // synchronously (the list is correct by the time the save
+            // call returns), while the calendar-driven retime relay — the
+            // one caller that can arrive off-main — hops instead of
+            // publishing from a background thread.
+            guard let self else { return }
+            if Thread.isMainThread {
+                self.medicationScheduleRevision += 1
+            } else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.medicationScheduleRevision += 1
+                }
+            }
         }
         // [MED-SLOT] (T-020) The medication scheduler's two remaining
         // composition hooks (T-016's seams). Attached here, with the
@@ -11716,6 +11737,19 @@ self.noteTalkContractChanged()
     /// 2026-09-07).
     var medicationEntries: [MedicationEntry] { medicationScheduler.medicationEntries() }
 
+    /// [T-023] The medication schedule's redraw signal. `medicationEntries`
+    /// above is COMPUTED over the scheduler — no observable state changes
+    /// when a save lands, so a surface that reads it can keep drawing the
+    /// pre-save list until something unrelated re-renders it ("I entered a
+    /// medication schedule and it just disappeared"). This counter is the
+    /// explicit dependency: it is bumped on every COMMITTED medication
+    /// write (the `onScheduleChanged` seam — `loadSchedule` only fires it
+    /// after the payload is persisted and the reminders are armed), and
+    /// the manage list reads it in its body, so a landed save, an edit, a
+    /// removal or a voice `set_reminder` re-draws the list immediately.
+    /// A failed write bumps nothing — the schedule did not change.
+    @Published private(set) var medicationScheduleRevision = 0
+
     func medicationName(for entryId: UUID) -> String {
         medicationScheduler.medicationEntries()
             .first { $0.id == entryId }?
@@ -12144,7 +12178,13 @@ self.noteTalkContractChanged()
             visualAids: visualAids
         )
         entries.append(entry)
-        medicationScheduler.loadSchedule(entries: entries)
+        // [T-023] The persist result is LOAD-BEARING: a failed write must
+        // not be followed by an arming pass, a share sync or a count
+        // refresh, and the caller must hear about it — a nil here means
+        // "saved", and a lost entry must never be reported as one.
+        guard medicationScheduler.loadSchedule(entries: entries) else {
+            return "settings.meds.saveFailed"
+        }
         medicationScheduler.scheduleAll()
         calendarSync.syncNow(entries: routineScheduler.entries())
         // [BOOT-REVIEW P1-7] A schedule edit changes today's dose total —
@@ -12189,7 +12229,10 @@ self.noteTalkContractChanged()
     /// `doseDescription` is composed once through `DoseLine` (C2, IF-5) —
     /// the one documented composition of quantity and dose text — and
     /// every entry persists through the shipped `loadSchedule` + re-arm
-    /// path. The request's photo is written to the medication
+    /// path, whose persist result is checked ([T-023]): a failed write
+    /// returns `settings.meds.saveFailed` with nothing armed, so the one
+    /// code path that can lose a schedule is also the one that says so.
+    /// The request's photo is written to the medication
     /// `VisualAidStore` under EACH new entry's id, fail-soft, exactly the
     /// shipped scan path's rule.
     ///
@@ -12201,7 +12244,10 @@ self.noteTalkContractChanged()
     /// editor's own error line: `settings.meds.nameRequired` (the
     /// unchanged name gate), `settings.meds.timeRequired` (a save needs
     /// at least one dose row), `settings.meds.slotRequired` (mixed row
-    /// shapes) or `settings.meds.duplicateError` (the gate above, m-2).
+    /// shapes), `settings.meds.duplicateError` (the gate above, m-2) or
+    /// `settings.meds.saveFailed` ([T-023] the persist itself failed —
+    /// nothing was armed, and the form keeps everything the family
+    /// entered instead of resetting under a success it did not have).
     func addMedication(_ request: MedicationSaveRequest) -> String? {
         saveMedication(request, replacing: nil)
     }
@@ -12323,7 +12369,13 @@ self.noteTalkContractChanged()
             entries.append(updated)
         }
         entries.append(contentsOf: created)
-        medicationScheduler.loadSchedule(entries: entries)
+        // [T-023] Persist first, then arm — and say so honestly when the
+        // persist fails. The nil below means "saved"; the failure key is
+        // the editor's own error line, so a lost write can never read as
+        // a reset-to-success form (FR-MSR-022 / D2).
+        guard medicationScheduler.loadSchedule(entries: entries) else {
+            return "settings.meds.saveFailed"
+        }
         medicationScheduler.scheduleAll()
         calendarSync.syncNow(entries: routineScheduler.entries())
         // [BOOT-REVIEW P1-7] A schedule edit changes today's dose total —
@@ -12457,10 +12509,20 @@ self.noteTalkContractChanged()
     }
 
     /// Removes a medication entry and re-arms (spec §4.4.3).
-    func removeMedication(id: UUID) {
+    ///
+    /// [T-023] Removal is persisted FIRST and the cascade runs only over
+    /// a stored removal: on a failed write the entry stays exactly as it
+    /// was — same schedule, same armed reminders, same photos, same
+    /// evidence — and the caller sees `false` (the manage list surfaces
+    /// the shipped failure line rather than a row that silently snaps
+    /// back). Deleting an entry's photos behind a schedule that still
+    /// exists would be half-applied state, so nothing downstream of the
+    /// guard runs on failure.
+    @discardableResult
+    func removeMedication(id: UUID) -> Bool {
         var entries = medicationScheduler.medicationEntries()
         entries.removeAll { $0.id == id }
-        medicationScheduler.loadSchedule(entries: entries)
+        guard medicationScheduler.loadSchedule(entries: entries) else { return false }
         medicationScheduler.scheduleAll()
         // The dose's photos go WITH the medication (medication-visual-aids
         // task, 2026-09-16): a picture of a box the household no longer
@@ -12479,6 +12541,7 @@ self.noteTalkContractChanged()
         // [BOOT-REVIEW P1-7] Removing an entry can empty today's doses —
         // the row hides itself, so the count must follow.
         refreshActiveNotificationCount()
+        return true
     }
 
     // MARK: - Medicine times: the household mapping (IF-9/IF-10) [MED-SLOT]
@@ -14391,7 +14454,16 @@ self.noteTalkContractChanged()
             confirmationDescription: nil
         )
         entries.append(entry)
-        medicationScheduler.loadSchedule(entries: entries)
+        // [T-023] The voice path persists through the same gate, and says
+        // so in the same words: a failed write surfaces the shipped
+        // failure line and offers NO undo — there is nothing to undo,
+        // and a "reminder set" card over a lost entry is the exact lie
+        // this unit removes.
+        guard medicationScheduler.loadSchedule(entries: entries) else {
+            setOutcome(icon: "exclamationmark.triangle.fill",
+                       text: L10n.str("settings.meds.saveFailed", locale: activeLocale))
+            return
+        }
         medicationScheduler.scheduleAll()
         // Genuinely reversible — `removeMedication` already exists and
         // re-arms alarms, so the outcome card's undo link does real work

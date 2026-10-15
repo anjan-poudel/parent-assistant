@@ -320,8 +320,11 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         var next = medicationEntries()
         guard let index = next.firstIndex(where: { $0.id == entryId }) else { return false }
         next[index] = entry.withScheduleTimes(times)
-        loadSchedule(entries: next)
-        return true
+        // [T-023] The persist result IS this call's result: a failed write
+        // must not be reported back as a successful retime (the schedule,
+        // its reminders and the calendar mirror all stay on the version
+        // that is actually stored).
+        return loadSchedule(entries: next)
     }
 
     init(
@@ -355,7 +358,44 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
 
     // MARK: - Load Schedule
 
-    func loadSchedule(entries newEntries: [MedicationEntry]) {
+    /// Replaces the whole schedule: persist FIRST, then adopt, rebuild and
+    /// arm — the write is the gate, not a footnote (FR-MSR-022 / D2,
+    /// "persistence precedes alarm arming"; T-023).
+    ///
+    /// Until T-023 this tail discarded its write result (`_ =`), so a
+    /// failed write surfaced as "saved": the caller armed and reported
+    /// success, the in-memory schedule looked right, and the entry was
+    /// gone at the next launch — the real-loss path behind the owner's
+    /// "I entered a medication schedule and it just disappeared". The
+    /// checked-write shape mirrors the two shipped precedents
+    /// (`setVisualAids` and the re-arm pass's mirror write): the same
+    /// PII-free `entry_persistence_failed` event, and nothing behind a
+    /// schedule that is not stored.
+    ///
+    /// On failure, in order:
+    ///
+    ///  - the caller sees `false` (the honest signal the AppCoordinator
+    ///    save paths propagate to the family as "could not save");
+    ///  - NOTHING is adopted: the in-memory entries, the pending
+    ///    reminders and the escalation engines keep the PREVIOUS
+    ///    schedule, which stays armed exactly as it was;
+    ///  - no `schedule_loaded`, no reminder write, no arming — and, most
+    ///    importantly, no `onScheduleChanged`, so the share layer is
+    ///    never told about a schedule that was not stored.
+    ///
+    /// On success the shipped order stands unchanged: adopt, emit
+    /// `schedule_loaded`, create (persist + arm) the pending reminders,
+    /// notify the share observer last. The write happens BEFORE the
+    /// adoption now; it persists bytes and touches no in-memory state, so
+    /// a failure leaves memory and storage in agreement — the version
+    /// stored IS the version in memory.
+    @discardableResult
+    func loadSchedule(entries newEntries: [MedicationEntry]) -> Bool {
+        guard case .success = storage.write(key: storageKeyEntries, value: newEntries) else {
+            emit("entry_persistence_failed", metadata: [:])
+            return false
+        }
+
         entries.removeAll()
         engines.removeAll()
         pendingRemindersList.removeAll()
@@ -363,8 +403,6 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         for entry in newEntries {
             entries[entry.id] = entry
         }
-
-        _ = storage.write(key: storageKeyEntries, value: newEntries)
 
         emit("schedule_loaded", metadata: ["entry_count": "\(newEntries.count)"])
 
@@ -375,6 +413,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         // reminders are the part the elder depends on — they are armed
         // before anything is offered to the share layer.
         onScheduleChanged?(newEntries)
+        return true
     }
 
     // MARK: - Schedule All

@@ -4548,59 +4548,101 @@ struct MedicationScheduleSettingsView: View {
     /// the active locale. Empty until a save.
     @State private var medicineTimesLines: [String] = []
 
+    /// [T-023] Which of the two screens this struct draws.
+    ///
+    /// The medication leaf is ONE form and ONE card, and both halves are
+    /// pinned here by the shipped suites (the T-018 statics and the T-020
+    /// Medicine-times card), so the routes complete them into a screen
+    /// rather than cloning them:
+    ///
+    ///  - `.editor` — the form alone. It is presented as a full-screen
+    ///    cover from the manage list, in new-entry mode or pre-filled via
+    ///    the edit-existing initializer below. It is NEVER the screen the
+    ///    family arrives at (owner report 1: "the Settings medication UI
+    ///    always shows the add-new-medication form and never shows
+    ///    existing schedules" — the inline form WAS that screen);
+    ///  - `.medicineTimesCard` — just the household times card, hosted by
+    ///    `MedicationManageListView` INSIDE the manage list's leaf, so
+    ///    "Medicine times" (and its one-shot retime note) stays reachable
+    ///    on the manage screen instead of being buried one cover down.
+    enum Screen {
+        case medicineTimesCard
+        case editor
+    }
+
+    let screen: Screen
+
+    /// [T-023] Fired after a save LANDS (the coordinator answered nil for
+    /// the save that was handed to it). The host dismisses the cover
+    /// here — the one place that knows both the save result and the
+    /// presentation. A failed save never calls this: the form stays up
+    /// with the failure line.
+    private let onSaveLanded: (() -> Void)?
+
     /// The new-entry form opens on the SLOT model (design-l2 C8): the
     /// family states a time of day, and the clock model stays one explicit
     /// tap away on the model chooser. The default lives here rather than in
     /// `MedicationEditorDraft`'s initializer on purpose (T-009's comment):
     /// the value type keeps `.times` so no pre-existing caller changed.
-    init() {
+    init(screen: Screen = .editor, onSaveLanded: (() -> Void)? = nil) {
+        self.screen = screen
+        self.onSaveLanded = onSaveLanded
         _draft = State(initialValue: Self.newDraft())
     }
 
+    /// [T-023] The edit-existing presentation: the manage list taps a row,
+    /// and the entry's values arrive through the SHIPPED T-018 conversion —
+    /// `Self.draft(from:)` (a call, never a copy) plus the editing id that
+    /// makes Save an in-place `updateMedication` instead of a second
+    /// entry. The form's state seed is the only difference from the
+    /// new-entry initializer above; everything else on this screen is the
+    /// same form.
+    init(editing entry: MedicationEntry, locale: Locale,
+         onSaveLanded: (() -> Void)? = nil) {
+        self.screen = .editor
+        self.onSaveLanded = onSaveLanded
+        _draft = State(initialValue: Self.draft(from: entry, locale: locale))
+        _editingEntryId = State(initialValue: entry.id)
+    }
+
+    /// [T-023] Two screens, one struct (see `Screen`): the manage list
+    /// hosts `.medicineTimesCard` inside its own leaf, and presents
+    /// `.editor` as a full-screen cover with no chrome of this struct's
+    /// own beyond the shipped form.
     var body: some View {
+        switch screen {
+        case .medicineTimesCard:
+            // No `LeafScreen` here — the manage list's leaf is already on
+            // screen, and the card is one section inside it.
+            medicineTimesSection
+        case .editor:
+            editor
+        }
+    }
+
+    /// [T-023] The editor arm: the shipped form, ALONE. The entries list
+    /// and the empty state live on `MedicationManageListView` — the
+    /// screen Settings → Medications actually arrives at — so the form
+    /// can only ever be reached by an explicit tap (a row, or the add
+    /// control). The `medRow` builder below is retained (the shipped
+    /// presentation suites pin its composition); the manage list's row
+    /// carries the same controls for the screen that renders them.
+    private var editor: some View {
         LeafScreen(titleKey: "settings.meds.title") {
             VStack(spacing: 12) {
-                if coordinator.medicationEntries.isEmpty {
-                    Text("settings.meds.empty")
-                        .font(.system(size: appearance.typography.bodyPointSize))
-                        .foregroundStyle(appearance.colors.textSecondary)
-                        .multilineTextAlignment(.center)
-                        .padding(32)
-                        .frame(maxWidth: .infinity)
-                        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
-                } else {
-                    ForEach(coordinator.medicationEntries) { entry in
-                        medRow(entry)
-                    }
-                }
                 addForm
-                // [MED-SLOT] (T-020) The household's OWN times: the
-                // mapping every slot row resolves through, editable here
-                // only (IF-9 — the one writer), with the m-5 one-shot
-                // note. It stays outside the emptiness branch above: the
-                // family may set its times before the first medicine
-                // exists.
-                medicineTimesSection
-                // This leaf edits the household's MEDICINES — nothing else
-                // (calendar-split task, 2026-09-17). The native-calendar
-                // mirror/two-way/import cards left for the Calendar settings
-                // leaf on 2026-09-07, and the two calendar settings that
-                // stayed behind — the appointment → iPhone Calendar write
-                // gate and the festival advance-reminder days — followed
-                // them there. Neither was a medication setting: one is the
-                // EventKit write gate the Calendar leaf's mirror cards
-                // belong to, the other a Bikram Sambat notification rule
-                // that every other BS-calendar control already shares a
-                // screen with.
+                // The household's OWN times and the calendar-split
+                // history that used to read here are on the manage list's
+                // leaf now (`medicationTimesCard` arm above) — this arm
+                // is one medicine's form and nothing else.
             }
         }
         // A medicine's photos, edited by the family (medication-visual-aids
         // task, 2026-09-16) — the SAME editor the routine reminders use,
         // with the medication photo store instead of the routine one.
         // Edits persist as they happen, so dismissal only has to close the
-        // sheet: this leaf reads `coordinator.medicationEntries` in its
-        // body, so the row's glyph and the dose screens pick the change up
-        // on the next draw (the dose screen snapshots at fire/tap time).
+        // sheet. (The manage list presents the same editor for ITS rows;
+        // this arm keeps the shipped sheet for the shipped row builder.)
         .sheet(item: $photoEditorEntry) { entry in
             ReminderVisualAidEditorView(
                 entryId: entry.id,
@@ -4652,7 +4694,7 @@ struct MedicationScheduleSettingsView: View {
                             .font(.system(size: appearance.typography.captionPointSize))
                             .foregroundStyle(appearance.colors.textSecondary)
                     } else {
-                        Text(timesText(entry.scheduleTimes))
+                        Text(Self.timesText(entry.scheduleTimes))
                             .font(.system(size: appearance.typography.captionPointSize))
                             .foregroundStyle(appearance.colors.textSecondary)
                     }
@@ -5239,6 +5281,12 @@ struct MedicationScheduleSettingsView: View {
     /// the one writer, and its nil means the save landed, so the form
     /// resets to a fresh add shape. A rejection keeps everything the
     /// family entered, and the scan's photo.
+    ///
+    /// [T-023] The failure key is set BEFORE the success branch and the
+    /// host is told only after it: a failed persist (`settings.meds.saveFailed`
+    /// included) leaves the form up, with the family's values and the
+    /// failure line — never a reset that reads as success, and never a
+    /// dismissed cover over an entry that was not saved.
     private func save() {
         if let pendingKey = Self.pendingRowFailureKey(for: draft) {
             errorKey = pendingKey
@@ -5254,6 +5302,7 @@ struct MedicationScheduleSettingsView: View {
         errorKey = failure
         if failure == nil {
             resetToAddForm()
+            onSaveLanded?()
         }
     }
 
@@ -5917,7 +5966,13 @@ struct MedicationScheduleSettingsView: View {
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
-    private func timesText(_ times: [DateComponents]) -> String {
+    /// A legacy entry's stored clock times as one line ("8:00 AM · 8:00 PM").
+    ///
+    /// [T-023] Static (was an instance member): the manage list draws the
+    /// SAME stored-times line for the rows it renders, so the one
+    /// formatting lives on the one statics seam the T-018 conversion and
+    /// the catalog key maps already expose — a call, never a copy.
+    static func timesText(_ times: [DateComponents]) -> String {
         times
             .compactMap { components in
                 guard let hour = components.hour, let minute = components.minute else {

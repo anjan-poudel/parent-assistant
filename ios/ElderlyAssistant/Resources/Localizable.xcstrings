@@ -17927,6 +17927,23 @@
         }
       }
     },
+    "settings.meds.saveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not save the medication. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "औषधि राख्न सकिएन। कृपया फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
     "settings.meds.slotRequired": {
       "extractionState": "manual",
       "localizations": {

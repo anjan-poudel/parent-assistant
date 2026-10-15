@@ -195,8 +195,11 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// total 1,439 — so this baseline is 1,420. Re-measured at the T-012
     /// medication localisation landing (2026-10-15): the 42-key medication
     /// family (design-l2 C13) lands on this W0 tree — total 1,481 — so
-    /// this baseline is 1,462.
-    private static let dialogueBaselineKeyCount = 1_462
+    /// this baseline is 1,462. Re-measured at the T-023 medication
+    /// manage-list landing (2026-10-15): that unit adds one further key
+    /// (`settings.meds.saveFailed`, the honest failed-save line) —
+    /// total 1,482 — so this baseline is 1,463.
+    private static let dialogueBaselineKeyCount = 1_463
 
     /// The design-l2 §16 draft copy, verbatim, both languages. The owner
     /// copy review is a later step recorded in the plan; this pin makes
@@ -488,8 +491,11 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// total 1,439 — so this baseline is 1,434. Re-measured at the T-012
     /// medication localisation landing (2026-10-15): the 42-key medication
     /// family (design-l2 C13) lands on this W0 tree — total 1,481 — so
-    /// this baseline is 1,476.
-    private static let callingBaselineKeyCount = 1_476
+    /// this baseline is 1,476. Re-measured at the T-023 medication
+    /// manage-list landing (2026-10-15): that unit adds one further key
+    /// (`settings.meds.saveFailed`, the honest failed-save line) —
+    /// total 1,482 — so this baseline is 1,477.
+    private static let callingBaselineKeyCount = 1_477
 
     /// The authored copy, both languages. The design freezes the keys and
     /// the parameter contracts, not the wording (catalog-time copy), so
@@ -1044,8 +1050,11 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// this baseline is 1,416. Re-measured at the T-012 medication
     /// localisation landing (2026-10-15): the 42-key medication family
     /// (design-l2 C13) lands on this W0 tree — total 1,481 — so this
-    /// baseline is 1,458.
-    private static let familyContactsBaselineKeyCount = 1_458
+    /// baseline is 1,458. Re-measured at the T-023 medication manage-list
+    /// landing (2026-10-15): that unit adds one further key
+    /// (`settings.meds.saveFailed`, the honest failed-save line) —
+    /// total 1,482 — so this baseline is 1,459.
+    private static let familyContactsBaselineKeyCount = 1_459
 
     /// Scenario: All 21 keys exist in both languages — the behavioural
     /// half. Every key resolves through the shipped lproj bundles in both
@@ -1669,7 +1678,11 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// this W0 tree — total 1,481 — so the baseline is 1,463. The +18
     /// delta is the constant, not the absolute; a later landing on the
     /// same tree re-measures this pin deliberately rather than guessing.
-    private static let cloudChatBaselineKeyCount = 1_463
+    /// Re-measured at the T-023 medication manage-list landing
+    /// (2026-10-15): that unit adds one further key
+    /// (`settings.meds.saveFailed`, the honest failed-save line) —
+    /// total 1,482 — so the baseline is 1,464.
+    private static let cloudChatBaselineKeyCount = 1_464
 
     /// The design-l1 §17 copy as authored by this unit, verbatim, both
     /// languages. T-176 owns the final disclosure-copy review; this pin
@@ -2710,7 +2723,9 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// Medicine-times mapping section, the editor controls, the walk's
     /// sanctioned clarification forms and its honest ended line, the
     /// evidence lines, the two new significant-event family alert bodies,
-    /// and the three calendar significant-event phrases. The amended
+    /// and the three calendar significant-event phrases — plus the one
+    /// key the T-023 manage-list landing adds (`settings.meds.saveFailed`,
+    /// 43 total). The amended
     /// `calendarShare.consent.whoCanSee` is deliberately NOT here: it is a
     /// modified shipped key, not a new one, and its M-1 pin lives in
     /// `CalendarShareConsentCopyTests`.
@@ -2746,6 +2761,10 @@ final class L10nCatalogCoverageTests: XCTestCase {
         "settings.meds.keepTimes",
         "settings.meds.slotRequired",
         "meds.addDose",
+        // [T-023] The honest failed-save line (the manage-list landing
+        // adds this one key to the family — the persist tail's failure
+        // surface on the editor, the manage list and the voice path).
+        "settings.meds.saveFailed",
         // The walk: the sanctioned forms and the honest ended line (C4).
         "meds.ack.clarifyOne",
         "meds.ack.clarifyPair",
@@ -2775,9 +2794,10 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// Nepali household. The Nepali resolution is Devanagari (or `%@`
     /// only), the catalog convention every family in this suite carries.
     func testMedicationFamiliesResolveInBothLanguages() {
-        XCTAssertEqual(Self.medicationKeys.count, 42,
+        XCTAssertEqual(Self.medicationKeys.count, 43,
                        "the family is exactly the 42 keys design-l2 C13 adds "
-                       + "(25 `meds.*` + 12 `settings.meds.*` + 2 `family.*` "
+                       + "plus T-023's one failed-save key "
+                       + "(25 `meds.*` + 13 `settings.meds.*` + 2 `family.*` "
                        + "+ 3 `calendarShare.*`)")
 
         for key in Self.medicationKeys {

@@ -272,12 +272,20 @@ final class MedicationSchedulerTests: XCTestCase {
         mockStorage.shouldFailWrite = true
 
         let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
-        scheduler.loadSchedule(entries: [entry])
+        let loadResult = scheduler.loadSchedule(entries: [entry])
 
-        // scheduleAll restores from storage; with failing storage,
-        // pending reminders won't be persisted but scheduled reminders
-        // from loadSchedule should still have been written
+        // The write-first order ([T-023]): loadSchedule persists the
+        // entries BEFORE it adopts or arms anything, so with failing
+        // storage that first write is ATTEMPTED and refused — the attempt
+        // count below is the witness that persistence ran at all, and
+        // nothing was adopted or armed on top of a schedule that never
+        // reached the store.
         XCTAssertGreaterThanOrEqual(mockStorage.writeCallCount, 1)
+        XCTAssertFalse(loadResult,
+                       "the refused write is reported to the caller, never absorbed")
+        XCTAssertTrue(scheduler.medicationEntries().isEmpty,
+                      "nothing is adopted behind a refused write")
+        XCTAssertTrue(scheduler.pendingReminders.isEmpty)
     }
 
     // MARK: - Acknowledgement flow
@@ -692,28 +700,74 @@ final class MedicationSchedulerTests: XCTestCase {
     /// FR-MSR-022's other half, on the slot path: when the persistence the
     /// arm depends on fails, nothing is armed and the shipped failure
     /// surface reports it — resolution is NOT the thing that failed.
+    ///
+    /// [T-023] The write-first-or-fail tail moves the FIRST failure
+    /// point: with `shouldFailWrite` the ENTRIES write (the gate that
+    /// precedes adoption and arming) refuses before the reminder write
+    /// is ever reached, and the shipped `entry_persistence_failed`
+    /// reports it — nothing is adopted, not merely unarmed. Both halves
+    /// of the invariant stay covered: this half pins the entries failure
+    /// point; the second half below fails ONLY the reminder write and
+    /// keeps the shipped `reminder_persistence_failed` coverage.
     func testStorageFailureBlocksArming() {
         installMapping(MedicationSlotClock.default, into: mockStorage)
         let entry = makeSlotEntry(slot: .morning, mirrorHour: 8, mirrorMinute: 0)
         mockStorage.shouldFailWrite = true
 
-        scheduler.loadSchedule(entries: [entry])
+        XCTAssertFalse(scheduler.loadSchedule(entries: [entry]),
+                       "the failed persist is the caller's failure — never a silent success")
 
         XCTAssertEqual(mockAlarm.scheduleCallCount, 0,
                        "a storage failure on the reminder state arms no platform alarm")
         XCTAssertTrue(mockAlarm.scheduledReminders.isEmpty)
         XCTAssertTrue(mockObservability.emittedEvents.contains {
-            $0.eventType == "reminder_persistence_failed"
-        }, "the shipped failure path reports the write")
+            $0.eventType == "entry_persistence_failed"
+        }, "the shipped failure path reports the refused entries write, the gate write")
         XCTAssertFalse(mockObservability.emittedEvents.contains {
             $0.eventType == "medication_slot_unresolved"
         }, "the slot resolved — the WRITE is what failed")
+
+        // Nothing was adopted behind the refused write: no entry, no
+        // pending state — the previous (empty) schedule is intact.
+        XCTAssertTrue(scheduler.medicationEntries().isEmpty,
+                      "the schedule the store never received is not adopted in memory")
+        XCTAssertTrue(scheduler.pendingReminders.isEmpty)
 
         // The failing write left no payload behind, so nothing can be
         // resurrected at the next launch as if it had armed.
         if case .success = mockStorage.read(key: "medication.pending_reminders",
                                             type: [String: ScheduledReminder].self) {
             XCTFail("a failed write must not leave a reminder payload")
+        }
+        if case .success = mockStorage.read(key: "medication.entries",
+                                            type: [MedicationEntry].self) {
+            XCTFail("a failed write must not leave an entries payload")
+        }
+
+        // The reminder-write half (T-023): the entries write LANDS and
+        // only the pending-state write refuses — the shipped
+        // `reminder_persistence_failed` still reports it, and the
+        // unpersisted pending state still arms nothing.
+        mockObservability.emittedEvents.removeAll()
+        mockStorage.shouldFailWrite = false
+        mockStorage.failingWriteKeys = ["medication.pending_reminders"]
+
+        XCTAssertTrue(scheduler.loadSchedule(entries: [entry]),
+                      "the entries write lands this time — the failure points are distinct")
+        XCTAssertEqual(scheduler.medicationEntries().count, 1,
+                       "…and the entry is adopted (the persist it depends on succeeded)")
+        XCTAssertEqual(mockAlarm.scheduleCallCount, 0,
+                       "the unpersisted pending state arms no platform alarm")
+        XCTAssertTrue(mockAlarm.scheduledReminders.isEmpty)
+        XCTAssertTrue(mockObservability.emittedEvents.contains {
+            $0.eventType == "reminder_persistence_failed"
+        }, "the reminder-write failure keeps its shipped report")
+        XCTAssertFalse(mockObservability.emittedEvents.contains {
+            $0.eventType == "medication_slot_unresolved"
+        }, "the slot resolved — the WRITE is what failed")
+        if case .success = mockStorage.read(key: "medication.pending_reminders",
+                                            type: [String: ScheduledReminder].self) {
+            XCTFail("a failed reminder write must not leave a reminder payload")
         }
     }
 
