@@ -1,23 +1,23 @@
-# Design L1+L2 — Conversational Nepali Replies
+# Design L1 — Medication Schedules and Reminders
 
 | | |
 |---|---|
 | Task | `design-l1` (agent: `system-architect`), contract `architecture_l1` |
-| Feature | `conversational-nepali-replies`, branch `feat/conversational-nepali-replies` |
-| Worktree | `/Users/anjan/workspace/projects/elderly-ai-assistant-conversational-nepali-replies` |
-| Base | `22de9864` (scaffold base master `91deddca`; all anchors verified in the feature worktree) |
-| Date | 2026-10-14 |
-| Scope | Combined L1+L2 design of record — `design-l2` is folded into this task (and the `review-l2` gate dropped) per the owner directive 2026-10-14; the review chain is the lean chain recorded in §21 |
-| Inputs | project `constitution.md`; `specs/conversational-nepali-replies/constitution.md` (feature supplement: style-spec contract, runtime contract, model & training contract, OD-1..OD-5); `specs/define-requirements.md` + `specs/define-requirements/` (29 FR-CNR, 11 NFR-CNR, locked; `define-requirements.lock.yaml`); owner-approved proposal `docs/features/2026-10-14-conversational-nepali-replies-proposal.md`; workflow `specs/conversational-nepali-replies/workflow.yaml` (canonical; its `.ai-sdd/workflows/` mirror is kept byte-identical per the workflow header) |
-| OD status | OD-1, OD-2, OD-4, OD-5 resolved in this document (§5, §6, §7.2, §9). OD-3 is an owner question, recorded not decided (§19.2; feasibility statement §20). Decision register: §3 |
+| Feature | `medication-schedules-reminders`, branch `feat/medication-schedules-reminders` |
+| Worktree | `/Users/anjan/workspace/projects/elderly-ai-assistant-medication-schedules-reminders` |
+| Base | `61e6bc32` (scaffold base master `261aa862`; every seam below re-verified in this worktree) |
+| Date | 2026-10-15 |
+| Inputs | project `constitution.md`; `specs/medication-schedules-reminders/constitution.md` (feature supplement: five binding contracts, safety delta (a)–(d), Feature Constraints 1–10, Integration Surfaces, Open Decisions); `specs/define-requirements.md` + `specs/define-requirements/` (22 FR-MSR, 10 NFR-MSR, locked; `define-requirements.lock.yaml`); read-only: `requirements.md` (FR-026–FR-030, NFR-027), `requirements-dementia-supplement.md` (FR-D01–FR-D04e), `docs/medication-scheduler-implementation-plan.md`, `docs/family-notifier-e2e-implementation-plan.md`, `docs/2026-09-16-calendar-family-sharing-implementation-plan.md`; workflow `specs/medication-schedules-reminders/workflow.yaml` |
+| OD status | OD-1…OD-3 settled as requirements (not reopened). **OD-4…OD-8 resolved in this document at L1** (§3, §6, §7, §8, §9, §11); the component-level internals each resolution leaves open are carried to `design-l2` with explicit boundaries (§24) |
 
-Line numbers cited below are orientation anchors into base `22de9864`, not contracts; symbol
-names are the contracts. This document designs; it does not implement (no production code, no
-migrations, no seed-file content are written here). Every interface below specifies its error
-paths (agent principle: explicit error return types), its isolation (agent principle:
-concurrency explicit), and treats timeouts as configuration (§13) — no timeout literal is
-introduced. Scope is enforced by the requirements: every component named here traces to an
-FR-CNR/NFR-CNR in the Traceability mapping, and nothing else is added.
+Line numbers cited below are orientation anchors into base `61e6bc32`, not contracts; symbol
+names are the contracts. Every seam claim was re-checked against the worktree code before being
+relied on. This document designs; it does not implement (no production code, no migrations, no
+seed content). Every interface below specifies its error paths (agent principle: explicit error
+return types), its isolation (agent principle: concurrency explicit), and treats windows and
+timeouts as configuration (§15) — no timeout literal is introduced. Scope is enforced by the
+requirements: every component named here traces to an FR-MSR/NFR-MSR id in §22, and nothing
+else is added.
 
 ---
 
@@ -25,940 +25,1045 @@ FR-CNR/NFR-CNR in the Traceability mapping, and nothing else is added.
 
 ### 1. Scope and method
 
-This document — the combined L1+L2 design of record — fixes the architecture for the owner's complaint — replies are "too robotic and AI like
-and sometimes incorrect grammatically" — as bound by the feature constitution's four contracts
-(Style Spec / Single Source, Runtime, Model & Training, Safety & Compliance Delta) and the 29+11
-locked requirements. It translates the generic architect template to this codebase's idioms:
+This document fixes the architecture for the owner's seven-point brief — the medication entry
+model becomes quantity + time-of-day slot + before/after meal; each medication carries a purpose;
+scan-to-fill works beside manual entry; the elder acknowledges intake in natural voice naming
+medication and slot; a photo of the medication serves as intake evidence; caregivers are always
+notified of significant events; and the whole is fit for forgetful elderly users — as bound by
+the feature constitution's five contracts and the 22+10 locked requirements. It translates the
+generic architect template to this codebase's idioms:
 
-- **"REST API surface" → the in-process seam surface**: the small set of Swift types other
-  modules may call (`ChatResponding`, the routing decision, the consent gate, the grammar
-  guard's verdict, the sampling override), each with an explicit outcome/verdict type; plus the
-  file-level artifact seams on the training box (style spec, seed mirrors, corpus, gate
-  harness). The only cross-process surface this feature touches is the existing Gemini HTTPS
-  client (consent-gated; §8).
-- **"OpenAPI" → the fixed schemas of those seams**: the single-decode JSON contract is
-  UNCHANGED (FR-CNR-013) and is therefore not redesigned here; the new contract documents are
-  the grammar-guard verdict/event schema (§7.5), the consent record (§8.3), and the
-  training-run provenance manifest (§11.5) — each defined as a named, versioned shape.
-- **"Data model" → persisted schemas + run artifacts**: the new persisted datum is the
-  cloud-chat consent record (encrypted at rest, §12); everything else the feature adds is a
-  repo/run artifact (style spec, seed mirrors, corpus, `chat_golden.jsonl`, GGUF, catalog
-  entry), versioned per §6.1/§11.
-- **"Infrastructure topology" → the process/thread topology**: one on-device app process
-  (main-thread-confined coordinator state, the serial `inferenceQueue` decode lane, the
-  `LLMCore` actor, the speech path), the training box (anjan-ubuntu, 4090) as the P1 compute
-  surface, and the Gemini endpoint as the single external service. There is no server of ours,
-  no container, no Docker anywhere in this design.
-- **"Auth strategy" → the trust & consent model**: there are no accounts and no auth tokens to
-  invent. The relevant authorization surface is (a) the existing stack-level cloud consent
-  (`voiceEngineStack` / `cloudEnabled`) and (b) the NEW explicit cloud-chat consent in the
-  Open Decision 12 shape (§8.3), plus header-only provider-key handling (FR-CNR-012). The
-  on-device brain is the floor under every path.
+- **"REST API surface" → the in-process seam surface.** This is a single-process native iOS app.
+  The interfaces that matter are the Swift seams another module may call — the scheduler's
+  resolution/arming feed, the pure slot-clock resolver, the pure ack resolver, the evidence
+  store, the notifier payload builder, the calendar-share write path — each with an explicit
+  outcome/error type (§21). There is no server of ours and no REST API.
+- **"OpenAPI" → the fixed schemas of those seams**: the `MedicationEntry` persisted schema
+  (§20), the family-alert wire envelope (§9.4), the household slot-clock record (§4.2), and the
+  significant-event calendar entry shape (§9.3) — each a named, versioned shape.
+- **"Data model" → persisted schemas**: the extended `MedicationEntry`, the extended
+  `MedicationAdherenceLog`, the new household slot-clock record, the new evidence file store
+  (§20). No database; `EncryptedLocalStorage` keys are the store (§20).
+- **"Infrastructure topology" → the process/component topology**: one iOS app process; the
+  platform alarm scheduler (UNUserNotificationCenter) as the firing surface; on-device Vision OCR
+  and camera capture; the caregiver app push path (transport stubbed — surfaced honestly); the
+  shared family Google Calendar (existing OAuth session, consent-gated). No container, no
+  Docker, no server of ours (§21.4).
+- **"Auth strategy" → the trust & consent model**: no accounts and no auth tokens are
+  introduced. The relevant authorization surfaces are (a) the existing family-calendar share
+  consent (reused, not re-invented), (b) the existing per-contact caregiver-notify settings
+  (opt-in kept for the daily first-fire only), and (c) the existing cloud voice-stack consent,
+  which this feature neither widens nor touches — label and photo processing stay on-device
+  (§12, §21.5).
 
 ### 2. Design summary and invariant ledger
 
-Three legs, per the approved proposal: **P0 runtime** (persona upgrade both seams; chat-only
-fixed-seed temp 0.3; deterministic grammar guard at the polisher seam; cloud-first chat routing
-toggle with OD-12-shape consent; explicit Gemini chat temperature), **P1** (four-layer corpus,
-chat-aware v17 QLoRA variant of the existing suite, chat gates, catalog swap), **P2** (DPO,
-romanized chat, 4B tier, consent-based transcripts). The design keeps every leg inside the
-existing seams; the load-bearing invariants that must not move are:
+The revamp relocates two things — where an entry's clock time comes from, and how an
+acknowledgement finds its medication — and extends three surfaces — scan-to-fill, photo
+evidence, caregiver notification — while every safety-shaped component between them keeps its
+contract. The load-bearing invariants that must not move:
 
 | Invariant | Contract | Enforcement in this design |
 |---|---|---|
-| Command decode determinism (NO-GIBBERISH) | temp 0 + fixed seed 20_260_907 + GBNF `commandJSONSchema`, byte-for-byte | §5.2: per-turn re-assertion of temp 0 for command decodes; `OnDeviceSampling` members and handle creation untouched; test-visible decode-parameter record |
-| Single-decode schema | one JSON (`intent` + response/reply + `confidence`); unreadable output abstains | Unchanged (FR-CNR-013); chat lane answers reuse the `.chat` `InterpretedCommand` shape; no new decode stage, no JSON repair |
-| Router ladder + emergency gate | semantics exactly as shipped; emergency recall 1.00 is a gate | §8.2: chat lane diverts only `ChatIntentClassifier == .chat` turns ahead of the selector; no ladder/cascade edits; DV-4 |
-| STT pipeline | untouched; transcript regression = stop-and-investigate | Not in the change surface; the chat lane and guard act on post-transcript text only (§8.2 note) |
-| Intent prompt bytes | `IntentPrompt.build` text + `seeds/prompt_template.txt` + `IntentPromptTests` pin byte-identical | §10: command decode's assembled prompt (incl. its system slot) stays byte-identical; only the chat shape's system slot changes |
-| One brain resident | no second model instance; zero feature-attributable jetsam | §5.2 rejects a shape-specific handle; §11.6 v17 is a swap of the same resident |
-| Log/telemetry content discipline | no conversation content, transcript, or key material in logs; classification-only events | §7.5, §16: new events carry enums/counts only; release gate covers the new paths |
+| Acknowledgement safety sequence | acknowledgement → FR-D01 challenge → FR-D03 double-dose → record, order never bypassed | §7.4: resolution only replaces *which* entry the shipped sequence runs for; `acknowledgeWithConfirmation` (:241) and its first-call-issues-challenge behaviour are untouched; no new recording path exists |
+| Persistence before alarm; re-arm on relaunch | FR-029 / NFR-027, root constitution | §10: a reminder persists its resolved exact `scheduledAt` before arming (`createPendingReminders` :707 persists then arms :733–744); restore/re-arm paths unchanged |
+| Deterministic, total slot→clock mapping | safety delta (b), FR-MSR-002 | §4.3: pure exhaustive function over a three-value slot enum; failure is typed and fail-closed — no determinate time ⇒ no armed reminder, error surfaced |
+| OCR never auto-binds | safety delta (a), FR-MSR-006 | §6: candidates only; the sole bind remains the family's save through `MedicationEditorDraft` → `AppCoordinator.addMedication` (:11634); every new scan entry point routes through the same gate |
+| Photo never creates a record | safety delta (c), FR-MSR-013 | §8: evidence attaches only inside `finalizeAcknowledgement` (:453) or to an already-recorded log; no path from capture to record |
+| PII-free wire | safety delta (d), FR-MSR-017 | §9.4: envelope `{v, alert_type, timestamp, entry_id_hash}` — no names, doses, or titles; `FamilyAlertContext` titles stay in memory only |
+| Existing escalation semantics | FR-MSR-019, root FR-026–FR-028 | §10: `EscalationEngine` (:29) untouched — it still derives ack deadline, re-fire schedule, escalation deadline and missed verdict from the one resolved `scheduledTime`; a future dose stays future on restore (:191–198) |
+| Dementia machinery | FR-MSR-020 | §8.5, §7.4: `ConfirmationChallenge`, `DoubleDoseDetector`, `PhotoVerifier` preserved; extension only, removal forbidden |
+| LLM independence | NFR-MSR-001 | §7, §13: the resolver is pure Swift string/enum logic in the medication module; the ack path runs on the keyword safety net ahead of the LLM; the scheduler compilation unit gains no LLM symbol |
+| Migration without loss | NFR-MSR-006 | §11: optional fields with custom-decoder defaults (the `init(from:)` :114 precedent); legacy `scheduleTimes` readable and representable; no automatic backfill |
+| Devanagari grapheme behaviour | NFR-MSR-007 | §16.3: pinned behaviour untouched; new vocabulary reuses the shipped substring conventions without "fixing" them |
+| Mic continuity around acks | FR-MSR-012, [ACK-MIC-CONTINUITY] | §7.5: new ack shapes ride the existing speech/fast-lane seams; no new session teardown between acknowledgement and listening |
 
-### 3. Decision register
+### 3. Decision register — OD-4 … OD-8 resolved at L1
 
-| OD | Question | Decision (this document) | Section |
-|---|---|---|---|
-| OD-1 | Chat temperature value, sampling plumbing, GBNF interplay | Chat temperature exactly 0.3 (`ChatSampling.chatTemperature`), applied as a per-turn, awaited, actor-ordered override on the single resident handle; command turns re-assert temp 0; a shape-specific second handle is rejected (NFR-CNR-003) | 5 |
-| OD-2 | Style-spec artifact format and four-consumer wiring | One artifact `tools/train-intent/seeds/nepali-chat-style-spec` (prose rules + machine YAML blocks); personas and guard hold drift-checked byte-mirrors; the Python consumers load it directly | 6 |
-| OD-3 | P0 landing path (owner question — NOT decided here) | Recorded verbatim, pending owner answer (Slack `q-ask-2f6a8883-804e-4ac5-9a58-c0762f257074`, 2026-10-14); the P0 slice stays independently landable | 19.2 |
-| OD-4 | Particles-budget enforcement mechanics | Particle set = the spec lexicon with longest-match-first tokenization; budget fixed at 1; enforced in the runtime guard AND the eval rubric over the post-polisher text | 7.2 |
-| OD-5 | Gemini chat temperature value | Exactly 0.3 (parity with the on-device value); chat-scoped optional `GenerationConfig.temperature`; search grounding off for chat | 9 |
+| OD | Question | L1 decision (this document) | Carried to design-l2 (boundaries in §24) | Section |
+|---|---|---|---|---|
+| OD-1 | Slot defaults / configurability | Settled upstream (FR-MSR-002): 08:00 / 13:00 / 19:00, family-configurable. The control shape is designed here (§4.2, §16.1) | — | 4.2 |
+| OD-2 | Quantity representation | Settled upstream (FR-MSR-003): amount + unit composed into `doseDescription`; detector unchanged. Composition rule designed here (§4.6) | — | 4.6 |
+| OD-3 | Significant set / "always" | Settled upstream (FR-MSR-015/016/017): missed + double-dose + intake-recorded + escalation-started, unconditional; first-fire stays opt-in; transport scope honest | — | 9 |
+| OD-4 | Scan-to-fill confirm step / partial fill | **Resolved**: the human-confirm step IS the family's review-and-save through the draft (nothing writes a store on scan); extraction surface stays the conservative parser's; partial-fill rules = blank-only text, label schedule wins, empty read changes nothing; scanned schedule items map to slot selections through a fixed documented table (§6) | Exact scan UI affordance placement; spoken partial-read copy; parser table extensions if any (must keep "refuses to guess") | 6 |
+| OD-5 | Legacy entries / backfill | **Resolved**: no automatic slot inference, ever; legacy entries render and behave exactly as today; the only time→slot conversion is family-directed inside an explicit edit, with exact-equality preselection only; new-entry surface is slot-only; `.weekly`/`.custom` remain decodable and out of the slot model (§11) | Editor presentation details of the switch; list-row rendering layout | 11 |
+| OD-6 | Ack-with-slot resolution mechanics | **Resolved**: pure deterministic resolver over the pending set by what was said (name keys via `MedicationVoiceVocabulary`, then slot; meal is context only); ambiguity walks the sanctioned "did you mean X / X or Y" forms in a fixed order; simple acks resolve only when unambiguous; sequence order preserved (§7) | Probe-state representation, exact slot/meal word lists, exact copy strings, per-event observability field names | 7 |
+| OD-7 | Calendar channel mechanism | **Resolved**: the existing consent-gated schedule mirror stays as is, and the three at-risk significant events (missed, possible double dose, escalation started) additionally surface as one-off entries on the same shared family calendar through the same service and consent gate; intake-recorded does not write calendar entries; push wire stays PII-free (§9.3) | One-off entry bookkeeping/lifecycle, entry title copy, invitee-derivation helper shape | 9.3 |
+| OD-8 | Photo-evidence mechanism / recipient | **Resolved**: on-device-only evidence variant; capture context (the reminder/record surface the capture starts from) determines the entry deterministically — no image classification anywhere; the record always flows through the acknowledgement chain; the caregiver is the judge, the app only captures/attaches/retains and reports state honestly; the dementia mechanism is untouched (§8) | Evidence store internals, capture-surface placement, copy strings, compression implementation (reuse the FR-D04b cap) | 8 |
 
-Items left to implementation/plan-tasks are listed in Deferred work (after the design body).
+The five resolutions are design-level choices inside the contracts the requirements fix — no
+owner-level decision is taken here. Each L2 hand-off in §24 names what design-l2 must decide and
+what it may not violate.
+
+---
 
 ## Architecture
 
-### 4. Runtime topology and chat data flow
+### 4. Entry model and the slot-to-clock mapping (FR-MSR-001, FR-MSR-002, FR-MSR-003)
 
-```
-                            ┌──────────────────────────────────────────────────────────┐
-                            │ IntentRouter.interpret (unchanged layers above chat)     │
-                            │  cache → cloud preparse → [NEW] chat lane → selector/    │
-                            │  legacy ladders (commands only, byte-identical)          │
-                            └───────────────┬──────────────────────────┬───────────────┘
-                                            │ classifier == .chat      │ otherwise
-                                            ▼                          ▼ (commands, untouched)
-                          ┌────────────────────────────────┐   ┌──────────────────────────┐
-                          │ CloudChatRouting.decide(...)   │   │ InterpreterSelector /    │
-                          │  consent × online × key × cost │   │ legacy ladder / cascade  │
-                          └───────┬─────────────────┬──────┘   └──────────────────────────┘
-                     .cloud (granted)          .local (or fallback)
-                                  │                 │
-                 ┌────────────────▼───┐   ┌─────────▼─────────────────────────────┐
-                 │ GeminiCommand-     │   │ interpretLocalLadder chat pre-check   │
-                 │ Interpreter        │   │ (existing): ChatIntentClassifier →    │
-                 │ respondToChat      │   │ LocalBrainChain.respondToChat →       │
-                 │ (ChatResponding)   │   │ LlamaCommandInterpreter.runTurn(.chat)│
-                 │ buildChat +        │   │  ┌────────────────────────────────┐   │
-                 │  chat replyPersona │   │  │ ResponseShape .chat:           │   │
-                 │  + GenerationConfig│   │  │  schema chatJSONSchema,        │   │
-                 │  temp (OD-5)       │   │  │  persona system slot,          │   │
-                 └────────┬───────────┘   │  │  temp ChatSampling.chatTemperature │
-                          │               │  │  via awaited core.setParameters│   │
-                          │               │  └────────────┬───────────────────┘   │
-                          │               │   one resident LLM handle (actor)      │
-                          │               └──────────────┬─────────────────────────┘
-                          │                              ▼
-                          │              CommandRouter.dispatchInterpreted  case .chat
-                          │              (chatConfidenceFloor guard, unchanged)
-                          └──────────────┬───────────────┘
-                                         ▼
-                    ┌───────────────────────────────────────────────┐
-                    │ [NEW] NepaliGrammarGuard.verdict(spokenText)  │  pure, total, no IO
-                    │  pass → speak (byte-identical to polished)    │
-                    │  flag → escalate (cloud chat, consented) or   │
-                    │         safe template (localized)             │
-                    │  unavailable → today's behaviour (honest)     │
-                    └──────────────────┬────────────────────────────┘
-                                       ▼
-                       ReplySanityGate → SpokenReplyPolisher.polish → speak
-                       (+ observability: reply_grammar_flag, cloud_chat_*)
+#### 4.1 The entry model
 
-     Training box (P1):  Layer builders → filters (spec-driven) → teacher-GEC → 70/30 mix
-                         → QLoRA (existing recipe) → chat gates + full regression harness
-                         → provenance manifest → GGUF → NEW ModelCatalog entry (gated swap)
-
-     Consent/UI:  CloudChatConsentGate (encrypted record) + ConsentPrompt (first cloud need)
-                  + status-slot cloud indicator + Settings/voice revocation (§8, §18)
-```
-
-Data flow for a chat turn (online, consented): transcript (existing STT path, untouched) →
-`IntentRouter.interpret` → cache/preparse miss → chat lane → `CloudChatRouting.decide` →
-`.cloud` → `GeminiCommandInterpreter.respondToChat` (buildChat + chat persona + explicit
-temperature) → `InterpretedCommand(.chat)` → `CommandRouter` dispatch (floor check) →
-grammar guard on the final spoken text → speak. Any cloud failure/timeout degrades to the
-local chat pre-check in the same turn (§8.8). Offline/declined/revoked: the local chat path
-directly, with cloud escalation for that turn disabled (§8.2). Command and emergency turns
-never enter this lane.
-
-Data flow for a chat turn (local): unchanged pre-check path (`interpretLocalLadder` :259-291)
-except the decode shape now carries the persona system slot and the chat temperature (§5, §10).
-The reply flows through the same dispatch → guard → polisher → speak seam.
-
-### 5. OD-1 — Chat decode sampling (resolved)
-
-**Decision: chat temperature = exactly `0.3`** (a new named constant
-`ChatSampling.chatTemperature: Float = 0.3`; NOT a mutation of `OnDeviceSampling`), applied as
-a **per-turn, actor-ordered override on the single resident handle** — not a shape-specific
-second handle.
-
-#### 5.1 Value and constants
-
-- `0.3` is the reviewed value (requirement says "~0.3"; a constant satisfies "~" by fixing
-  it). Changing it later is a reviewed change to a recorded constant, not a tunable.
-- New constant lives in a new small type (`ChatSampling`) so `OnDeviceSampling`
-  (LlamaCommandInterpreter.swift:404-417: `fixedSeed = 20_260_907`, `temperature = 0`,
-  topK 40, topP 0.95, repeatPenalty 1.2, lookback 64) is not moved, reparameterised or
-  bypassed (FR-CNR-004). Seed stays `OnDeviceSampling.fixedSeed` — one fixed seed for both
-  shapes.
-- The handle creation call (`LLM(from:...seed: OnDeviceSampling.fixedSeed ... temp:
-  OnDeviceSampling.temperature ...)`, :1391-1398) is untouched.
-
-#### 5.2 Plumbing (why per-turn override; handles, sampling order)
-
-- `ResponseShape` (:870-901) gains `var temperature: Float { .command →
-  OnDeviceSampling.temperature; .chat → ChatSampling.chatTemperature }` and `runInference`
-  receives the shape (it already receives the shape's schema, :1416-1417).
-- Inside the generation task, immediately before the existing
-  `llm.core.generateWithConstraints(from:jsonSchema:)` call (:1508-1510):
-  `try? await llm.core.setParameters(temp: shape.temperature)`.
-- **Determinism argument (why this is safe):** `LLMCore` is an actor (LLM.swift:34);
-  `makeConstrainedSampler` (:711-720) builds the per-call chain
-  `penalties → grammar → top_k → top_p → temp → dist(seed)` from the CURRENT handle fields at
-  generation time; the awaited `setParameters` (:114-125) and the generation run on the same
-  actor with no suspension between them inside the actor's serialized execution, and the whole
-  turn is additionally serialized on `inferenceQueue` (label `llama.command`, :969). No other
-  code path can interleave a field change mid-decode. The wrapper's fire-and-forget
-  `LLM.temp` setter is NOT used (ordering with `generateWithConstraints` would not be
-  guaranteed).
-- **Every turn asserts its shape's temperature before decoding** — the handle persists across
-  turns, so the command shape re-asserts temp 0 rather than assuming `OnDeviceSampling`'s
-  initial value survives a preceding chat turn. With temp 0 the draw is deterministic
-  (argmax under `dist`), the seed is unchanged, and the assembled command prompt is
-  byte-identical (§10), so command outputs stay byte-identical to today (FR-CNR-004).
-- **Rejected: a shape-specific second handle.** A second `LLM` instance doubles resident
-  weights (two Q4_K_M copies) and duplicate decode state: it violates NFR-CNR-003's "exactly
-  one brain model resident" and the recorded [VOICE-OOM] bug class ("a second 3.4 GB load is
-  the bug class"). Rejected also: per-turn handle re-creation (model load per turn — latency
-  and memory churn).
-- **Test seam:** `runInference`'s override seam stays; a read-only
-  `lastDecodeParameters: (temperature: Float, seed: UInt32, schema: String)` record is set on
-  every path (override included via an added `generateOverride(prompt, schema, temperature)`
-  variant, default compatible) so tests can assert "chat decode requested 0.3" and "command
-  decode requested 0" without inspecting llama.cpp.
-
-#### 5.3 GBNF interplay (honest)
-
-Grammar masking happens in the sampler chain BEFORE top_k/top_p/temp → dist: the masked
-distribution contains only grammar-valid tokens, so at temp 0.3 the output is still one JSON
-object (`intent` = "chat" only — `LlamaGrammar.chatJSONSchema` :350-360 pins the enum —
-`reply`, `confidence`); structural validity is preserved, only token CHOICE varies. An output
-that still fails to parse abstains (nil) exactly as today (FR-CNR-003/013). There is no
-configuration where temp > 0 with GBNF produces malformed JSON by construction; the honest
-residual is content-quality variance, not structure.
-
-#### 5.4 Reproducibility contract (NFR-CNR-001)
-
-- Same transcript + same state + same device tier + same build → byte-identical reply, 100% of
-  trials (the fixed seed makes the `dist` draw sequence identical for identical distributions;
-  cross-session holds because nothing seed- or state-relevant is cached per session).
-- **Explicit non-claim (see §20):** byte-identity across DIFFERENT device tiers or different
-  builds is not claimed (Metal backend float differences can shift the last bits of logits).
-  NFR-CNR-001 measures per tier and build; the requirement is met as written.
-- A random/time-derived seed remains a defect: the seed is `OnDeviceSampling.fixedSeed`; the
-  only per-shape variability is the reviewed temperature constant.
-- Cloud path determinism (NFR-CNR-001 last bullet) is "identical configuration": the chat
-  request is issued with the recorded `GenerationConfig` (fixed temperature, fixed
-  responseMimeType) — the provider remains a nondeterministic service and the requirement is
-  met by fixing the request parameters (§9).
-
-#### 5.5 Error paths and isolation
-
-| Failure | Outcome | Consumer |
-|---|---|---|
-| `setParameters` fails (cannot throw in practice — `try?` guards authoring drift) | decode proceeds with current handle fields; `lastDecodeParameters` records the requested value, and the mismatch is detectable in tests | turn still decoded; classification-only event `chat_sampling_override_failed` |
-| Timeout (existing `config.timeoutSeconds`, :1517) | unchanged: `llm.stop()`, `inference_empty_output`/`inference_timeout`, completion(nil) | router fallback as today |
-| Empty/failed decode | unchanged: abstain (nil) | `chat_abstained` path as today |
-
-Isolation: one actor (`LLMCore`) + one serial queue (`inferenceQueue`) serialize all decodes;
-no concurrent access to sampler fields is possible (§14).
-
-### 6. OD-2 — The style spec and its four consumers (resolved)
-
-**Decision: one extensionless artifact `tools/train-intent/seeds/nepali-chat-style-spec` in a
-hybrid format — prose rule text (human authority) PLUS a machine-readable YAML block
-(executable authority) — with four consumers that either load it directly (Python) or hold a
-mechanically drift-checked byte-mirror of its named blocks (Swift). No consumer re-authors a
-rule; the drift checker fails the build on any divergence.**
-
-#### 6.1 Artifact and format
-
-- Path is exactly `tools/train-intent/seeds/nepali-chat-style-spec` (as FR-CNR-001 fixes it;
-  no extension added). Content: a YAML document (parseable by `PyYAML`, already a training-suite
-  dependency) whose sections carry both `description` (prose, human) and machine fields. No
-  seed CONTENT is authored in this design document; the sections and their consumers are the
-  contract here.
-- Sections (contractual names): `register` (rules; `honorific_pairs`: familiar→honorific verb
-  forms, e.g. भन्यो→भन्नुभयो; `forbidden_address_forms`: तिमी family), `particles` (lexicon
-  with longest-match units — है, नि, ल, ला, अनि, हुन्छ नि + morphological variants;
-  `budget: 1`), `sentence_shape` (`max_sentences: 2`, SOV, one idea per sentence),
-  `small_talk` (repertoire topics), `code_switch` (health/tech noun renderings),
-  `ai_isms` (blacklist: list/markdown patterns, "म एक AI हुँ", canned service phrases,
-  translation-ese stems, over-politeness stacking), `persona_clause` (the canonical SHORT
-  rule clause to be embedded byte-identically by both personas), `guard_checks` (the executable
-  inputs for §7: the lexicons/patterns the guard and the eval checkers share).
-- Versioned: the spec carries a `version` field; the sha256 of the file is recorded in the
-  training-run evidence and in the mirror-check output.
-
-#### 6.2 The four consumers, exactly
-
-| Consumer | Mechanism | Where |
-|---|---|---|
-| Personas (`chatSystemPrompt` chat-side system slot; cloud `replyPersona`) | Both embed the spec's `persona_clause` byte-identically (each with its own minimal transport wrapper). `check-prompt-mirror.py` extracts both literals and fails if the clause bytes differ from the spec | §10; FR-CNR-002 |
-| Data-generation / teacher prompts (all four layers) | `src/style_spec.py` loads the spec at generation time and renders rules into every layer-builder and teacher-post-edit prompt. No prompt text is authored beside the spec | §11.1; FR-CNR-017 |
-| Eval rubric (chat gates) | `eval_chat_gates.py` executes the spec's machine blocks: the honorific-agreement checker and the no-AI-ism checker ARE lexicon/pattern runs over the spec; the LLM-judge prompt's rubric criteria are rendered from the spec's rule text | §11.4; FR-CNR-020 |
-| Grammar guard (on-device) | Swift holds `NepaliGrammarGuard`'s lexicons/patterns as compiled constants that mirror the spec's `guard_checks` block; `check-prompt-mirror.py` (extended) verifies byte-equality of each named block; a mismatch fails the check | §7; FR-CNR-005 |
-
-#### 6.3 No-fork enforcement (NFR-CNR-005's verifiable property)
-
-- `check-prompt-mirror.py` gains three checks: (a) `chat_prompt_template.txt` ↔
-  `IntentPrompt.buildChat` (existing 4-placeholder mechanism, 3 placeholders here:
-  `{language_hint}`, `{address_as_clause}`, `{transcript}`); (b) persona clause ↔ spec
-  `persona_clause` (both personas); (c) guard lexicon blocks ↔ spec `guard_checks`. Each
-  check exits non-zero on drift and runs in the same gate surface as the existing intent-prompt
-  check. The Python side (`src/style_spec.py`) loads the spec directly, so Python consumers
-  cannot hold copies.
-- "The style spec's discipline is equivalent to the seed mirror" is thus mechanically
-  verified, not reviewed by eye: a consumer block that stops matching the spec is a build
-  failure, in the same change (FR-CNR-001 property 1; NFR-CNR-005 last bullet).
-
-### 7. Grammar guard contract (FR-CNR-005/006/007, OD-4 included)
-
-#### 7.1 Verdict type and seam position
-
-New file `Services/Voice/NepaliGrammarGuard.swift`; a pure, total, context-free type (the
-`SpokenReplyPolisher` doctrine, `SpokenReplyPolisher.swift:21-26`, is inherited: deterministic,
-idempotent, **grammar stays the models' job** — the guard verifies, never rewrites):
+`MedicationEntry` (:26) grows three optional fields; `scheduleTimes` stays exactly as shipped:
 
 ```swift
-enum GrammarCheckClass: String, CaseIterable {   // FR-CNR-007 permitted field
-    case honorificAgreement, devanagariPurity, danglingParticle
+enum MedicationSlot: String, Codable, CaseIterable { case morning, afternoon, evening }
+enum MealRelation: String, Codable { case beforeMeal, afterMeal }
+struct MedicationQuantity: Codable, Equatable {
+    let amount: Int    // positive integer, validated at the editor
+    let unit: String   // MedicationDoseUnit raw value, or the family's free text
 }
-enum GrammarGuardVerdict: Equatable {
-    case pass
-    case flag(classes: [GrammarCheckClass])   // sorted, classification only
-    case unavailable(reason: String)          // reason code; see 7.4
+enum MedicationDoseUnit: String, Codable, CaseIterable {
+    case tablet, capsule, milliliter, teaspoon, drop, puff, sachet
 }
-static func verdict(spokenText: String, locale: String) -> GrammarGuardVerdict
 ```
 
-- The guard returns a verdict, never text. There is NO code path in which guard output
-  substitutes model words (FR-CNR-005 "no rewrite path exists").
-- **Where it runs:** `CommandRouter.dispatchInterpreted`'s `.chat` case (:4490-4531) — after
-  the `chatConfidenceFloor` check (unchanged), AFTER `SpokenReplyPolisher.polish` for the
-  candidate text is computed but BEFORE `speak`; i.e. the verdict is computed over the exact
-  text that would be spoken. A `.pass` speaks that text byte-identically (the guard changes
-  nothing). Both local and cloud chat replies arrive at this single dispatch case, so "every
-  model reply passes it — local and cloud alike" holds structurally (FR-CNR-005 property 3).
-  The one call-site location of `polish` (:4557) is not duplicated; the guard wraps the
-  `deliverModelReply` sequence from the dispatch level where the transcript is still in scope
-  (needed for escalation, §7.3).
-- **Idempotent/reproducible:** pure function of (text, locale, compiled lexicons) — same input,
-  same verdict, run to run; re-running changes nothing (FR-CNR-005 property 4).
+`MedicationEntry` additions (all optional, all `decodeIfPresent` with defaults, CodingKeys
+extended — the shipped migration shape at :114–131):
+`quantity: MedicationQuantity?`, `slot: MedicationSlot?`, `mealRelation: MealRelation?`.
 
-#### 7.2 Checks (deterministic; the machine inputs are the spec's `guard_checks`)
+The family-facing editor (`MedicationEditorDraft` :19, `SettingsView` `addForm` :4640) gains
+three controls and keeps every shipped draft rule:
 
-| Class | Rule (executable) | Bound |
-|---|---|---|
-| `honorificAgreement` | Flag if the reply contains any `forbidden_address_forms` token (तिमी family) as a word; flag if it contains any `non_honorific_verb_forms` standalone token whose honorific pair exists in `honorific_pairs` (the familiar finite forms a reply to the elder must not use) | Lexicon-bounded: forms outside the curated pairs are NOT caught (honest limit, §20) |
-| `devanagariPurity` | For a Nepali session: flag if the reply contains Latin-letter runs other than tokens in the spec's (empty-by-default) latin allowlist; flag mixed-script tokens. Code-switched health/tech nouns are Devanagari renderings (प्रेसर, डाक्टर, …) and pass | Script classification only; not a spell checker |
-| `danglingParticle` | Tokenize on whitespace/punctuation; longest-match the particle lexicon first ("हुन्छ नि" counts once). Flag if count > budget (1) — the OD-4 decision below — or if a particle token is dangling: the first token of the reply, or immediately preceded only by a sentence terminator/punctuation (no clause to attach to) | Budget ceiling is fixed at 1 (FR-CNR-001); dangling = the positional definition above |
+- **Quantity**: a positive-integer amount control plus a unit picker (the seven units above,
+  plus a custom free-text option modelled on the purpose chips — a unit string that matches no
+  enum case is stored verbatim, exactly the shipped `purpose` chip-or-free-text precedent).
+- **Slot**: three large slot options (morning / afternoon / evening), each rendered with the
+  household-mapped clock time as read-only context (e.g. "Morning · 8:00 am"). The family never
+  types or computes a clock time.
+- **Meal relation**: before meal / after meal, attached to the slot as context.
 
-**OD-4 decision (particle-budget enforcement):** the particle SET is the spec's lexicon
-(है, नि, ल, ला, अनि, हुन्छ नि + variants) with longest-match-first tokenization so multi-word
-units count once and the contained particle is not double-counted. Enforcement is **both**:
-(a) the grammar guard flags >1 occurrences (and dangling particles) at runtime — the reply is
-not spoken (§7.3); and (b) the eval rubric enforces it: the deterministic eval checker runs
-the SAME lexicon over `chat_golden.jsonl` outputs, and the LLM-judge rubric includes "particles
-within budget" as a scored criterion derived from the spec. One rule, two execution sites.
-Interaction with the ≤2-sentence ceiling: the guard verdict is computed over the FINAL
-(post-polisher) text — brevity trimming happens first, so a trimmed-away second sentence
-cannot flag and a surviving one does; two sentences with one particle each = 2 > 1 → flag.
-Code-switched sentences: English/Latin tokens are never particles; a particle following an
-English noun ("प्रेसर छ, नि?") still counts by token rule (no noun-class exception — simpler and
-testable; if this proves too strict in device testing it is a spec change, not a code
-exception). The polisher's brevity profile remains the downstream backstop (unchanged).
+The draft rules bound by constitution Entry-Model property 7 are unchanged: text pre-fill into
+blank fields only, the label's stated schedule wins, an empty read changes nothing,
+`storedTimes` stays `[.hour, .minute]` (:143), and `canSave` still requires a name (:149). The
+save gate produces a slot-model entry; a legacy entry keeps loading and behaving (§11).
 
-#### 7.3 Flag outcome — honest degradation (FR-CNR-006)
+The voice `set_reminder` path (`addVoiceReminder` :12939) keeps constructing the legacy shape
+(raw `scheduleTimes`, no slot): the elder's one-off voice reminder is not the family-facing
+entry surface, and the model keeps that shape first-class. Recorded, not silently changed.
 
-On `.flag`, the flagged text is never spoken. Resolution order, exactly two outcomes:
+#### 4.2 The household mapping and its store
 
-1. **Escalate**: if the flagged reply came from the LOCAL shape AND `CloudChatRouting.decide`
-   yields `.cloud` for this turn (consent granted, online, key, cost — §8.1), issue the cloud
-   chat call for the SAME turn's transcript (`respondToChat`), whose reply is itself run
-   through the guard before speaking (FR-CNR-005 property 3). If that reply passes, speak it.
-   If the cloud call fails/timeouts or its reply also flags, go to (2). This is a second,
-   smaller cloud egress surface and obeys the identical consent/disclosure rules (FR-CNR-009
-   property 5).
-2. **Safe template**: speak a short, grammatical, register-correct localized fallback
-   (safe-template set, en+ne, authored to the spec, deterministic selection keyed by check
-   class; exact copy authored at implementation — see Deferred work). Chat is never lost — the turn is always answered.
-
-A flagged CLOUD reply takes only outcome (2) (escalating a cloud reply back to the same cloud
-would repeat the failure; documented asymmetry, consistent with FR-CNR-006's "flagged local
-reply" scenarios).
-
-#### 7.4 Guard-failure honesty (FR-CNR-006 property "a guard that fails to run")
-
-The guard is pure and total, so a runtime failure is structurally unreachable; the
-`.unavailable(reason)` verdict exists as the contract's third state (e.g. a future
-lexicon-loading change). On `.unavailable`: the turn proceeds under today's behaviour (the
-polished text is spoken), and a `reply_grammar_flag` event with outcome `degraded` is emitted
-so "a guard that is not running is visible rather than silently absent" (FR-CNR-007). It never
-blocks speech with an error and never reports a success it did not verify.
-
-#### 7.5 Telemetry (FR-CNR-007; NFR-CNR-007)
-
-Event `reply_grammar_flag` on the existing observability bus. Permitted fields ONLY: event
-kind; `path` (on-device/cloud); `check` (space-joined `GrammarCheckClass` raw values; empty for
-degraded); `outcome` (`escalated` / `safeTemplate` / `degraded` / `notApplicable` — the last
-for `.pass`, or omitted entirely for pass per the schema frozen before implement);
-counters; timestamps. Forbidden: transcript, reply text, identity, health values, contacts,
-profile, key material. Emitted for local, cloud and degraded cases. Schema frozen before
-implement; adding a content-bearing field is a defect (NFR-CNR-007 property 4); the advisory
-security pass reviews it.
-
-### 8. Cloud-first chat routing toggle (the OD-12-shape amendment)
-
-#### 8.1 The routing decision (single chokepoint)
-
-New pure type `CloudChatRouting`:
+NEW persisted record `MedicationSlotClock` — the household's slot→clock mapping, one per
+installation/profile, stored through the existing `EncryptedLocalStorage` seam under a new key
+(the scheduler's own store keys :60–62 are the precedent):
 
 ```swift
-enum ChatRoute: Equatable {
-    case cloud                                   // egress allowed this turn
-    case local(reason: LocalReason)              // fail-closed; no egress
-    enum LocalReason: String { case consentNotRecorded, consentDenied, consentRevoked,
-                                    consentUnreadable, offline, keyMissing, costBlocked }
+struct TimeOfDay: Codable, Equatable { let hour: Int; let minute: Int }
+
+struct MedicationSlotClock: Codable, Equatable {
+    let morning: TimeOfDay     // default 08:00
+    let afternoon: TimeOfDay   // default 13:00
+    let evening: TimeOfDay     // default 19:00
+
+    static let `default` = ... // 08:00 / 13:00 / 19:00 (OD-1)
 }
-static func decide(consent: CloudChatConsentGate.Decision,
-                   online: Bool,
-                   keyConfigured: Bool,
-                   costAllows: Bool) -> ChatRoute
+enum SlotClockError: Error, Equatable { case indeterminate(slot: MedicationSlot) }
 ```
 
-- The ONLY yes is `consent == .granted` AND online AND key AND cost → `.cloud`. Everything
-  else is `.local(reason)` — fail-closed, one function, exhaustively unit-tested (16 cells).
-- This is "enforced at the routing decision, not merely in the UI" (FR-CNR-009): the gate's
-  decision is read per turn at this single point (wired as closures like `geminiKeyConfigured`
-  :107-108; nil closure reads as not-granted — every pre-feature construction site and test
-  keeps compiling and selects local, honestly).
-- `online` uses the existing reachability discipline (LiveTranslate's `NetworkReachability`
-  pattern; provided as a closure so tests inject it).
+- **Custom decode, defaults not failures** (the house migration rule): a record with a missing
+  key decodes that slot as the default; the record's absence decodes as `.default`. Never lose a
+  household's schedule to a missing key.
+- **Present-but-invalid values are indeterminate, not repaired**: a stored hour/minute outside
+  0–23 / 0–59 is a corrupt value and must NOT be silently clamped into a guessed time — that
+  slot resolves as `.indeterminate` and the failure path below applies. Determinism means "the
+  same inputs always produce the same times", never "anything produces some time".
+- **One writer**: the medication settings surface (settings leaf, §16.1). Writes validate
+  ranges before persisting; a failed write surfaces and does not take effect (§14).
+- **Control shape (design-l1 owns this per OD-1)**: a "Medicine times" section in the medication
+  settings leaf — three rows (Morning / Afternoon / Evening), each with a large tappable
+  time control at 44pt+/18pt+, plus a "reset to default times" action. Changes persist through
+  the store and immediately trigger the guarded re-arm (§4.5).
 
-#### 8.2 Insertion point and the no-ladder-change proof (FR-CNR-008, FR-CNR-014)
+The meal relation is context, not a clock (OD-1): it renders in spoken copy and on the dose
+screen and never produces a second firing.
 
-In `IntentRouter.interpret` (:167-223), AFTER the cache layer and the cloud-preparse layer and
-BEFORE the `cloudFirstEnabled && cloudEnabled` selector block (:197):
+#### 4.3 Determinism and totality
 
+The mapping is a pure function of `(entry.slot, householdMapping)`:
+
+- **Total over the creatable entry space.** The creatable space is {morning, afternoon,
+  evening} — an exhaustive three-case enum resolved by a function with no default case — so
+  every creatable entry resolves under every valid household mapping. There is no input for
+  which the function "has no answer" by omission.
+- **The one failure is typed and fail-closed.** `.indeterminate(slot:)` arises only from a
+  corrupt stored mapping value (§4.2). On failure: **no reminder is armed for the affected
+  entries**, an observability event (`medication_slot_unresolved`, entry_id_hash only) is
+  emitted, and the condition surfaces on the settings surface as an error. No implicit or
+  guessed clock time is ever used — this is FR-MSR-002's failure scenario by construction.
+- **No hidden state.** The resolver reads only the entry's slot and the persisted mapping;
+  identical inputs always produce identical `TimeOfDay` outputs. Nothing is cached that could
+  drift (the mapping is read at arming time through the injected store).
+- **Exact-time scheduling preserved.** Resolution produces hour/minute `DateComponents`, the
+  same shape `createPendingReminders` (:707) and `nextOccurrence` (:747) already consume;
+  `UNCalendarNotificationTrigger`-based exact-time arming (`UNNotificationScheduler` :37) is
+  untouched, so the resolved time is the schedule of record and NFR-MSR-010's 30-second firing
+  envelope is unaffected (no fire-time resolution step is introduced).
+
+#### 4.4 The resolved-time feed into arming
+
+`MedicationScheduler` gains one seam:
+
+```swift
+func resolvedScheduleTimes(for entry: MedicationEntry) -> Result<[DateComponents], SlotClockError>
 ```
-if ChatIntentClassifier.classify(transcript) == .chat {
-    switch CloudChatRouting.decide(...) {
-    case .cloud:  interpretCloudChat(...)      // new: cloud ChatResponding
-    case .local:  interpretLocalLadder(..., chatEgressDisabled: true)
-    }
-    return
+
+- `entry.slot == nil` (legacy shape) → `.success(entry.scheduleTimes)` verbatim — bit-for-bit
+  today's behaviour.
+- `entry.slot != nil` → the mapping's `TimeOfDay` for that slot, as `[DateComponents]` with
+  `.hour`/`.minute` only (the model's local-time convention).
+
+`createPendingReminders` (:707) consumes this seam in place of reading `entry.scheduleTimes`
+directly. On `.failure`, the entry is skipped with the surfaced error (§4.3); on `.success` the
+existing pipeline runs byte-identically: reminder constructed with the resolved `scheduledAt`,
+escalation deadline derived from it, engines made per reminder, `persistReminders()` before the
+first `alarmScheduler.scheduleReminder` call. Everything downstream — `EscalationEngine`
+(:29), `PlatformAlarmScheduler` (:5), `DoubleDoseDetector` (:21), the adherence log — keeps
+reading one concrete `Date` and is untouched.
+
+Because slots map to exactly one time and there is no second firing for the meal relation, a
+slot entry produces one pending reminder per day per slot — the same cardinality the shipped
+editor produced for one `DatePicker` row, so `activeReminderId(for:)` (:773) and the per-reminder
+engine keying are unchanged.
+
+#### 4.5 Mapping changes and the guarded re-arm
+
+When the family saves a changed mapping, reminders must re-resolve deterministically (FR-MSR-002
+scenario: re-armed ⇒ 07:30). The shipped `loadSchedule` (:180) cannot be reused for this:
+it clears `pendingRemindersList` and `engines` wholesale, which would reset a live escalation
+(refire counts, deadlines) and could re-create an already-fired dose as "next occurrence"
+(tomorrow). The design therefore requires a dedicated pass:
+
+**`rearmForSlotClockChange()` (new scheduler API), semantics:**
+1. For each entry, re-resolve times under the new mapping (§4.4).
+2. Pending reminders with `lastFiredAt != nil` (the dose rang; escalation has begun) keep their
+   persisted `scheduledAt`, engine and state — a mapping change never moves a live escalation.
+3. Un-fired pending reminders whose resolution changed are replaced, using the standard creation
+   rules (`nextOccurrence` from now), engines re-made, persistence before arming.
+4. Entries whose resolution fails arm nothing and surface the error (§4.3).
+5. The pass runs through `persistReminders()` before any `alarmScheduler` call — persistence
+   before alarm holds on this path too (FR-MSR-022).
+
+Callers: the mapping-save action (§4.2) and nothing else. App launch keeps the shipped
+`scheduleAll()` → `restoreState`/`rearmAllPendingReminders` path, which restores persisted
+resolved times verbatim.
+
+#### 4.6 Quantity and the composed dose line (FR-MSR-003, OD-2)
+
+`doseDescription` remains the one rendered dose line — the field the fired-dose screen, the
+briefing and the editor's scanned strength already consume (:30; `MedicationEditorDraft`
+`storedStrength` :132). Composition happens at save through one pure function:
+
+```swift
+enum DoseLine {
+    static func compose(quantity: MedicationQuantity?, doseText: String, locale: Locale) -> String
 }
 ```
 
-- **Only `.chat`-classified turns are diverted.** `ChatIntentClassifier` is the existing
-  conservative exact-table classifier (any content cue → `.command`); every command, ladder,
-  cascade and emergency utterance takes the identical code path as before (FR-CNR-014). The
-  classifier table is NOT widened by this feature.
-- **Why a `.chat` turn never reaches the command ladder's cloud escalation**: for a
-  chat-classified turn the turn must resolve through chat surfaces only — cloud chat, else
-  local chat, else the existing local ladder with cloud escalation disabled FOR THAT TURN.
-  Otherwise the FR-CNR-009 failure scenario ("consent declined/revoked → no chat content
-  leaves the device") could be violated by a chat turn's abstention escalating to the cloud
-  command path. The cost is confined to utterances byte-equal to the closed small-talk table
-  (genuinely small talk by construction); a false `.command` costs nothing and a false `.chat`
-  can only divert an exact table hit — the classifier's own documented trade-off, preserved.
-  `chatEgressDisabled` is a parameter of the LOCAL lane for chat-classified turns only; the
-  lane's ladder body is otherwise untouched.
-- **Emergency isolation:** the chat lane performs no model-independent delay and no new
-  blocking call; the emergency gate's precedence is untouched (FR-CNR-014); DV-4 re-verifies
-  recall on device. A cloud chat attempt cannot block the emergency path: it runs on the
-  router/existing async seams, and the emergency module's isolation from LLM availability is
-  preserved.
-- **Cloud preparse note:** the preparse layer above the chat lane is produced by the Gemini
-  speech stack's collapsed transcription call (GeminiSpeechRecognizer): on a Gemini-stack
-  device the transcript already travels to the provider for transcription under the
-  STACK-level consent (the recorded OD-12 transcription exception). This feature neither
-  widens that path nor claims to remove it; the chat consent gate governs the REPLY surfaces
-  (routing + escalation). Recorded explicitly in §20 — a silent drop it is not. On the
-  on-device speech stack, no chat content leaves at all without chat consent.
+Rules (single, documented, deterministic):
+1. `quantity` set, dose text blank → `"<amount> <localized unit>"` (e.g. "1 tablet";
+   unit label resolved through the catalog when `unit` matches a `MedicationDoseUnit`, the
+   family's words verbatim otherwise).
+2. `quantity` set, dose text non-blank (e.g. a scanned strength "500 mg") → the composed line
+   gains the text after a fixed separator (`"1 tablet, 500 mg"`); exact separator and copy at
+   implementation. Nothing the family saw in the form is dropped.
+3. `quantity` nil → the dose text verbatim (today's path; "half tablet" and every legacy entry).
+4. Both empty → empty string (today's behaviour for a dose-less entry).
 
-#### 8.3 Consent gate (OD-12 shape — binding)
+Downstream consumers change not at all — they keep reading `doseDescription`. The editor keeps
+its strength/free-text input (the scan target per FR-MSR-005) and adds the structured controls;
+the two together follow the purpose-draft shape (structured selection pre-fills, typed text
+overrides the structured rendering only through rule 2/3 in this subsection — the exact interaction is a
+component detail for design-l2, §24).
 
-`CloudChatConsentGate`, mirroring `LiveTranslateConsentGate`'s shape as the implementation
-precedent (fail-closed decision, one writer, revoke-verify, disclosure version):
+`DoubleDoseDetector.check(medicationEntryId:windowHours:adherenceLog:now:)` (:21) is untouched:
+entry-scoped and window-scoped, no dose or quantity input. Partial-vs-full dose detection stays
+out of scope (FR-MSR-003) — a recorded dose blocks a second attempt for the window regardless of
+quantity, exactly as shipped.
 
-- `enum Decision: Equatable { granted, notRecorded, denied, unreadable }` with
-  `var allowsEgress: Bool` (only `.granted`). `.unreadable` is fail-closed.
-- `struct ConsentRecord: Codable, Equatable { granted: Bool, recordedAt: Date,
-  disclosureVersion: String }` stored via the existing encrypted-at-rest consent pattern
-  (Keychain-backed storage; the store seam reuses the mechanism the LiveTranslate consent record uses — reuse, not a fork; see Deferred work).
-- One writer (`grant()`, `revoke()` guarded by an NSLock); revoke clears in-memory state
-  BEFORE storage; a write that did not take effect is surfaced as a failure, never as success.
-- A record whose `disclosureVersion` differs from the current constant is treated as
-  `.notRecorded` (re-disclosure after a copy change — the LiveTranslate pattern).
-- Consent is the ELDER's act: the prompt (§8.4) is presented at the first cloud chat need and
-  answerable by voice (yes/no via the existing spoken-confirmation capture) or touch.
+### 5. Purpose at entry (FR-MSR-004)
 
-#### 8.4 Disclosure (plain language; final copy at implementation — Deferred work)
+Purpose builds on the shipped machinery — `MedicationEntry.purpose` (:50), the ten chips and
+`MedicationPurposeDraft`, `MedicationVoiceVocabulary.voiceKeys(for:)` (:114),
+`MedicationPurposeLookupService` — and adds nothing new. The one design-level question the
+requirement leaves open is decided here:
 
-At the first moment a chat turn WOULD route to the cloud: a blocking prompt (no timeout, no
-auto-dismiss — mirroring `ConsentPromptController`'s doctrine that auto-dismissal is implicit
-consent): "conversation goes to an internet service to be answered; everything else stays on
-this phone; you can stop it anytime". Until answered, the turn is answered locally (never
-content sent, never a dropped turn — chat is never blocked). Declined → recorded `denied`;
-no re-prompt within the session. Copy + indicator UX are reviewed before the first App Store
-submission (FR-CNR-009; OD-12/13 review clause), and the feature-level exception is recorded
-so the root constitution's exceptions list can be amended at final sign-off.
+**Purpose remains OPTIONAL at entry.** Rationale: no behaviour may depend on purpose text being
+present (FR-MSR-004); pre-purpose payloads keep loading (they do, via the shipped
+`decodeIfPresent` :129); requiring it would add friction to a hurried caregiver editing flow and
+risks junk values that then enter the voice vocabulary. The chip step, the lookup and the
+pre-fill-into-free-text rule (`applyPurposeLookup` :103) are unchanged. Purpose is not scannable
+from a label (FR-MSR-005) — the lookup stays the separate, gated suggestion path.
 
-#### 8.5 Visible indicator
+### 6. Scan-to-fill (FR-MSR-005, FR-MSR-006, OD-4)
 
-- While cloud chat is active the status slot shows a persistent badge (existing status-slot
-  surface; no new screen): presented from the routing decision of a cloud turn until its reply
-  is spoken, and it also reflects the enabled state in Settings. "Present for the whole time
-  conversation content is going to the cloud — not a one-time toast" (FR-CNR-009/ NFR-CNR-009:
-  100% of cloud-active chat turns, DV-2).
-- Spoken form: a one-per-session short spoken notice at the first cloud-active turn in the
-  user's language (final copy at implementation — Deferred work; NFR-CNR-010); the badge remains visible regardless.
+**Resolution of OD-4 — the confirm step is fixed as the family's review-and-save, and nothing
+else.**
 
-#### 8.6 Revocation (voice-first, NFR-CNR-009)
+- **Additive path.** The scan button, `MedicationLabelScanner` (`start`/`finish`, spoken
+  outcomes, metadata-free `medication_label_scan` events) and `MedicationEditorDraft.applyScan`
+  (:69) remain the scanner surface. A household that never scans keeps today's exact manual
+  path.
+- **Bounded extraction surface (unchanged).** Name, strength, schedule (time words; the
+  `1-0-1` day pattern; count-based defaults), frequency guess — all from the conservative
+  `MedicationLabelParser` (:86), which refuses to guess. Purpose is not scannable.
+- **Human confirmation before binding (safety delta (a)).** Nothing writes a store on scan: the
+  parser's output is a `MedicationLabelCandidate` (:41), `applyScan` mutates only the in-memory
+  draft, and the entry is created solely by the family's save
+  (`SettingsView` :4673 → `AppCoordinator.addMedication` :11634 → `loadSchedule`). **Any new scan
+  entry point must route through the same draft-and-save gate; a scan path that writes an entry
+  or arms a reminder directly is a defect of this design, not a feature.**
+- **Partial-fill rules (unchanged).** Text fills blank fields only; the label's stated schedule
+  replaces the form's (including family-set values — the rule and its rationale stand); an empty
+  read changes nothing and is spoken ("could not read it"); the photo is never discarded
+  (`.scanned` carries the image even when text did not come).
+- **Scanned schedule → slot selections (new, bounded).** With the entry surface now slot-based,
+  the parser's schedule output must land in slot selections. The parser's schedule values are
+  already slot-shaped conventions — time words (बिहान / सकाळ / morning → 8:00; दिउँसो /
+  afternoon → 13:00; बेलुका / evening → 19:00; other table entries) and the `1-0-1` day-pattern
+  slots (morning / midday / night), see `timeWordHours` :203 and `slotHours` :213. A new pure
+  conversion (`ScannedSchedule.slots(from:)`) maps each parsed item to a slot through a fixed,
+  documented table (morning → morning; midday/noon/afternoon → afternoon; evening/night →
+  evening), applied as **candidate selections the family sees and can change before Save**,
+  under the existing "the label's stated schedule wins" rule. The conversion uses the parser's
+  own convention hours, never the household mapping (the label says "morning", not "07:30");
+  an item with no slot counterpart (possible only if the parser's tables change) fills nothing —
+  if no item converts, the schedule is left unchanged, mirroring "a candidate that stated no
+  schedule changes nothing". Meal relation is not scannable and stays family-set. The conversion
+  is deterministic and testable; it does not extend the parser's extraction surface.
+- **Outcomes stay observable and metadata-free** (no image, no recognized text).
 
-- Settings row (family/caregiver paths) toggles cloud chat off; wired through the gate's one
-  writer.
-- Elder voice path: one small deterministic keyword-rule family added to the existing keyword
-  safety net (KeywordIntentRule — no model involvement, no NLU change): (a) revoke cloud chat,
-  (b) spoken state query ("is the cloud on?"). Exact phrases: implementation (Deferred work). This is what
-  makes "consenting, revoking, learning whether the cloud is active" voice-reachable — no
-  new behaviour is touch-only (NFR-CNR-009 property 1).
-- Revocation takes effect at the NEXT turn's routing decision (read per turn — no cached
-  route), returns chat to the on-device brain, and loses no chat functionality.
+### 7. Voice acknowledgement with slot (FR-MSR-007 … FR-MSR-012, OD-6)
 
-#### 8.7 Egress scope (FR-CNR-010)
+#### 7.1 Gate order and vocabulary
 
-Exactly one payload shape: the chat request carries the sanitised transcript (the user's own
-utterance) and the chat template/context needed to answer that turn. No health data, contacts,
-family data, profile content, device identifiers, or recordings are attached (the
-`GeminiClient` builder is the chokepoint; a test asserts the request body contains only the
-composed prompt text). Emergency and command content never travel this lane (§8.2). The
-escalation path has the identical scope (§7.3).
+The shipped gate order is preserved exactly, and the new utterance shapes slot into it:
 
-#### 8.8 Degradation (FR-CNR-008)
+1. Emergency phrases (`routeSafetyNet` :2478 first check) — untouched.
+2. **Refusal-first denial guard** (`medicationDenialPhrases` :2425, checked everywhere the ack
+   list is used, :2464, :2491) — untouched and still first: a denial never falls through to an
+   acknowledgement (FR-MSR-011), including mixed denial-with-ack-token utterances, clarification
+   answers and challenge answers.
+3. **Acknowledgement gate** — `isExplicitMedicationAcknowledgement` (:2460) unchanged as the
+   entry condition into the ack flow. The owner's utterance shape ("I have taken X for morning
+   before meal" / "औषधि खाएँ … बिहान") already matches via the shipped phrase/token lists
+   ("taken", "औषधि खाएँ"…); the lists may only be extended **additively** (a phrase list
+   addition), never reordered around the denial guard.
+4. Resolution and the safety sequence (§7.2–7.4) — replacing only the `oldestPendingReminderEntryId()`
+   (:12929) selection step inside `handleMedicationAcknowledgement` (:5381).
+5. Correction rescue (`attemptCorrectionRescue` :2519) — untouchable order: it runs on the
+   unrecognised path only, after the ack vocabulary; a medication acknowledgement is never
+   captured by it, and a general correction utterance is never captured as an ack (FR-MSR-008
+   coexistence scenario). Within an open confirmation/clarification window the existing
+   "follow-up block asks `isExplicitMedicationAcknowledgement` first" rule (:1191) continues to
+   hold.
 
-Cloud-chat attempt failure/timeout (existing `GeminiClient` timeout config), offline,
-rate/cost block: fall back IN THE SAME TURN to the local chat path (`interpretLocalLadder`
-chat pre-check), emit `cloud_chat_fallback` (classification + reason only), and answer —
-no user-visible error where a reply is expected, no dropped turn. The fallback decision is
-bounded by the cloud attempt's own budget (NFR-CNR-002): worst case = local envelope + the
-bounded attempt, never an indefinite wait. The on-device engine remains a first-class peer:
-with cloud chat off the assistant is fully functional.
+#### 7.2 The candidate seam and the resolver
 
-#### 8.9 Reuse, don't fork
+`AppCoordinator` exposes one read seam (the `oldestPendingReminderEntryId` precedent, :12929):
 
-The lane uses the existing `GeminiClient`, the existing router readiness inputs
-(`geminiKeyConfigured`, `geminiCostAllows`), the existing `GeminiCommandInterpreter` object
-(it gains a `ChatResponding` conformance), and the existing dispatch/speech seam. No parallel
-cloud client, no second provider integration.
+```swift
+struct MedicationAckCandidate {
+    let entryId: UUID
+    let scheduledAt: Date          // the reminder's resolved time — the ordering key
+    let fired: Bool                // lastFiredAt != nil (the reminder has rung)
+    let slot: MedicationSlot?      // nil for legacy-shape entries
+    let voiceKeys: [String]        // MedicationVoiceVocabulary.voiceKeys(for: entry), canonical
+    let medicationName: String     // for the sanctioned copy only
+}
+func medicationAckCandidates() -> [MedicationAckCandidate]  // one per pending reminder
+```
 
-### 9. OD-5 — Explicit Gemini chat temperature (resolved)
+NEW pure type `MedicationAckResolver` in the medication module (no LLM dependency — NFR-MSR-001;
+deterministic; no clock reads beyond the inputs):
 
-**Decision: cloud chat temperature = `0.3`** — parity with the on-device value, one reviewed
-number for the same style contract.
+```swift
+enum AckResolution: Equatable {
+    case resolved(entryId: UUID)
+    case ambiguous(ordered: [UUID])       // ≥2 candidates; walk order fixed here
+    case noMatch(orderedPending: [UUID])  // something was said that matches no pending entry
+    case nothingPending
+}
+enum MedicationAckResolver {
+    static func resolve(transcript: String, candidates: [MedicationAckCandidate]) -> AckResolution
+}
+```
 
-- `GeminiRequest.GenerationConfig` (GeminiClient.swift:659-661) gains an optional
-  `temperature: Double?`; `generateJSON` (:168-180) passes it through. ONLY the new chat call
-  site sets it (`GeminiChatConfig.temperature: Double = 0.3`, a new named constant). Every
-  other call site (voice transcription, translation tier, teacher tooling, the command
-  `interpret` path) sends today's shape with no sampling parameter — chat-scoped (FR-CNR-011).
-- Rationale: 0.3 is the same escape from greedy cliché as the on-device side; identical values
-  keep the two paths from drifting in perceived register (FR-CNR-002); a provider default is
-  replaced by a stated, reviewed value visible in code and in this record.
-- The chat request additionally sets search grounding OFF for the chat call (design decision,
-  rationale: chat answers come from the persona, not web retrieval; keeps the request
-  minimal and the latency tail tighter; flagged for confirmation in the advisory security pass (final-sign-off) —
-  it changes no egress scope of user content, which remains the transcript only). The command
-  `interpret` call's grounding behavior is untouched.
-- Cloud determinism is "identical configuration" (NFR-CNR-001): fixed temperature + fixed
-  responseMimeType are recorded; the service itself is nondeterministic by nature and the
-  requirement is met as written.
+**Resolution algorithm (deterministic, conservative, by what was said):**
 
-### 10. Personas and prompt discipline (FR-CNR-002, FR-CNR-023)
+1. **Parse the utterance**: name-key matches = candidate entries whose canonical `voiceKeys`
+   appear in the canonical transcript (substring containment — the shipped vocabulary convention
+   `MedicationVoiceVocabulary.canonical` :104 and the parser's Devanagari-fusion convention);
+   optional slot word from a closed two-language list (morning/afternoon/evening in the elder's
+   languages); optional meal word (before/after meal). The meal relation is **context only — it
+   never filters and never discriminates** (OD-1: meal is not a clock; the named medication and
+   slot are the strong signals).
+2. **Name first.** If ≥1 name-key match:
+   - if a slot was named and any name-match has that slot → keep the name-matches carrying that
+     slot; if a slot was named and none of the name-matches carries it → this is a conflict
+     (one of the two statements is wrong) → **ambiguous** walk over the name-matches;
+   - exactly one → `resolved`; several → `ambiguous`.
+   Resolution is by what the elder said — never by firing order or `scheduledAt` preference — so
+   naming a medication resolves to that medication's entry even when another medication's
+   reminder rang first (FR-MSR-007's stated motivation).
+3. **Then slot.** No name match, slot named: candidates = pending entries whose slot equals the
+   named slot. 0 → `noMatch` (honest: nothing pending at that slot — never a fall-through to
+   other slots); 1 → `resolved`; ≥2 → `ambiguous`. Legacy entries (slot nil) never match a slot
+   word — no inference over their raw times.
+4. **Then a simple acknowledgement.** No name, no slot: candidates = the **fired** pending
+   reminders if any (`fired == true` — "taken" with no further information refers to what rang),
+   else all pending (early acknowledgement of a not-yet-rung reminder — the shipped
+   single-pending behaviour). 1 → `resolved`; ≥2 → `ambiguous`; 0 → `nothingPending`.
+5. `noMatch` carries the full ordered pending set so the router can run the sanctioned fallback
+   question below.
 
-- The local persona is applied ONLY to the chat shape: `ResponseShape` gains a per-shape
-  system slot — `.command` keeps the CURRENT `chatSystemPrompt` bytes untouched (the
-  command decode's assembled prompt, system included, stays byte-identical → command outputs
-  stay byte-identical at temp 0), `.chat` uses a NEW short system text built from the spec's
-  `persona_clause` (concrete rules — register/तपाईं+honorific, particles ≤1, code-switch
-  nouns, forbidden AI-isms, ≤2 sentences — not abstractions like "warm grandchild").
-- The cloud persona `replyPersona` (:35-44) is rewritten from the SAME `persona_clause`
-  (byte-identical clause inside its wrapper) so the two paths cannot drift (FR-CNR-002); both
-  remain declarative and short.
-- Budget: the fully assembled chat prompt (chat system text + `buildChat` template + turn)
-  tokenises ≤1,024; enforced by the extended `IntentPromptTests` ceiling; no few-shot
-  exemplars anywhere in the device prompt (FR-CNR-023; NFR-CNR-004 — headroom shortfalls are
-  reported, never solved by truncating the turn or by making the cloud the offline answer).
-- Seed mirrors: `tools/train-intent/seeds/chat_prompt_template.txt` byte-mirrors
-  `IntentPrompt.buildChat` and lands in the SAME change as any `buildChat` edit; in P0 the
-  mirror is created against the CURRENT `buildChat` text (no text change required for P0),
-  and the extended `check-prompt-mirror.py` enforces it from then on. `IntentPrompt.build` +
-  `seeds/prompt_template.txt` + the pin remain byte-identical (sha256-verified by the existing
-  check plus a new equality assertion in the mirror report).
+**Behaviour change recorded (conservative, per FR-MSR-007):** today a simple run of "taken" with
+several pending reminders silently picks the oldest. Under this design, several pending
+reminders make a simple acknowledgement **ambiguous** (clarification) unless exactly one has
+rung. The requirement's own failure scenario demands this ("no medication is chosen by firing
+order"); the single-pending case (the scenario where today's behaviour was correct) is
+byte-identical.
 
-### 11. Training-suite extension — v17 (P1)
+#### 7.3 The clarification walk — sanctioned copy only
 
-#### 11.1 Corpus (FR-CNR-016, FR-CNR-017)
+`AckResolution.ambiguous` and `noMatch` enter the clarification walk: coordinator state
+`pendingAckClarification` (the `pendingNavigationWalk` precedent — a small ordered candidate
+list plus a cursor), reflected in `isAwaitingConfirmation` (:12916) so the router's yes/no
+parsing stays in force while it is open. The walk:
 
-- `src/build_chat_corpus.py` builds the four layers per the proposal, each shaped by
-  `style_spec.py`-rendered prompt text:
-  L1 native Nepali (IndicDialogue, call-center transcription sample via the existing Whisper
-  pipeline, Devanagari-Ecommerce Apache-2.0; optional nepali-sft sets teacher-cleaned),
-  L2 translated+post-edited English dialogue (research-only set and commercial-safe set),
-  L3 teacher-generated synthetic elderly-care dialogues (~10–20k turns),
-  L4 claw-back (golden_corpus.jsonl, emergency_nearmiss.jsonl, abstain/honesty examples,
-  light instruction data, STT-noised turns at the suite's existing 60% rate via `stt_noise.py`).
-- Every assistant turn is teacher-GEC'd (existing teacher config, `gemini-2.5-flash-lite`)
-  before admission — grammar comes from the data.
-- Target ~30–60k clean turns post-filter; mixture 70% conversation / 30% claw-back (the
-  intent-regression mitigation, not optional).
+- **Order**: fixed at entry — by `scheduledAt`, then canonical name, then id. Same input ⇒ same
+  order ⇒ same question (FR-MSR-008 determinism scenario).
+- **Two candidates**: first question uses the pair form — "did you mean X or Y?" (the sanctioned
+  copy). A response naming one of the pair (name containment) resolves to it; a plain "yes"
+  stays ambiguous and the walk falls to the single-candidate form below at cursor 0; a plain
+  "no" ends the walk with nothing recorded.
+- **One candidate (and `noMatch` with a single pending)**: "did you mean X?" — the sanctioned
+  single form. "Yes" resolves to X and proceeds to the safety sequence; "no" ends with nothing
+  recorded.
+- **Three or more candidates**: single-candidate form from cursor 0 onward, one candidate per
+  question — **never a numbered list, never a leading question** (owner copy rule; the forms
+  permitted are exactly "did you mean X" and "X or Y").
+- **Barge-in**: a response that is itself an explicit acknowledgement re-enters resolution from
+  scratch (the existing precedence: an ack is never consumed as a yes/no answer, :1191).
+- **Expiry**: the walk is open for a configurable response window (§15), default equal to the
+  existing challenge timeout (30 s, `ConfirmationChallenge.challengeTimeoutSeconds` :21);
+  on expiry the walk ends, nothing is recorded, and the reminders stay pending untouched —
+  escalation continues on its own clock.
+- **Outcome**: every ending other than a resolved "yes" records nothing and says so honestly.
+  The copy strings are L10n keys in both languages; the sanctioned forms are the only shapes.
 
-#### 11.2 Filters (admission gates on data, source = spec)
+The same conservative discipline governs the photo path (§8.3) — one clarification mechanism,
+not two.
 
-Honorific-agreement checker and AI-ism blacklist (the same spec machine blocks the guard/eval
-execute — one rule), length filter, and a held-out dedupe/near-duplicate check against
-`chat_golden.jsonl` BEFORE admission (a golden leak invalidates the run — FR-CNR-019).
-Human spot-check of L1/L2 post-edit outputs.
+#### 7.4 The preserved safety sequence and recording (FR-MSR-009, FR-MSR-010)
 
-#### 11.3 Config and recipe (FR-CNR-016)
+On `.resolved(entryId)`, the router calls the shipped flow for that entry:
+`coordinator.startVoiceAckConfirmation(for: entryId)` (:12657) → challenge prompt spoken →
+next-transcript handling (`handleMedicationConfirmation` :12647) → `acknowledgeWithConfirmation`
+(:241) → `ConfirmationChallenge.userResponds` → `.recordTaken` → `checkDoubleDoseAndRecord`
+(:499, `DoubleDoseDetector`) → `finalizeAcknowledgement` (:453). Nothing in this chain is
+modified — resolution only decides **which** entry the chain runs for. The first-call-issues-
+challenge behaviour (:254) is untouched, so no path — resolved directly, clarified, or
+photo-initiated — can record without the challenge; a "No" or a timeout re-enters escalation
+with FR-D02 semantics (:272, `reEnterEscalation` :589), locale-aware prompts preserved.
 
-`config.yaml` gains an additive `chat:` variant section (enable flag, mixture ratios, layer
-paths, filters); with the flag absent, the existing pipeline runs byte-identically (v14/v16
-runs reproducible). Recipe unchanged: QLoRA r=16, α=32, lr ~1e-4, 2–3 epochs, 1024 seq,
-Q4_K_M export; base Qwen3-1.7B device default (extended-tokenizer base preferred); 4B only
-via the per-device resolver (P2).
+**Recording (FR-MSR-010):** unchanged shape — `MedicationAdherenceLog` carrying the reminder's
+`scheduledAt` (the slot-mapped exact time) and `acknowledgedAt` (:460–471), persisted before
+runtime cleanup (:476–489). Only a fully confirmed dose records as taken.
 
-#### 11.4 Gate-harness extension (FR-CNR-020, FR-CNR-021; NFR-CNR-008)
+#### 7.5 Mic continuity, refusal-first, correction coexistence (FR-MSR-011, FR-MSR-012)
 
-`eval_chat_gates.py` runs over `chat_golden.jsonl`: deterministic honorific-agreement pass
-rate and no-AI-ism pass rate (spec lexicons), plus an LLM-judge mean (naturalness/grammar/
-warmth/brevity) using the recorded judge (Gemini, temperature 0, model version + prompt +
-rubric recorded with the result — the `stt_judge_eval` judge discipline applied). Thresholds:
-≥0.98, ≥0.98, ≥4/5. The existing `eval_golden.py` regression harness (emergency recall 1.00,
-abstention ≥0.90, closed-intent ≥0.95, calibration ±0.10, near-miss ≥0.98, side-effect
-precision ≥0.97, latency p50 ≤1.0 s) re-runs unchanged over the SAME candidate. Red gate =
-stop; the swap does not ship; the shortfall is reported to the owner (never absorbed by
-loosening).
+- **Mic continuity**: the new ack-with-slot and clarification utterances enter the same turn
+  pipeline and the same speech seams as today's acks; the [ACK-MIC-CONTINUITY] property
+  (`AckFastLane.swift` header; pre-acks play outside the listening seam, `speakPreAck` :5529)
+  is preserved — no new synthesis-and-teardown step is introduced between the acknowledgement
+  and listening, and the fast-lane suite (`AckFastLaneTests`) extends to the new shapes. The
+  challenge and clarification prompts are spoken through the same `speak` seam that already
+  speaks the shipped challenge prompt (confirmation challenges deliberately never use the
+  pre-ack, :5512).
+- **Refusal-first**: §7.1 step 2.
+- **Correction coexistence**: §7.1 step 5.
 
-#### 11.5 Provenance manifest (FR-CNR-018)
+#### 7.6 Honest outcomes summary
 
-The run emits `build/<run-id>/provenance-manifest.json`: every source with license, layer,
-ship/dev classification, counts used, derived artifacts, and the `chat_golden.jsonl` exclusion.
-Ship mix = CC-BY/Apache/MIT + synthetic + own data only; CC BY-NC (IndicDialogue, DailyDialog,
-PersonaChat, EmpatheticDialogues) and the research-gated call-center transcripts are dev-mix
-only and can never reach a shipped artifact; tooling inputs are classified too. The manifest
-travels with the run into final-sign-off (advisory security pass) as compliance evidence, and its
-sha256 is recorded with the gate results.
-
-#### 11.6 Model delivery, tiers, rollback (FR-CNR-022, FR-CNR-028)
-
-- NEW versioned `ModelCatalogEntry` (id marked `v17`/chat variant, real sha256, sizeBytes,
-  `minDeviceRAMBytes`, languages ne/en) placed BESIDE `intentQwenS43`; `availableBrainEntries`
-  lists both. Selecting the entry changes the served model with zero chain/router changes.
-- Default promotion only with ALL gates green + manifest attached; recorded with the gate
-  evidence. The promotion is expressed through the catalog default resolution seam
-  (`resolvedBrainModelID`/`LanguageModelResolver.resolvedAutomaticPick` — the per-language
-  remembered-pick + default map is reference DATA), so a rollback to the previous entry is a
-  catalog-level operation with no code change and no gate re-run (the previous entry already
-  carries green evidence) — FR-CNR-022's reversibility, exercised in DV.
-- Tiers: 1.7B default; 4B only through the resolver and only if it holds the latency envelope
-  and memory behavior on that tier (NFR-CNR-002/003); §20 records the reference-tier verdict.
-- A/B on Anzaan rides the catalog pick (listening panel; DV-6).
-
-#### 11.7 P2 hooks (FR-CNR-026/027/028/029)
-
-- DPO: preference pairs from the SAME judge rubric; result is a NEW catalog candidate behind
-  the full harness (never an in-place mutation); starts only after P1's swap is live and DV
-  has run; descopable only by the owner explicitly (FR-CNR-026).
-- Romanized chat: additive; Devanagari behavior and all gates unchanged; if unreliable, it is
-  reported not-delivered (FR-CNR-024 honesty) — FR-CNR-027.
-- 4B tier: per §11.6, memory/latency-gated (FR-CNR-028).
-- Real transcripts: explicit informed revocable consent before collection (UAT/test-device
-  sessions first), withdrawal removes future mixes, classified as own data in the manifest,
-  no silent harvest, gated as a new candidate (FR-CNR-029).
-
-### 12. Data model and persisted state
-
-- **`CloudChatConsentGate.ConsentRecord`** (NEW persisted datum; §8.3) — encrypted at rest via
-  the existing consent-storage pattern (Keychain-backed; Data Protection household standard).
-  Fields: `granted`, `recordedAt`, `disclosureVersion`. Corrupt/unreadable payload ⇒
-  `.unreadable` ⇒ fail-closed (local route), never a crash and never a silent grant.
-- **Preferences** — none required beyond the consent record; the Settings toggle writes
-  through the gate (revocation is a record state, not a separate flag), so there is exactly
-  one source of truth for "may chat egress".
-- **No new device schema otherwise**: the feature adds no store fields, no new permission
-  keys, no `Info.plist` change (FR-CNR-015). The v17 catalog entry is catalog reference data;
-  its download/install uses the existing ModelStore lifecycle (existing outcomes, §15).
-- **Repo/run artifacts** (not device state): style spec (+version +sha256), both seed mirrors,
-  corpus + provenance manifest, `chat_golden.jsonl` (versioned with the run), GGUF, catalog
-  entry. Their formats are the contracts named in §22 (Components); content is authored at implementation,
-  not here.
-
-### 13. Timeouts and configurable parameters (agent principle: timeouts are configuration)
-
-| Parameter | Value | Status |
+| Situation | Outcome | Recorded? |
 |---|---|---|
-| `ChatSampling.chatTemperature` | 0.3 | NEW named constant (reviewed; §5) |
-| `GeminiChatConfig.temperature` | 0.3 | NEW named constant (reviewed; §9) |
-| `OnDeviceSampling.*` (seed/topK/topP/temp/penalties) | unchanged | untouched (FR-CNR-004) |
-| Local decode timeout | existing `LlamaCommandInterpreter.Config.timeoutSeconds` | unchanged, still config |
-| Cloud attempt budget | existing `GeminiClient` timeout config (+ its existing retry policy) | unchanged, still config; fallback bound = local envelope + this budget (NFR-CNR-002) |
-| Preparse freshness | existing `IntentRouter.Config.preparseFreshnessSeconds` | unchanged |
-| Consent prompt dismissal | NONE (blocking decision; a timeout value would be wrong — the ConsentPromptController doctrine) | no timer |
-| Indicator | event-driven (decision → spoken reply); no timer | none |
-| Particle budget | 1 | spec data constant (FR-CNR-001), not a timeout |
-| Guard | pure function | no timeout possible |
+| Name (+ slot) matches one entry | resolved → challenge → detector → record | yes, on confirmation |
+| Name matches several / pair form | sanctioned clarification walk; nothing until a resolution | no |
+| Simple ack, exactly one fired (or only one pending) | resolved (shipped single-pending behaviour) | yes, on confirmation |
+| Simple ack, several pending | clarification walk over the sanctioned forms | no |
+| Slot named, nothing pending there | honest "nothing to acknowledge" line | no |
+| Name matches nothing, ≥1 pending | clarification walk over the pending set | no |
+| Nothing pending at all | shipped `router.noPendingReminder` line (:5384) | no |
+| Challenge answer "No" / timeout | FR-D02: not recorded, escalation re-entered | no |
 
-No new timeout literals are introduced anywhere; the only new numbers are the two reviewed
-temperatures and the spec's budget.
+**LLM independence (NFR-MSR-001):** the resolver and the vocabulary lists are pure Swift in the
+medication module; the ack path runs on the keyword safety net ahead of the model (`routeSafetyNet`
+precedes the interpreter), and no medication compilation unit gains an `LlamaInferenceEngine`
+symbol.
 
-### 14. Concurrency and isolation (explicit)
+### 8. Photo-as-evidence (FR-MSR-013, FR-MSR-014, OD-8)
+
+**Resolution of OD-8 — the on-device-only evidence variant, judged by the caregiver, bound by
+capture context.**
+
+#### 8.1 Mechanism
+
+- **Capture context determines the entry — never image content.** The capture affordances live
+  on surfaces that already carry a determinate entry: the fired-dose screen
+  (`MedicationVisualAidFireHandler`/`MedicationVisualAidsPresentation`) for the entry whose
+  reminder rang, and the intake-record surface for an already-recorded dose. The photo itself is
+  never classified — no CV, no matching against visual aids, no claim about what the image
+  shows. When no determinate context exists, the design **declines to bind** (honest line) —
+  there is no generic evidence camera, so FR-MSR-014's ambiguity case is handled by not creating
+  the ambiguous capture surface at all, and any future surface must route ambiguity through the
+  §7.3 clarification discipline ("asks … or declines to bind; never guesses").
+- **Evidence attaches, never creates (safety delta (c)).** Two attach moments, both inside the
+  acknowledgement machinery: (i) a capture taken while a reminder is pending is held as pending
+  evidence for that entry and attached only when `finalizeAcknowledgement` records the dose —
+  on a denied or timed-out challenge the held photo is discarded and nothing is recorded
+  (the intake still required the chain); (ii) a capture on a record surface attaches to that
+  existing `MedicationAdherenceLog`. No code path leads from capture to record creation.
+- **The record still flows through the chain.** Ruling from §7.4 applies verbatim: the
+  acknowledgement → challenge → double-dose → record sequence runs for the context's entry, and
+  the challenge's medication-naming prompt is also the elder's chance to catch a wrong context
+  ("Is that the small white tablet…?" → "No" → nothing recorded). The photo path is a second
+  way to *start* the chain, never a way around it (FR-MSR-009's photo-flow clause).
+- **On-device only (NFR-MSR-003).** Photos are captured, compressed (reusing the FR-D04b 200 KB
+  cap precedent — `PhotoVerifier` :27) and stored in a new on-device file store keyed by the
+  adherence-log id. The model carries a bare file name only (the `visualAids` precedent, :55–61:
+  never a path, never bytes in the model). Nothing is transmitted; the recorded cloud
+  exceptions do not apply.
+- **Camera availability**: capture reuses the shipped camera-presenting component and its
+  availability handling (`MedicationLabelScanner`/`CameraCapturePresenting` — no device, no
+  permission, cannot present all have honest spoken guidance). A camera that cannot present
+  never blocks the intake loop — the voice path is the floor (the FR-D04d graceful-degradation
+  philosophy).
+- **Recipient and judge**: the caregiver. The app's claim is exactly "a photo was captured at
+  acknowledgment time and attached to this record" — never "intake verified". Delivery: there
+  is no medication-photo transport in this feature. The photo stays on the primary device
+  (compressed, retained until delivered — which, with no channel, is honestly "not yet
+  delivered", surfaced as such, FR-MSR-018). When the inherited E2E channel
+  (`docs/family-notifier-e2e-implementation-plan.md`) lands, the FR-D04b discipline applies to
+  this store unchanged: deliver to the companion app, then delete from the primary device
+  within 1 hour; never stored on the relay; delivery failure never silent. This is the OD-3
+  transport-scope logic applied to evidence (§9.5), and it is the honest boundary under which
+  the requirement's "where evidence leaves the device" clause stays satisfiable without
+  falsifying anything today.
+
+#### 8.2 Data shape
+
+- `MedicationAdherenceLog` gains `evidencePhotoFileName: String?` (optional, custom-decoder
+  default nil, migration-safe). The dementia-side `photoVerification: PhotoVerificationStatus`
+  (:196) is **not** reused — keeping the two mechanisms separable keeps the unwired dementia
+  state honestly reported (§8.5).
+- NEW `MedicationEvidenceStore`: file-per-record storage under Application Support (the
+  `VisualAidStore` pattern), one photo per record (re-capture replaces), deleted with its
+  entry (the `removeMedication` cascade :11683 precedent) and deleted when a record's evidence
+  is discarded pre-record.
+
+#### 8.3 Determinism (FR-MSR-014)
+
+Resolution is a function of the capture context, not the image: the same capture context and
+pending set resolve identically every time. Ambiguity cannot be attributed to a neighbouring
+medication by construction (no cross-entry binding exists); declined binding is the honest
+failure branch.
+
+#### 8.4 UX
+
+The capture affordance is a large touch target on the fired-dose screen (and the record
+surface), announced by voice when the surface appears (the FR-D04e audio-cue philosophy). The
+elder may complete the whole intake by voice alone — the photo is the provided alternative, not
+a requirement (FR-MSR-021: "or the provided photo capture").
+
+#### 8.5 Dementia machinery — preserved, not repurposed (FR-MSR-020)
+
+`PhotoVerifier` (FR-D04a–e) stays exactly as shipped — components present, not wired
+(`photoVerificationEnabled` still `false` at every entry-construction site), no tests invented
+for it, its state surfaced honestly. The new evidence path is a sibling, not a wiring of that
+machinery; nothing in this feature removes, bypasses or silently enables the per-medication
+dementia mechanism.
+
+### 9. Caregiver notification (FR-MSR-015, FR-MSR-016, FR-MSR-017, FR-MSR-018, OD-7)
+
+#### 9.1 The significant set and its trigger sites
+
+The resolved set (OD-3) fires **unconditionally** — not gated by `CaregiverNotifySettings`
+(whose opt-in remains for the daily first-fire `eventReminder` only, resolved at fire time
+:353):
+
+| Event | Wire type | Trigger site (medication path) |
+|---|---|---|
+| Missed dose | `missedMedication` (shipped) | `recordMissedDose` :551 — unchanged |
+| Possible double dose | `possibleDoubleDose` (shipped) | `checkDoubleDoseAndRecord` blocked branch :530–536 — unchanged |
+| **Intake recorded** | `intakeRecorded` (**new taxonomy case**) | `finalizeAcknowledgement` :453 — after the adherence log is durably persisted, before/independent of runtime cleanup; every recorded intake, whichever path recorded it |
+| **Escalation started** | `escalationStarted` (**new taxonomy case**) | `handleAckDeadlineExpired` :378, the reminder's **first re-fire decision** (the ack window elapsed and the re-fire escalation begins — FR-MSR-015's scenario), once per reminder, state-derived (the engine's re-fire count), never a per-event stored flag |
+
+Both new triggers live on the medication notification path, never on
+`CaregiverEventFireHandler` (medication alarms carry no `userInfo["type"]` — its own guard
+:70–76). Send decisions resolve at fire time, nothing is stored per event.
+
+#### 9.2 Channels and honest per-contact results
+
+- **Push/text path**: the shipped `notifyAll` per-contact loop (`FamilyNotifier` :112–151), with
+  `NotificationResult` carrying success/errorCode/channel (:230). Significant-event calls now
+  pass a `FamilyAlertContext` (kind `.medicationReminder`, hashed event id, title in memory
+  only) so the channel the push rode and the `family_event_alerted` observability event are
+  recorded for significant events too — the mechanism exists and is reused, not rebuilt.
+- **Transport honesty (FR-MSR-016, FR-MSR-018)**: the shipped provider is a stub that returns
+  success (`APNsProvider.sendPush` :222–227) — that is precisely the false success the
+  requirements forbid. The design makes it honest: `sendPush` returns an explicit outcome
+  (delivered / not-delivered with a reason code, e.g. `transport_unimplemented`), the notifier
+  maps it to `success: false` + errorCode, partial delivery is reported as partial, and no
+  surface describes a caregiver as notified when the transport did not deliver. When the E2E
+  transport lands (inherited tracked work), the provider is swapped and the honesty contract
+  stays.
+- **Text channels**: `NotifyChannel.resolve(preferred:defaultApp:…)` (:58) keeps deriving the
+  channel per contact; they remain available paths with the same honest-result rule.
+- **Delivery claims**: made only for what actually fires. Transport-dependent statements are
+  labelled inherited tracked work (`docs/family-notifier-e2e-implementation-plan.md`).
+
+#### 9.3 The calendar channel — OD-7 resolved
+
+**Decision: the consent-gated schedule mirror stays exactly as shipped, and the three at-risk
+significant events additionally surface as one-off entries on the same shared family calendar.**
+
+- **Mechanism.** `CalendarShareService` (consent gate at :124–162, status :224) already mirrors
+  the schedule into shared twins on every schedule write (`MedicationScheduler.onScheduleChanged`,
+  wired at `AppCoordinator` :3523 → `reconcileMedication` :437 → `CalendarShareMapper.medicationDrafts`
+  :214). Significant events (missed medication, possible double dose, escalation started) are
+  written through the same service and gate as **one-off** entries — the key grammar already has
+  `CalendarShareKey.oneOff` (:32) — at the event time, non-recurring, keyed by a stable
+  non-PII event identifier. The schedule mirror is untouched by this addition.
+- **Which events.** Exactly the three at-risk events; **intake-recorded does not write calendar
+  entries** — a calendar entry per taken dose would flood the family calendar and defeat the
+  channel's attention purpose; the push notification still fires for it, and the caregiver's
+  adherence view is its record surface. (OD-7 explicitly leaves "which events surface there" to
+  the design; recorded here for review.)
+- **Consent gate respected.** No calendar-share consent (or not signed in) ⇒ no writes, exactly
+  as shipped (`canShare(isSignedIn:hasConsented:)` :196). The household's consent text covers
+  sharing medication schedule content on that calendar; the event entries stay in that content
+  class (medication name + time, to the same invitees) — **no new PII category on that channel,
+  and none on the push wire.**
+- **Invitee rule (deviation recorded).** The shipped `inviteeEmails` (:155) suppresses
+  non-emergency contacts for medication-kind twins unless the first-fire opt-in is on. Because
+  the significant set is unconditional, significant-event entries use the family-notification
+  contact set (contacts with an email, de-duplicated, emergency-first — the same
+  de-dup/ordering helpers) without consulting the first-fire opt-in. The opt-in keeps governing
+  the daily reminder twins (noise control).
+- **Honest results.** Each write's outcome is tracked per item through the service's existing
+  pending-queue/status surface; a failed or pending write is reported as itself (the Settings
+  status card already shows the pending count honestly), never as delivered.
+
+#### 9.4 The wire (FR-MSR-017)
+
+- Envelope stays versioned and PII-free: `{v:1, alert_type, timestamp}` **plus an optional
+  `entry_id_hash`** (`IdHashing.shortHash`, a truncated SHA-256 — one-way) where
+  medication-level correlation is needed (`FamilyNotifier.buildPayload` :153 extended). No
+  medication name, dose, label text, household content, or title on the wire, on any of the
+  four significant types. The additive key keeps v:1 (no deployed consumer exists — the
+  transport is unimplemented); this is recorded as the honest state, to be revisited at
+  transport landing.
+- The `FamilyAlertContext` in-memory-title rule stands: titles (the medication name) are never
+  serialized; putting names/titles on the wire remains an explicit owner-level decision, not
+  smuggled in here.
+
+#### 9.5 Honest degradation (FR-MSR-018)
+
+No silent stubs, stated affirmatively: the unwired photo-verification machinery is surfaced as
+itself (§8.5); the push transport reports not-delivered (§9.2); a calendar write failure
+surfaces as pending/failed (§9.3); a failed persistence write blocks its dependent step — a
+reminder is not armed (:733 persist-then-arm) and a dose is not reported as recorded (:476); and
+every delivery-dependent claim in this document is labelled inherited tracked work.
+
+### 10. Preservation and persistence (FR-MSR-019, FR-MSR-022)
+
+- **Reminder/escalation semantics preserved.** The only change to the chain is that all derived
+  instants come from the one resolved `scheduledAt` (§4.4): the reminder names the medication;
+  re-fires follow the shipped interval/count within the escalation window (defaults 5 min ack /
+  5 refires / 60 min window / 12 min interval — `EscalationEngine` :31–34, untouched); a fully
+  escalated miss is marked, logged and alerted; a future dose stays future on restore (:191–198).
+  One `Date` remains the sole derivation basis (FR-MSR-019's rejection of any other basis holds
+  by construction).
+- **Persistence before alarm.** `createPendingReminders` persists the reminder (with its
+  resolved exact `scheduledAt`) before the first `alarmScheduler.scheduleReminder` call
+  (:733–744); a failed write skips arming and surfaces (`reminder_persistence_failed` :789).
+  The mapping-change pass obeys the same order (§4.5).
+- **Acknowledgement durability.** `finalizeAcknowledgement` writes the adherence log before
+  runtime cleanup and before returning success (:473–496) — a crash after confirmation loses
+  nothing.
+- **Process-kill re-arm.** `scheduleAll()` on launch (`restoreState` :611 → `rearmAllPendingReminders`
+  :646) restores the persisted reminders — now carrying slot-model resolved times — and re-arms
+  within the unexpired escalation window; escalation resumes from the remaining window time.
+  This path is unchanged.
+- **Future-stays-future.** Restore never converts a not-yet-due dose into "fire now"
+  (the shipped recovery rule).
+
+### 11. Migration and legacy compatibility (NFR-MSR-006, OD-5)
+
+**Resolution of OD-5 — no automatic backfill inference; legacy entries keep working exactly as
+today; every re-interpretation is deterministic, visible and family-directed.**
+
+- **Decode.** `quantity`, `slot`, `mealRelation` (entry) and `evidencePhotoFileName` (log) are
+  optional with custom-decoder defaults — the `init(from:)` :114 and `decodeIfPresent` :129–130
+  precedent. A pre-revamp payload (raw `scheduleTimes`, no new fields) loads successfully; no
+  key is required that the payload does not contain. **Implementation trap, called out for
+  design-l2/implement: `withScheduleTimes` (:144) rebuilds the entry memberwise — it must carry
+  the new fields (or be replaced) or a slot-model entry loses its slot on a copy.**
+- **Legacy representation.** `scheduleTimes` remains required-decodable and representable; a
+  legacy entry (`slot == nil`) resolves and schedules byte-identically (`.success(entry.scheduleTimes)`,
+  §4.4), and the slot model never consults `scheduleTimes` for slot entries.
+- **Migration time.** Nothing is rewritten at migration. No slot is inferred, ever. A migration
+  that drops, alters or silently reinterprets a legacy schedule element is a defect (the
+  requirement's failure scenario).
+- **Rendering.** Legacy entries render in the family list with their raw clock times (display
+  formatting as today; any spoken line through the `SpokenTime` formatter per NFR-MSR-004) and
+  behave exactly as today until the family edits them.
+- **Family-directed conversion (the only time→slot path).** Inside an explicit edit of a legacy
+  entry, the editor offers the slot model; the family assigns each legacy time to a slot. The
+  only assistance permitted is **exact-equality preselection**: a legacy time whose hour:minute
+  equals the household mapping's time for a slot may preselect that slot — visible in the chips,
+  deterministic, family-confirmed on save. Any legacy time with no exact match requires the
+  family to pick a slot or remove the row; the slot-model save is gated on every row being
+  assigned. The family may also leave the entry in times mode — legacy stays a first-class shape.
+- **Native-calendar retime interaction (decision).** `setScheduleTimes` / the
+  `onMedicationNativeChanges` relay (`applyMedicationCalendarMutations` :12067) can retime an
+  entry from the iPhone Calendar app. For a slot-model entry the times are derived, so a raw
+  retime would create two sources of truth; the design **refuses the retime for slot entries**
+  (returns `false`; an honest observability event is emitted; the family edits the slot in the
+  app instead). Refusal is the non-interpretation: deterministic, visible, never a silent
+  re-interpretation. Legacy entries are unaffected. (Recorded for review — the alternative,
+  clearing the slot silently, was rejected as family-intent loss.)
+- **Frequency.** The slot model is daily; the shipping editor already constructs `.daily`
+  everywhere. `.weekly`/`.custom` stay decodable; legacy entries of any frequency keep working
+  exactly as today (the shipped scheduler treats `scheduleTimes` as daily wall-clock times —
+  `CalendarShareMapper.medicationDrafts` :205 records the same fact). Representing non-daily
+  frequencies in the slot model is out of scope for this feature (recorded, not silently
+  dropped).
+
+### 12. Privacy, observability, on-device (NFR-MSR-002, NFR-MSR-003)
+
+- **No new egress.** Label scanning (Vision, on-device), medication-photo evidence (on-device
+  store), the ack resolver, and the slot mapping are all device-local. The recorded cloud
+  exceptions (voice transcription; OCR'd-text translation) do not apply. The shipped
+  purpose-lookup medicine-name search-stack egress is unchanged and is the stack's, under its
+  existing disclosure. **Honest note for review:** the family-calendar channel is an existing
+  consent-gated egress of medication schedule content (Google Calendar); §9.3 extends its
+  content with significant-event entries inside the same content class and consent — this is
+  not a new channel or a new data category, and it is stated rather than implied.
+- **Observability.** Every new event is PII-free (`entry_id_hash` = `IdHashing.shortHash` only,
+  categorical fields, `LogSanitiser` discipline). New event vocabulary (classification only):
+  `medication_slot_clock_changed`, `medication_slot_unresolved`, `medication_ack_resolved` /
+  `medication_ack_ambiguous` / `medication_ack_unmatched` / `medication_ack_clarify_ended`
+  (outcome enum only), `medication_evidence_captured` / `_discarded` / `_attached` (no image,
+  no text), plus the extended family-alert events (`family_alerted` with the new alert_type
+  values). No medication name, dose text, label text, photo content or utterance content ever
+  reaches an event or log.
+- **Release log gate.** `ios/tools/check-release-log-safety.sh` (wired into `ios/build.sh`)
+  must exit 0 with the new source paths inside its coverage (NFR-MSR-009).
+
+### 13. Concurrency and isolation (explicit)
 
 | Component | Isolation | Concurrent access |
 |---|---|---|
-| `IntentRouter` chat lane + readiness closures | router state mutated on its owning thread (as today); the lane adds no shared mutable state beyond reading the injected closures per turn | closure reads are per-turn; the consent gate is internally locked |
-| `CloudChatConsentGate` | NSLock; single writer; revoke clears memory before storage | decision reads and grant/revoke writes may interleave safely; no partial states observable |
-| `NepaliGrammarGuard` | pure static (no state, no IO) | callable from the speech path thread; trivially thread-safe |
-| `LLMCore` sampling override | actor (LLM.swift:34); `setParameters` then `generateWithConstraints` are actor-ordered; the turn is additionally serialized on `inferenceQueue` (label `llama.command`) | no interleaving possible mid-decode (§5.2) |
-| `CommandRouter` speech/dispatch | main-thread-confined (existing) | unchanged |
-| `GeminiClient` calls | URLSession-based, per-call objects; no shared mutable request state | chat and command calls are independent; cost governor gate before network (existing) |
-| Audit/lifecycle (`ModelLifecycleManager`) | existing actor/seam; the v17 swap uses the existing lifecycle | no new keeper of large allocations; one resident model (§11.6) |
+| `MedicationAckResolver` (NEW) | pure static function — no state, no IO, no clock | trivially thread-safe; callable from the router path |
+| `MedicationSlotClock` / slot resolver (NEW) | pure value + store read; mapping read once per arming pass | reads are per-arming; the record is written by ONE writer (the settings surface), validated before persist; no partial states observable |
+| `MedicationScheduler` (CHANGED) | shipped confinement unchanged — mutations (`loadSchedule`, `scheduleAll`, ack/record paths, the new `rearmForSlotClockChange`) run on the main thread; alarm callbacks arrive on the main queue | the new resolution feed adds no shared mutable state; mapping reads are point-in-time |
+| Clarification walk state | coordinator `@Published`/main-thread state (the `pendingNavigationWalk` pattern) | one active walk; a new ack re-enters resolution (single logical flow) |
+| `MedicationEvidenceStore` (NEW) | file IO off the main thread (the scanner's `offload` discipline :82); one photo per record (replace-on-recapture) | per-record writes are serialized by record identity; no cross-record state |
+| `FamilyNotifier` / `APNsProvider` (CHANGED) | async per-contact loop, per-call payloads | unchanged shape; the honest outcome type adds no shared state |
+| `CalendarShareService` (CHANGED) | shipped reconcile/queue discipline; consent read at act time | one-off event writes ride the same single reconcile path |
+| Camera capture (evidence) | the shipped `CameraCapturePresenting` main-queue discipline, one session at a time | the scanner's `isRunning` guard pattern prevents overlapping sessions |
 
-Single-flight rules: the consent prompt presents at most once per session (a state machine on
-main, mirroring ConsentPromptController); guard escalation issues at most ONE cloud attempt
-per flagged turn (no retry loop — a failed escalation goes straight to the safe template);
-cloud chat has the client's existing bounded retry only.
+### 14. Error-path catalogue
 
-### 15. Error-path catalogue
-
-| Interface | Failure | Returned outcome | Consumer behavior |
+| Interface / flow | Failure | Returned outcome | Consumer behaviour |
 |---|---|---|---|
-| `ChatSampling` override (`setParameters`) | authoring drift / call fails | requested value recorded; `try?` | decode proceeds; test-detectable; `chat_sampling_override_failed` event |
-| Local chat decode | empty output / timeout | nil (existing `inference_empty_output` / `inference_timeout`) | `chat_abstained` → local ladder (escalation disabled for chat turns) |
-| `CloudChatRouting.decide` | any non-granted input state | `.local(reason)` — total function, never throws | reasons map: `consentNotRecorded` → present disclosure + local answer; `consentDenied/Revoked` → local, no re-prompt; `offline/keyMissing/costBlocked` → local; each emits classification event |
-| `CloudChatConsentGate` | unreadable/corrupt record; write failure on grant/revoke | `.unreadable` (routes local) / grant-revoke returns failure surfaced to UI | never a silent grant; never a crash |
-| Cloud chat call | timeout / non-200 / malformed JSON / empty reply | nil → `cloud_chat_fallback(reason)` | same-turn local chat path (NFR-CNR-002 bound) |
-| `respondToChat` (cloud) parse | reply JSON invalid/missing fields | nil | treated as cloud failure → fallback |
-| `NepaliGrammarGuard.verdict` | (structurally unreachable) unavailable | `.unavailable(reason)` | turn proceeds under today's behaviour + `reply_grammar_flag` outcome `degraded` |
-| Guard flag resolution | escalation unconsented/offline/failed; escalation reply also flags; flagged cloud reply | safe template | localized safe reply spoken; event outcome `safeTemplate` |
-| `ModelCatalogEntry` install (v17) | download/hash/space failures | existing ModelStore outcomes (unchanged) | resolver keeps serving the previous entry (rollback = previous entry still addressable) |
-| Mirror/drift checks (`check-prompt-mirror.py`) | consumer block ≠ spec; seed ≠ buildChat | exit non-zero | build/test fails; never a silent drift |
+| Slot→clock resolution (§4.4) | corrupt mapping value | `SlotClockError.indeterminate(slot:)` | no reminder armed for that entry; `medication_slot_unresolved` event; settings error surfaced; never a guessed time |
+| Mapping save (§4.2) | store write fails / out-of-range input | write result surfaced; no take-effect | mapping unchanged; re-arm not triggered; honest error line |
+| Mapping-change re-arm (§4.5) | persist fails | `persistReminders` false | arming skipped for the affected reminders; surfaced (shipped `reminder_persistence_failed` shape) |
+| Scan (`MedicationLabelScanner`) | camera unavailable / recognition or read failure / empty candidate | existing honest outcomes: unavailable-with-reason, spoken "could not read it", `.scanned(nil/empty)` | form unchanged; photo retained; nothing bound |
+| Ack resolution (§7.2) | ambiguous / unmatched / nothing pending | `AckResolution` enum cases | sanctioned clarification, or honest "nothing to acknowledge" line; nothing recorded; reminders untouched |
+| Clarification walk (§7.3) | no response within the window | walk ends (configurable timeout) | nothing recorded; reminders and escalation continue; classification event |
+| Challenge | "No" / timeout | `reEnterEscalation` (shipped) | not recorded; FR-D02 re-enter; locale-aware copy |
+| Recording (§7.4) | adherence-log persist fails | `SafetyError.reminderPersistenceFailed` (shipped) | failure surfaced; not reported as recorded; intake-recorded notification NOT fired (it follows successful persistence) |
+| Evidence capture (§8) | camera unavailable / store write fails / pre-record challenge denied | `CameraAvailability` reasons / store error (explicit) / discard | voice path continues; photo not presented as evidence; honest lines |
+| Notification delivery (§9.2) | transport not implemented / partial failure | `NotificationResult` per contact (`success:false`, errorCode, channel) | partial reported as partial; never described as notified |
+| Calendar significant-event write (§9.3) | no consent / not signed in / write failure | consent gate blocks; per-item result / pending queue | no writes without consent; failures surfaced as themselves |
+| Notify at fire time (§9.1) | settings resolve at fire time only | — | no per-event stored decision can silently suppress a significant event |
 
-### 16. Privacy, log safety, egress discipline, release gate wiring
+### 15. Configuration and timeouts (timeouts are configuration)
 
-- **Zero content in logs** (NFR-CNR-006, FR-CNR-012): the new chat/routing/guard/consent code
-  logs/emits classification only — event kinds, outcomes, reason codes, check classes,
-  counters, model/catalog ids. No utterance, reply, transcript, prompt dump, request/response
-  body, or key material — error paths record a reason code, never the payload.
-- **Key handling**: unchanged — provider key in the `x-goog-api-key` header only (never URL,
-  never log); the new chat path reuses the same request builder.
-- **Telemetry schemas** (§7.5, §8.1/§8.8 events) are frozen before implement; a
-  content-bearing field is a defect; the advisory security pass reviews them. Events ride the existing observability channel — not a
-  new egress surface.
-- **Release gate**: `ios/tools/check-release-log-safety.sh` (wired into `ios/build.sh` ahead of
-  every test scope) must exit 0 with the new chat/routing/guard/consent source paths inside
-  its coverage (feature role); its fixture suite stays green; the pre-release device
-  console/sysdiagnose check covers the new paths.
-- **Egress inventory (this feature)**: exactly two provider surfaces — the cloud chat reply
-  call and the guard escalation — both consent-gated by `CloudChatConsentGate`, both carrying
-  only the chat turn's content (§8.7); plus the unchanged existing surfaces (transcription
-  under stack consent; the command interpret path for non-chat turns). No new hosts/endpoints.
-
-### 17. Accessibility, localisation, consent/indicator surfaces
-
-- All new user-visible strings exist in `ne` and `en` via the string catalogue (L10n keys;
-  final wording at implementation — Deferred work): `cloud.chat.consent.title/.body/.allow/.notNow`;
-  `cloud.chat.indicator` + `cloud.chat.indicatorSpoken`; `cloud.chat.revoke.title/.body/.done`;
-  `cloud.chat.state.spoken.*` (voice state query answer); `settings.cloudChat.*`;
-  `chat.safeTemplate.<class>` (+ generic); optionally `chat.cloudFallback.notice` (config-only,
-  not spoken, unless implementation decides otherwise — Deferred work). `L10nCatalogCoverageTests` extended (both languages,
-  values differ, placeholder counts).
-- Safe templates and the spoken indicator/state lines are spoken in the configured language —
-  a Nepali device never speaks an English-only fallback (NFR-CNR-010).
-- Accessibility: consent sheet, indicator, Settings row ≥44 pt controls, ≥18 pt text, plain
-  language (no "routing", "model", "fallback" terms — NFR-CNR-009); the elder is never asked
-  to reason about routing internals; every new function is voice-reachable (§8.6).
-- No new permission and no `Info.plist` change (FR-CNR-015).
-
-### 18. DV protocol on Anzaan (FR-CNR-025 — the completion gate)
-
-Each item recorded with outcome at final-sign-off; a failed/skipped item withholds completion.
-
-| DV | Script | Evidence |
+| Parameter | Value | Status |
 |---|---|---|
-| DV-1 local chat | force local (consent declined or offline); chat turns: warm, grammatical, honorific agreement, particles ≤1, no AI-isms; safe template engages on a seeded guard flag | session notes + `reply_grammar_flag`/`command_llm_chat` events (classification only) |
-| DV-2 cloud-first chat | first-use disclosure appears before any send; consent granted; indicator visible for cloud-active turns; revoke (voice + Settings) returns to on-device without losing chat | consent record state + indicator presence count (100% of cloud-active turns) |
-| DV-3 offline degradation | airplane mode: chat answers locally; forced cloud failure mid-turn degrades without crash/false success/dropped turn; latency ≤ local envelope + bounded attempt | session notes + fallback events |
-| DV-4 emergency phrasing | emergency utterances still trigger exactly (recall untouched on device) | existing emergency check script |
-| DV-5 command determinism | reminders/alarms answer identically to pre-feature behavior (temp-0 path unchanged); two repeat commands byte-identical | side-by-side with the previous build |
-| DV-6 listening panel | A/B behind the catalog pick (v17 vs previous, or P0-build vs previous for a P0-only landing); elderly listeners' verdict recorded VERBATIM | recorded verdict; A/B pick flip + rollback exercised here |
-| Honorific-mismatch telemetry | captured during the DV session (classification only) | event counts |
-| Release gate | `check-release-log-safety.sh` exits 0 with new paths covered; pre-release console/sysdiagnose check on the same paths | gate output + device capture |
+| `MedicationSlotClock` defaults | morning 08:00 / afternoon 13:00 / evening 19:00 | NEW named defaults (OD-1; household-configurable) |
+| `ConfirmationChallenge.challengeTimeoutSeconds` | existing (default 30 per FR-D02) | untouched, still injected config (:28) |
+| Clarification response window | NEW configurable parameter; default equal to the challenge timeout | configuration, single named constant — no literal at the call site |
+| Ack window / refire count / escalation window / refire interval | existing entry-level fields (5 / 5 / 60 / 12 defaults) | untouched (FR-MSR-019 binding) |
+| Evidence photo size cap | FR-D04b-existing 200 KB precedent (`PhotoVerifier` :27) | reused as the compression cap; not a timeout |
+| Notification / calendar calls | existing async paths; no new timeouts | unchanged |
+| Mapping resolution | pure function — no timeout possible | none |
 
-### 19. Sequencing and the OD-3 record
+### 16. Elderly-fit UX, localisation, accessibility (FR-MSR-021, NFR-MSR-004, NFR-MSR-005, NFR-MSR-007)
 
-#### 19.1 The P0 slice is independently landable (design guarantee)
+#### 16.1 Fit for the forgetful elder
 
-Every P0 item works against the CURRENT shipped model (`intentQwenS43`, 1.7B default) with
-ZERO dependency on P1 artifacts: the persona/spec/guard/consent/routing/Gemini-temperature
-changes touch only runtime seams and repo artifacts that exist at base; `chat_golden.jsonl`,
-the corpus, the GGUF, and the v17 catalog entry are not referenced by any P0 path; the
-catalog default stays `intentQwenS43` until P1's gates are green. A P0-only PR therefore
-ships with no rework: P1 later adds data/artifact files + one catalog entry + the default
-resolution change.
+- The intake loop completes entirely by voice (acknowledge → challenge answer → recorded) with
+  zero touch; the photo capture is the provided alternative (§8.4); the clarification answers
+  (yes/no, or naming a medication) are voice-reachable.
+- The unambiguous case adds no step: a simple "taken" with one pending reminder resolves
+  exactly as today.
+- No new command vocabulary beyond the established set: the slot and meal words are part of the
+  acknowledgement sentence grammar the owner specified, not new commands; the only new
+  interactions are variants of the sanctioned clarification forms and yes/no.
+- One idea per utterance: the challenge, each clarification question and every outcome line is
+  a single, short spoken sentence.
+- Family-facing editor surfaces use plain language (no "slot", no "mapping" jargon in copy),
+  ≥44 pt controls, ≥18 pt body text, contrast per the shipped appearance tokens; the
+  mapping section shows the mapped times as read-only context so nobody computes clock times.
 
-#### 19.2 OD-3 — recorded exactly as the owner question it is (NOT decided here)
+#### 16.2 Localisation and spoken time
 
-> **OD-3 (owner question):** owner directive = full P0→P1→P2 in this run, P0 first; the
-> P0-PR-first option preserved by design; re-surfaced to the owner via Slack question id
-> `q-ask-2f6a8883-804e-4ac5-9a58-c0762f257074` (2026-10-14); pending owner answer; any
-> sequencing deviation is reported per FR-CNR-024.
->
-> (The design preserves the second option literally: §19.1's P0 slice is independently
-> landable with no rework.)
+- Every new user-visible string exists in Nepali and English in
+  `Resources/Localizable.xcstrings` (no hard-coded strings): slot labels, meal labels, unit
+  labels, the quantity control, the mapping section (+ reset + error lines), the sanctioned
+  clarification forms ("did you mean X" / "X or Y"), clarification/outcome lines, the
+  significant-event alert bodies (`family.alertIntakeRecorded`, `family.alertEscalationStarted`),
+  evidence capture/state lines, calendar event entry titles. `L10nCatalogCoverageTests` extends.
+- **All spoken times go through the `SpokenTime` formatter** (`Services/Voice/SpokenTime.swift`
+  :28; the `formattedTime` :5375 and `todayMedicationSummaryLines` :12625 precedents). Any new
+  spoken line that names a time — mapped reminder times, schedule renderings, notification
+  copy, error lines — uses the formatter; raw hour/minute interpolation into speech is a defect
+  (NFR-MSR-004).
 
-### 20. Feasibility honesty statement (FR-CNR-024; locked constraint C13)
+#### 16.3 Devanagari regression pin (NFR-MSR-007)
 
-No silent drops. Verdicts for every named leg:
+The resolver's matching reuses the shipped substring/vocabulary conventions
+(`MedicationVoiceVocabulary.canonical`, the parser's Devanagari-fusion substring matching) and
+does not change, "fix" or route around the pinned grapheme-cluster behaviour. The pinned
+regression tests pass unchanged; the matching implementation is untouched; a proposed "fix" is
+rejected (owner decision required, outside this feature).
 
-| Leg | Verdict | Statement for the owner |
-|---|---|---|
-| Chat sampling (temp 0.3, fixed seed, GBNF) | FEASIBLE as specified | Reproducibility holds per device tier + build (byte-identical repeats, NFR-CNR-001's own scope). GBNF validity is preserved at temp 0.3 (grammar masks before sampling). NOT claimed: byte-identity across different tiers/builds (Metal float differences can shift distribution tails) — the requirement does not demand it. The per-turn override re-asserts temp 0 for commands, so command determinism is untouched |
-| Grammar-guard coverage | PARTIALLY feasible — bounded, stated | The deterministic checks catch: forbidden तिमी-family forms, the curated familiar↔honorific verb pairs, Latin-script runs in Nepali replies, particle count >1, positionally dangling particles. They do NOT catch: agreement forms outside the curated pairs, case/postposition errors, complex agreement, word-order errors. The guard is a floor (never a false "verified"), not a grammar proof; the gates + P1 corpus carry the rest. A `flag` never invents text; false negatives are the honest residual |
-| Cloud chat routing (consent/disclosure/indicator/revocation) | FEASIBLE as specified, with one recorded scope note | The consent gate governs the reply surfaces (routing + escalation) and is enforced at the routing decision. On a Gemini SPEECH stack device, the utterance transcript already travels for transcription under the existing stack-level consent (recorded OD-12 transcription exception) before the chat decision exists; this feature does not widen that path and cannot retroactively gate it — "no chat content leaves the device" is guaranteed at the chat reply/escalation surfaces, and fully (including transcription) on the on-device speech stack. Recorded, not dropped |
-| Training thresholds (P1) | FEASIBILITY MEASURED AT THE RUN | If the corpus/gates do not reach ≥0.98/≥0.98/≥4/5 with all regressions green, the swap does NOT ship; the measured shortfall is reported to the owner. P0 is unaffected either way |
-| 4B tier admission | LIKELY NOT ADMISSIBLE on the reference 6 GB tier | The 4B latency failure is documented at default; admission requires the latency envelope AND memory behavior on that tier. Until a tier holds both, the 4B variant exists only as a gated, non-default catalog candidate (P2, COULD). Recorded |
-| Romanized chat (P2) | UNPROVEN | Ships only if the full harness stays green; otherwise reported as not delivered (FR-CNR-027) |
-| Chat-classified surface scope | STATED BOUND | The P0 decode/persona/cloud-chat improvements act on turns `ChatIntentClassifier` routes as chat (the conservative closed small-talk table); content-bearing conversational turns keep the command decode by design (FR-CNR-004), improving via the P1 model's register. The table is not widened |
+### 17. Quality, compliance and latency (NFR-MSR-008, NFR-MSR-009, NFR-MSR-010)
 
-### 21. Test plan and gates
+- **Test rigor.** Scoped suites are the honest gate (the constitution's Feature Constraint 4
+  names them): the ten medication suites and four notifier suites extend with the new
+  contracts, plus NEW suites for `MedicationSlotClock` (determinism, totality, corrupt-value
+  fail-closed, decode defaults), `MedicationAckResolver` (the §7.2 truth table, the §7.3 walk,
+  determinism, denial interactions), `MedicationEvidence` (attach-never-create, on-device,
+  context determinism, discard-on-denial), quantity/dose-line composition, migration decoding,
+  and notifier honesty (stub reports not-delivered). The four required integration tests ride
+  along and are release-blocking: persistence-before-alarm ordering, process-kill re-arm,
+  LLM independence (symbol inspection), and the legacy-payload migration round trip.
+  Zero-touch (100 %) unit coverage on every touched medication safety path; pre-existing
+  baseline failures recorded separately, never mixed in.
+- **Compliance/release.** The release log-surface gate passes over the new paths; the App Store
+  health-data posture is unchanged (no new data collection, no new permission — camera is
+  already used at point of use with plain-language copy); PII-free telemetry keeps the standing
+  log-volume posture (NFR-MSR-009).
+- **Elevated bar.** Decisions touching FR-D01/D03/D04a–b machinery (the challenge, the
+  detector, the photo machinery) run at the dementia supplement's 0.90 threshold; this design
+  touches them only by routing around them (§7.4, §8.5) — the challenge/detector contracts are
+  byte-preserved.
+- **Firing latency (NFR-MSR-010).** The mapping resolves at arming time (pure O(1)); no
+  fire-time resolution step exists, so a reminder fires within 30 s of its resolved scheduled
+  time, including for entries created or edited shortly before the slot and reminders re-armed
+  after a relaunch (the persisted `scheduledAt` is the schedule of record). DV-1/DV-6 exercise
+  this on the reference device.
 
-Scoped XCTest suites (house rule: focused tests + typecheck per unit; scoped runs at gates;
-full suite once at the end with pre-existing baseline failures recorded, never masked):
+### 18. Safety delta (a)–(d) as enforced invariants
 
-- NEW `ChatSamplingTests`: shape→temperature mapping; command decode requests temp 0 on every
-  turn (including after a chat turn); chat decode requests 0.3; repeat-decode byte-identity
-  probe via `lastDecodeParameters`; schema passthrough unchanged.
-- NEW `NepaliGrammarGuardTests`: each check positive/negative; particle lexicon longest-match
-  (`हुन्छ नि` = 1); budget boundary (1 passes, 2 flags); dangling-position cases; code-switch
-  nouns pass; Latin-run flag; Latin-free Nepali passes; idempotence (same verdict over
-  repeats); totality (no throws); Devanagari edge cases pinned, not "fixed".
-- NEW `StyleSpecMirrorTests` (or extensions in the python `tests/`): spec loads/validates;
-  persona clause byte-equality (both personas); guard lexicons byte-equality; chat template
-  mirror; intent prompt + seed untouched (sha256 equality).
-- NEW `CloudChatRoutingTests`: the decision matrix (consent × online × key × cost = 16 cells);
-  decline/revoke ⇒ local AND zero cloud call recorded (fake chat brain spy); failure ⇒
-  fallback + classification event; chat turns never enter the command ladder/cascade; command
-  turns byte-identical behavior.
-- NEW `CloudChatConsentGateTests`: fail-closed `.unreadable`; one writer; revoke-verify;
-  disclosureVersion mismatch ⇒ notRecorded; round-trip through encrypted storage.
-- NEW `CloudChatEgressTests` (fake client): request body = composed chat prompt only; header-only
-  key; timeout from config; no content in any log path (fixture-level).
-- NEW `ReplyGrammarFlagEventTests`: event carries only permitted fields (the frozen schema);
-  degraded case distinct; emitted for local/cloud.
-- CHANGED suites: `IntentPromptTests` (build pin unchanged; chat assembly ceiling extended to
-  include the persona), `L10nCatalogCoverageTests` (new keys), router suites (chat lane
-  insertion leaves command paths pinned), log-safety fixtures.
-- Python: `tests/test_style_spec.py` (loader/validation), gate-harness fixture tests for
-  `eval_chat_gates.py` (fixture-backed, no network), corpus-filter unit tests (a golden leak
-  is detected).
-- Gates (lean chain per the owner directive 2026-10-14): design (this document — the combined
-  L1+L2 design of record; review-l2 and review-implementation dropped) → plan-tasks →
-  implement (unit-based; confidence 0.85; no paired review) → final-sign-off T2 + HIL with the
-  DV record and the feasibility statement (§20), carrying ONE advisory, non-blocking security
-  pass (STRIDE + security-test scope; findings recorded with the sign-off). The hard safety
-  gates — emergency recall 1.00, abstention ≥0.90, closed-intent ≥0.95 — remain enforced by
-  the training eval gates (§11.4) and implementation tests; they are not review gates. Release
-  gate `check-release-log-safety.sh` exits 0.
+| Delta | Enforced invariant | Mechanism | Verification |
+|---|---|---|---|
+| (a) OCR never auto-binds | no scan path writes a store or arms a reminder; only the family's save through the draft binds | §6: candidate → draft → `addMedication`; any new scan entry point must route through the same gate | `MedicationEditorDraftTests`/`MedicationLabelOCRTests` extended; a silent-auto-apply path is a test-level rejection |
+| (b) deterministic, total slot→clock mapping | every creatable entry resolves to one determinate hour/minute; failure is typed and fail-closed; all derived instants come from the one resolved time | §4.3–4.5: exhaustive enum function; `.indeterminate` → no arm + surfaced; `EscalationEngine` untouched and fed the resolved `Date` | `MedicationSlotClockTests`; escalation/persistence integration tests; DV-1 |
+| (c) photo never creates a record | capture leads only to evidence attachment inside the acknowledgement machinery; denied/expired challenge ⇒ no record, evidence discarded | §8.1: context-bound captures; attach inside `finalizeAcknowledgement` or on an existing record; no capture→record edge exists | `MedicationEvidenceTests` (photo-alone ⇒ no record); DV-4 |
+| (d) PII-free wire | envelope carries type + timestamp (+ one-way `entry_id_hash`); no names/doses/titles on any wire; titles stay in memory | §9.4: `buildPayload` extension; `FamilyAlertContext` rule preserved | `FamilyNotifierTests` (payload shape; no name); DV-5 |
+
+---
 
 ## Components
 
-### 22. Module boundaries and responsibilities
+### 19. Module boundaries and responsibilities
 
 | File / artifact | Status | Responsibility | Requirements |
 |---|---|---|---|
-| `tools/train-intent/seeds/nepali-chat-style-spec` | NEW (single source) | THE conversational register: prose rules + machine blocks (register/particles/ai-isms/code-switch/persona clause); consumable by Python tooling and drift-checkable against Swift mirrors (§6) | FR-CNR-001, FR-CNR-002, FR-CNR-005, FR-CNR-017, FR-CNR-020; NFR-CNR-005 |
-| `tools/train-intent/seeds/chat_prompt_template.txt` | NEW | Byte-mirror of `IntentPrompt.buildChat`'s text (3 placeholders), same-change rule enforced by `check-prompt-mirror.py` (§10) | FR-CNR-023; NFR-CNR-005 |
-| `ios/tools/check-prompt-mirror.py` | CHANGED | Extended: chat template mirror check + persona-clause check + guard-lexicon check (the no-fork verifier) | FR-CNR-001, FR-CNR-023; NFR-CNR-005 |
-| `ios/ElderlyAssistant/Services/Voice/LlamaCommandInterpreter.swift` | CHANGED | `ResponseShape` gains per-shape system slot + `temperature`; `runInference` awaits `core.setParameters(temp:)` before `generateWithConstraints`; test-visible decode-parameter record; `chatSystemPrompt` (command system slot) untouched; chat persona system text NEW | FR-CNR-002, FR-CNR-003, FR-CNR-004, FR-CNR-013; NFR-CNR-001, NFR-CNR-004 |
-| `ios/ElderlyAssistant/Services/Voice/IntentPrompt.swift` | CHANGED (only if a chat-template edit is needed) | `buildChat` gains no exemplars; text changes only together with the seed mirror; `build` byte-identical | FR-CNR-002, FR-CNR-023; NFR-CNR-004 |
-| `ios/ElderlyAssistant/Services/Voice/NepaliGrammarGuard.swift` | NEW (pure, total) | Deterministic verdict over the final spoken text: honorific agreement, Devanagari purity, dangling particles/particle budget; never returns text | FR-CNR-005, FR-CNR-006; NFR-CNR-001 |
-| `ios/ElderlyAssistant/Services/Voice/CommandRouter.swift` | CHANGED | `.chat` dispatch branch: guard call site (post-polish text), flag outcome wiring (escalate/safe template), `reply_grammar_flag` emission; `speak` path unchanged for a pass | FR-CNR-005, FR-CNR-006, FR-CNR-007 |
-| `ios/ElderlyAssistant/Services/Intents/CloudChat/CloudChatConsentGate.swift` | NEW | OD-12-shape consent: fail-closed `Decision`, `ConsentRecord` (granted/recordedAt/disclosureVersion), one writer, revoke in-memory-first; encrypted at rest | FR-CNR-009; NFR-CNR-006, NFR-CNR-011 |
-| `ios/ElderlyAssistant/Services/Intents/CloudChat/CloudChatRouting.swift` | NEW (pure) | Single routing decision for chat turns: `.cloud`, `.local` (with reason) — the only place egress is decided | FR-CNR-008, FR-CNR-009, FR-CNR-010 |
-| `ios/ElderlyAssistant/Services/Intents/IntentRouter.swift` | CHANGED | Chat lane inserted after cache/preparse, before the `cloudFirstEnabled` selector branch; cloud-chat readiness closures (consent/online) wired like `geminiKeyConfigured`; local-chat fallback for chat-classified turns with cloud escalation disabled for the turn | FR-CNR-008, FR-CNR-009, FR-CNR-014 |
-| `ios/ElderlyAssistant/Services/Voice/GeminiCommandInterpreter.swift` | CHANGED | New `ChatResponding` conformance (`respondToChat`): sanitise → `IntentPrompt.buildChat` → upgraded chat `replyPersona` → `generateJSON` with the chat `GenerationConfig` (temp OD-5, search grounding off for chat — §9); `interpret()` unchanged | FR-CNR-002, FR-CNR-008, FR-CNR-010, FR-CNR-011, FR-CNR-012 |
-| `ios/ElderlyAssistant/Services/Gemini/GeminiClient.swift` | CHANGED (small) | `GenerationConfig` gains optional `temperature`; only the chat call site sets it; timeout/cost-governor/header-key discipline unchanged | FR-CNR-011, FR-CNR-012; NFR-CNR-002 |
-| `ios/ElderlyAssistant/App/AppCoordinator.swift` | CHANGED | Consent gate lifecycle + wiring (`cloudChatConsent`, `cloudChatOnline` closures), indicator published state, Settings row model, revocation action, catalog-per-language default resolution for the P1 swap | FR-CNR-008, FR-CNR-009, FR-CNR-022; NFR-CNR-009 |
-| `Resources/Localizable.xcstrings`, `App/L10n.swift`, `L10nCatalogCoverageTests` | CHANGED | All new strings en+ne (consent, disclosure, indicator + spoken form, revocation, safe templates, Settings row) | NFR-CNR-009, NFR-CNR-010 |
-| `ios/tools/check-release-log-safety.sh(.py)` + fixtures | CHANGED (coverage) | New chat/routing/guard/consent source paths in the stricter feature role; fixtures unchanged | FR-CNR-012; NFR-CNR-006 |
-| `tools/train-intent/src/style_spec.py` | NEW | Loads/validates the spec; renders rule text into layer-builder prompts; executes machine blocks for filters | FR-CNR-001, FR-CNR-017 |
-| `tools/train-intent/src/build_chat_corpus.py` | NEW | Layer 1–4 builders, filters (honorific/AI-ism/length/dedupe), teacher-GEC stage, 70/30 mixture assembly, manifest emission | FR-CNR-016, FR-CNR-017, FR-CNR-018 |
-| `tools/train-intent/eval/chat_golden.jsonl` | NEW | ~500 held-out, teacher-authored, human-reviewed turns with expected qualities; held out strictly | FR-CNR-019 |
-| `tools/train-intent/src/eval_chat_gates.py` | NEW | The three chat gates over `chat_golden.jsonl`; judge config recorded; exit non-zero on any red gate | FR-CNR-020; NFR-CNR-008 |
-| `tools/train-intent/src/eval_golden.py` + `config.yaml` | CHANGED (additive) | Chat variant keys under `chat:`; the regression harness re-runs as-is; existing keys/defaults untouched | FR-CNR-016, FR-CNR-021 |
-| `ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift` | CHANGED | NEW versioned v17 entry (real sha256, tier fields) beside `intentQwenS43`; previous entry stays addressable for rollback | FR-CNR-022, FR-CNR-028; NFR-CNR-003 |
+| `Services/MedicationScheduler/Models.swift` | CHANGED | `MedicationEntry` grows `quantity`/`slot`/`mealRelation` (optional, custom-decode defaults); `MedicationAdherenceLog` grows `evidencePhotoFileName`; `FamilyAlertType` grows `intakeRecorded` + `escalationStarted`; `withScheduleTimes` carries the new fields | FR-MSR-001/003/004/015/017; NFR-MSR-006 |
+| `Services/MedicationScheduler/MedicationSlotClock.swift` | NEW | `MedicationSlot`, `MealRelation`, `TimeOfDay`, `MedicationSlotClock` (defaults, custom decode, validation, one writer), `SlotClockError`; the pure deterministic mapping (§4) | FR-MSR-001/002; NFR-MSR-006 |
+| `Services/MedicationScheduler/DoseLine.swift` | NEW (small) | Quantity composition into `doseDescription` (single rule, localized units) | FR-MSR-003 |
+| `Services/MedicationScheduler/MedicationAckResolver.swift` | NEW (pure) | Ack resolution over candidates by what was said: name keys → slot → fired preference; `AckResolution`; the clarification walk order — never a guess (§7) | FR-MSR-007/008; NFR-MSR-001 |
+| `Services/MedicationScheduler/MedicationEvidenceStore.swift` | NEW | On-device evidence file store (bare file names in the model; JPEGs under Application Support; one per record; delete-with-entry) | FR-MSR-013/014; NFR-MSR-003 |
+| `Services/MedicationScheduler/MedicationScheduler.swift` | CHANGED | `resolvedScheduleTimes(for:)` feed at arming; `rearmForSlotClockChange()`; significant-event triggers (`intakeRecorded` in `finalizeAcknowledgement`, `escalationStarted` on the first re-fire decision); slot-entry retime refusal in `setScheduleTimes` | FR-MSR-002/015/019/022 |
+| `Services/MedicationScheduler/MedicationEditorDraft.swift` | CHANGED | Quantity + slot + meal controls in the draft; scanned-schedule→slot candidates; all shipped draft rules bound unchanged | FR-MSR-001/005/006; NFR-MSR-006 |
+| `Services/MedicationScheduler/MedicationLabelOCR.swift` + `ScannedSchedule` (pure helper) | CHANGED (bounded) | No parser-surface change; a fixed documented conversion of parser outputs to slot candidates (§6) | FR-MSR-005/006 |
+| `Services/Voice/CommandRouter.swift` | CHANGED | Ack gate additions (additive phrases only; denial guard first); resolution call replacing `oldestPendingReminderEntryId()`; clarification-walk interception + copy; correction-rescue ordering preserved | FR-MSR-007–012; NFR-MSR-001 |
+| `App/AppCoordinator.swift` | CHANGED | `medicationAckCandidates()` seam; clarification-walk state (navigation-walk precedent); editor save plumbing (`addMedication` gains quantity/slot/meal); mapping-save action + re-arm call; evidence capture plumbing | FR-MSR-001/007/008/013/014 |
+| `App/SettingsView.swift` | CHANGED | Editor: quantity + slot + before/after-meal controls; "Medicine times" mapping section (3 rows + reset); legacy edit-switch flow; evidence capture affordance on the dose/record surfaces | FR-MSR-001/002/011; NFR-MSR-005 |
+| `Services/FamilyNotifier/FamilyNotifier.swift` | CHANGED | `FamilyAlertType` cases wired; payload gains optional `entry_id_hash`; honest provider outcome (`transport_unimplemented`) replacing the silent-success stub; context passed for significant events (channel reporting) | FR-MSR-015/016/017/018 |
+| `Services/CalendarSync/CalendarShareService.swift` + `CalendarShareMapper.swift` | CHANGED | One-off significant-event calendar entries (3 at-risk events), consent gate reused, invitee rule for significant events, honest per-item results | FR-MSR-016/017; OD-7 |
+| `Resources/Localizable.xcstrings` (+ `L10n.swift`, `L10nCatalogCoverageTests`) | CHANGED | All new strings ne/en; spoken times only via `SpokenTime` | NFR-MSR-004/005 |
+| `ios/tools/check-release-log-safety.sh` fixtures | CHANGED (coverage) | New paths inside the gate's coverage; gate exits 0 | NFR-MSR-002/009 |
+| `Services/MedicationScheduler/EscalationEngine.swift`, `ConfirmationChallenge.swift`, `DoubleDoseDetector.swift`, `PlatformAlarmScheduler.swift`, `PhotoVerifier.swift` | UNCHANGED (bound) | The escalation machinery, challenge, detector, alarm arming and the dementia photo machinery are preserved contracts — fed the same one `Date` | FR-MSR-003/009/019/020; NFR-MSR-001 |
+| `Services/Voice/AckFastLane.swift` | UNCHANGED (property extended by tests) | The ack fast lane and its mic-continuity property hold for the new shapes | FR-MSR-012 |
+| Tests: `ios/ElderlyAssistantTests/Services/MedicationScheduler/` (10 suites), `…/Services/FamilyNotifier/` (4 suites), `…/Services/Voice/` | CHANGED + NEW suites | Coverage of every new contract + the four required integration tests | NFR-MSR-008/009 |
+
+### 20. Data model outline
+
+| Datum | Shape | Store / notes |
+|---|---|---|
+| `MedicationEntry` | + `quantity: MedicationQuantity?`, `slot: MedicationSlot?`, `mealRelation: MealRelation?`; `scheduleTimes` retained | `EncryptedLocalStorage` key `medication.entries` (shipped); optional fields, custom decode |
+| `MedicationSlotClock` | `morning/afternoon/evening: TimeOfDay` | NEW key (e.g. `medication.slot_clock`); per-slot decode defaults; present-but-invalid ⇒ indeterminate; one writer |
+| `MedicationAdherenceLog` | + `evidencePhotoFileName: String?` | shipped key `medication.adherence_log`; bare file name only |
+| `ScheduledReminder` | unchanged (`scheduledAt` = the resolved exact time) | shipped key `medication.pending_reminders` |
+| Evidence files | JPEG ≤ 200 KB cap, one per record | `Application Support` on-device store (VisualAidStore pattern); deleted with the entry or on pre-record discard |
+| Family-alert wire | `{v:1, alert_type, timestamp, entry_id_hash?}` | `FamilyNotifier.buildPayload`; no names/doses/titles |
+| Calendar significant-event entry | one-off, non-recurring, at the event time, keyed by a stable non-PII identifier; title plain-language + medication name (same content class as the existing mirror) | `CalendarShareService` one-off key space; consent-gated |
+
+### 21. Interface surface (seams, payload schemas, topology, auth)
+
+#### 21.1 New/changed seamed signatures (explicit error types)
+
+```swift
+// Slot→clock resolution (pure value; MedicationSlotClock.swift)
+func resolve(slot: MedicationSlot) -> Result<TimeOfDay, SlotClockError>
+
+// Scheduler arming feed (MedicationScheduler)
+func resolvedScheduleTimes(for entry: MedicationEntry) -> Result<[DateComponents], SlotClockError>
+func rearmForSlotClockChange()
+
+// Ack candidate seam (AppCoordinator, read-only; the oldestPendingReminderEntryId precedent)
+func medicationAckCandidates() -> [MedicationAckCandidate]
+
+// Ack resolution (pure; MedicationAckResolver.swift)
+static func resolve(transcript: String, candidates: [MedicationAckCandidate]) -> AckResolution
+
+// Evidence store (MedicationEvidenceStore.swift)
+func store(image: UIImage, for logId: UUID) -> Result<String, EvidenceStoreError>   // returns the bare file name
+func delete(fileName: String) -> Result<Void, EvidenceStoreError>
+
+// Notifier honesty (FamilyNotifier / APNsProvider)
+enum PushOutcome: Equatable { case delivered; case notDelivered(reason: String) }
+func sendPush(payload: [String: Any], deviceToken: String) async -> PushOutcome
+
+// Calendar significant-event write (CalendarShareService)
+func writeSignificantEvent(_ event: SignificantMedicationEvent, entry: MedicationEntry?) -> CalendarShareWriteResult
+```
+
+#### 21.2 Outcome/error types
+
+`SlotClockError.indeterminate(slot:)`; `AckResolution.{resolved, ambiguous, noMatch, nothingPending}`;
+`EvidenceStoreError` (explicit cases: writeRequested, storageUnavailable, removeFailed);
+`PushOutcome`; per-contact `NotificationResult` (existing: success/errorCode/channel);
+per-item calendar results.
+
+#### 21.3 Persisted schema versioning
+
+`MedicationEntry` and the wire envelope keep their current version fields; the new keys are
+optional/additive (custom decode; `decodeIfPresent`). No migration step runs at upgrade — the
+absence of a key IS the default (§11).
+
+#### 21.4 Infrastructure topology
+
+One iOS app process: main-thread-confined coordinator/scheduler state; `UNUserNotificationCenter`
+as the firing surface; on-device camera + Vision; `EncryptedLocalStorage` + Application Support
+stores; the family Google Calendar via the existing OAuth session (consent-gated); the APNs
+push path (transport stubbed, honestly reported). No server, no container, no Docker.
+
+#### 21.5 Auth strategy
+
+No accounts or tokens introduced. Authorization surfaces as they ship: the family-calendar
+share consent (reused for §9.3 writes), the per-contact caregiver-notify settings (opt-in kept
+for the daily first-fire only), the cloud voice-stack consent (untouched — no new egress), and
+camera permission requested at point of use with plain-language copy (shipped behavior for the
+scanner, reused for evidence capture).
+
+---
 
 ## Traceability
 
+### 22. Requirement-to-architecture mapping
+
 | Requirement | Design sections |
 |---|---|
-| FR-CNR-001 style spec, single source, four consumers | 6 (all), 22, 21 |
-| FR-CNR-002 persona upgrade both seams, same contract | 10, 6.2, 9 |
-| FR-CNR-003 chat sampling fixed seed temp 0.3, chat only, GBNF, feasibility | 5 (all), 20 |
-| FR-CNR-004 command determinism preserved | 5.1, 5.2, 10, 2, 18 (DV-5) |
-| FR-CNR-005 grammar guard verify-never-rewrite | 7.1, 7.2, 7.4 |
-| FR-CNR-006 flag outcome, honest degradation | 7.3, 7.4, 15 |
-| FR-CNR-007 reply_grammar_flag no content | 7.5, 16 |
-| FR-CNR-008 cloud-first chat toggle, local floor, degradation | 8.1, 8.2, 8.8, 15 |
-| FR-CNR-009 consent/disclosure/indicator/revocation, OD-12 shape | 8.3, 8.4, 8.5, 8.6, 17 |
-| FR-CNR-010 egress scope | 8.7, 7.3, 16 |
-| FR-CNR-011 explicit Gemini chat temperature | 9 |
-| FR-CNR-012 credential + content hygiene | 9, 16, 22 (gate row) |
-| FR-CNR-013 single-decode unchanged, abstain | 2, 5.3, 8.2 |
-| FR-CNR-014 ladder/emergency unchanged | 8.2, 2, 18 (DV-4) |
-| FR-CNR-015 STT/permissions/collection unchanged | 8.2 (note), 12, 17, 2 |
-| FR-CNR-016 v17 chat-aware QLoRA variant | 11.1, 11.2, 11.3 |
-| FR-CNR-017 four-layer corpus | 11.1, 11.2 |
-| FR-CNR-018 ship-mix provenance manifest | 11.5 |
-| FR-CNR-019 chat_golden held-out set | 11.4 (held-out rule), 21, 22 (artifact row) |
-| FR-CNR-020 new chat gates + thresholds | 11.4, 21 |
-| FR-CNR-021 full harness before swap | 11.4, 11.6, 20 |
-| FR-CNR-022 catalog entry, versioned/reversible/gated/tiers | 11.6, 15, 18 |
-| FR-CNR-023 chat template discipline / intent prompt frozen | 10, 6.3 |
-| FR-CNR-024 feasibility honesty | 20, 19.2 |
-| FR-CNR-025 DV-1..DV-6 + release gate | 18, 16 |
-| FR-CNR-026 P2 DPO | 11.7 |
-| FR-CNR-027 P2 romanized chat | 11.7, 20 |
-| FR-CNR-028 P2 4B tier via resolver | 11.6, 11.7, 20 |
-| FR-CNR-029 P2 consent-based transcripts | 11.7 |
-| NFR-CNR-001 chat reproducibility | 5.4, 5.2, 8.9 |
-| NFR-CNR-002 latency envelope | 13, 8.8, 11.6, 18 |
-| NFR-CNR-003 memory/jetsam, one resident | 5.2 (rejected handle), 11.6, 14 |
-| NFR-CNR-004 1,024-token budget | 10, 21 |
-| NFR-CNR-005 byte-mirror discipline | 6.3, 10 |
-| NFR-CNR-006 log safety | 16, 7.5, 21 |
-| NFR-CNR-007 telemetry hygiene | 7.5, 8.1, 16 |
-| NFR-CNR-008 gate thresholds | 11.4, 21 |
-| NFR-CNR-009 accessibility, voice-first, indicator, no internals | 17, 8.5, 8.6 |
-| NFR-CNR-010 localisation ne/en | 17, 7.3 (safe templates) |
-| NFR-CNR-011 compliance/release gates | 21, 16, 19.1 |
+| FR-MSR-001 slot-based entry model (quantity + slot + meal) | 4.1, 4.2, 4.4, 19 (draft/settings rows) |
+| FR-MSR-002 deterministic total slot→clock mapping, defaults, family-configurable | 4.2, 4.3, 4.5, 15, 18 (b), 21.1–21.2 |
+| FR-MSR-003 structured quantity, composed dose line, detector unchanged | 4.6, 19 (DoseLine), 2 (invariant ledger) |
+| FR-MSR-004 purpose at entry (optional; no dependency) | 5 |
+| FR-MSR-005 scan-to-fill additive, bounded, partial-fill honest | 6, 19 (draft + ScannedSchedule) |
+| FR-MSR-006 OCR confirmation before binding, no silent auto-apply | 6, 18 (a), 14 |
+| FR-MSR-007 voice ack names medication and slot; resolution by what was said | 7.1, 7.2, 7.6 |
+| FR-MSR-008 conservative disambiguation, sanctioned copy only | 7.2, 7.3, 14 |
+| FR-MSR-009 safety sequence preserved, no bypass | 7.4, 8.1, 2, 17 |
+| FR-MSR-010 intake recorded against the schedule | 7.4, 10 |
+| FR-MSR-011 refusal-first denial guard preserved | 7.1, 7.5 |
+| FR-MSR-012 mic continuity around acks | 7.5, 13, 19 (AckFastLane row) |
+| FR-MSR-013 photo evidence augments never replaces, never creates | 8.1, 8.2, 8.5, 18 (c) |
+| FR-MSR-014 photo evidence shared-slot resolution deterministic | 8.1, 8.3 |
+| FR-MSR-015 significant-event set + triggers on the medication path | 9.1, 9.5, 14 |
+| FR-MSR-016 channels + honest per-contact delivery; consent gate | 9.2, 9.3, 14 |
+| FR-MSR-017 PII-free wire | 9.4, 18 (d), 20 |
+| FR-MSR-018 honest degradation, no silent stubs | 9.2, 9.3, 8.1, 9.5, 14 |
+| FR-MSR-019 reminder/escalation semantics preserved | 10, 2, 4.4 |
+| FR-MSR-020 dementia machinery preserved and integrated | 7.4, 8.5, 17 |
+| FR-MSR-021 elderly-fit UX of the new flows | 16.1, 7.3, 8.4 |
+| FR-MSR-022 persistence before alarm + process-kill re-arm | 10, 4.5, 14 |
+| NFR-MSR-001 LLM independence | 7.6, 13, 17 |
+| NFR-MSR-002 PII-free observability + release log gate | 12, 17, 19 |
+| NFR-MSR-003 on-device label/photo processing, no new egress | 6, 8.1, 12 |
+| NFR-MSR-004 localisation + spoken time via the formatter | 16.2, 11 (legacy rendering) |
+| NFR-MSR-005 accessibility (44pt/18pt/contrast, voice-first) | 16.1, §4.2 control shape |
+| NFR-MSR-006 migration compatibility, no loss, no inference | 11, 4.2, 20, 21.3 |
+| NFR-MSR-007 Devanagari grapheme regression pin | 16.3 |
+| NFR-MSR-008 test coverage, integration tests, confidence bars | 17, 19 (tests row) |
+| NFR-MSR-009 compliance and release gates | 12, 17, 19 |
+| NFR-MSR-010 reminder firing latency | 4.3, 10, 17 |
 
 Every locked requirement is bound by the design above. No requirement is left unbound.
 
-## Deferred work (plan-tasks / implementation)
+---
 
-`design-l2` is folded into this document (owner directive 2026-10-14): this is the combined
-L1+L2 design of record, and the `review-l2` gate is dropped. The former design-l2 items are
-resolved here where the contracts already determine them, and honestly deferred otherwise —
-never silently dropped. Nothing below weakens a binding above.
+## Risks and open questions
+
+### 23. Risks and review focus for `review-l1`
+
+1. **Calendar-channel content extension (§9.3, OD-7).** Significant-event entries put
+   medication-name + event-time content on the shared Google Calendar. This is the same content
+   class the shipped schedule mirror already shares under the same consent, and FR-MSR-016 names
+   the calendar channel in scope — but the disclosure copy (`calendarShare.consent.*`) should be
+   reviewed to confirm it covers event entries, not just schedule items. Recorded as the top
+   review focus.
+2. **Simple-ack behaviour change (§7.2).** Several pending reminders now yield clarification
+   instead of the silent oldest-pending pick. Required by FR-MSR-007's failure scenario; the
+   single-pending case is byte-identical. Review should confirm the due-set preference
+   ("fired == true") is the right reading of "unambiguous".
+3. **Retime refusal for slot entries (§11).** The Calendar-app retime path is refused for
+   slot-model entries (honest event, no silent conversion). The alternative (clearing the slot)
+   was rejected; review should confirm the refusal is acceptable to the family's edit paths.
+4. **Honest-stub change (§9.2).** Making `APNsProvider` report not-delivered changes shipped
+   behaviour (and its tests) — required by FR-MSR-016/018, but it makes delivery gaps visible on
+   every existing alert. Review should confirm this is the intended honesty posture.
+5. **Evidence delivery boundary (§8.1, OD-8).** On-device-only evidence is honest but means the
+   caregiver cannot see the photo remotely until the inherited E2E transport lands. Review
+   should confirm the retention/forward-contract statement satisfies FR-MSR-013's
+   "where evidence leaves the device" clause.
+6. **Dose-line composition rule 2 (§4.6).** Composing quantity + scanned strength into one line
+   ("1 tablet, 500 mg") preserves data but adds content; the alternative (quantity wins,
+   strength dropped) loses the scanned value. Review should confirm the composed form.
+7. **`withScheduleTimes` copy trap (§11).** A memberwise rebuild that drops the new fields is a
+   silent slot-loss defect; called out for implement-time attention and a migration test.
+8. **Legacy entries in the ack slot filter (§7.2 rule 3).** Legacy (slot-nil) entries never
+   match a slot word; a household mid-upgrade gets the honest clarification instead of an
+   inferred match. Deterministic and conservative; review should confirm no inference is wanted
+   there either.
+
+## Deferred work (design-l2 / implementation — nothing below weakens a binding above)
 
 | Item | Disposition |
 |---|---|
-| File placement for `CloudChatRouting` / `CloudChatConsentGate` / `NepaliGrammarGuard` | FOLDED — paths fixed in §22 (Components); unit decomposition belongs to plan-tasks |
-| Guard internals — tokenization and lexicon representation | FOLDED — tokenization and longest-match rules fixed in §7.2; lexicons are compiled Swift constants that byte-mirror the spec's `guard_checks` blocks (drift-checked, §6.3); no runtime resource loading, so no load-failure mode |
-| Consent store seam | FOLDED — reuse the encrypted, Keychain-backed store mechanism the LiveTranslate consent record uses (reuse, not a fork; §8.3, §12) |
-| `ResponseShape` / `runInference` refactor detail (parameter passing, extended override-seam signature, `lastDecodeParameters` accessor shape) | FOLDED — the shape→temperature property, the awaited `core.setParameters` placement, and the test-visible decode-parameter record are fixed in §5.2; parameter/member names are implementation |
-| Judge prompt/model version pinning; `eval_chat_gates.py` output schema | FOLDED — the judge runs at temperature 0 and model id + prompt sha256 + rubric are recorded with the results; the results file carries `{gate, threshold, observed, pass}` per gate plus the judge config, and the harness exits non-zero on any red gate (§11.4) |
-| Catalog entry id / default-resolution data shape | DEFERRED to implementation — the entry is new and versioned beside `intentQwenS43` (§11.6); the literal id is set when the artifact exists (real sha256), recorded in the entry and the run manifest |
-| Spec field-level schemas (e.g. `honorific_pairs` internals) | DEFERRED to implementation, binding intact — section names and required content are fixed in §6.1; field names may be finalized at implementation because the drift checks bind the BYTES of the named blocks (§6.3), and any change is a spec-version bump recorded in the run manifest |
-| Final en/ne copy — consent, disclosure, indicator + spoken forms, revocation/state, safe templates, Settings row, `chat.cloudFallback.notice` | DEFERRED to implementation — the key set and semantics are fixed in §17/§8; literal strings are authored at implementation and verified by `L10nCatalogCoverageTests` (both languages) and DV-2/DV-3, with copy review before the first App Store submission (§8.4) |
-| Voice revocation/state keyword phrases | DEFERRED to implementation — the deterministic keyword-rule family is fixed in §8.6; phrases are authored with the router safety-net test pins |
+| Clarification-walk state representation; response-window plumbing | DEFERRED to design-l2 — mechanics fixed in §7.3; the state object and its timeout wiring are component details |
+| Slot/meal word lists (exact strings, both languages); additive ack-phrase additions | DEFERRED to design-l2/implement — closed lists, no LLM, tested; boundary: denial guard first, no reordering, Devanagari pin untouched |
+| Exact L10n copy strings (units, slots, meals, mapping section, clarification forms, outcome lines, alert bodies, evidence lines, calendar entry titles) | DEFERRED to implementation — key sets and semantics fixed (§16.2); both languages; catalog coverage test |
+| Evidence store internals (file naming, compression implementation, replace/delete ordering) | DEFERRED to design-l2 — shape fixed in §8.2/§20 (bare file names, one per record, 200 KB cap) |
+| Capture-surface placement/details (dose screen affordance, record-surface affordance) | DEFERRED to design-l2 — context-bound determinism and no-generic-camera rule fixed in §8.1 |
+| Calendar one-off bookkeeping (key lifecycle, reconcile interplay, entry title format) | DEFERRED to design-l2 — mechanism, consent gate, invitee rule and event subset fixed in §9.3 |
+| Editor interaction details (quantity/strength coexistence rendering; mapping control layout) | DEFERRED to design-l2 — rules fixed in §4.1/§4.6 |
 | Wave decomposition and unit boundaries | DEFERRED to plan-tasks (the plan owns unit decomposition) |
-
-## Assumptions
-
-- A1: The `ChatIntentClassifier` table and its conservative semantics stay as shipped; the
-  chat lane routes exactly its `.chat` set.
-- A2: `LLMCore.setParameters` + `generateWithConstraints` actor-ordering holds as read at base
-  22de9864 (verified in the vendored source); any future runtime change re-verifies §5.2 by
-  test before the feature's invariants are claimed.
-- A3: The Gemini speech stack's transcription egress remains under the existing stack consent
-  (recorded OD-12); the feature records the boundary (§20) rather than altering it.
-- A4: Training-box execution (anjan-ubuntu/4090) per the suite's README; corpus/GGUF are build
-  artifacts, not app changes.
-- A5: The reference device (Anzaan) runs an iOS 26-class build; DV results are recorded there.
-- A6: The workflow's canonical file `specs/conversational-nepali-replies/workflow.yaml` is the
-  authority for gate mechanics; its `.ai-sdd/workflows/` mirror is kept byte-identical.
