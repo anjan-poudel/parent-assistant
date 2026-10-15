@@ -4498,16 +4498,26 @@ struct MedicationScheduleSettingsView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// The whole form as a value ([MED-OCR], 2026-09-18): the name, the
-    /// printed strength, the dose-time rows and the purpose step. The view
-    /// only moves state in and reads stored values out at Save — the
-    /// pre-fill rules for a label scan live in `MedicationEditorDraft`,
-    /// where they are tested without a view.
+    /// printed strength, the dose rows and the purpose step. The view only
+    /// moves state in and reads stored values out at Save — the pre-fill
+    /// rules for a label scan live in `MedicationEditorDraft`, where they
+    /// are tested without a view.
     ///
     /// It replaced three `@State` properties (`name`, `time`, `purpose`)
     /// because the label scan fills several of them at once, and "what a
     /// scan may overwrite" is exactly the rule a reader has to be able to
     /// find in one place.
-    @State private var draft = MedicationEditorDraft()
+    ///
+    /// [MED-SLOT] (2026-10-15, C8 view half) The SAME one value now also
+    /// carries the slot model's rows, the quantity step and the meal
+    /// relation, and the form edits an EXISTING entry through the same
+    /// draft: tapping a row loads the entry in by field assignment (the
+    /// prefill rules live in `Self.draft(from:)` below), and Save hands
+    /// `Self.saveRequest(from:)` to IF-21. The draft has no from-entry
+    /// initializer by design — T-009 deliberately left that decision to
+    /// this surface — so the prefill is a static, testable function here
+    /// rather than a view-body edit.
+    @State private var draft: MedicationEditorDraft
     /// The photo the last scan took, held until Save. The entry does not
     /// exist yet — `addMedication` mints its id — so the picture waits here
     /// and is written as the entry's first visual aid at save time.
@@ -4520,6 +4530,20 @@ struct MedicationScheduleSettingsView: View {
     /// aids task, 2026-09-16) — held as the full entry so the sheet renders
     /// without a store read of its own.
     @State private var photoEditorEntry: MedicationEntry?
+    /// [MED-SLOT] The entry the form is editing, or nil for the add form.
+    /// Tapping a row sets it; a successful Save (or the "Add medication"
+    /// reset) clears it. The form is ONE form for both flows — the design's
+    /// "the same form pre-filled from the entry".
+    @State private var editingEntryId: UUID?
+
+    /// The new-entry form opens on the SLOT model (design-l2 C8): the
+    /// family states a time of day, and the clock model stays one explicit
+    /// tap away on the model chooser. The default lives here rather than in
+    /// `MedicationEditorDraft`'s initializer on purpose (T-009's comment):
+    /// the value type keeps `.times` so no pre-existing caller changed.
+    init() {
+        _draft = State(initialValue: Self.newDraft())
+    }
 
     var body: some View {
         LeafScreen(titleKey: "settings.meds.title") {
@@ -4575,37 +4599,63 @@ struct MedicationScheduleSettingsView: View {
 
     private func medRow(_ entry: MedicationEntry) -> some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(entry.medicationName)
-                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                    .foregroundStyle(appearance.colors.textPrimary)
-                // The printed strength ([MED-OCR], 2026-09-18) — read off
-                // the label by the scan flow and stored in the dose line.
-                // Shown on the row for the same reason the purpose is: a
-                // household with two boxes of the same medicine at different
-                // strengths must be able to tell them apart HERE, before
-                // anyone is asked to take one.
-                if !entry.doseDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(entry.doseDescription)
-                        .font(.system(size: appearance.typography.captionPointSize))
-                        .foregroundStyle(appearance.colors.textSecondary)
+            // [MED-SLOT] (T-018, C8) The row IS the edit-existing door:
+            // tapping a medicine opens the form above pre-filled with it
+            // (photos/delete buttons unchanged beside it). A Button rather
+            // than a tap gesture, so VoiceOver announces a control; the
+            // button's label is the row's own text, so nothing new is said.
+            Button {
+                beginEditing(entry)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.medicationName)
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                        .foregroundStyle(appearance.colors.textPrimary)
+                    // The printed strength ([MED-OCR], 2026-09-18) — read off
+                    // the label by the scan flow and stored in the dose line.
+                    // Shown on the row for the same reason the purpose is: a
+                    // household with two boxes of the same medicine at different
+                    // strengths must be able to tell them apart HERE, before
+                    // anyone is asked to take one.
+                    if !entry.doseDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(entry.doseDescription)
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
+                    }
+                    // The "when" line ([MED-SLOT], T-018): a slot entry
+                    // states its time of day and meal context; the
+                    // resolved-time mirror is a carrier the family never
+                    // stated (D2), so it is never drawn as a schedule. A
+                    // legacy entry keeps its stored clock times, exactly
+                    // as shipped.
+                    if let slotContext = slotContextText(entry) {
+                        Text(slotContext)
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
+                    } else {
+                        Text(timesText(entry.scheduleTimes))
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
+                    }
+                    // What the medicine is FOR ([MED-PURPOSE], 2026-09-17) —
+                    // the same label the photo caption and the voice rule use
+                    // (`MedicationPurpose.label(forStored:locale:)`), so the
+                    // family sees one name for a purpose everywhere. Absent
+                    // (or blank) draws no line at all: a household that files
+                    // no purposes sees exactly the row it saw before.
+                    if let purpose = MedicationPurpose.label(forStored: entry.purpose,
+                                                             locale: coordinator.activeLocale) {
+                        Text(purpose)
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
+                    }
                 }
-                Text(timesText(entry.scheduleTimes))
-                    .font(.system(size: appearance.typography.captionPointSize))
-                    .foregroundStyle(appearance.colors.textSecondary)
-                // What the medicine is FOR ([MED-PURPOSE], 2026-09-17) —
-                // the same label the photo caption and the voice rule use
-                // (`MedicationPurpose.label(forStored:locale:)`), so the
-                // family sees one name for a purpose everywhere. Absent
-                // (or blank) draws no line at all: a household that files
-                // no purposes sees exactly the row it saw before.
-                if let purpose = MedicationPurpose.label(forStored: entry.purpose,
-                                                         locale: coordinator.activeLocale) {
-                    Text(purpose)
-                        .font(.system(size: appearance.typography.captionPointSize))
-                        .foregroundStyle(appearance.colors.textSecondary)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(editingEntryId == entry.id ? [.isSelected] : [])
             Spacer()
             // Photos live behind this row, the same place routines put
             // them (medication-visual-aids task, 2026-09-16): this leaf is
@@ -4660,7 +4710,11 @@ struct MedicationScheduleSettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
 
-            timeRows
+            scheduleStep
+
+            quantityStep
+
+            mealStep
 
             purposeStep
 
@@ -4671,18 +4725,7 @@ struct MedicationScheduleSettingsView: View {
             }
 
             Button {
-                errorKey = coordinator.addMedication(name: draft.storedName,
-                                                     times: draft.storedTimes,
-                                                     purpose: draft.storedPurpose,
-                                                     strength: draft.storedStrength,
-                                                     photo: scanPhoto)
-                // Cleared only on success, like the name: a rejected save
-                // must not throw away what the family chose — nor the photo
-                // they took for it.
-                if errorKey == nil {
-                    draft = MedicationEditorDraft()
-                    scanPhoto = nil
-                }
+                save()
             } label: {
                 Text("settings.meds.save")
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
@@ -4693,11 +4736,581 @@ struct MedicationScheduleSettingsView: View {
                     .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
             }
             .buttonStyle(.plain)
+
+            // The way back to a fresh form while an entry is open (T-018):
+            // the shipped `settings.meds.add` label, doing exactly what it
+            // says. Absent in the add flow, where it would do nothing.
+            if editingEntryId != nil {
+                Button {
+                    resetToAddForm()
+                } label: {
+                    Text("settings.meds.add")
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                        .foregroundStyle(appearance.colors.accentForeground)
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity)
         .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
+
+    // MARK: - The slot model's controls ([MED-SLOT], T-018, C8)
+
+    /// The schedule step: the model chooser, then the current model's
+    /// rows. The chooser is what makes the slot model an explicit family
+    /// choice in BOTH directions — a legacy entry opens on "Keep exact
+    /// times" and stays there unless the family taps the slot controls,
+    /// and a fresh slot-model form can still state a clock time for a
+    /// medicine the household needs to the minute.
+    private var scheduleStep: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(spacing: 8) {
+                modeChip("settings.meds.keepTimes", mode: .times)
+                modeChip("settings.meds.useSlotModel", mode: .slots)
+            }
+            if draft.scheduleMode == .slots {
+                slotDoseRows
+            } else {
+                timeRows
+            }
+        }
+    }
+
+    /// One chip of the model chooser (the `purposeChip` shape). The chosen
+    /// model carries the selected trait as well as the filled surface, so
+    /// the choice is never conveyed by colour alone.
+    private func modeChip(_ key: String, mode: ScheduleMode) -> some View {
+        let isSelected = draft.scheduleMode == mode
+        return Button {
+            selectScheduleMode(mode)
+        } label: {
+            Text(LocalizedStringKey(key))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                .foregroundStyle(isSelected ? .white : appearance.colors.textPrimary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(isSelected ? appearance.colors.accent : appearance.colors.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    /// Tapping the already-chosen model is a no-op — it must never re-run
+    /// preselection over rows the family has meanwhile assigned.
+    private func selectScheduleMode(_ mode: ScheduleMode) {
+        guard draft.scheduleMode != mode else { return }
+        switch mode {
+        case .slots:
+            Self.switchToSlots(&draft, mapping: householdMapping())
+        case .times:
+            Self.switchToTimes(&draft, mapping: householdMapping(), now: Date())
+        }
+    }
+
+    /// The household mapping's read seam for the family's model switch —
+    /// read at the tap and never cached: the store is stateless over the
+    /// storage seam (`MedicationSlotClockStore`'s own contract; the
+    /// `MedicationScheduler.init` precedent), so an instance composed here
+    /// reads the ONE stored record the save gate and the arming path read,
+    /// and the chips can never be filled against a divergent clock.
+    ///
+    /// Nothing here resolves a time FOR the save — the view hands slots to
+    /// IF-21; the mapping is consulted only to fill the chips, and the
+    /// switch to the clock model only to seed the pickers at the times the
+    /// entry already fires at.
+    private func householdMapping() -> MedicationSlotClock {
+        MedicationSlotClockStore(storage: MigratingEncryptedStorage()).load()
+    }
+
+    /// The slot model's dose rows: one card per dose with a three-chip
+    /// slot picker and the shipped remove control, then the "Add another
+    /// dose" appender. The time pickers do not appear in this arm at all
+    /// (design-l2 C8) — in the slot model the family is never asked for a
+    /// clock time.
+    private var slotDoseRows: some View {
+        VStack(spacing: 10) {
+            ForEach(draft.slotRows.indices, id: \.self) { index in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        timeLabel
+                        Spacer(minLength: 0)
+                        removeTimeButton(at: index)
+                    }
+                    HStack(spacing: 8) {
+                        ForEach(MedicationSlot.allCases, id: \.self) { slot in
+                            slotChip(slot, at: index)
+                        }
+                    }
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+            }
+            addDoseButton
+        }
+    }
+
+    /// One slot control of one row — a big chip, the same shape as the
+    /// purpose and model chips, carrying the selected trait when it is the
+    /// row's stated slot.
+    private func slotChip(_ slot: MedicationSlot, at index: Int) -> some View {
+        let isSelected = draft.slotRows.indices.contains(index) && draft.slotRows[index] == slot
+        return Button {
+            guard draft.slotRows.indices.contains(index) else { return }
+            draft.slotRows[index] = slot
+        } label: {
+            Text(LocalizedStringKey(Self.slotKey(for: slot)))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                .foregroundStyle(isSelected ? .white : appearance.colors.textPrimary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(isSelected ? appearance.colors.accent : appearance.colors.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    /// "Add another dose" — one tap, one more row (a twice-daily medicine
+    /// is two rows and, on save, two entries — D1). The appender is
+    /// `MedicationEditorDraft.addTime`, which keeps the two row arrays
+    /// parallel; the new row is unassigned until the family picks a slot.
+    private var addDoseButton: some View {
+        Button {
+            draft.addTime()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                Text("meds.addDose")
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+            }.foregroundStyle(appearance.colors.accentForeground)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// "How much?": the amount and the unit — the purpose chip-or-free-text
+    /// shape applied to the quantity (OD-2). NOTHING is defaulted: the
+    /// amount starts unstated, the first `+` states "1", and the − control
+    /// never goes below 1 (a stored quantity is a positive whole number, and
+    /// a half-stated pair — an amount with no unit, or a unit with no amount
+    /// — is never stored at all; `MedicationQuantityDraft` owns that rule).
+    private var quantityStep: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Text("meds.quantity.amount")
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                    .foregroundStyle(appearance.colors.textPrimary)
+                Spacer(minLength: 0)
+                amountControl
+            }
+            TextField(LocalizedStringKey("meds.quantity.customUnit"),
+                      text: Binding(
+                        get: { draft.quantity.text },
+                        set: { draft.quantity.editText($0) }
+                      ))
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .padding(14)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+            VStack(spacing: 8) {
+                ForEach(Self.unitChipRows, id: \.self) { row in
+                    HStack(spacing: 8) {
+                        ForEach(row, id: \.self) { unit in
+                            unitChip(unit)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+    }
+
+    /// − / number / + — every part a full tap target. The number is drawn
+    /// only once it is stated: an unstated amount shows nothing rather than
+    /// an invented "1" or a corrupt-looking "0".
+    private var amountControl: some View {
+        HStack(spacing: 8) {
+            amountButton(systemName: "minus", disabled: draft.quantity.amount == nil) {
+                stepAmount(by: -1)
+            }
+            Text(draft.quantity.amount.map(String.init) ?? "")
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textPrimary)
+                .frame(minWidth: DesignTokens.minTapTargetSize)
+                .multilineTextAlignment(.center)
+            amountButton(systemName: "plus", disabled: false) {
+                stepAmount(by: 1)
+            }
+        }
+    }
+
+    private func amountButton(systemName: String, disabled: Bool,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(disabled
+                    ? appearance.colors.textSecondary
+                    : appearance.colors.accentForeground)
+                .frame(minWidth: DesignTokens.minTapTargetSize,
+                       minHeight: DesignTokens.minTapTargetSize)
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
+
+    /// The stated amount moves by one whole unit and never leaves the
+    /// quantity contract's range: nil (never stated) becomes 1 on the first
+    /// `+`, and the floor is 1 — no zero, no negative, nothing to repair
+    /// later (`MedicationQuantityDraft.storedValue` re-checks rather than
+    /// clamps).
+    private func stepAmount(by delta: Int) {
+        let current = draft.quantity.amount ?? 0
+        let next = current + delta
+        draft.quantity.amount = next > 0 ? next : nil
+    }
+
+    /// One unit chip. The label resolves through the shipped T-012 key
+    /// family `meds.unit.<id>` — the ONE source of unit labels, the same
+    /// key `MedicationQuantityDraft.select` fills the field with and
+    /// `DoseLine` renders the stored quantity through.
+    private func unitChip(_ unit: MedicationDoseUnit) -> some View {
+        let isSelected = draft.quantity.unit == unit
+        return Button {
+            draft.quantity.select(unit, locale: coordinator.activeLocale)
+        } label: {
+            Text(Self.unitLabel(for: unit, locale: coordinator.activeLocale))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                .foregroundStyle(isSelected ? .white : appearance.colors.textPrimary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(isSelected ? appearance.colors.accent : appearance.colors.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    /// "Before or after food?": two chips, the stated relation or none.
+    /// Tapping the selected chip withdraws the statement — nil is a real
+    /// answer (the relation is context, and the family may not know it
+    /// yet), and a no-way-back control would trap a mistap.
+    private var mealStep: some View {
+        HStack(spacing: 8) {
+            mealChip(.beforeMeal)
+            mealChip(.afterMeal)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity)
+        .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+    }
+
+    private func mealChip(_ relation: MealRelation) -> some View {
+        let isSelected = draft.mealRelation == relation
+        return Button {
+            draft.mealRelation = isSelected ? nil : relation
+        } label: {
+            Text(LocalizedStringKey(Self.mealKey(for: relation)))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                .foregroundStyle(isSelected ? .white : appearance.colors.textPrimary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(isSelected ? appearance.colors.accent : appearance.colors.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    // MARK: - The form's pure seams ([MED-SLOT], T-018, C8)
+
+    /// The new-entry form's draft: the slot model by default (design-l2
+    /// C8). The family states a time of day; the clock model stays one
+    /// explicit chooser tap away.
+    static func newDraft(now: Date = Date(), calendar: Calendar = .current) -> MedicationEditorDraft {
+        var draft = MedicationEditorDraft(now: now, calendar: calendar)
+        draft.scheduleMode = .slots
+        return draft
+    }
+
+    /// The edit-existing prefill (C8): "the same form pre-filled from the
+    /// entry", by field assignment.
+    ///
+    /// The two model rules, in one place:
+    ///
+    ///  - a LEGACY entry (no slot) opens in `.times` with its stored times
+    ///    placed exactly as stored — hour and minute, no fuzzy match — and
+    ///    NO slot assigned: nothing converts until the family chooses the
+    ///    slot controls, and the family may save in the clock model;
+    ///  - a SLOT entry reopens in `.slots` with its slot on the one form
+    ///    row (D1: a row is a dose, and the model's slot is singular). Its
+    ///    resolved-time mirror is deliberately NOT placed anywhere the
+    ///    form shows: the family stated no clock time when they saved it,
+    ///    so no clock time is put in front of them now.
+    ///
+    /// The quantity step is refilled from the entry's STRUCTURED quantity
+    /// (never parsed back out of the dose line), and the dose line is
+    /// split back into its two halves only when it is exactly the C2
+    /// composition of that quantity and a text half in the caller's
+    /// locale (`Self.doseTextHalf(of:locale:)`); otherwise the whole line
+    /// rides the free-text field verbatim, so the family's visible line is
+    /// never duplicated and never rewritten by the editor.
+    static func draft(from entry: MedicationEntry, locale: Locale,
+                      now: Date = Date(), calendar: Calendar = .current) -> MedicationEditorDraft {
+        var draft = MedicationEditorDraft(now: now, calendar: calendar)
+        draft.name = entry.medicationName
+        if let purpose = entry.purpose, !purpose.isEmpty {
+            draft.applyPurposeLookup(purpose)
+        }
+        draft.mealRelation = entry.mealRelation
+        if let slot = entry.slot {
+            draft.scheduleMode = .slots
+            draft.times = [now]
+            draft.slotRows = [slot]
+        } else {
+            draft.scheduleMode = .times
+            let placed = entry.scheduleTimes.compactMap { components -> Date? in
+                guard let hour = components.hour, let minute = components.minute else { return nil }
+                return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: now)
+            }
+            draft.times = placed.isEmpty ? [now] : placed
+            draft.slotRows = Array(repeating: nil, count: draft.times.count)
+        }
+        if let quantity = entry.quantity, let textHalf = doseTextHalf(of: entry, locale: locale) {
+            draft.quantity.amount = quantity.amount
+            if let unit = MedicationDoseUnit(rawValue: quantity.unit) {
+                draft.quantity.select(unit, locale: locale)
+            } else {
+                draft.quantity.editText(quantity.unit)
+            }
+            draft.strength = textHalf
+        } else {
+            // A legacy entry's line, or one composed in another locale (or
+            // by an older composer): it has no exactly recoverable text
+            // half, so it stays the family's free text, verbatim, and the
+            // quantity step stays empty. Rule 3 of the composer then
+            // re-saves the identical line.
+            draft.strength = entry.doseDescription
+        }
+        return draft
+    }
+
+    /// The dose TEXT half of a stored dose line, or nil when the line is
+    /// not exactly the C2 composition of the entry's own structured
+    /// quantity and a text half in the caller's locale.
+    ///
+    /// The quantity itself is never derived from the line (design-l2 C2:
+    /// the structured quantity is stored BESIDE the line, never parsed
+    /// back out of it) — this only recognises the documented composition
+    /// (`"<amount> <unit>, <dose text>"`, `DoseLine.compose` rule 2) to
+    /// get the family's own words back for the form. `""` is a real
+    /// answer: a line that is exactly the composed quantity has an empty
+    /// text half and re-composes to the identical line. A miss is a miss —
+    /// nothing is guessed, and no loose delimiter is ever split on.
+    static func doseTextHalf(of entry: MedicationEntry, locale: Locale) -> String? {
+        guard let quantity = entry.quantity else { return nil }
+        let rendered = DoseLine.compose(quantity: quantity, doseText: "", locale: locale)
+        guard !rendered.isEmpty else { return nil }
+        if entry.doseDescription == rendered { return "" }
+        let prefix = rendered + Self.doseLineSeparator
+        guard entry.doseDescription.hasPrefix(prefix) else { return nil }
+        return String(entry.doseDescription.dropFirst(prefix.count))
+    }
+
+    /// The C2 dose-line separator, pinned to `DoseLine.compose`'s
+    /// documented format ("<amount> <unit>, <dose text>"): punctuation
+    /// only, deliberately not a catalog key, and identical in both
+    /// languages. This is the only other place that names it, and only to
+    /// recognise an already-composed line — a miss falls back to the
+    /// verbatim line, never to a guess.
+    private static let doseLineSeparator = ", "
+
+    /// The save request the form's Save builds from the draft (IF-21): the
+    /// shipped stored values, the stated quantity and meal relation, the
+    /// draft's dose rows and the scan's photo. The rows are single-shape by
+    /// construction — `storedRows` emits `.time` in the clock model and the
+    /// assigned `.slot` rows in the slot model — and a `.slot` row carries
+    /// no clock time here, ever: the coordinator resolves it (the view
+    /// resolution is T-001/T-008's, never this surface's).
+    static func saveRequest(from draft: MedicationEditorDraft,
+                            photo: UIImage?) -> MedicationSaveRequest {
+        MedicationSaveRequest(name: draft.storedName,
+                              strength: draft.storedStrength,
+                              purpose: draft.storedPurpose,
+                              quantity: draft.storedQuantity,
+                              mealRelation: draft.mealRelation,
+                              rows: draft.storedRows,
+                              photo: photo)
+    }
+
+    /// The view-level half of the save gate: a slot-model row the family
+    /// has not assigned yet. `storedRows` deliberately drops unassigned
+    /// rows, so a save that got past this would silently persist FEWER
+    /// doses than the form shows — the honest outcome is the shipped
+    /// `settings.meds.slotRequired` line instead. The clock model has no
+    /// such hole (its rows are shaped by construction) and returns nil,
+    /// letting the coordinator's own gates speak.
+    static func pendingRowFailureKey(for draft: MedicationEditorDraft) -> String? {
+        guard draft.scheduleMode == .slots else { return nil }
+        return draft.slotRows.contains { $0 == nil } ? "settings.meds.slotRequired" : nil
+    }
+
+    /// The explicit, family-made switch to the slot model (C8). Assigning
+    /// the mode is the whole act — nothing is persisted — and
+    /// `applySlotPreselection` fills only rows that still equal the
+    /// household mapping's time for a slot EXACTLY, to the minute. A row it
+    /// cannot match stays unassigned, and `pendingRowFailureKey` keeps the
+    /// save closed until the family picks a slot or removes the row. A
+    /// legacy entry's clock times are never converted into slots.
+    static func switchToSlots(_ draft: inout MedicationEditorDraft,
+                              mapping: MedicationSlotClock) {
+        draft.scheduleMode = .slots
+        draft.applySlotPreselection(mapping: mapping)
+    }
+
+    /// The reverse explicit choice ("Keep exact times"). Each assigned row's
+    /// picker is placed at the time its slot resolves to under the mapping
+    /// the family has now — the time the entry actually fires at, so the
+    /// visible conversion never moves a dose. A row the mapping cannot
+    /// resolve (fail-closed `.indeterminate`) keeps its carrier and the
+    /// family states the time in the picker. Nothing is persisted, and the
+    /// slot assignments stay as chips for a switch back.
+    static func switchToTimes(_ draft: inout MedicationEditorDraft,
+                              mapping: MedicationSlotClock,
+                              now: Date, calendar: Calendar = .current) {
+        for index in draft.slotRows.indices where draft.times.indices.contains(index) {
+            guard let slot = draft.slotRows[index],
+                  case .success(let resolved) = mapping.resolve(slot: slot),
+                  let placed = calendar.date(bySettingHour: resolved.hour,
+                                             minute: resolved.minute,
+                                             second: 0, of: now)
+            else { continue }
+            draft.times[index] = placed
+        }
+        draft.scheduleMode = .times
+    }
+
+    /// Save: the view's request (IF-21) in, the coordinator's catalog KEY
+    /// out (or nil). Nothing is written by this view — the coordinator is
+    /// the one writer, and its nil means the save landed, so the form
+    /// resets to a fresh add shape. A rejection keeps everything the
+    /// family entered, and the scan's photo.
+    private func save() {
+        if let pendingKey = Self.pendingRowFailureKey(for: draft) {
+            errorKey = pendingKey
+            return
+        }
+        let request = Self.saveRequest(from: draft, photo: scanPhoto)
+        let failure: String?
+        if let entryId = editingEntryId {
+            failure = coordinator.updateMedication(id: entryId, request)
+        } else {
+            failure = coordinator.addMedication(request)
+        }
+        errorKey = failure
+        if failure == nil {
+            resetToAddForm()
+        }
+    }
+
+    /// Back to a fresh slot-model form — on a successful save and on the
+    /// "Add medication" reset, so the next medicine never inherits the
+    /// previous one's rows.
+    private func resetToAddForm() {
+        draft = Self.newDraft()
+        scanPhoto = nil
+        editingEntryId = nil
+        errorKey = nil
+    }
+
+    /// The edit-existing entry point: a row was tapped, so the form takes
+    /// that entry's values. The scan photo is cleared with it — a picture
+    /// taken for a different form must never attach to this entry.
+    private func beginEditing(_ entry: MedicationEntry) {
+        draft = Self.draft(from: entry, locale: coordinator.activeLocale)
+        scanPhoto = nil
+        errorKey = nil
+        editingEntryId = entry.id
+    }
+
+    /// The "when" line of a medication row: slot entries state their time
+    /// of day plus the meal context; legacy entries keep their stored clock
+    /// times (the `timesText` path). nil for legacy — the caller decides.
+    private func slotContextText(_ entry: MedicationEntry) -> String? {
+        guard let slot = entry.slot else { return nil }
+        let locale = coordinator.activeLocale
+        var parts = [L10n.str(Self.slotKey(for: slot), locale: locale)]
+        if let meal = entry.mealRelation {
+            parts.append(L10n.str(Self.mealKey(for: meal), locale: locale))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: - The catalog's key mappings ([MED-SLOT], T-018)
+
+    /// The T-012 catalog key for a slot — the ONE mapping, shared by the
+    /// row's chip and the row's context line (the `CallChannelChain.nameKey`
+    /// precedent: nothing re-derives the key family).
+    static func slotKey(for slot: MedicationSlot) -> String {
+        "meds.slot." + slot.rawValue
+    }
+
+    /// The T-012 catalog key for a meal relation. The raw values
+    /// (`beforeMeal` / `afterMeal`) are the model's wire form; the catalog
+    /// keys are the two shorter words, so the mapping is named here rather
+    /// than derived by string surgery.
+    static func mealKey(for relation: MealRelation) -> String {
+        switch relation {
+        case .beforeMeal: return "meds.meal.before"
+        case .afterMeal: return "meds.meal.after"
+        }
+    }
+
+    /// The T-012 catalog key for a unit (`meds.unit.<id>`), the same family
+    /// `MedicationQuantityDraft.select` and `DoseLine` resolve through.
+    static func unitLabel(for unit: MedicationDoseUnit, locale: Locale) -> String {
+        L10n.str("meds.unit." + unit.rawValue, locale: locale)
+    }
+
+    /// `MedicationDoseUnit.allCases` in the catalog's order, two per row —
+    /// the `purposeChipRows` layout rule (fixed pairs so a chip stays where
+    /// the family last found it, in either language).
+    private static let unitChipRows: [[MedicationDoseUnit]] = {
+        var rows: [[MedicationDoseUnit]] = []
+        var current: [MedicationDoseUnit] = []
+        for unit in MedicationDoseUnit.allCases {
+            current.append(unit)
+            if current.count == 2 {
+                rows.append(current)
+                current = []
+            }
+        }
+        if !current.isEmpty { rows.append(current) }
+        return rows
+    }()
 
     // MARK: - Scan label ([MED-OCR], 2026-09-18)
 

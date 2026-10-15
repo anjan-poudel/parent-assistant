@@ -75,6 +75,14 @@ final class AckFastLaneTests: XCTestCase {
         var speakingEnded = 0
         var timerStartOutcome: AlarmTimerSetOutcome = .scheduled
 
+        // [MED-ACK-WALK] Additive T-014 script (all defaults inert — every
+        // pre-existing test keeps the shipped nil/empty behaviour).
+        var candidates: [MedicationAckCandidate] = []
+        var challengePrompt: String? = nil
+        private(set) var challengeIssuedFor: UUID?
+        private(set) var recordedAckEntryIds: [UUID] = []
+        private(set) var confirmationResponses: [ConfirmationResponse] = []
+
         func noteAssistantSpoke(_ text: String) { assistantSpoken.append(text) }
         func noteSpeakingStarted() { speakingStarted += 1 }
         func noteSpeakingEnded() { speakingEnded += 1 }
@@ -85,9 +93,17 @@ final class AckFastLaneTests: XCTestCase {
         func requestAlarmSet(at time: Date, label: String?) async -> AlarmTimerSetOutcome { .failed }
         func recordTranscript(_ text: String) {}
         func oldestPendingReminderEntryId() -> UUID? { nil }
-        func handleMedicationAcknowledgement(entryId: UUID) {}
-        func startVoiceAckConfirmation(for entryId: UUID) -> String? { nil }
-        func handleConfirmationResponse(_ response: ConfirmationResponse) {}
+        func handleMedicationAcknowledgement(entryId: UUID) {
+            recordedAckEntryIds.append(entryId)
+        }
+        func startVoiceAckConfirmation(for entryId: UUID) -> String? {
+            challengeIssuedFor = entryId
+            return challengePrompt
+        }
+        func handleConfirmationResponse(_ response: ConfirmationResponse) {
+            confirmationResponses.append(response)
+        }
+        func medicationAckCandidates() -> [MedicationAckCandidate] { candidates }
         func addVoiceReminder(title: String, time: DateComponents) {}
         var pendingRephraseCommand: InterpretedCommand? { nil }
         func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?,
@@ -654,5 +670,99 @@ final class AckFastLaneTests: XCTestCase {
             $0.component == "ack_cache" && $0.eventType == "warm"
                 && $0.outcome == "failed" && $0.errorCode == "voice_missing"
         })
+    }
+
+    // MARK: - [MED-ACK-WALK] (T-014) Named ack shapes on the shipped pipeline
+
+    /// A named acknowledgement ("I have taken Metformin for morning") —
+    /// one of the FR-MSR-012 utterance shapes — rides the SHIPPED ack
+    /// pipeline unchanged: the same deterministic gate admits it (no new
+    /// gate), the same challenge seam answers it, and the new shape
+    /// introduces no fast-lane step of its own (no cached-WAV playback,
+    /// no miss event) — one committed utterance, balanced speak notes, so
+    /// the [ACK-MIC-CONTINUITY] listening seam behaves exactly as it does
+    /// for the shipped ack shapes.
+    func testNamedAckShapeRidesTheShippedPipelineWithNoNewGate() {
+        let coordinator = FakeAckCoordinator()
+        let entryId = UUID()
+        coordinator.candidates = [MedicationAckCandidate(
+            entryId: entryId,
+            scheduledAt: Date(timeIntervalSince1970: 1_000),
+            fired: true,
+            slot: .morning,
+            voiceKeys: ["metformin"],
+            medicationName: "Metformin")]
+        coordinator.challengePrompt = "औषधि खानुभयो?"
+        let player = FakePreAckPlayer()
+        let (router, speaker, bus) = makeRouter(coordinator, player: player)
+
+        let result = router.route(transcript: "i have taken metformin for morning")
+        waitForAsyncSpeak()
+
+        XCTAssertEqual(result, .acknowledgedMedication,
+                       "the named shape is consumed by the shipped deterministic ack path")
+        XCTAssertEqual(coordinator.challengeIssuedFor, entryId,
+                       "the shipped challenge seam runs for the named entry — no new gate")
+        XCTAssertEqual(coordinator.recordedAckEntryIds, [],
+                       "recording still waits for the challenge answer, as shipped")
+        XCTAssertEqual(coordinator.assistantSpoken, [coordinator.challengePrompt!],
+                       "one committed utterance — the shipped challenge prompt")
+        XCTAssertEqual(coordinator.speakingStarted, 1)
+        waitForAsyncSpeak()
+        XCTAssertEqual(coordinator.speakingEnded, 1,
+                       "the single utterance settles — no speak note dangles and no new listening gap opens")
+        XCTAssertTrue(speaker.utterances.contains { $0.text == coordinator.challengePrompt },
+                      "the prompt rides the shipped reply lane")
+        XCTAssertTrue(player.playCalls.isEmpty,
+                      "the new shape fabricates no fast-lane ack of its own")
+        XCTAssertFalse(bus.events.contains { $0.eventType == "ack_cache_miss" },
+                       "the fast lane is never consulted, so it can never miss — mic continuity untouched")
+        XCTAssertEqual(bus.events.first { $0.eventType == "medication_ack_resolved" }?
+                        .metadata["entry_id_hash"],
+                       IdHashing.shortHash(of: entryId))
+    }
+
+    /// The answer spoken immediately after that acknowledgement is
+    /// captured in the same turn flow: with the challenge window open —
+    /// exactly the state the acknowledgement leaves behind — the very
+    /// next transcript reaches the challenge handler (never the
+    /// interpreter, never a walk), and the ack path added no gap between
+    /// the two turns.
+    func testChallengeAnswerSpokenRightAfterAnAckIsCapturedInTheSameTurnFlow() {
+        let coordinator = FakeAckCoordinator()
+        let entryId = UUID()
+        coordinator.candidates = [MedicationAckCandidate(
+            entryId: entryId,
+            scheduledAt: Date(timeIntervalSince1970: 1_000),
+            fired: true,
+            slot: .morning,
+            voiceKeys: ["metformin"],
+            medicationName: "Metformin")]
+        coordinator.challengePrompt = "औषधि खानुभयो?"
+        let player = FakePreAckPlayer()
+        let (router, speaker, bus) = makeRouter(coordinator, player: player)
+
+        _ = router.route(transcript: "i have taken metformin for morning")
+        // The coordinator opens the challenge window when the prompt is
+        // issued (the real coordinator's `startVoiceAckConfirmation`).
+        coordinator.isAwaitingConfirmation = true
+        waitForAsyncSpeak()
+
+        let result = router.route(transcript: "हो")
+        waitForAsyncSpeak()
+
+        XCTAssertEqual(result, .acknowledgedMedication,
+                       "the answer to the challenge is the challenge's, as shipped")
+        XCTAssertEqual(coordinator.confirmationResponses, [.yes],
+                       "captured by the challenge handler in the same turn flow")
+        XCTAssertTrue(coordinator.recordedAckEntryIds.isEmpty,
+                       "the yes still goes through the shipped safety sequence")
+        XCTAssertTrue(speaker.utterances.contains { $0.text == L10n.str("router.confirmationYes", locale: ne) },
+                      "the shipped confirmation line answers the yes")
+        XCTAssertTrue(bus.events.contains {
+            $0.eventType == "confirmation_yes" && $0.outcome == "success"
+        })
+        XCTAssertTrue(player.playCalls.isEmpty,
+                      "neither the ack nor its answer introduces a fast-lane step of its own")
     }
 }

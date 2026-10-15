@@ -1,527 +1,412 @@
-# Requirements lock — Conversational Nepali Replies (v1)
+# Requirements lock — Medication Schedules and Reminders (v1)
 #
 # Contract: requirements_lock (ai-sdd task define-requirements).
 # Snapshot of the feature requirements set produced from
 # specs/define-requirements.md + specs/define-requirements/ (FR/ and NFR/).
-# Downstream tasks (design-l1, design-l2, review-l2, security-design-review,
-# plan-tasks, implement, review-implementation, security-test, final-sign-off)
-# consume this file to stay in scope and to detect drift: if a requirement
-# file's sha256 no longer matches, the requirement set has changed since this
-# lock.
+# Downstream tasks (design-l1, review-l1, design-l2, review-l2, plan-tasks,
+# implement, review-implementation, final-sign-off) consume this file to stay
+# in scope and to detect drift: if a requirement file's sha256 no longer
+# matches, the requirement set has changed since this lock.
 #
-# Status: HIL gate RESOLVED (risk tier T1, per the feature workflow's
-# define-requirements task). The owner approved the feature story on 2026-10-14
-# ("please implement this as ai-sdd feature spec" —
-# docs/features/2026-10-14-conversational-nepali-replies-proposal.md), so the
-# owner-story HIL is resolved by that approval rather than re-asked at this
-# step; the artifact is submitted for the coordinator's completion. The T2
-# human gate sits at final-sign-off. No owner-level decision is open (see
-# open_decisions); five design-level Open Decisions (OD-1..OD-5) are carried by
-# the feature constitution and belong to design-l1/design-l2. Re-lock after any
-# sign-off change; the hashes below are the drift-detection baseline.
+# Status: HIL gate bedf72fc RESOLVED — approved from Slack by owner
+# U0C6DTHDMV0 on 2026-10-14T22:22:30Z. The T2 human gate sits at
+# final-sign-off. No owner-level decision is open (see open_decisions):
+# OD-1..OD-3 are settled in the feature constitution (2026-10-15) and are
+# carried as requirements (FR-MSR-002, FR-MSR-003, FR-MSR-015/016/017); the
+# five design-level Open Decisions (OD-4..OD-8) belong to design-l1/design-l2.
+# The DV-1..DV-7 device checklist and the release log gate are recorded at
+# final-sign-off (see traceability). Re-lock after any sign-off change; the
+# hashes below are the drift-detection baseline.
 #
 # Note on scope: the FR/ and NFR/ folders also still contain the previously
-# shipped call-dialer-primary-secondary files (FR-CDP-NNN-*, NFR-CDP-NNN-*),
-# family-contacts-unify files (FR-FCU-NNN-*, NFR-FCU-NNN-*),
-# live-camera-translation files (FR-LCT-NNN-*, NFR-LCT-NNN-*),
-# profile-interview files (FR-PI-NNN-*, NFR-PI-NNN-*),
-# spotify-music-integration files (FR-SP-NNN-*, NFR-SP-NNN-*) and
-# multi-turn-conversation files (FR-MTC-NNN-*, NFR-MTC-NNN-*); they are left
-# in place and are NOT part of this lock. This lock covers the
-# conversational-nepali-replies set only (FR-CNR-* / NFR-CNR-*).
+# shipped features' files (call-dialer-primary-secondary FR-CDP-*/NFR-CDP-*,
+# conversational-nepali-replies FR-CNR-*/NFR-CNR-*, family-contacts-unify
+# FR-FCU-*, live-camera-translation FR-LCT-*, multi-turn-conversation
+# FR-MTC-*, profile-interview FR-PI-*, spotify-music-integration FR-SP-*);
+# they are left in place and are NOT part of this lock. This lock covers the
+# medication-schedules-reminders set only (FR-MSR-* / NFR-MSR-*).
 
 version: "1"
 task: define-requirements
-feature: conversational-nepali-replies
+feature: medication-schedules-reminders
 agent: ba
 contract: requirements_lock
-locked_at: "2026-10-14T07:43:09Z"
+locked_at: "2026-10-14T22:43:02Z"
 snapshot_of: "specs/define-requirements.md"
-snapshot_sha256: 98a93ee899479c0ad078c196236aed3e9d80afbcd73479a3add23247f2fc4ada
+snapshot_sha256: 31a723dcab492b5af271ee86f114e73871d401a85b8f77df2b58d2f6f118dfc9
 index: "specs/define-requirements/index.md"
 counts:
-  functional_requirements: 29
-  non_functional_requirements: 11
+  functional_requirements: 22
+  non_functional_requirements: 10
 
 requirements:
-  - id: FR-CNR-001
-    title: "Nepali conversation style spec — one source of truth for the conversational register"
+  - id: FR-MSR-001
+    title: "Slot-based entry model — quantity + time-of-day slot + before/after meal"
     kind: FR
-    area: "Style Spec / Single Source"
+    area: "Entry Model"
     priority: MUST
-    phase: P0
-    file: specs/define-requirements/FR/FR-CNR-001-nepali-chat-style-spec-single-source.md
-    sha256: 32c35640b63fdf0c3e221919ffb865e009975a11f58d899ee9c5638289ecebaf
+    file: specs/define-requirements/FR/FR-MSR-001-slot-based-entry-model.md
+    sha256: ca4c72902b2623f1c28eb3f46366eca41f87eb8e9ee59d07aa4b1e40d8b43fa8
     acceptance_scenarios: 3
-  - id: FR-CNR-002
-    title: "Persona upgrade in both seams — same style contract, local and cloud"
+  - id: FR-MSR-002
+    title: "Deterministic slot-to-clock mapping — 08:00 / 13:00 / 19:00 defaults, family-configurable"
     kind: FR
-    area: "Persona / Local + Cloud Seams"
+    area: "Slot-to-Clock Mapping"
     priority: MUST
-    phase: P0
-    file: specs/define-requirements/FR/FR-CNR-002-persona-upgrade-both-seams.md
-    sha256: e0a3863c6e6fbcb6dfcc424c00dd0537159c57382ee0d5e4691d3592c782e199
+    file: specs/define-requirements/FR/FR-MSR-002-deterministic-slot-to-clock-mapping.md
+    sha256: f450ec57f20186f1d1b4274ac4f10e12be804dd9980809f4570cb8ab176b1e65
+    acceptance_scenarios: 3
+  - id: FR-MSR-003
+    title: "Structured quantity — amount + unit composed into the rendered dose line"
+    kind: FR
+    area: "Quantity & Dose Line"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MSR-003-structured-quantity-dose-line.md
+    sha256: 8187565297ab4ee31d4e74e79824df39b6f83a4acbb447ed3192c5771075d07d
+    acceptance_scenarios: 3
+  - id: FR-MSR-004
+    title: "Purpose at entry — a brief purpose description on every medication"
+    kind: FR
+    area: "Purpose"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MSR-004-purpose-at-entry.md
+    sha256: 968a8e6c95eac49cae0143a6ce0a025f31c84b4e8ed68dacd1e9fae8ff001984
+    acceptance_scenarios: 3
+  - id: FR-MSR-005
+    title: "Scan-to-fill — additive beside manual entry, bounded extraction"
+    kind: FR
+    area: "Scan-to-Fill"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MSR-005-scan-to-fill-additive.md
+    sha256: 9c34e3e86489da71a50f89821fd4146fa21d1b2dbf6ee50f60b2df12d709d8ab
     acceptance_scenarios: 4
-  - id: FR-CNR-003
-    title: "Chat-turn sampling — fixed seed with temperature ~0.3, chat turns only"
+  - id: FR-MSR-006
+    title: "OCR values require human confirmation before binding — never silent auto-apply"
     kind: FR
-    area: "Decode / Chat Sampling"
+    area: "Scan-to-Fill / Safety"
     priority: MUST
-    phase: P0
-    file: specs/define-requirements/FR/FR-CNR-003-chat-turn-fixed-seed-temp.md
-    sha256: d7033d1cfb6402f60b59bae55e13c594ce4db6114be32e0cb3f6aeca06e1ca6d
+    file: specs/define-requirements/FR/FR-MSR-006-ocr-human-confirmation-before-binding.md
+    sha256: 09968ff8e1aeeb837841af200f48600166465cbf62400aefa38d2a91e373e1eb
+    acceptance_scenarios: 3
+  - id: FR-MSR-007
+    title: "Voice acknowledgement names the medication and slot — resolution by what was said"
+    kind: FR
+    area: "Voice Acknowledgement"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MSR-007-voice-ack-names-medication-and-slot.md
+    sha256: 91bfae578dda41bb92b829a76c7a204f9f0c7ceaa5c158b3391f4e6e7a705bb2
     acceptance_scenarios: 4
-  - id: FR-CNR-004
-    title: "Command-turn decode determinism preserved — temp-0 + fixed seed + GBNF untouched"
+  - id: FR-MSR-008
+    title: "Conservative disambiguation — \"did you mean X / X or Y\" copy rule, never the wrong medication"
     kind: FR
-    area: "Decode / Determinism Invariant"
+    area: "Voice Acknowledgement / Safety"
     priority: MUST
-    phase: P0
-    file: specs/define-requirements/FR/FR-CNR-004-command-decode-determinism-preserved.md
-    sha256: f681664697cde44ddc89a76fa2d04279d65f21f12bd1ecc37eab2887d0f18421
-    acceptance_scenarios: 3
-  - id: FR-CNR-005
-    title: "Deterministic Nepali grammar guard at the polisher seam — verify, never rewrite"
-    kind: FR
-    area: "Grammar Guard / Verification"
-    priority: MUST
-    phase: P0
-    file: specs/define-requirements/FR/FR-CNR-005-grammar-guard-verify-never-rewrite.md
-    sha256: b42e06721ec45340151b88eb20bc1572f902ffa0704ed367031b4fa74753463f
+    file: specs/define-requirements/FR/FR-MSR-008-conservative-disambiguation-copy-rule.md
+    sha256: 7604a2c5879c37652ff5806416a59b0de7eeeb1673b61d2986ee5fbfc5df5da6
     acceptance_scenarios: 4
-  - id: FR-CNR-006
-    title: "Guard flag outcome — escalate to the cloud persona or a safe template; honest degradation"
+  - id: FR-MSR-009
+    title: "Acknowledgement safety sequence preserved — challenge, then double-dose check, then record"
     kind: FR
-    area: "Grammar Guard / Degradation"
+    area: "Medication Safety Sequence"
     priority: MUST
-    phase: P0
-    file: specs/define-requirements/FR/FR-CNR-006-guard-flag-escalation-honest-degradation.md
-    sha256: af324fe78f31bea48dfd8a0e8befe9bf45c138e73ff635aad43ce6094720e805
-    acceptance_scenarios: 3
-  - id: FR-CNR-007
-    title: "`reply_grammar_flag` telemetry — observability without user content"
-    kind: FR
-    area: "Grammar Guard / Telemetry"
-    priority: MUST
-    phase: P0
-    file: specs/define-requirements/FR/FR-CNR-007-reply-grammar-flag-telemetry-no-content.md
-    sha256: 1c83df879c1043e90728442c5b1f8f6811ca0fc8aafc3ca633a2a913f8d4431c
-    acceptance_scenarios: 3
-  - id: FR-CNR-008
-    title: "Cloud-first chat routing toggle — online routes to Gemini, local brain is the floor"
-    kind: FR
-    area: "Cloud Chat Routing"
-    priority: MUST
-    phase: P0
-    file: specs/define-requirements/FR/FR-CNR-008-cloud-first-chat-routing-toggle.md
-    sha256: bef3b9a807057a10741b6fba545865854007e3d2a67fde013fd209714b83ebb8
+    file: specs/define-requirements/FR/FR-MSR-009-acknowledgement-safety-sequence.md
+    sha256: 8a597fbe73693bf9df6928ff088df9493b0dcde8166a98ede4ed1632030aba10
     acceptance_scenarios: 4
-  - id: FR-CNR-009
-    title: "Cloud chat consent, plain-language disclosure, visible indicator and revocation (the OD-12 shape)"
+  - id: FR-MSR-010
+    title: "Intake recorded against the day's schedule — scheduled time and acknowledged time"
     kind: FR
-    area: "Cloud Chat Consent & Disclosure"
+    area: "Recording & Adherence"
     priority: MUST
-    phase: P0
-    file: specs/define-requirements/FR/FR-CNR-009-cloud-chat-consent-disclosure-indicator.md
-    sha256: 0a2baf1890f7df1ac834a47a2ddec3626299ff1ea7d0fdaa815fef49f11f61ee
+    file: specs/define-requirements/FR/FR-MSR-010-intake-recorded-against-schedule.md
+    sha256: 2c0e9c16c05020ff64599166b46a9b885bb83ccdad60955c05052848335772f0
+    acceptance_scenarios: 3
+  - id: FR-MSR-011
+    title: "Refusal-first denial guard preserved — a denial never falls through to an acknowledgement"
+    kind: FR
+    area: "Ack Vocabulary Guard"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MSR-011-refusal-first-denial-guard.md
+    sha256: 350965700b983eacca050e3582ad654189e8b31faa5b4f62a7a30d361cfaaa26
+    acceptance_scenarios: 3
+  - id: FR-MSR-012
+    title: "Mic continuity around acknowledgements — no gap between acknowledgement and listening"
+    kind: FR
+    area: "Voice Pipeline / Ack Fast Lane"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MSR-012-mic-continuity-around-acks.md
+    sha256: aba5e4db786f30cfde2e968c3a3f9ecdd74e51e13849fbe7edd78cf1169df88f
+    acceptance_scenarios: 3
+  - id: FR-MSR-013
+    title: "Photo of the medication as intake evidence — augments, never replaces, never creates a record"
+    kind: FR
+    area: "Photo Evidence / Safety"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MSR-013-photo-evidence-augments-never-replaces.md
+    sha256: f15708b66b5422113d095892c74b604c1dfc4679a2f1298d2cebaa891aa55fa4
+    acceptance_scenarios: 3
+  - id: FR-MSR-014
+    title: "Photo evidence resolves the shared slot deterministically — never the wrong medication"
+    kind: FR
+    area: "Photo Evidence"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MSR-014-photo-evidence-shared-slot-resolution.md
+    sha256: b551ff9c30d1e20ee476579f0ffdb5490a96305b3ce34216e27250a2cf9ef8bb
+    acceptance_scenarios: 3
+  - id: FR-MSR-015
+    title: "Significant-event notification set — missed dose, double-dose, intake recorded, escalation started"
+    kind: FR
+    area: "Caregiver Notification"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MSR-015-significant-event-notification-set.md
+    sha256: aa8caa20858dd40f4e0c18530b53408f3ce6c0c2310142041a6b9b9dda5c671f
     acceptance_scenarios: 4
-  - id: FR-CNR-010
-    title: "Cloud chat egress scope — the chat turn's user content and nothing else"
+  - id: FR-MSR-016
+    title: "Caregiver notification channels and honest per-contact delivery"
     kind: FR
-    area: "Cloud Chat Egress Scope"
+    area: "Caregiver Notification / Delivery Honesty"
     priority: MUST
-    phase: P0
-    file: specs/define-requirements/FR/FR-CNR-010-cloud-chat-egress-scope.md
-    sha256: a49125db861429c8765db24b68c791f98dde9adfba55919b37ee0454699491c9
+    file: specs/define-requirements/FR/FR-MSR-016-caregiver-channels-honest-delivery.md
+    sha256: ad777e0e88083c31698591c4fbaf1532b08d26514b934b2f4715ec67d9584fb9
     acceptance_scenarios: 3
-  - id: FR-CNR-011
-    title: "Explicit Gemini chat temperature — a stated, reviewed value instead of a provider default"
+  - id: FR-MSR-017
+    title: "PII-free wire — significant events extend the existing taxonomy with no new PII"
     kind: FR
-    area: "Cloud Chat Sampling Config"
+    area: "Wire Discipline / Safety"
     priority: MUST
-    phase: P0
-    file: specs/define-requirements/FR/FR-CNR-011-explicit-gemini-chat-temperature.md
-    sha256: 4f830164fd58c2027e639bf1836723ba628915b2de5ecdfe558b0a956885940f
+    file: specs/define-requirements/FR/FR-MSR-017-pii-free-wire.md
+    sha256: dc03ab2bcf6fe3520b10e3cff6e757d5265910bf32a20ea2a9016d484641c86d
     acceptance_scenarios: 3
-  - id: FR-CNR-012
-    title: "Cloud chat credential and content hygiene — header-only key, content off the logs"
+  - id: FR-MSR-018
+    title: "Honest degradation — deferred capabilities surfaced as themselves, never a false success"
     kind: FR
-    area: "Cloud Chat Hygiene"
+    area: "Honesty / Delivery Integrity"
     priority: MUST
-    phase: P0
-    file: specs/define-requirements/FR/FR-CNR-012-cloud-chat-credential-and-content-hygiene.md
-    sha256: 4e4d8dfe3f4fc98ba41eaf0de5eea1c8a4a751c55f7b20b3d06772e91cecf35e
+    file: specs/define-requirements/FR/FR-MSR-018-honest-degradation-deferred-capabilities.md
+    sha256: c4cf5d4f5e7a0e8467fa7e4ca5a6786d72722047af25042e8c2c951dfbb05ab6
     acceptance_scenarios: 4
-  - id: FR-CNR-013
-    title: "Single-decode schema unchanged — one JSON, and an unreadable object abstains"
+  - id: FR-MSR-019
+    title: "Existing reminder and escalation semantics preserved — no weakening of medication safety invariants"
     kind: FR
-    area: "Single-Decode Integrity"
+    area: "Preserved Machinery"
     priority: MUST
-    phase: P0/P1
-    file: specs/define-requirements/FR/FR-CNR-013-single-decode-schema-unchanged.md
-    sha256: ebf378a21a00fc650ae7ad0a7d8967f2623f34fa0cb2f4a40dbb62f8cc4c8d29
+    file: specs/define-requirements/FR/FR-MSR-019-existing-reminder-escalation-preserved.md
+    sha256: 0a76ec69bdc819127d9a22313e793f9e9194f2b400f49d747d28afe93c074c5f
     acceptance_scenarios: 3
-  - id: FR-CNR-014
-    title: "Router ladder and the emergency path unchanged — emergency recall 1.00 is a gate, not a metric"
+  - id: FR-MSR-020
+    title: "Dementia machinery preserved and integrated — never rebuilt, never removed"
     kind: FR
-    area: "Preserved Behaviours / Safety Path"
+    area: "Preserved Machinery"
     priority: MUST
-    phase: P0/P1
-    file: specs/define-requirements/FR/FR-CNR-014-router-ladder-emergency-gate-unchanged.md
-    sha256: d7e9de96bfeb0e26d91eddb9f9dc9f4bc5aabb3322dc4bac709fe4494d90ae24
+    file: specs/define-requirements/FR/FR-MSR-020-dementia-machinery-preserved.md
+    sha256: ab652f22d834788697bac231d925e313bae91f503641f069b820878e941a9a7f
     acceptance_scenarios: 3
-  - id: FR-CNR-015
-    title: "STT pipeline, device permissions and data collection unchanged"
+  - id: FR-MSR-021
+    title: "Elderly-fit UX of the new flows — voice-first completion, plain language, vocabulary limit"
     kind: FR
-    area: "Preserved Behaviours / Privacy & Permissions"
+    area: "Elderly-Fit UX"
     priority: MUST
-    phase: P0/P1
-    file: specs/define-requirements/FR/FR-CNR-015-stt-permissions-data-collection-unchanged.md
-    sha256: 7df399c2ffd7b02e34b2745e8848c916a7620f0424bbe1cb16eaaf02955a48ee
-    acceptance_scenarios: 3
-  - id: FR-CNR-016
-    title: "v17 — a chat-aware QLoRA variant of the existing training suite (same model family)"
-    kind: FR
-    area: "Training / v17 Suite Extension"
-    priority: MUST
-    phase: P1
-    file: specs/define-requirements/FR/FR-CNR-016-v17-chat-aware-qlora-variant.md
-    sha256: 64a3bfe489476698ec891f4939d201a0e6aa5d598e69f58da9506bacc09beba6
+    file: specs/define-requirements/FR/FR-MSR-021-elderly-fit-ux-new-flows.md
+    sha256: 6e6e0f243cfd9d840e10e3acfde84f189943651a362e1ce7795577fa6627c249
     acceptance_scenarios: 4
-  - id: FR-CNR-017
-    title: "Four-layer conversation corpus construction shaped by the style spec"
+  - id: FR-MSR-022
+    title: "Persistence before alarm and process-kill re-arm — the FR-029 invariant holds on the revamped paths"
     kind: FR
-    area: "Training Data / Corpus Construction"
+    area: "Persistence & Recovery"
     priority: MUST
-    phase: P1
-    file: specs/define-requirements/FR/FR-CNR-017-four-layer-corpus-construction.md
-    sha256: b0fb3473187fdcaa302660854bf0165caee845ae2801e6e1a4d1594966437b21
+    file: specs/define-requirements/FR/FR-MSR-022-persistence-before-alarm-and-rearm.md
+    sha256: 6c593ee4da993921214d74eff97188fc4cd1f24c9e15056ab31fb385adb5cc9a
     acceptance_scenarios: 4
-  - id: FR-CNR-018
-    title: "Ship-mix provenance manifest — no CC BY-NC contamination of a shipped artifact"
-    kind: FR
-    area: "Training Data / Provenance & Licensing"
-    priority: MUST
-    phase: P1
-    file: specs/define-requirements/FR/FR-CNR-018-ship-mix-provenance-manifest.md
-    sha256: fd42c392d32280de97e2f2a6ca10a495f11acef44d8aa65fb1f6ab4e77abe162
-    acceptance_scenarios: 3
-  - id: FR-CNR-019
-    title: "`eval/chat_golden.jsonl` — a held-out chat evaluation set"
-    kind: FR
-    area: "Evaluation / Held-out Set"
-    priority: MUST
-    phase: P1
-    file: specs/define-requirements/FR/FR-CNR-019-chat-golden-heldout-eval-set.md
-    sha256: 5b06ccceae714366501515dce66ece87c56b2c389798e762eeb6b47f93c801c1
-    acceptance_scenarios: 3
-  - id: FR-CNR-020
-    title: "The new chat gates — honorific agreement, no AI-isms, LLM-judge quality"
-    kind: FR
-    area: "Evaluation / Chat Gates"
-    priority: MUST
-    phase: P1
-    file: specs/define-requirements/FR/FR-CNR-020-new-chat-gates.md
-    sha256: b5ea1110acc173d56752d79d3117d771a02d692d5f77624606b4b5743fc5901b
-    acceptance_scenarios: 3
-  - id: FR-CNR-021
-    title: "The full gate harness is the ship gate — existing regressions are non-negotiable"
-    kind: FR
-    area: "Evaluation / Regression Gates & Ship Gate"
-    priority: MUST
-    phase: P1
-    file: specs/define-requirements/FR/FR-CNR-021-full-gate-harness-before-swap.md
-    sha256: f45dc6aa2e2e12580dc5e39a112f443062632e152d001eb941bbbc6a5bf2a450
-    acceptance_scenarios: 3
-  - id: FR-CNR-022
-    title: "v17 catalog entry — versioned, reversible, gated, with per-device tier selection"
-    kind: FR
-    area: "Model Delivery / Catalog Swap"
-    priority: MUST
-    phase: P1
-    file: specs/define-requirements/FR/FR-CNR-022-v17-catalog-entry-versioned-reversible.md
-    sha256: e36b25034560823c2f56022ffd896048aeaf51df67a6b088b09f17b06611f05f
-    acceptance_scenarios: 4
-  - id: FR-CNR-023
-    title: "Chat prompt/template discipline — seed byte-mirror, intent prompt untouched, no few-shot exemplars"
-    kind: FR
-    area: "Prompt Discipline / Seed Mirror"
-    priority: MUST
-    phase: P0/P1
-    file: specs/define-requirements/FR/FR-CNR-023-chat-prompt-template-discipline.md
-    sha256: f5fd0df6d38c544b6a57476e7840a967426f949922dba22d3ad21956109f4617
-    acceptance_scenarios: 4
-  - id: FR-CNR-024
-    title: "Feasibility honesty — every leg reported explicitly, no silent drop"
-    kind: FR
-    area: "Delivery / Feasibility Reporting"
-    priority: MUST
-    phase: All
-    file: specs/define-requirements/FR/FR-CNR-024-feasibility-honesty-reporting.md
-    sha256: 849a608dcf49da48245fbe12f4b545cfda475c7dbf1ffc8abae45b2da460eec0
-    acceptance_scenarios: 3
-  - id: FR-CNR-025
-    title: "DV-1 … DV-6 device validation on Anzaan — the recorded completion gate"
-    kind: FR
-    area: "Validation / Completion Gate"
-    priority: MUST
-    phase: All
-    file: specs/define-requirements/FR/FR-CNR-025-dv-device-validation-completion-gate.md
-    sha256: 1ed053e8ec916068021fb1ac3389ac04bf5c352a30b0824c99ba051a2431bf55
-    acceptance_scenarios: 3
-  - id: FR-CNR-026
-    title: "P2 polish — DPO on judge preferences"
-    kind: FR
-    area: "P2 Polish / Preference Tuning"
-    priority: SHOULD
-    phase: P2
-    file: specs/define-requirements/FR/FR-CNR-026-p2-dpo-on-judge-preferences.md
-    sha256: 239f5f3c02a6807dae526da35677fccd8ff107ab981d22d3c18fa1b98e7fee72
-    acceptance_scenarios: 3
-  - id: FR-CNR-027
-    title: "P2 polish — romanized-Nepali chat"
-    kind: FR
-    area: "P2 Polish / Romanized Input"
-    priority: COULD
-    phase: P2
-    file: specs/define-requirements/FR/FR-CNR-027-p2-romanized-nepali-chat.md
-    sha256: c1f27c0c5bcb7e8c9a64da3cb4b993bcb2d44a4a5cfcddc3922bd050fa2cddb6
-    acceptance_scenarios: 3
-  - id: FR-CNR-028
-    title: "P2 polish — the 4B chat tier, admitted only through the per-device resolver"
-    kind: FR
-    area: "P2 Polish / Device Tiers"
-    priority: COULD
-    phase: P2
-    file: specs/define-requirements/FR/FR-CNR-028-p2-4b-tier-per-device-resolver.md
-    sha256: 8789ca131ae763daff229ca439593359ee4419a3e3376d43d9ad8d4040062f96
-    acceptance_scenarios: 3
-  - id: FR-CNR-029
-    title: "P2 polish — consent-based real conversation transcripts as the gold source"
-    kind: FR
-    area: "P2 Polish / Own-Data Corpus"
-    priority: COULD
-    phase: P2
-    file: specs/define-requirements/FR/FR-CNR-029-p2-consent-based-real-transcripts.md
-    sha256: 3ba246f2af6a3736a5801c62f5871803feab55ef90cb50020769793692aaf5e4
-    acceptance_scenarios: 3
-  - id: NFR-CNR-001
-    title: "Chat reply reproducibility — fixed seed, same input, same reply"
+  - id: NFR-MSR-001
+    title: "LLM independence — the medication scheduler unit stays free of LLM dependencies"
     kind: NFR
-    area: "Reliability / Determinism"
+    area: "Reliability"
     priority: MUST
-    phase: P0
-    file: specs/define-requirements/NFR/NFR-CNR-001-chat-reply-reproducibility.md
-    sha256: ed46019e27c836a7151b932f3595763a1514eb6f70ec8fb20abc5e31b3d1d402
-    acceptance_scenarios: 3
-  - id: NFR-CNR-002
-    title: "Listening-turn latency envelope — chat replies stay within the spoken-conversation budget"
-    kind: NFR
-    area: "Performance"
-    priority: MUST
-    phase: P0
-    file: specs/define-requirements/NFR/NFR-CNR-002-listening-turn-latency-envelope.md
-    sha256: b5e983bc5a5892f982eaa35ff0cae7484d3dd7a31ecbfbbef898dac9f91e8463
-    acceptance_scenarios: 3
-  - id: NFR-CNR-003
-    title: "Memory and jetsam behaviour — one brain resident, zero feature-attributable terminations"
-    kind: NFR
-    area: "Reliability / Resource Behaviour"
-    priority: MUST
-    phase: P0
-    file: specs/define-requirements/NFR/NFR-CNR-003-memory-and-jetsam-device-tiers.md
-    sha256: e77be7506d6804113d29071fd99b91519896d577c2a514a8993ad84199546b58
-    acceptance_scenarios: 3
-  - id: NFR-CNR-004
-    title: "Chat prompt token budget — the 1,024-token ceiling holds"
-    kind: NFR
-    area: "Performance / Resource Budget"
-    priority: MUST
-    phase: P0
-    file: specs/define-requirements/NFR/NFR-CNR-004-chat-prompt-token-budget.md
-    sha256: 0391dca5300f0e7f560bf65be42e3c891791fd4224a75c9e99388499c8370131
-    acceptance_scenarios: 3
-  - id: NFR-CNR-005
-    title: "Prompt-template byte-mirror discipline — seed and code cannot drift"
-    kind: NFR
-    area: "Reliability / Build Discipline"
-    priority: MUST
-    phase: P0
-    file: specs/define-requirements/NFR/NFR-CNR-005-prompt-template-byte-mirror.md
-    sha256: 92fd4998d2718cfefc75ee295200ff6be9181311ed48cc3bacac1032d06156ea
-    acceptance_scenarios: 3
-  - id: NFR-CNR-006
-    title: "Log safety — no conversation content, transcript or key material in any log"
+    file: specs/define-requirements/NFR/NFR-MSR-001-llm-independence.md
+    sha256: 5a3798ff029e6333549d0394f38adefc2fc5b894b9e38857f13e474f4487160e
+    acceptance_scenarios: 2
+  - id: NFR-MSR-002
+    title: "PII-free observability — hash-only medication identifiers, sanitised logs, gate-covered paths"
     kind: NFR
     area: "Privacy / Security"
     priority: MUST
-    phase: P0
-    file: specs/define-requirements/NFR/NFR-CNR-006-log-safety.md
-    sha256: 759c9f26e4f87ba1612da5cd1bf24b3d4bb5dad3cad854111340b982a678ee7d
-    acceptance_scenarios: 3
-  - id: NFR-CNR-007
-    title: "Telemetry content hygiene — every new event carries classification only"
+    file: specs/define-requirements/NFR/NFR-MSR-002-pii-free-observability.md
+    sha256: 3fa2c7bb3d281e2cffdc5d0f3b785f16906f73d6345ea6e0754d3228f9c0634b
+    acceptance_scenarios: 2
+  - id: NFR-MSR-003
+    title: "On-device label and photo processing — no new cloud egress for medication content"
     kind: NFR
     area: "Privacy"
     priority: MUST
-    phase: P0
-    file: specs/define-requirements/NFR/NFR-CNR-007-telemetry-content-hygiene.md
-    sha256: 7844cecfeaf558b77358c7dcc1326f5e084ef7cc86e45255fc6a072773e24f6f
-    acceptance_scenarios: 3
-  - id: NFR-CNR-008
-    title: "Gate thresholds — the measurable ship conditions for the v17 swap"
-    kind: NFR
-    area: "Quality / Evaluation Gates"
-    priority: MUST
-    phase: P0
-    file: specs/define-requirements/NFR/NFR-CNR-008-gate-thresholds.md
-    sha256: 1b153ea7ef774dad0501b7ec3c52c83085e11f317ea80e2e349e0b1bc9d9fd30
-    acceptance_scenarios: 3
-  - id: NFR-CNR-009
-    title: "Accessibility — voice-first, house touch standards, and no routing reasoning asked of the elderly user"
-    kind: NFR
-    area: "Accessibility"
-    priority: MUST
-    phase: P0
-    file: specs/define-requirements/NFR/NFR-CNR-009-accessibility.md
-    sha256: 213d6bb868c6be80f94fdffe79155bf2626e8201447824b25db7a3ac813f428c
-    acceptance_scenarios: 4
-  - id: NFR-CNR-010
-    title: "Localisation — every new user-visible string exists in Nepali and English"
+    file: specs/define-requirements/NFR/NFR-MSR-003-on-device-no-new-egress.md
+    sha256: d7149af139e0912ff37199e64f0016720f0442ea88989369e2835d1c7d4b6232
+    acceptance_scenarios: 2
+  - id: NFR-MSR-004
+    title: "Localisation and spoken times — every new string in Nepali and English, all spoken times through the formatter"
     kind: NFR
     area: "Localisation"
     priority: MUST
-    phase: P0
-    file: specs/define-requirements/NFR/NFR-CNR-010-localisation-ne-en.md
-    sha256: 667dfbeb0b26e8c7fdd8063b950eaf0fe692109748f6d1982de1f97fc60b9eca
+    file: specs/define-requirements/NFR/NFR-MSR-004-localisation-and-spoken-time.md
+    sha256: 88c4efc3fb15f9c598c75abdb0da8b9b9b18e5530d320af66aac283aa2a8d952
     acceptance_scenarios: 3
-  - id: NFR-CNR-011
-    title: "Compliance and release gates — workflow gates, the log gate, and honest baseline reporting"
+  - id: NFR-MSR-005
+    title: "Accessibility — 44pt targets, 18pt body text, contrast, voice-first acknowledgement"
+    kind: NFR
+    area: "Accessibility"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-MSR-005-accessibility-elderly-fit.md
+    sha256: 16fa4fe964733fc925e0f5aaa98a61bb494866307c07b7b1d1a6ca127953980f
+    acceptance_scenarios: 3
+  - id: NFR-MSR-006
+    title: "Migration compatibility — legacy payloads keep loading, schedules are never lost to a missing key"
+    kind: NFR
+    area: "Reliability / Compatibility"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-MSR-006-migration-compatibility.md
+    sha256: a3bf8a705f7b5ca5f9c85d9c84e93ca6420f5f845857d61fe245bf97d19381a2
+    acceptance_scenarios: 3
+  - id: NFR-MSR-007
+    title: "Devanagari grapheme-cluster behaviour regression-pinned — do not \"fix\" it"
+    kind: NFR
+    area: "Localisation / Regression"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-MSR-007-devanagari-grapheme-regression-pin.md
+    sha256: cae986d3cfc99cb218c596e44d0ac66cfe4619ed0bfe5c4873f1c3dd0a8a54ed
+    acceptance_scenarios: 2
+  - id: NFR-MSR-008
+    title: "Safety-path test rigor — 100 per cent unit coverage, required integration tests, elevated confidence"
+    kind: NFR
+    area: "Quality / Compliance"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-MSR-008-safety-test-coverage-and-confidence.md
+    sha256: 6e7d04b9be2c0155a3894d8b613e7ff75d2dc57b61ce09314fc8b41a0f26e75e
+    acceptance_scenarios: 3
+  - id: NFR-MSR-009
+    title: "Compliance and release gates — log-safety gate green, health-policy posture unchanged, honest baseline"
     kind: NFR
     area: "Compliance"
     priority: MUST
-    phase: P0
-    file: specs/define-requirements/NFR/NFR-CNR-011-compliance-and-release-gates.md
-    sha256: d6dd3ce38a411236523ea2e5380533442fc5678ca03bd3749e783c32bdecc2d2
-    acceptance_scenarios: 4
+    file: specs/define-requirements/NFR/NFR-MSR-009-compliance-and-release-gates.md
+    sha256: ee3a6d0844b508e9c170105a464021cfaab5ffd7c118ac7b7b9ff7e099075242
+    acceptance_scenarios: 3
+  - id: NFR-MSR-010
+    title: "Reminder firing latency — the mapped clock time is the schedule of record"
+    kind: NFR
+    area: "Reliability / Performance"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-MSR-010-reminder-firing-latency.md
+    sha256: e05553eeec6e5c034422318d29ca5e1ba5e425eea3f4d41126bcf7d37d57253d
+    acceptance_scenarios: 3
 
 assumptions:
   - id: A1
-    statement: "The integration surfaces exist as named in the feature constitution and the scaffold report; the cited anchors were verified as present in the worktree at requirements time (base master 91deddca) — IntentPrompt.buildChat (:197-211); LlamaCommandInterpreter OnDeviceSampling (:404-417), handle creation (:1391-1398), chatSystemPrompt (:552-563), chatJSONSchema (:350), respondToChat (:709); GeminiCommandInterpreter.replyPersona (:35-44); GeminiClient.GenerationConfig (:659-661); SpokenReplyPolisher doctrine (:21-26); LocalBrainChain.respondToChat (:268-294); IntentRouter.interpretLocalLadder (:259-291) / runLocalLadder (:308-395); AppCoordinator.defaultBrainModelID; ModelCatalog.qwen4BNepali (:237); tools/train-intent/seeds/ (prompt_template.txt, command_schema.json, intents.yaml present); tools/train-intent/eval/ (golden_corpus.jsonl, emergency_nearmiss.jsonl present); ios/tools/check-release-log-safety.sh present and executable. Line numbers are orientation, not contracts."
+    statement: "The integration surfaces exist as named in the feature constitution (the source mandate); the cited anchors were verified against master 261aa862 at requirements time (2026-10-15) for the entry model, scheduler, detector, OCR/editor, notifier and calendar surfaces listed in the constitution's Integration Surfaces table. Line numbers are orientation, not contracts. No capability claim in this set goes beyond those verified statements or the read-only source documents (root requirements.md; requirements-dementia-supplement.md; docs/medication-scheduler-implementation-plan.md)."
   - id: A2
-    statement: "Design-level choices are deliberately left open and are NOT requirements: the chat temperature value and its sampling plumbing, incl. GBNF interplay (OD-1); the style-spec artifact format and how its four consumers resolve against it (OD-2); the particles-budget enforcement mechanics (OD-4); the Gemini chat temperature value (OD-5); the ModelCatalog entry naming/versioning scheme and the per-device resolver's tier criteria (FR-CNR-022/028); the grammar guard's internal check implementation and per-class thresholds (FR-CNR-005); the consent/indicator/revocation UX shapes (FR-CNR-009, bounded by NFR-CNR-009); the safe-template wording (FR-CNR-006, bounded by NFR-CNR-010)."
+    statement: "Numeric thresholds are inherited, not invented: the 30-second firing envelope is root NFR-005; the 44pt/18pt/contrast figures are the root elder-fit standards and the feature house rule; the photo-evidence size-cap and retention figures belong to the FR-D04b discipline referenced by FR-MSR-013. No new numeric target was fabricated."
   - id: A3
-    statement: "The 5-8 s/turn chat latency band in NFR-CNR-002 is the proposal's measured figure for the Qwen3-1.7B device default, recorded as the reference-tier target band; it is not invented. The existing suite gate (latency p50 <=1.0 s) remains a separate non-negotiable regression and is not merged into this band."
+    statement: "Design-level choices are deliberately left open and are NOT requirements: OD-4 (scan confirm-step and partial-fill details), OD-5 (legacy rendering and any backfill), OD-6 (ack-with-slot resolution mechanics and interaction order), OD-7 (calendar-channel mechanism), OD-8 (photo-evidence mechanism and recipient). Each is bounded by the requirement(s) named in open_decisions and belongs to design-l1/design-l2."
   - id: A4
-    statement: "The memory/jetsam requirement (NFR-CNR-003) is expressed as counted properties - exactly one resident brain model, zero feature-attributable jetsam terminations across the DV session, no additional KV/context allocation beyond the pinned budget - because the source documents state no byte-level memory threshold. No numeric threshold was invented."
+    statement: "The PhotoVerifier unwired state and the stub push transport are treated as verified facts; the set encodes honesty obligations around them (FR-MSR-013/016/018) rather than assuming delivery."
   - id: A5
-    statement: "Exact user-facing copy (cloud-chat consent and disclosure, indicator labels, safe-template replies, degradation notices) is design-dependent and localisation-bound; the ne/en keys must exist per NFR-CNR-010, and the copy is reviewed under the Open Decision 12/13 review clause before the first App Store submission."
+    statement: "The project's known pre-existing full-bundle test failures remain the recorded baseline; the feature's own and touched suites are the honest gate (NFR-MSR-008/009)."
   - id: A6
-    statement: "Sub-artifacts named in the sources (the enterprise licence for the Nepali call-center corpus; the optional NepaliGPT CPT phase; the server-side Nepali GEC corrector as corpus-cleaning tooling) are encoded as binding properties and conditions, not as their internal designs."
-  - id: A7
-    statement: "The project's known pre-existing full-bundle test failures remain the baseline for NFR-CNR-011; the feature's own and touched suites must pass, with baseline failures recorded rather than silently included or excluded."
+    statement: "HIL: gate bedf72fc approved from Slack by owner U0C6DTHDMV0 on 2026-10-14T22:22:30Z; the T2 human gate sits at final-sign-off. Any sign-off change requires a re-lock."
 
 constraints:
   - id: C1
-    statement: "Non-goal: the single-decode schema is unchanged - one JSON (intent + reply + confidence), no chain/router surgery; the v17 variant is a ModelCatalog swap, versioned and reversible."
-    source: "feature constitution Out of scope; Runtime Contract 'Chat decode' 3; Model & Training Contract 1-2"
+    statement: "Preserved invariants (a change here is a non-goal): the reminder and escalation semantics of root FR-026-FR-028, the LLM independence of the medication scheduler unit, persistence-before-alarm, process-kill re-arm (root FR-029), the refusal-first denial guard, and the FR-D01/FR-D02/FR-D03 sequence order. No weakening is permitted."
+    source: "feature constitution Out of scope and Safety & Compliance Delta; project constitution; requirements.md FR-026-FR-029"
   - id: C2
-    statement: "Non-goal: the router ladder and emergency gate behaviour are unchanged; emergency recall 1.00 is a gate, not a metric. Chat routing never alters ladder ordering, triggers or the emergency path."
-    source: "feature constitution Out of scope; Cloud-first chat routing toggle 1; Safety & Compliance Delta 1"
+    statement: "The dementia machinery (confirmation challenge, double-dose detection, photo-verification components) is integrated and extended, never rebuilt or removed; decisions touching the FR-D01/FR-D03/FR-D04a-b machinery run under the elevated 0.90 confidence threshold."
+    source: "feature constitution Out of scope; requirements-dementia-supplement.md 4.4"
   - id: C3
-    statement: "Non-goal: STT behaviour is untouched - the STT-engine invariant (owner-declared: functioning STT is the invariant of any change) stands; a transcript regression is a stop-and-investigate event."
-    source: "feature constitution Out of scope; Safety & Compliance Delta 6"
+    statement: "OCR values are candidates only: nothing writes a schedule store on scan; the family's explicit review-and-save is the bind; every scan entry point routes through the same confirmation gate (safety delta (a))."
+    source: "feature constitution Safety & Compliance Delta (a); Intake/Scan contracts"
   - id: C4
-    statement: "Non-goal: command-turn decode determinism - temp-0 + fixed seed (20_260_907) + GBNF commandJSONSchema stay byte-for-byte untouched; only chat turns use the fixed-seed chat sampling setting."
-    source: "feature constitution Runtime Contract 'Chat decode' 1; proposal 5.1/7"
+    statement: "The slot-to-clock mapping is deterministic and total; no reminder is armed without a determinate hour/minute; one resolved scheduled time drives the acknowledgement deadline, re-fire schedule, escalation deadline and missed-dose verdict (safety delta (b))."
+    source: "feature constitution Entry Model & Slot-to-Clock Mapping contract; Open Decision 1 (resolved)"
   - id: C5
-    statement: "Non-goal: no new device permission and no new data collection beyond the recorded cloud-chat egress and classification-only telemetry; only the consent-gated cloud chat path carries conversation content off the device."
-    source: "feature constitution Out of scope; Cloud-first chat routing toggle 3; project constitution OD-12/13 pattern"
+    statement: "Photo evidence augments and never replaces the acknowledgement plus confirmation chain; a photo never creates a record; recording happens only through the acknowledgement path (safety delta (c))."
+    source: "feature constitution Safety & Compliance Delta (c); Photo-as-Evidence contract"
   - id: C6
-    statement: "Non-goal: no few-shot exemplars in the on-device prompt - style travels via data, not prompt tokens; combined with the pinned 1,024-token budget."
-    source: "proposal 4; feature constitution Prompt/seed discipline 3"
+    statement: "The caregiver wire stays PII-free: the versioned envelope carries alert type and timestamp, with the hashed entry identifier where correlation is needed; no names, doses or household content; the title-on-wire question stays an explicit owner-level decision, never smuggled in (safety delta (d))."
+    source: "feature constitution Safety & Compliance Delta (d); Open Decision 3 (resolved)"
   - id: C7
-    statement: "Prompt discipline: seeds/chat_prompt_template.txt byte-mirrors IntentPrompt.buildChat and the mirror lands in the SAME change; the intent prompt bytes and seeds/prompt_template.txt stay byte-identical to their pre-change content."
-    source: "proposal 4; feature constitution Prompt/seed discipline 1-2"
+    statement: "Label scanning and medication-photo processing stay on-device; no new cloud egress for medication content; the recorded cloud exceptions (voice transcription; OCR'd-text translation) do not apply to this feature."
+    source: "feature constitution Feature Constraints (no new cloud egress); project constitution"
   - id: C8
-    statement: "Cloud chat is a recorded OD-12-shape exception to Architecture Constraint 1: explicit consent at first cloud use, plain-language disclosure, visible indicator while content goes to the cloud, revocable at any time, on-device fallback that never blocks chat, provider key in a header only and never in URLs or logs (B2/T-050 precedent). The feature-level exception is recorded so the root constitution's recorded-exceptions list can be amended at final sign-off."
-    source: "feature constitution Cloud-first chat routing toggle 2-6; Safety & Compliance Delta 2; project constitution OD-12/OD-13"
+    statement: "Honest degradation: no silent stubs; the unwired photo-verification machinery is surfaced as itself; an undelivered notification is never presented as success; a failed persistence write surfaces and blocks its dependent step."
+    source: "docs/medication-scheduler-implementation-plan.md safety invariants 4-5; feature constitution Feature Constraint 9; project constitution Agent Principles"
   - id: C9
-    statement: "Ship-mix licence hygiene: the SHIPPED training mix is CC-BY/Apache/MIT + synthetic + own data only; CC BY-NC sources (IndicDialogue, DailyDialog, PersonaChat, EmpatheticDialogues) and research-gated / unlicensed sources (Nepali call-center corpus) are dev-mix only. A provenance manifest is the evidence; contamination of a shipped artifact is a compliance event."
-    source: "proposal 3/7; feature constitution Data provenance 1-4"
+    statement: "Correction and disambiguation copy follows the owner rule: \"did you mean X / X or Y\" ONLY — no leading questions, no numbered lists, ever."
+    source: "owner rule (correction copy); feature constitution voice-ack contract; FR-MSR-008"
   - id: C10
-    statement: "Gate discipline: the catalog swap ships only with ALL gates green (new chat gates plus every existing regression gate); a red gate is a stop, not a threshold to move. Harness output is release evidence."
-    source: "proposal 6; feature constitution Mixture and gate harness 2-3"
+    statement: "Voice pipeline discipline: the refusal-first denial guard is preserved everywhere; acknowledgements play through the ack fast lane so the microphone never closes and listening resumes with no gap."
+    source: "feature constitution Integration Surfaces (CommandRouter, AckFastLane [ACK-MIC-CONTINUITY]); FR-MSR-011/012"
   - id: C11
-    statement: "Delivery - house rule (inherited): work ONLY in the sibling worktree /Users/anjan/workspace/projects/elderly-ai-assistant-conversational-nepali-replies (branch feat/conversational-nepali-replies); integrate via PR against master; never the main checkout."
-    source: "project CLAUDE.md working rules; feature workflow"
+    statement: "Elderly-fit measures: 44pt minimum targets, 18pt body text with system scaling, WCAG AA contrast, voice-first completion; all new strings exist in Nepali and English; all spoken times go through the mandated spoken-time formatter; the Devanagari substring/grapheme-cluster behaviour is regression-pinned and not 'fixed'."
+    source: "root NFR-020-NFR-022; project house rules; feature constitution Feature Constraints 7-8"
   - id: C12
-    statement: "Release gate: ios/tools/check-release-log-safety.sh must exit 0 (build-blocking, wired into ios/build.sh ahead of every test scope) with the new chat/routing/guard source paths inside its coverage; the pre-release device console/sysdiagnose check covers the same paths."
-    source: "project constitution Release gates; feature constitution Cloud-first chat routing toggle 4 and Success Criteria"
+    statement: "Release gate: ios/tools/check-release-log-safety.sh must exit 0 covering the feature's new paths; the scoped medication and notifier suites are the honest gate, with the pre-existing full-bundle baseline recorded rather than silently included or excluded."
+    source: "project constitution Release gates; feature constitution Success Criteria and Test Rigor"
   - id: C13
-    statement: "Feasibility honesty: if any leg is infeasible or only partially feasible (chat sampling reproducibility on a tier and GBNF interplay, guard coverage, cloud consent/indicator behaviour, training thresholds, 4B tier admission, P0->P1->P2 sequencing), it is stated explicitly for the owner - no silent drop."
-    source: "feature constitution Runtime Contract 'Chat decode' 4 / OD-1 / workflow design-l1 comment; project constitution Agent Principles (no silent stubs)"
+    statement: "Delivery (house rule, inherited): work ONLY in the sibling worktree elderly-ai-assistant-medication-schedules-reminders (branch feat/medication-schedules-reminders); integrate via PR against master; never the main checkout."
+    source: "project CLAUDE.md working rules; feature workflow"
 
-open_decisions:  # no owner-level decision open; OD-1..OD-5 are design-level and belong to design-l1/design-l2
-  - id: OD-1
-    statement: "Chat temperature value + sampling plumbing (per-turn override vs. a shape-specific handle; the LLM handle is created once) and the GBNF interplay. Bounded by FR-CNR-003/004 and NFR-CNR-001; feasibility honesty via FR-CNR-024. Owner of the decision: design-l1."
-  - id: OD-2
-    statement: "Style-spec artifact format (prose vs. machine-readable) and how the four consumers resolve against one file without duplication, incl. which parts the guard/eval execute directly. Bounded by FR-CNR-001 (single source, no forks) and NFR-CNR-005. Owner: design-l1."
-  - id: OD-3
-    statement: "Owner question (recorded, not resolved by this task): P0 landing path - full P0->P1->P2 in this run (owner directive) vs. P0 as a normal PR first, which the approved proposal explicitly permits. Sequencing only; scope and contracts identical. A deviation is reported per FR-CNR-024."
+open_decisions:  # no owner-level decision open; OD-1..OD-3 are RESOLVED in the feature constitution (2026-10-15) and carried as requirements (FR-MSR-002, FR-MSR-003, FR-MSR-015/016/017); OD-4..OD-8 are design-level and belong to design-l1/design-l2
   - id: OD-4
-    statement: "Particles-budget enforcement mechanics (which particle set counts; guard check vs. eval rubric vs. both; interaction with the <=2-sentence ceiling and code-switched sentences). Bounded by FR-CNR-001 (the <=1 per-reply budget is fixed), FR-CNR-005 and FR-CNR-020. Owner: design-l1."
+    statement: "Scan-to-fill: extraction surface, confirm step, partial-fill behaviour. Confirm nothing auto-binds, strength→doseDescription stays, the parser's conservative partial-fill rules remain binding, and purpose stays manual/lookup. Bounded by FR-MSR-005 (additive, non-destructive, refuses to guess) and FR-MSR-006 (human confirmation before binding is fixed). Owner of the decision: design-l1/design-l2."
   - id: OD-5
-    statement: "The Gemini chat temperature value (the on-device side is ~0.3); the cloud value is proposed with a rationale and reviewed at design review. Bounded by FR-CNR-011 (explicit, reviewed) and FR-CNR-002 (no local/cloud drift). Owner: design-l1."
+    statement: "Legacy entries in the new model: how pre-revamp entries (raw scheduleTimes, e.g. 08:00 / 20:00, no slot/meal fields) render in the slot-based UI; whether any backfill (times→slot inference) is allowed at migration; whether .weekly/.custom frequency entries are representable. Recorded safe default to confirm: legacy scheduleTimes readable and representable, entries keep working exactly as today until the family edits them, no automatic slot inference. Bounded by NFR-MSR-006. Owner: design-l1/design-l2."
+  - id: OD-6
+    statement: "Voice ack with slot: resolution and interaction order — how the named-slot utterance resolves when multiple reminders are pending, that the FR-D01 challenge and FR-D03 double-dose sequence keeps its exact order for the new shapes, and the honest behaviour when the named medication does not match or is ambiguous (sanctioned clarification, never a guess; no path records without the challenge). Bounded by FR-MSR-007/008/009/011. Owner: design-l1/design-l2."
+  - id: OD-7
+    statement: "Caregiver calendar-events channel: (a) the existing consent-gated schedule mirror with caregivers following that calendar, (b) significant events written as calendar entries, or (c) another shape — and which events surface there. Bounded by FR-MSR-016 (consent gate, honest results) and FR-MSR-017 (no new PII on any channel). Owner: design-l1/design-l2."
+  - id: OD-8
+    statement: "Photo-as-evidence: mechanism and recipient — reuse the existing (unwired) PhotoVerifier E2E path once wired, an on-device-only variant, or an extension of the per-medication/per-time-of-day dementia mechanism; what the photo proves (identifying the medication at a shared slot vs the existing FR-D04a empty-hand presence check) and who judges it. Bounded by FR-MSR-013 (augments never replaces; never assumes the unwired machinery works; on-device; delivery discipline if it leaves the device), FR-MSR-014 (deterministic, conservative resolution) and FR-MSR-020 (removal of the dementia mechanism forbidden). Owner: design-l1/design-l2."
 
 out_of_scope:
-  - "The single-decode schema - one JSON (intent + response/reply + confidence); no chain/router surgery; v17 is a catalog swap (FR-CNR-013, FR-CNR-022)"
-  - "Router ladder and emergency gate behaviour; chat pre-check semantics beyond wiring the routing toggle (FR-CNR-014)"
-  - "STT behaviour - the speech pipeline is not part of this feature (FR-CNR-015)"
-  - "Command-turn decode determinism - temp-0 + fixed seed + GBNF commandJSONSchema (FR-CNR-004)"
-  - "Any new device permission; any new data collection beyond the recorded cloud-chat egress and classification-only telemetry (FR-CNR-010, FR-CNR-015, NFR-CNR-007)"
-  - "Few-shot exemplars in the on-device prompt (FR-CNR-023, NFR-CNR-004)"
-  - "The intent prompt bytes - IntentPrompt.build, seeds/prompt_template.txt and the IntentPromptTests pin (FR-CNR-023)"
-  - "Emergency-call logic, medication flow, health monitoring and the encrypted remote-config channel"
-  - "Non-chat content on the cloud chat path - commands and emergency phrasing do not travel the new toggle (FR-CNR-010)"
-  - "CC BY-NC and research-gated data in shipped artifacts (FR-CNR-018)"
-  - "A new training pipeline - v17 extends tools/train-intent (FR-CNR-016)"
-  - "An on-device Nepali GEC corrector (~3.5 GB quantized; out of scope for the current device tiers) - the guard verifies instead of correcting (FR-CNR-005)"
-  - "Automatic transliteration / script bridging in matching or dialling surfaces elsewhere in the app - not re-opened by this feature (FR-CNR-027 keeps replies scoped)"
-  - "Android - no platform scope beyond the existing iOS app"
+  - "Emergency-call and health-monitoring modules — untouched by this feature (FR-MSR-020)"
+  - "Android — deferred to v2; not reopened"
+  - "No weakening of any existing medication safety invariant — reminder/escalation semantics, LLM independence, persistence-before-alarm, process-kill re-arm (FR-MSR-019/022, NFR-MSR-001)"
+  - "No removal of the existing dementia machinery — challenge, double-dose detection, photo-verification components are integrated and extended only (FR-MSR-020)"
+  - "No new cloud egress for medication content — label/photo processing stays on-device (NFR-MSR-003)"
+  - "No new PII on the caregiver wire — the title/name-on-wire question stays an explicit owner-level decision (FR-MSR-017)"
+  - "The end-to-end push transport (inherited tracked work, docs/family-notifier-e2e-implementation-plan.md) — the feature's scope is the trigger paths, the calendar channel and honest reporting (FR-MSR-016)"
+  - "Devanagari substring/grapheme-cluster behaviour — regression-pinned; not 'fixed' (NFR-MSR-007)"
+  - "Partial-vs-full dose detection — out of scope; the double-dose detector's semantics are unchanged (FR-MSR-003)"
 
 security_surfaces:
-  - surface: "Shared safety-critical model - the v17 chat variant is the SAME single-decode model that answers commands and the emergency path; the 30% claw-back mixture is the mitigation and the catalog swap is versioned, reversible and gated"
-    requirements: ["FR-CNR-014", "FR-CNR-016", "FR-CNR-021", "FR-CNR-022", "NFR-CNR-008"]
-  - surface: "NEW cloud egress - chat conversation content reaches Gemini via the cloud-first routing toggle and the grammar-guard escalation, beyond the recorded exceptions (OD-12 voice transcription only; OD-13 OCR'd text only); consent/disclosure/indicator/revocation in the OD-12 shape; local fallback that never blocks chat"
-    requirements: ["FR-CNR-006", "FR-CNR-008", "FR-CNR-009", "FR-CNR-010"]
-  - surface: "Credential + content hygiene - provider key in a header only, never URLs or logs; conversation content off the logs beyond the existing transcript policy; check-release-log-safety.sh coverage of the new paths"
-    requirements: ["FR-CNR-012", "NFR-CNR-006", "FR-CNR-007", "NFR-CNR-007"]
-  - surface: "Guard integrity - verify-never-rewrite; escalation or safe template on a flag; honest degradation on guard failure; a guard-invented rewrite is forbidden"
-    requirements: ["FR-CNR-005", "FR-CNR-006", "FR-CNR-007"]
-  - surface: "Data provenance and licence compliance - ship mix CC-BY/Apache/MIT + synthetic + own data only; no CC BY-NC contamination of a shipped artifact; the manifest is the evidence"
-    requirements: ["FR-CNR-017", "FR-CNR-018", "FR-CNR-029"]
-  - surface: "Prompt discipline - 1,024-token budget held; seeds/chat_prompt_template.txt byte-mirrors IntentPrompt.buildChat in the same change; the intent prompt stays byte-identical; no few-shot exemplars"
-    requirements: ["FR-CNR-023", "NFR-CNR-004", "NFR-CNR-005"]
-  - surface: "Determinism and resource behaviour on device tiers - fixed-seed chat reproducibility; the NO-GIBBERISH command invariants untouched; one resident brain model; zero feature-attributable jetsam terminations; the latency envelope"
-    requirements: ["FR-CNR-003", "FR-CNR-004", "NFR-CNR-001", "NFR-CNR-002", "NFR-CNR-003"]
-  - surface: "Unchanged surfaces - STT pipeline, device permissions, data collection, the single-decode schema, the intent prompt bytes"
-    requirements: ["FR-CNR-013", "FR-CNR-014", "FR-CNR-015"]
+  - surface: "Scan-to-fill writes into a safety-critical schedule — OCR values require human confirmation before binding; an OCR misread must cost a correction, never a dose"
+    requirements: ["FR-MSR-005", "FR-MSR-006"]
+  - surface: "Slot-to-clock mapping feeding the escalation engine — deterministic and total; no armed reminder without a determinate time; one resolved scheduled time drives every derived instant"
+    requirements: ["FR-MSR-002", "FR-MSR-019", "NFR-MSR-010"]
+  - surface: "Photo-as-evidence — augments never replaces; a photo never creates a record; on-device processing; the unwired machinery surfaced honestly"
+    requirements: ["FR-MSR-013", "FR-MSR-014", "FR-MSR-018", "NFR-MSR-003"]
+  - surface: "Caregiver wire — PII-free taxonomy; hashed entry identifier only; no names, doses or household content; title-on-wire stays owner-level"
+    requirements: ["FR-MSR-015", "FR-MSR-016", "FR-MSR-017"]
+  - surface: "Persistence and process-kill — persistence before alarm; acknowledgement durable immediately on confirmation; re-arm within the unexpired window"
+    requirements: ["FR-MSR-022", "NFR-MSR-008"]
+  - surface: "Dementia safety machinery — challenge, double-dose detector and photo components preserved; refusal-first denial guard; no bypass of the acknowledgement sequence; elevated 0.90 on touched machinery"
+    requirements: ["FR-MSR-009", "FR-MSR-011", "FR-MSR-020", "NFR-MSR-008"]
+  - surface: "Voice pipeline integrity — mic continuity around acknowledgements; conservative disambiguation never records the wrong medication; sanctioned clarification copy only"
+    requirements: ["FR-MSR-007", "FR-MSR-008", "FR-MSR-012"]
+  - surface: "Observability — hash-only medication identifiers; sanitiser applied; release log gate covering the new paths"
+    requirements: ["NFR-MSR-002", "NFR-MSR-009"]
 
 traceability:
+  - gate: "define-requirements"
+    checks: "This artifact. HIL gate bedf72fc approved from Slack by owner U0C6DTHDMV0 on 2026-10-14T22:22:30Z; this lock is the downstream drift-detection baseline."
   - gate: "design-l1"
-    checks: "Resolve OD-1..OD-5 inside this set's contracts: the style-spec artifact and its four consumer seams (FR-CNR-001/002/005/017/020); the chat decode seam with reproducibility tests (FR-CNR-003, NFR-CNR-001) without moving the command invariants (FR-CNR-004); the grammar-guard contract - checks incl. timi/tapai-verb agreement, Devanagari purity, dangling particles; verify-never-rewrite; escalation; content-free telemetry (FR-CNR-005..007); the cloud toggle shape - consent state, disclosure copy seam, visible indicator, offline fallback, the OD-12-shape amendment (FR-CNR-008..010/012); the Gemini chat temperature seam (FR-CNR-011); the v17 suite extension - data layers, mixture, filters, provenance manifest, gate-harness extension, catalog entry + rollback path (FR-CNR-016..022); the DV protocol on Anzaan (FR-CNR-025). Feasibility honesty starts here (FR-CNR-024)."
+    checks: "Resolve OD-4..OD-8 inside this set's contracts: the entry model and slot-to-clock mapping with the determinism/totality property and the family-configurable control (FR-MSR-001/002); the quantity representation and dose-line composition (FR-MSR-003); scan-to-fill confirm step and partial-fill rules (FR-MSR-005/006); the ack-with-slot resolution mechanics with the by-what-was-said discipline (FR-MSR-007/008/011/012); the photo-evidence mechanism decision (FR-MSR-013/014, OD-8); the notification seams and honesty boundaries (FR-MSR-015/016/017/018); migration and legacy rendering (NFR-MSR-006, OD-5)."
+  - gate: "review-l1"
+    checks: "review.decision == GO against the level-1 design and this set."
   - gate: "design-l2"
-    checks: "Component design against this set: interface contracts for the style spec and its consumers, the chat sampling seam, the guard verdict/flag surface, the consent/indicator state, the cloud chat request, the training-suite variant and the catalog entry; sequencing P0 -> P1 -> P2 (FR-CNR-024 records deviation)."
+    checks: "Component design against this set: interface contracts for the entry model and mapping control, the scan confirm step, the ack resolution seam, the photo-evidence path decision, the notification seams including the calendar channel (OD-7), and migration/legacy handling; sequencing such that no path records without the challenge (FR-MSR-009)."
   - gate: "review-l2"
-    checks: "review.decision == GO against the component design and this set."
-  - gate: "security-design-review"
-    checks: "STRIDE with the new cloud egress and the shared safety-critical model as named focus areas: safety-gate regression + catalog-swap discipline (FR-CNR-014/021/022, NFR-CNR-008); cloud chat consent/disclosure in the OD-12 shape (FR-CNR-008/009/010); credential + content hygiene incl. the flag event carrying no user content (FR-CNR-007/012, NFR-CNR-006/007); guard integrity (FR-CNR-005/006); data provenance (FR-CNR-017/018); prompt discipline (FR-CNR-023, NFR-CNR-004/005). SECURITY-GO required."
+    checks: "review.decision == GO against the component design and this set, including the safety-sequence no-bypass property (FR-MSR-009) and the preserved escalation semantics (FR-MSR-019)."
   - gate: "plan-tasks / implement"
-    checks: "Units trace back to FR-CNR-* / NFR-CNR-* ids; P0 lands before P1 per the owner directive (FR-CNR-024 records any deviation); paired review and the 0.85 confidence threshold on implementation output; focused tests + typecheck per unit."
+    checks: "Units trace back to FR-MSR-* / NFR-MSR-* ids; paired review and the 0.85 confidence threshold on implementation output, elevated to 0.90 on FR-D01/D03/D04a-b-touching decisions; coverage and integration-test obligations (NFR-MSR-008); migration tests ride with the model change (NFR-MSR-006)."
   - gate: "review-implementation"
-    checks: "review.decision == GO over the implementation against this set."
-  - gate: "security-test"
-    checks: "Evidence: emergency recall stays 1.00 and command decode stays deterministic after the chat changes (FR-CNR-004/014/021); chat turns are reproducible at the fixed-seed chat setting (NFR-CNR-001, FR-CNR-003); the grammar guard never rewrites and its escalation/fallback degrades honestly (FR-CNR-005/006); the cloud chat path enforces consent + visible indicator and never leaks the provider key or conversation content into logs, with check-release-log-safety.sh coverage of the new paths (FR-CNR-009/012, NFR-CNR-006/007); the ship-mix provenance manifest proves no CC BY-NC source (FR-CNR-018); the chat templates stay within the pinned 1,024-token budget and the seed mirror is byte-identical (FR-CNR-023, NFR-CNR-004/005). SECURITY-GO required."
+    checks: "review.decision == GO over the implementation against this set, including the honesty properties (FR-MSR-018) and the PII-free paths (FR-MSR-017, NFR-MSR-002)."
   - gate: "final-sign-off"
-    checks: "T2 + HIL; the DV-1..DV-6 checklist is recorded and passed on Anzaan (FR-CNR-025); ios/tools/check-release-log-safety.sh exits 0 (FR-CNR-012, NFR-CNR-006/011); the feasibility-honesty statement for every leg is explicit for the owner (FR-CNR-024)."
+    checks: "T2 + HIL; the recorded DV-1..DV-7 device-validation checklist on the reference device (Anzaan): DV-1 slot entry and mapped fire (FR-MSR-001/002); DV-2 scan confirm, honest partial read (FR-MSR-005/006); DV-3 voice ack with slot resolving the shared slot, sequence order preserved (FR-MSR-007/008/009); DV-4 photo evidence attaching on-device, never creating a record (FR-MSR-013/014); DV-5 significant events firing with the consent-gated calendar channel and no PII on the wire (FR-MSR-015/016/017); DV-6 process-kill re-arm within the unexpired window (FR-MSR-022); DV-7 elderly-fit 44pt+/18pt+/voice-first and spoken times via the formatter only (FR-MSR-021, NFR-MSR-004/005). Release gate: ios/tools/check-release-log-safety.sh exits 0 (NFR-MSR-009)."

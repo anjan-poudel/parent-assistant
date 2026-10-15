@@ -1,36 +1,39 @@
-# Non-Functional Requirements — Conversational Nepali Replies (v1)
+# Non-Functional Requirements — Medication Schedules and Reminders
 
-11 non-functional requirements. IDs are namespaced `NFR-CNR-NNN` to avoid colliding with the
-project-level `NFR-NNN` set in the root stakeholder brief (`requirements.md`) — the same
-convention live-camera-translation used (`NFR-LCT-NNN`), profile-interview used (`NFR-PI-NNN`),
-spotify-music-integration used (`NFR-SP-NNN`), multi-turn-conversation used (`NFR-MTC-NNN`),
-family-contacts-unify used (`NFR-FCU-NNN`) and call-dialer-primary-secondary used (`NFR-CDP-NNN`).
-This page covers the `conversational-nepali-replies` set (`NFR-CNR-*`) only; the earlier feature
-files remain in this folder and are not part of this feature's requirements or lock.
+10 non-functional requirements. IDs are namespaced `NFR-MSR-NNN` to avoid colliding with the
+project-level `NFR-NNN` set in the root stakeholder brief (`requirements.md`) — the same convention
+the earlier features used (`NFR-LCT-NNN`, `NFR-PI-NNN`, `NFR-SP-NNN`, `NFR-MTC-NNN`,
+`NFR-FCU-NNN`, `NFR-CDP-NNN`, `NFR-CNR-NNN`). This page covers the
+`medication-schedules-reminders` set (`NFR-MSR-*`) only; the earlier feature files remain in this
+folder and are not part of this feature's requirements or lock. All 10 are MUST.
 
 | ID | Title | Category | Priority |
 |----|-------|----------|----------|
-| [NFR-CNR-001](NFR-CNR-001-chat-reply-reproducibility.md) | Chat reply reproducibility — fixed seed, same input, same reply | Reliability / Determinism | MUST |
-| [NFR-CNR-002](NFR-CNR-002-listening-turn-latency-envelope.md) | Listening-turn latency envelope — chat replies stay within the spoken-conversation budget | Performance | MUST |
-| [NFR-CNR-003](NFR-CNR-003-memory-and-jetsam-device-tiers.md) | Memory and jetsam behaviour — one brain resident, zero feature-attributable terminations | Reliability / Resource Behaviour | MUST |
-| [NFR-CNR-004](NFR-CNR-004-chat-prompt-token-budget.md) | Chat prompt token budget — the 1,024-token ceiling holds | Performance / Resource Budget | MUST |
-| [NFR-CNR-005](NFR-CNR-005-prompt-template-byte-mirror.md) | Prompt-template byte-mirror discipline — seed and code cannot drift | Reliability / Build Discipline | MUST |
-| [NFR-CNR-006](NFR-CNR-006-log-safety.md) | Log safety — no conversation content, transcript or key material in any log | Privacy / Security | MUST |
-| [NFR-CNR-007](NFR-CNR-007-telemetry-content-hygiene.md) | Telemetry content hygiene — every new event carries classification only | Privacy | MUST |
-| [NFR-CNR-008](NFR-CNR-008-gate-thresholds.md) | Gate thresholds — the measurable ship conditions for the v17 swap | Quality / Evaluation Gates | MUST |
-| [NFR-CNR-009](NFR-CNR-009-accessibility.md) | Accessibility — voice-first, house touch standards, and no routing reasoning asked of the elderly user | Accessibility | MUST |
-| [NFR-CNR-010](NFR-CNR-010-localisation-ne-en.md) | Localisation — every new user-visible string exists in Nepali and English | Localisation | MUST |
-| [NFR-CNR-011](NFR-CNR-011-compliance-and-release-gates.md) | Compliance and release gates — workflow gates, the log gate, and honest baseline reporting | Compliance | MUST |
+| [NFR-MSR-001](NFR-MSR-001-llm-independence.md) | LLM independence — the medication scheduler unit stays free of LLM dependencies | Reliability | MUST |
+| [NFR-MSR-002](NFR-MSR-002-pii-free-observability.md) | PII-free observability — hash-only medication identifiers, sanitised logs, gate-covered paths | Privacy / Security | MUST |
+| [NFR-MSR-003](NFR-MSR-003-on-device-no-new-egress.md) | On-device label and photo processing — no new cloud egress for medication content | Privacy | MUST |
+| [NFR-MSR-004](NFR-MSR-004-localisation-and-spoken-time.md) | Localisation and spoken times — every new string in Nepali and English, all spoken times through the formatter | Localisation | MUST |
+| [NFR-MSR-005](NFR-MSR-005-accessibility-elderly-fit.md) | Accessibility — 44pt targets, 18pt body text, contrast, voice-first acknowledgement | Accessibility | MUST |
+| [NFR-MSR-006](NFR-MSR-006-migration-compatibility.md) | Migration compatibility — legacy payloads keep loading, schedules are never lost to a missing key | Reliability / Compatibility | MUST |
+| [NFR-MSR-007](NFR-MSR-007-devanagari-grapheme-regression-pin.md) | Devanagari grapheme-cluster behaviour regression-pinned — do not "fix" it | Localisation / Regression | MUST |
+| [NFR-MSR-008](NFR-MSR-008-safety-test-coverage-and-confidence.md) | Safety-path test rigor — 100 per cent unit coverage, required integration tests, elevated confidence | Quality / Compliance | MUST |
+| [NFR-MSR-009](NFR-MSR-009-compliance-and-release-gates.md) | Compliance and release gates — log-safety gate green, health-policy posture unchanged, honest baseline | Compliance | MUST |
+| [NFR-MSR-010](NFR-MSR-010-reminder-firing-latency.md) | Reminder firing latency — the mapped clock time is the schedule of record | Reliability / Performance | MUST |
 
-## Coverage of the workflow's security focus areas
+## Coverage of the constitution's safety delta and key constraints
 
-| Focus area (workflow `security-design-review` / `security-test`) | Covered by |
+| Safety delta / constraint | Covered by |
 |---|---|
-| Safety-gate regression on the shared model — the v17 chat variant serves the intent and emergency paths; catalog swap versioned/reversible; command decode determinism untouched | [FR-CNR-004](../FR/FR-CNR-004-command-decode-determinism-preserved.md), [FR-CNR-014](../FR/FR-CNR-014-router-ladder-emergency-gate-unchanged.md), [FR-CNR-021](../FR/FR-CNR-021-full-gate-harness-before-swap.md), [FR-CNR-022](../FR/FR-CNR-022-v17-catalog-entry-versioned-reversible.md), [NFR-CNR-008](NFR-CNR-008-gate-thresholds.md) |
-| NEW cloud egress surface — chat conversation content reaches Gemini via routing and guard escalation; consent/disclosure in the OD-12 shape; never blocks chat | [FR-CNR-008](../FR/FR-CNR-008-cloud-first-chat-routing-toggle.md), [FR-CNR-009](../FR/FR-CNR-009-cloud-chat-consent-disclosure-indicator.md), [FR-CNR-010](../FR/FR-CNR-010-cloud-chat-egress-scope.md), [FR-CNR-006](../FR/FR-CNR-006-guard-flag-escalation-honest-degradation.md) |
-| Credential + content hygiene — key in header only, never URLs or logs; conversation content off the logs; the flag event carries no user content | [FR-CNR-012](../FR/FR-CNR-012-cloud-chat-credential-and-content-hygiene.md), [FR-CNR-007](../FR/FR-CNR-007-reply-grammar-flag-telemetry-no-content.md), [NFR-CNR-006](NFR-CNR-006-log-safety.md), [NFR-CNR-007](NFR-CNR-007-telemetry-content-hygiene.md) |
-| Guard integrity — verify-never-rewrite; honest degradation on guard failure; never a false success | [FR-CNR-005](../FR/FR-CNR-005-grammar-guard-verify-never-rewrite.md), [FR-CNR-006](../FR/FR-CNR-006-guard-flag-escalation-honest-degradation.md) |
-| Data provenance — ship mix CC-BY/Apache/MIT + synthetic + own data only; no CC BY-NC contamination; provenance manifest as evidence | [FR-CNR-018](../FR/FR-CNR-018-ship-mix-provenance-manifest.md), [FR-CNR-017](../FR/FR-CNR-017-four-layer-corpus-construction.md) |
-| Prompt discipline — 1,024-token budget; `chat_prompt_template.txt` byte-mirrors `IntentPrompt.buildChat`; intent prompt untouched; no few-shot exemplars | [FR-CNR-023](../FR/FR-CNR-023-chat-prompt-template-discipline.md), [NFR-CNR-004](NFR-CNR-004-chat-prompt-token-budget.md), [NFR-CNR-005](NFR-CNR-005-prompt-template-byte-mirror.md) |
-| Determinism and resource behaviour on device tiers — fixed-seed reproducibility; latency envelope; one brain resident; jetsam | [NFR-CNR-001](NFR-CNR-001-chat-reply-reproducibility.md), [NFR-CNR-002](NFR-CNR-002-listening-turn-latency-envelope.md), [NFR-CNR-003](NFR-CNR-003-memory-and-jetsam-device-tiers.md) |
-| Unchanged surfaces — STT pipeline, permissions, data collection, ladder/emergency path, single-decode schema | [FR-CNR-013](../FR/FR-CNR-013-single-decode-schema-unchanged.md), [FR-CNR-015](../FR/FR-CNR-015-stt-permissions-data-collection-unchanged.md) |
+| (a) Scan-to-fill writes into a safety-critical schedule — OCR values require human confirmation before binding | [FR-MSR-006](../FR/FR-MSR-006-ocr-human-confirmation-before-binding.md), [FR-MSR-005](../FR/FR-MSR-005-scan-to-fill-additive.md) |
+| (b) Slot-to-clock mapping — deterministic and total; the escalation engine receives an exact scheduled time | [FR-MSR-002](../FR/FR-MSR-002-deterministic-slot-to-clock-mapping.md), [FR-MSR-019](../FR/FR-MSR-019-existing-reminder-escalation-preserved.md), [NFR-MSR-010](NFR-MSR-010-reminder-firing-latency.md) |
+| (c) Photo-as-intake-evidence augments and never replaces the acknowledgement + confirmation chain | [FR-MSR-013](../FR/FR-MSR-013-photo-evidence-augments-never-replaces.md), [FR-MSR-014](../FR/FR-MSR-014-photo-evidence-shared-slot-resolution.md), [FR-MSR-009](../FR/FR-MSR-009-acknowledgement-safety-sequence.md) |
+| (d) Caregiver "always notified" extends the PII-free taxonomy with no new PII on the wire | [FR-MSR-017](../FR/FR-MSR-017-pii-free-wire.md), [FR-MSR-015](../FR/FR-MSR-015-significant-event-notification-set.md), [FR-MSR-016](../FR/FR-MSR-016-caregiver-channels-honest-delivery.md) |
+| LLM independence of the medication scheduler unit | [NFR-MSR-001](NFR-MSR-001-llm-independence.md) |
+| Persistence before alarm; process-kill re-arm within the unexpired window (FR-029) | [FR-MSR-022](../FR/FR-MSR-022-persistence-before-alarm-and-rearm.md), [NFR-MSR-008](NFR-MSR-008-safety-test-coverage-and-confidence.md) |
+| Honest degradation — no silent stubs, no undelivered notification as success, the unwired photo machinery surfaced as itself | [FR-MSR-018](../FR/FR-MSR-018-honest-degradation-deferred-capabilities.md), [FR-MSR-016](../FR/FR-MSR-016-caregiver-channels-honest-delivery.md) |
+| Migration without loss — optional fields, decoder defaults, legacy schedule times readable and representable | [NFR-MSR-006](NFR-MSR-006-migration-compatibility.md) |
+| On-device label/photo processing; no new cloud egress | [NFR-MSR-003](NFR-MSR-003-on-device-no-new-egress.md) |
+| PII-free observability (hashed entry identifier only) | [NFR-MSR-002](NFR-MSR-002-pii-free-observability.md) |
+| Localisation ne/en; spoken times only via the formatter; Devanagari behaviour pinned | [NFR-MSR-004](NFR-MSR-004-localisation-and-spoken-time.md), [NFR-MSR-007](NFR-MSR-007-devanagari-grapheme-regression-pin.md) |
+| Elderly-fit measures (44pt / 18pt / contrast / voice-first) | [NFR-MSR-005](NFR-MSR-005-accessibility-elderly-fit.md), [FR-MSR-021](../FR/FR-MSR-021-elderly-fit-ux-new-flows.md) |
+| Test rigor and the elevated threshold on the dementia machinery | [NFR-MSR-008](NFR-MSR-008-safety-test-coverage-and-confidence.md), [FR-MSR-020](../FR/FR-MSR-020-dementia-machinery-preserved.md) |

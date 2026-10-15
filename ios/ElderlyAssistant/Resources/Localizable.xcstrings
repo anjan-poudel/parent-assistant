@@ -2318,6 +2318,57 @@
         }
       }
     },
+    "calendarShare.alert.doubleDose": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Possible double dose"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दोहोरो डोजको सम्भावना"
+          }
+        }
+      }
+    },
+    "calendarShare.alert.escalation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medicine needs attention"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ध्यान चाहिने औषधि"
+          }
+        }
+      }
+    },
+    "calendarShare.alert.missed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Missed medicine"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "छुटेको औषधि"
+          }
+        }
+      }
+    },
     "calendarShare.banner.signedIn": {
       "extractionState": "manual",
       "localizations": {
@@ -2426,13 +2477,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Emergency contacts are always invited. Other family members are invited for the kinds of reminders you switch on in Notify caregivers."
+            "value": "Emergency contacts are always invited. Other family members are invited for the kinds of reminders you switch on in Notify caregivers. Safety alerts — a missed dose, a possible double dose, or a dose that needs attention — are always shared with every family contact who has an email."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "आपतकालीन सम्पर्कहरूलाई सधैं निम्ता जान्छ। अरू परिवारलाई परिवारलाई खबर गर्नेमा खोल्नुभएका सम्झनाका प्रकारअनुसार निम्ता जान्छ।"
+            "value": "आपतकालीन सम्पर्कहरूलाई सधैं निम्ता जान्छ। अरू परिवारलाई खबर गर्नेमा खोल्नुभएका सम्झनाका प्रकारअनुसार निम्ता जान्छ। सुरक्षा सूचनाहरू — छुटेको औषधि, दोहोरो डोजको सम्भावना, वा ध्यान चाहिने औषधिको समय — इमेल भएका परिवारका सबै सदस्यहरूलाई सधैं पठाइन्छ।"
           }
         }
       }
@@ -6024,6 +6075,23 @@
         }
       }
     },
+    "family.alertEscalationStarted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your family member has not taken a scheduled medication yet — reminders are continuing."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको परिवारका सदस्यले तोकिएको औषधि अझै खानुभएको छैन — सम्झना जारी छ।"
+          }
+        }
+      }
+    },
     "family.alertHealthMonitoringInterrupted": {
       "extractionState": "manual",
       "localizations": {
@@ -6054,6 +6122,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "तपाईंको परिवारका सदस्यले लामो समयदेखि सहायकसँग कुराकानी गर्नुभएको छैन।"
+          }
+        }
+      }
+    },
+    "family.alertIntakeRecorded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your family member has taken a scheduled medication."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको परिवारका सदस्यले तोकिएको औषधि खानुभयो।"
           }
         }
       }
@@ -10039,6 +10124,74 @@
         }
       }
     },
+    "meds.ack.clarifyEnded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK, nothing was recorded."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठीक छ, केही टिपिएको छैन।"
+          }
+        }
+      }
+    },
+    "meds.ack.clarifyOne": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Did you mean %@?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंले %@ भन्न खोज्नुभयो?"
+          }
+        }
+      }
+    },
+    "meds.ack.clarifyPair": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Did you mean %@ or %@?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंले %@ कि %@ भन्न खोज्नुभयो?"
+          }
+        }
+      }
+    },
+    "meds.addDose": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add another dose"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अर्को डोज थप्नुहोस्"
+          }
+        }
+      }
+    },
     "meds.addTime": {
       "extractionState": "manual",
       "localizations": {
@@ -10141,6 +10294,91 @@
         }
       }
     },
+    "meds.evidence.attached": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photo saved with this medicine."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो यो औषधिसँगै राखियो।"
+          }
+        }
+      }
+    },
+    "meds.evidence.capture": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Take a photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो खिच्नुहोस्"
+          }
+        }
+      }
+    },
+    "meds.evidence.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The photo could not be saved."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो राख्न सकिएन।"
+          }
+        }
+      }
+    },
+    "meds.evidence.notYetDelivered": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The photo is saved on this phone. It has not been sent anywhere yet."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो यही फोनमा सुरक्षित छ। अहिलेसम्म कतै पठाइएको छैन।"
+          }
+        }
+      }
+    },
+    "meds.evidence.spoken": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photo for %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को फोटो"
+          }
+        }
+      }
+    },
     "meds.firePrompt": {
       "extractionState": "manual",
       "localizations": {
@@ -10239,6 +10477,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "खोज्दै…"
+          }
+        }
+      }
+    },
+    "meds.meal.after": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "After food"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खाना पछि"
+          }
+        }
+      }
+    },
+    "meds.meal.before": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Before food"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खाना अघि"
           }
         }
       }
@@ -10532,6 +10804,57 @@
         }
       }
     },
+    "meds.quantity.amount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Amount"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मात्रा"
+          }
+        }
+      }
+    },
+    "meds.quantity.customUnit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Or type your own"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वा आफ्नै शब्दमा लेख्नुहोस्"
+          }
+        }
+      }
+    },
+    "meds.quantity.unit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unit"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "एकाइ"
+          }
+        }
+      }
+    },
     "meds.reminderNotificationBody": {
       "extractionState": "manual",
       "localizations": {
@@ -10668,6 +10991,57 @@
         }
       }
     },
+    "meds.slot.afternoon": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afternoon"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दिउँसो"
+          }
+        }
+      }
+    },
+    "meds.slot.evening": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Evening"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बेलुका"
+          }
+        }
+      }
+    },
+    "meds.slot.morning": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Morning"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बिहान"
+          }
+        }
+      }
+    },
     "meds.taken": {
       "extractionState": "manual",
       "localizations": {
@@ -10685,6 +11059,23 @@
         }
       }
     },
+    "meds.takenToday.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Taken today"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज लिएका औषधि"
+          }
+        }
+      }
+    },
     "meds.title": {
       "extractionState": "manual",
       "localizations": {
@@ -10698,6 +11089,125 @@
           "stringUnit": {
             "state": "translated",
             "value": "आजको औषधि"
+          }
+        }
+      }
+    },
+    "meds.unit.capsule": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "capsule"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्याप्सुल"
+          }
+        }
+      }
+    },
+    "meds.unit.drop": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "drop"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "थोपा"
+          }
+        }
+      }
+    },
+    "meds.unit.milliliter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ml"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मि.ली."
+          }
+        }
+      }
+    },
+    "meds.unit.puff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "puff"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पफ"
+          }
+        }
+      }
+    },
+    "meds.unit.sachet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "sachet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "प्याकेट"
+          }
+        }
+      }
+    },
+    "meds.unit.tablet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tablet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चक्की"
+          }
+        }
+      }
+    },
+    "meds.unit.teaspoon": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "teaspoon"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चम्चा"
           }
         }
       }
@@ -17383,6 +17893,23 @@
         }
       }
     },
+    "settings.meds.keepTimes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep exact times"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठ्याक्कै समय राख्नुहोस्"
+          }
+        }
+      }
+    },
     "settings.meds.name": {
       "extractionState": "manual",
       "localizations": {
@@ -17430,6 +17957,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "राख्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.meds.slotRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Please choose morning, afternoon or evening for every dose."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हरेक डोजको लागि बिहान, दिउँसो वा बेलुका रोज्नुहोस्।"
           }
         }
       }
@@ -17485,6 +18029,159 @@
         }
       }
     },
+    "settings.meds.times.afternoon": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afternoon"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दिउँसो"
+          }
+        }
+      }
+    },
+    "settings.meds.times.evening": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Evening"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बेलुका"
+          }
+        }
+      }
+    },
+    "settings.meds.times.morning": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Morning"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बिहान"
+          }
+        }
+      }
+    },
+    "settings.meds.times.reset": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back to the usual times"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पहिलेकै समयमा फर्काउनुहोस्"
+          }
+        }
+      }
+    },
+    "settings.meds.times.retimeNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A medicine's time in the calendar comes from the morning, afternoon or evening time set here. If a medicine's time is changed in the calendar app, this setting is what it goes back to."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्यालेन्डरमा देखिने औषधिको समय यहाँ राखिएको बिहान, दिउँसो वा बेलुकाको समयअनुसार हुन्छ। क्यालेन्डर एपमा औषधिको समय फेरिए पनि यही समय कायम हुन्छ।"
+          }
+        }
+      }
+    },
+    "settings.meds.times.retimeNote.dismiss": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close this message"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो सन्देश बन्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.meds.times.saveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The new times could not be saved. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नयाँ समय राख्न सकिएन। कृपया फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "settings.meds.times.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medicine times"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "औषधिको समय"
+          }
+        }
+      }
+    },
+    "settings.meds.times.unresolved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One medicine's time could not be set. Please set the medicine times again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "एउटा औषधिको समय राख्न सकिएन। कृपया औषधिको समय फेरि मिलाउनुहोस्।"
+          }
+        }
+      }
+    },
     "settings.meds.title": {
       "extractionState": "manual",
       "localizations": {
@@ -17498,6 +18195,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "औषधि तालिका"
+          }
+        }
+      }
+    },
+    "settings.meds.useSlotModel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use morning, afternoon, evening"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बिहान, दिउँसो, बेलुका प्रयोग गर्नुहोस्"
           }
         }
       }

@@ -18,14 +18,23 @@ enum ConfirmationAction: Equatable {
 }
 
 final class ConfirmationChallenge {
-    let challengeTimeoutSeconds: TimeInterval   // default: 30 per FR-D02
+    /// The ONE named home of the challenge response window (FR-D02, 30
+    /// seconds, as shipped). `MedicationScheduler` passes this value
+    /// explicitly at both of its construction sites, and
+    /// `AckClarificationConfig` — the clarification walk's window type
+    /// (design-l2 D4) — composes from the same home, so the walk window
+    /// can never desynchronize from the challenge window and no call
+    /// site carries a literal (review-l2 R-2).
+    static let defaultChallengeTimeoutSeconds: TimeInterval = 30
+
+    let challengeTimeoutSeconds: TimeInterval
     /// Locale the spoken challenge prompts resolve against (spec §3.2).
     /// Injected by `MedicationScheduler` from `AppCoordinator.activeLocale`;
     /// the English default keeps unit-test prompts deterministic.
     private let locale: Locale
     private(set) var state: ConfirmationState
 
-    init(challengeTimeoutSeconds: TimeInterval = 30,
+    init(challengeTimeoutSeconds: TimeInterval = ConfirmationChallenge.defaultChallengeTimeoutSeconds,
          locale: Locale = Locale(identifier: "en")) {
         self.challengeTimeoutSeconds = challengeTimeoutSeconds
         self.locale = locale

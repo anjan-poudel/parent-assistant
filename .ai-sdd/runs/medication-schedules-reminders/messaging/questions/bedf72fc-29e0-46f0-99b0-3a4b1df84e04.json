@@ -1,0 +1,26 @@
+{
+  "schema_version": "1",
+  "question_id": "bedf72fc-29e0-46f0-99b0-3a4b1df84e04",
+  "kind": "hil",
+  "channel_id": "C0C95FFFBMK",
+  "message_ts": "1792010612.504959",
+  "thread_ts": "1792010612.504959",
+  "hil_id": "bedf72fc-29e0-46f0-99b0-3a4b1df84e04",
+  "status": "answered",
+  "asked_at": "2026-10-14T20:43:32.377Z",
+  "expires_at": null,
+  "consumed": [
+    {
+      "message_id": "C0C95FFFBMK:1792010612.504959",
+      "event_id": null,
+      "from_user": "U0C6DTHDMV0",
+      "consumed_at": "2026-10-14T22:22:30.687Z",
+      "delivered_at": "2026-10-14T22:22:31.264Z"
+    }
+  ],
+  "answer": {
+    "choice_id": "approve",
+    "text": null,
+    "from_user": "U0C6DTHDMV0"
+  }
+}

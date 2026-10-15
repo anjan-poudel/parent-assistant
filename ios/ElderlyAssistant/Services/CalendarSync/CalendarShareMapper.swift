@@ -161,16 +161,8 @@ enum CalendarShareMapper {
         var seen = Set<String>()
         var result: [String] = []
 
-        func append(_ email: String) {
-            let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            guard seen.insert(trimmed.lowercased()).inserted else { return }
-            result.append(trimmed)
-        }
-
-        for contact in contacts where contact.isEmergencyContact {
-            if let email = contact.email { append(email) }
-        }
+        appendEmails(from: contacts.filter { $0.isEmergencyContact },
+                     to: &result, seen: &seen)
         // [CALENDAR-POLICY] (2026-09-17) Calendar events are shared with
         // EVERY contact that has an email, toggle-independent — the
         // elder's original requirement ("make all calendar events
@@ -179,11 +171,49 @@ enum CalendarShareMapper {
         // and routine kinds keep toggle gating because their daily
         // recurrence would invite every contact to every dose forever.
         if othersEnabled || kind == .calendarEvent {
-            for contact in contacts where !contact.isEmergencyContact {
-                if let email = contact.email { append(email) }
-            }
+            appendEmails(from: contacts.filter { !$0.isEmergencyContact },
+                         to: &result, seen: &seen)
         }
         return result
+    }
+
+    /// The family-notification audience (M-1 resolved, T-012): EVERY
+    /// family contact with an email — de-duplicated case-insensitively,
+    /// emergency-first — with the notify toggles never consulted.
+    ///
+    /// The significant-event calendar channel (IF-17/IF-18) invites this
+    /// set rather than the per-kind `inviteeEmails` rule: the three
+    /// at-risk events (a missed dose, a possible double dose, a dose
+    /// that needs attention) are unconditional, and the amended
+    /// disclosure the household accepted says exactly this — "Safety
+    /// alerts … are always shared with every family contact who has an
+    /// email". The toggles keep governing the daily reminder twins'
+    /// noise.
+    static func familyAudienceEmails(contacts: [FamilyContact]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        appendEmails(from: contacts.filter { $0.isEmergencyContact },
+                     to: &result, seen: &seen)
+        appendEmails(from: contacts.filter { !$0.isEmergencyContact },
+                     to: &result, seen: &seen)
+        return result
+    }
+
+    /// The shared de-dup/ordering append, so `inviteeEmails` and
+    /// `familyAudienceEmails` cannot drift on the rule they both state:
+    /// trimmed, blank-skipped (a whitespace-only field is absent, never
+    /// an empty invitee), de-duplicated case-insensitively with the
+    /// first spelling kept.
+    private static func appendEmails(from contacts: [FamilyContact],
+                                     to result: inout [String],
+                                     seen: inout Set<String>) {
+        for contact in contacts {
+            guard let email = contact.email else { continue }
+            let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            guard seen.insert(trimmed.lowercased()).inserted else { continue }
+            result.append(trimmed)
+        }
     }
 
     // MARK: Gate
@@ -334,6 +364,63 @@ enum CalendarShareMapper {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    // MARK: Significant event (IF-18, C11)
+
+    /// The title a significant-event twin opens with: the catalog phrase
+    /// for the event kind (C13 keys, present in both locales), then the
+    /// medication name — `"<phrase> — <name>"`, the same two-part shape
+    /// the medicine screen's photo caption uses so the family reads one
+    /// vocabulary wherever the alert reaches them.
+    ///
+    /// The name is the elder's own medication name, verbatim: after
+    /// consent the shipped full-title rule applies (user decision 5),
+    /// and a redacted title here would be a second, silently different
+    /// policy.
+    static func significantEventTitle(
+        kind: SignificantMedicationEvent.Kind,
+        medicationName: String,
+        locale: Locale
+    ) -> String {
+        "\(L10n.str(kind.alertKey, locale: locale)) — \(medicationName)"
+    }
+
+    /// The twin for a significant medication event (IF-18): a ONE-OFF
+    /// (no recurrence) anchored at the trigger instant, titled with the
+    /// significant-event copy, and invited to the FAMILY-NOTIFICATION
+    /// audience — every family contact with an email, toggle-independent
+    /// (see `familyAudienceEmails`).
+    ///
+    /// `nil` when nobody has an email: the same "no invitees → no
+    /// draft" collapse the other builders use, which the service reports
+    /// as a skip rather than writing an attendee-less entry.
+    ///
+    /// `kind` on the draft is `.medicationReminder` — the family-facing
+    /// reminder taxonomy, so existing surfaces (the Google event tag, the
+    /// flush logs) classify it without a new case. It is NOT the key's
+    /// identity component spelling anything significant: the caller
+    /// composes the key from the event's deterministic id (D7).
+    static func significantEventDraft(
+        event: SignificantMedicationEvent,
+        medicationName: String,
+        contacts: [FamilyContact],
+        timeZone: TimeZone = .current,
+        locale: Locale = Locale(identifier: "en")
+    ) -> CalendarTwinDraft? {
+        let attendees = familyAudienceEmails(contacts: contacts)
+        guard !attendees.isEmpty else { return nil }
+        return CalendarTwinDraft(
+            title: significantEventTitle(kind: event.kind,
+                                         medicationName: medicationName,
+                                         locale: locale),
+            startDate: event.occurredAt,
+            durationMinutes: defaultDurationMinutes,
+            timeZoneIdentifier: timeZone.identifier,
+            recurrence: nil,
+            attendeeEmails: attendees,
+            kind: .medicationReminder
+        )
+    }
+
     // MARK: Fingerprint
 
     /// A stable content hash of a draft — what the reconcile compares to
@@ -406,5 +493,26 @@ enum CalendarShareMapper {
     ) -> (created: Set<String>, removed: Set<String>) {
         let current = Set(currentKeys)
         return (current.subtracting(snapshotKeys), snapshotKeys.subtracting(current))
+    }
+
+    /// The slice of the ledger a reconcile pass may reason about: the
+    /// keys that belong to `prefix` AND are SLOT-shaped (the
+    /// three-component `kind:uuid:slot` form the schedule mirror writes).
+    ///
+    /// The narrowing is load-bearing, not housekeeping (D7): the ledger
+    /// also holds significant-event one-off keys (`kind:<opaque id>`,
+    /// written by the alert channel), and a prefix-only slice would let
+    /// the reconciler read a written one-off as "removed by this schedule
+    /// edit" and queue a tombstone that DELETES a live alert from the
+    /// family's calendar. The 2-vs-3-component distinction is the one
+    /// the parser already draws (`CalendarShareKey.parts`), so the
+    /// snapshot reads that parse rather than a second spelling of the
+    /// same rule — one grammar, one interpretation.
+    static func reconcileSnapshotKeys(from knownKeys: Set<String>,
+                                      prefix: String) -> Set<String> {
+        knownKeys.filter { key in
+            guard key.hasPrefix(prefix) else { return false }
+            return CalendarShareKey.parts(key)?.slot != nil
+        }
     }
 }
