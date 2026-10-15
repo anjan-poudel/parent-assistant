@@ -316,6 +316,7 @@
 		57387874E58EC854768F3E6A /* UserManualCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CE58E85BC291C8BFD9D3E46 /* UserManualCatalog.swift */; };
 		57A304D3B2F04C73D15C1906 /* PointAskYOLODecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50225C817AD43B203A32CA4D /* PointAskYOLODecoderTests.swift */; };
 		581771E71420CB50C996D8BA /* HomeProfileLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 133BC94926927C45132262BF /* HomeProfileLinkTests.swift */; };
+		583826133154091DD57FE93F /* MedicationEditorSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B2BA1B6EC436A3CC1C1D9F0 /* MedicationEditorSurfaceTests.swift */; };
 		585D5F36CCBFEDE734AF7112 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 878B433E4C66ADC0A34F7A69 /* ContentView.swift */; };
 		58661028E700083263585070 /* CalendarSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52F50C83B482A19F5DC8B6CE /* CalendarSyncService.swift */; };
 		58819F311E6D4EBC6A387777 /* EncryptedFileStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD408D01D8A120C902E41AC9 /* EncryptedFileStorage.swift */; };
@@ -1435,6 +1436,7 @@
 		89B3C3B7DE00708964619C09 /* ModelPreferenceMemoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPreferenceMemoryTests.swift; sourceTree = "<group>"; };
 		89EF123C64993A5CE3C38556 /* SpotifyLinkProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyLinkProbe.swift; sourceTree = "<group>"; };
 		8ADAF62F5351AF636E114DAA /* DialectIdentifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialectIdentifier.swift; sourceTree = "<group>"; };
+		8B2BA1B6EC436A3CC1C1D9F0 /* MedicationEditorSurfaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationEditorSurfaceTests.swift; sourceTree = "<group>"; };
 		8B62DBBF36BFCEFB58D6E442 /* ConsentPromptAndRevocationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConsentPromptAndRevocationTests.swift; sourceTree = "<group>"; };
 		8B77A16FC0FE2E705F2E46F8 /* CalculatorTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalculatorTool.swift; sourceTree = "<group>"; };
 		8BE88FA004F604AA268A598F /* AppCoordinatorSpotifyWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinatorSpotifyWiringTests.swift; sourceTree = "<group>"; };
@@ -2484,6 +2486,7 @@
 				FF46FF3BB62902DB1FC16086 /* KinDesignationTests.swift */,
 				91B220F3E406C71B4549529A /* L10nCatalogCoverageTests.swift */,
 				034B2248EA0404D34582576D /* MedicationAckClarificationTests.swift */,
+				8B2BA1B6EC436A3CC1C1D9F0 /* MedicationEditorSurfaceTests.swift */,
 				E259FF1E457AB4798C655755 /* MedicationSavePlumbingTests.swift */,
 				22577ED90A48390A73B44C47 /* MedicationVisualAidPresentationTests.swift */,
 				15F0074FD67707356D249845 /* MissedCallDialBackTests.swift */,
@@ -4262,6 +4265,7 @@
 				9CE316FC912F95082A9075EA /* MedicationAckClarificationTests.swift in Sources */,
 				F7465FA62069BADC7DAA2860 /* MedicationAckResolverTests.swift in Sources */,
 				8E14FBA399E9B6E5632215DB /* MedicationEditorDraftTests.swift in Sources */,
+				583826133154091DD57FE93F /* MedicationEditorSurfaceTests.swift in Sources */,
 				62A23CDEF97ACF55906EEE6D /* MedicationEntryMigrationTests.swift in Sources */,
 				227C42E9054FFFDED50AF96F /* MedicationEntryVisualAidTests.swift in Sources */,
 				85CBEF8E8F10B9CE9D31D160 /* MedicationEvidenceStoreTests.swift in Sources */,

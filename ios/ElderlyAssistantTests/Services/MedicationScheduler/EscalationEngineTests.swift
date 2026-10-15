@@ -217,6 +217,59 @@ final class EscalationEngineTests: XCTestCase {
         XCTAssertEqual(deadline.timeIntervalSince1970, expected.timeIntervalSince1970, accuracy: 1.0)
     }
 
+    /// D10's precondition at the engine seam: the re-fire count crosses
+    /// 0 → 1 exactly once per reminder. Every later ack-window expiry
+    /// steps to the NEXT count, and a recreated engine (the process-kill
+    /// recovery) derives the count from the persisted reminder — so the
+    /// "first re-fire decision" the scheduler's escalationStarted trigger
+    /// reads can never be produced a second time for the same reminder.
+    func testRefireCountReachesOneExactlyOncePerReminder() {
+        let scheduledTime = Date()
+        let engine = EscalationEngine(scheduledTime: scheduledTime)
+        _ = engine.start()
+        _ = engine.reminderDelivered(at: scheduledTime)
+
+        var actions: [EscalationAction] = []
+        for i in 1...3 {
+            let ackClosed = scheduledTime.addingTimeInterval(TimeInterval((i - 1) * 12 * 60 + 6 * 60))
+            actions.append(engine.ackWindowExpired(at: ackClosed).action)
+            if i < 3 {
+                _ = engine.reminderDelivered(at: scheduledTime.addingTimeInterval(TimeInterval(i * 12 * 60)))
+            }
+        }
+
+        XCTAssertEqual(actions, [
+            .fireReminder(refireCount: 1),
+            .fireReminder(refireCount: 2),
+            .fireReminder(refireCount: 3)
+        ], "each expiry steps exactly one count forward")
+        XCTAssertEqual(actions.filter { $0 == .fireReminder(refireCount: 1) }.count, 1,
+                       "the 0 → 1 decision happens once per reminder, not once per expiry")
+
+        // The process-kill recovery: the recreated engine rebuilds the
+        // count from the persisted reminder, so its next expiry steps
+        // past 1 — never a second "first" re-fire.
+        let recovered = EscalationEngine(scheduledTime: scheduledTime)
+        let stored = ScheduledReminder(
+            id: UUID(),
+            medicationEntryId: UUID(),
+            scheduledAt: scheduledTime,
+            refireCount: 1,
+            escalationDeadline: scheduledTime.addingTimeInterval(3600),
+            state: .fired,
+            lastFiredAt: scheduledTime,
+            acknowledgedAt: nil
+        )
+        _ = recovered.recover(from: stored, at: scheduledTime.addingTimeInterval(20 * 60))
+        _ = recovered.reminderDelivered(at: scheduledTime.addingTimeInterval(20 * 60))
+
+        let afterRecovery = recovered.ackWindowExpired(at: scheduledTime.addingTimeInterval(26 * 60))
+
+        XCTAssertEqual(afterRecovery.action, .fireReminder(refireCount: 2),
+                       "a rebuilt engine's first expiry is NOT a 0 → 1 transition")
+        XCTAssertEqual(recovered.currentRefireCount, 2)
+    }
+
     func testNextRefireTimeCalculation() {
         let scheduledTime = Date()
         let engine = EscalationEngine(scheduledTime: scheduledTime, refireIntervalMinutes: 12)

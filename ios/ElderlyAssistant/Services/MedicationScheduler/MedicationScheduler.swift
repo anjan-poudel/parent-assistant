@@ -119,6 +119,31 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
     /// coordinator assigns once is the smallest thing that works.
     var onScheduleChanged: (([MedicationEntry]) -> Void)?
 
+    /// Significant-event hook (IF-20, C7.4; T-016): invoked
+    /// synchronously at the three at-risk trigger sites — a missed dose,
+    /// a blocked double dose and the first re-fire decision — with the
+    /// event value and the entry it is about.
+    ///
+    /// Same shape and nullability rule as `onScheduleChanged` above
+    /// (the design's own precedent): a plain closure set once at
+    /// composition (T-020), main thread by the scheduler's contract,
+    /// and an unset hook degrades to no calendar write while every
+    /// local behaviour stays untouched. The notifier call and this hook
+    /// are independent channels — neither gates the other — and
+    /// `intakeRecorded` deliberately never reaches this hook: a
+    /// recorded intake is not an at-risk event and writes no calendar
+    /// entry.
+    var onSignificantEvent: ((SignificantMedicationEvent, MedicationEntry?) -> Void)?
+
+    /// Retime-refusal hook (IF-20, C7.5; T-016, m-5): fires on a
+    /// REFUSED slot-entry retime (`setScheduleTimes`) for the one-shot
+    /// settings note the family sees (wired at composition in T-020).
+    /// The refusal is never silent: the named PII-free observability
+    /// event is the operator record, this hook is the family-facing
+    /// surface, and the note names no medication — the entry id is all
+    /// the consumer needs. Unset = no note, local truth untouched.
+    var onSlotEntryRetimeRefused: ((UUID) -> Void)?
+
     private let storageKeyReminders = "medication.pending_reminders"
     private let storageKeyAdherenceLog = "medication.adherence_log"
     private let storageKeyEntries = "medication.entries"
@@ -208,11 +233,31 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
     /// changed. The alternative — keeping a reminder for a time that no
     /// longer exists — would fire a dose the family removed.
     ///
+    /// A SLOT entry is refused outright (m-5, FR-MSR-018): its clock
+    /// time comes from the household mapping, so a calendar-driven
+    /// retime has nothing local to move — the refusal is the
+    /// NON-interpretation (L1 §11), and the authority stays the
+    /// settings editor. The refusal applies NOTHING and SURFACES itself,
+    /// twice: the named PII-free `medication_retime_refused` event
+    /// (metadata `entry_id_hash` and `slot` ONLY — never a name, a dose
+    /// or a clock value, NFR-MSR-002) and the one-shot settings-note
+    /// hook (IF-20, wired in T-020). No write, no re-arm, no observer
+    /// call — a refusal never mutates state.
+    ///
     /// Returns false when the entry is unknown (deleted in Settings
-    /// since the plan was made) or when the write fails.
+    /// since the plan was made), when the entry is a slot entry (the
+    /// refusal above), or when the write fails.
     @discardableResult
     func setScheduleTimes(_ times: [DateComponents], entryId: UUID) -> Bool {
         guard let entry = entries[entryId] else { return false }
+        if let slot = entry.slot {
+            emit("medication_retime_refused",
+                 metadata: ["entry_id_hash": idHash(entryId),
+                            "slot": slot.rawValue],
+                 outcome: "info")
+            onSlotEntryRetimeRefused?(entryId)
+            return false
+        }
         var next = medicationEntries()
         guard let index = next.firstIndex(where: { $0.id == entryId }) else { return false }
         next[index] = entry.withScheduleTimes(times)
@@ -696,6 +741,23 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
                 )
             }
 
+            // The reminder's FIRST re-fire decision (D10, FR-MSR-015):
+            // the ack window elapsed and the escalation begins.
+            // `refireCount == 1` is the engine's own count crossing 0→1
+            // — state-derived, exactly once per reminder, and with no
+            // stored per-event flag (the count IS the flag; `recover`
+            // rebuilds it from the persisted reminder, so a relaunch
+            // never replays the transition). Both channels are
+            // UNCONDITIONAL: the first-fire opt-in gate governs the
+            // delivery-day `eventReminder` alert (`triggerReminder`) and
+            // is not touched here.
+            if refireCount == 1 {
+                notifySignificantEvent(.escalationStarted, entry: entry,
+                                       at: Date(), fireAt: reminder.scheduledAt)
+                raiseSignificantEvent(.escalationStarted, entry: entry,
+                                      occurredAt: reminder.scheduledAt)
+            }
+
         case .escalateToFamilyNotifier:
             recordMissedDose(entryId: entry.id, entry: entry)
 
@@ -741,10 +803,11 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         refireCount: Int
     ) -> Result<Void, SafetyError> {
         let reminderId = activeReminderId(for: entryId)
+        let scheduledAt = reminderId.flatMap { engines[$0]?.scheduledTime } ?? Date()
         let logEntry = MedicationAdherenceLog(
             id: UUID(),
             medicationEntryId: entryId,
-            scheduledAt: reminderId.flatMap { engines[$0]?.scheduledTime } ?? Date(),
+            scheduledAt: scheduledAt,
             acknowledgedAt: acknowledgedAt,
             refireCount: refireCount,
             status: .acknowledged,
@@ -760,6 +823,19 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         if case .failure = storage.write(key: storageKeyAdherenceLog, value: adherenceLog) {
             return .failure(.reminderPersistenceFailed)
         }
+
+        // The intakeRecorded significant event (T-016, L1 §9.1) — the
+        // caregiver's record that the dose was actually taken. It fires
+        // AFTER the write above, never instead of it: the failure arm
+        // has already returned, so a dose is never announced as
+        // recorded when the record did not land. Before the runtime
+        // cleanup on purpose — the alert is about the record, not about
+        // the reminder teardown — and unconditional (the first-fire
+        // opt-in gate is the `eventReminder` path alone). Deliberately
+        // NO `onSignificantEvent` call here: a recorded intake is not an
+        // at-risk event and writes no calendar entry.
+        notifySignificantEvent(.intakeRecorded, entry: entry,
+                               at: acknowledgedAt, fireAt: scheduledAt)
 
         // Clean up pending reminder + its engine
         if let reminderId = reminderId {
@@ -811,13 +887,16 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
 
             emit("double_dose_blocked", metadata: ["entry_id_hash": idHash(entryId)])
 
-            // Alert caregiver asynchronously
-            Task {
-                let _ = await familyNotifier.notifyAll(
-                    alertType: .possibleDoubleDose,
-                    at: acknowledgedAt
-                )
-            }
+            // Alert caregiver asynchronously, with the context this
+            // significant event now carries (T-016): the entry-id hash
+            // is the correlation handle the payload is allowed to hold,
+            // and the title stays in memory. `acknowledgedAt` is the
+            // event instant — the attempt — which is also what the
+            // blocked record above stamps as its own `scheduledAt`.
+            notifySignificantEvent(.possibleDoubleDose, entry: entry,
+                                   at: acknowledgedAt, fireAt: acknowledgedAt)
+            raiseSignificantEvent(.possibleDoubleDose, entry: entry,
+                                  occurredAt: acknowledgedAt)
 
             return .success(())  // Not a persistence failure -- dose intentionally blocked
         }
@@ -834,10 +913,11 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
 
     private func recordMissedDose(entryId: UUID, entry: MedicationEntry) {
         let reminderId = activeReminderId(for: entryId)
+        let scheduledAt = reminderId.flatMap { engines[$0]?.scheduledTime } ?? Date()
         let logEntry = MedicationAdherenceLog(
             id: UUID(),
             medicationEntryId: entryId,
-            scheduledAt: reminderId.flatMap { engines[$0]?.scheduledTime } ?? Date(),
+            scheduledAt: scheduledAt,
             acknowledgedAt: nil,
             refireCount: entry.maxRefireCount,
             status: .missed,
@@ -861,13 +941,17 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         emit("missed", metadata: ["entry_id_hash": idHash(entryId)])
         emit("family_alerted", metadata: ["entry_id_hash": idHash(entryId)])
 
-        // Fire family notification asynchronously
-        Task {
-            let _ = await familyNotifier.notifyAll(
-                alertType: .missedMedication,
-                at: Date()
-            )
-        }
+        // Fire the caregiver channels asynchronously (T-016): the push
+        // now carries the significant event's context, and the calendar
+        // hook gets the same event as a value. Independent channels —
+        // neither gates the other — and both unconditional. The context
+        // and the event anchor share the missed dose's scheduledAt: the
+        // occurrence the miss is about, already stamped into the record
+        // above.
+        notifySignificantEvent(.missedMedication, entry: entry,
+                               at: Date(), fireAt: scheduledAt)
+        raiseSignificantEvent(.missedMedication, entry: entry,
+                              occurredAt: scheduledAt)
     }
 
     private func reEnterEscalation(entryId: UUID, entry: MedicationEntry) -> Result<Void, SafetyError> {
@@ -1169,6 +1253,58 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
             emit("reminder_persistence_failed", metadata: [:])
             return false
         }
+    }
+
+    // MARK: - Significant events (T-016, C7.3–C7.4)
+
+    /// The notifier half of a significant event (FR-MSR-015): one
+    /// context-carrying `notifyAll`, asynchronous exactly like the
+    /// shipped medication alerts, UNCONDITIONAL (the four significant
+    /// types are not toggle-gated — the first-fire opt-in governs the
+    /// `eventReminder` path alone).
+    ///
+    /// The context is the honesty seam T-011 built: `entry_id_hash` is
+    /// the only medication reference the payload is allowed to carry,
+    /// and the title (`eventTitle`) lives in memory only — never
+    /// serialized, never logged. `fireAt` is the dose occurrence the
+    /// event is about, which is not always the instant the alert is
+    /// sent (an event observed late still says WHEN it happened).
+    private func notifySignificantEvent(_ alertType: FamilyAlertType,
+                                        entry: MedicationEntry,
+                                        at timestamp: Date,
+                                        fireAt: Date) {
+        let context = FamilyAlertContext(
+            kind: .medicationReminder,
+            eventIdHash: idHash(entry.id),
+            eventTitle: entry.medicationName,
+            fireAt: fireAt
+        )
+        Task { [familyNotifier] in
+            let _ = await familyNotifier.notifyAll(
+                alertType: alertType,
+                at: timestamp,
+                context: context
+            )
+        }
+    }
+
+    /// The calendar half of an at-risk significant event (IF-20, C7.4):
+    /// exposes the event as a plain value and invokes the hook
+    /// synchronously, main thread by the scheduler's contract. The hook
+    /// is the ONLY consumer (the write itself lives in
+    /// `CalendarShareService`, wired at composition in T-020) and an
+    /// unset hook is a no-op while local truth stays untouched. Called
+    /// at the three at-risk sites and nowhere else — `intakeRecorded`
+    /// writes no calendar entry, so it never reaches here.
+    private func raiseSignificantEvent(_ kind: SignificantMedicationEvent.Kind,
+                                       entry: MedicationEntry,
+                                       occurredAt: Date) {
+        onSignificantEvent?(
+            SignificantMedicationEvent(kind: kind,
+                                       entryId: entry.id,
+                                       occurredAt: occurredAt),
+            entry
+        )
     }
 
     // MARK: - Observability

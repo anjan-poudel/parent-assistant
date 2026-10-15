@@ -17,7 +17,7 @@ description: Implementation notes for the medication-schedules-reminders impleme
 | W1 | T-002, T-003, T-004, T-005 | 5 classes — 42 tests (2026-10-15) | PASS — 42/42, 0 failures |
 | W2 | T-008, T-009, T-011, T-013, T-015 | 7 classes — 176 tests (2026-10-15) | PASS — 176/176, 0 failures |
 | W3 | T-010, T-014, T-017 | 4 classes — 65 tests (2026-10-15) | PASS — 65/65, 0 failures |
-| W4 | T-016, T-018 | pending | pending |
+| W4 | T-016, T-018 | 4 classes — 77 tests (2026-10-15) | PASS — 77/77, 0 failures |
 | W5 | T-019, T-020 | pending | pending |
 | W6 | T-021 | pending | pending |
 | W7 | T-022 | pending | pending |
@@ -124,6 +124,36 @@ description: Implementation notes for the medication-schedules-reminders impleme
   (arming surfaces the unresolved line later); the verification harness
   typechecked a frozen module snapshot (deterministic under concurrent sibling
   edits); no notes file per the binding rules.
+- T-016 recorded judgment calls (4): `escalationStarted` fires at the
+  `.fireReminder(let refireCount)` arm only when `refireCount == 1` — the
+  exactly-once decision is read from the engine's `currentRefireCount`, no
+  stored flag, and the arm is unreachable from `triggerReminder`/`recover`;
+  `.possibleDoubleDose` anchors `occurredAt`/`fireAt` at `acknowledgedAt`;
+  `intakeRecorded` deliberately makes no `onSignificantEvent` call (it writes
+  no calendar entry — the T-011 push path covers intake separately; comment at
+  the site); the retime-refusal order is emit observation -> fire hook ->
+  `return false`, no mutation, `outcome: "info"` on `medication_retime_refused`
+  with metadata exactly `entry_id_hash` + `slot`; legacy path unchanged.
+  Coordinator flags: T-020 must wire BOTH hooks at composition (an unset hook
+  is a safe no-op, but nothing reaches the calendar until wired) and must NOT
+  gate the four significant alert types on the caregiver medication toggle.
+- T-018 recorded judgment calls (6): the dose-line round trip reconstructs the
+  structured quantity only when the stored dose description is exactly
+  `DoseLine.compose(quantity, "")` or its rendered-plus-separator prefix; any
+  other text (including copy saved in the other language) keeps the stored line
+  verbatim in `strength` with the quantity step empty — verbatim, never
+  duplicated, but a cross-language edit degrades that entry to the legacy shape
+  on re-save (flagged for T-020/T-021 review); no from-entry initializer was
+  added (T-009 forbids it) — prefill is field assignment inside the pure static
+  factory; the coordinator's slot-clock store is private with no accessor, so
+  the view composes a stateless `MedicationSlotClockStore` over
+  `MigratingEncryptedStorage` at tap time (precedent: `MedicationScheduler`
+  init; never cached; follow-up: add a coordinator accessor); a legacy time
+  matching no slot default is left unassigned on family switch and blocks Save
+  with `settings.meds.slotRequired` (no fuzzy match, no silent conversion); a
+  tap on the selected meal chip clears the relation to nil (the model admits
+  nil); every new interactive element carries the 44pt/18pt floors pinned
+  line-by-line in the suite.
 
 ## Verification
 
@@ -281,6 +311,44 @@ description: Implementation notes for the medication-schedules-reminders impleme
     legacy path untouched. New suite 10 tests. Anchors for T-020: rows built
     from `MedicationEditorDraft.storedRows`, errors are catalog keys
     (`settings.meds.*`).
+- **W4 consolidated scoped pass (2026-10-15):** `ios/build.sh test:unit
+  MedicationSchedulerTests EscalationEngineTests MedicationEditorSurfaceTests
+  MedicationEditorDraftTests` — 77 tests, 0 failures, `TEST SUCCEEDED`
+  (xcresult 77/77, result Passed). Suite coverage: scheduler 34 (25 + 9),
+  escalation engine 14 (13 + 1), editor surface 6 (new suite), editor draft 23.
+  Green on the first attempt; guards green; a scoped run does not advance the
+  impact baseline.
+- **Unit outcomes (W4):**
+  - T-016 — `MedicationScheduler.swift`: the four significant-event triggers —
+    `intakeRecorded` after the successful adherence-log write in
+    `finalizeAcknowledgement` (deliberately no hook call); `escalationStarted`
+    exactly once per reminder at the first re-fire (`.fireReminder` arm,
+    `refireCount == 1`); `missedMedication`/`possibleDoubleDose` now carry real
+    context through the private `notifySignificantEvent`. Hooks
+    `onSignificantEvent` (:136) and `onSlotEntryRetimeRefused` (:145);
+    `raiseSignificantEvent` (:1299) invoked at exactly the three at-risk sites
+    (:757 / :898 / :953). Retime refusal: the `setScheduleTimes` slot guard
+    emits `medication_retime_refused`, fires the hook, returns false, no
+    mutation; legacy unchanged. The first-fire opt-in gate is untouched.
+    Tests: 9 named in the scheduler suite + 1 in escalation engine; additive
+    `MockFamilyNotifier` seam. Anchors for T-020: both hooks wired at
+    composition; the four significant alert types are never gated on the
+    caregiver toggle.
+  - T-018 — `SettingsView.swift` (+ new `MedicationEditorSurfaceTests.swift`):
+    slot-model rebuild of the medication editor form (schedule/quantity/meal/
+    purpose steps; family chips keep-times / use-slot-model; slot mode never
+    shows a clock time to the family) and the edit-existing flow (legacy entry
+    reopens `.times` exactly as stored — no fuzzy match, no silent conversion;
+    slot entry reopens `.slots` with its row, mirror never shown; family switch
+    is an explicit chip tap and nothing persists before Save). IF-21 save: the
+    pending-row gate (`settings.meds.slotRequired` for unassigned rows) is
+    ordered before the coordinator call; `updateMedication(id:request:)` on
+    edit, `addMedication(request)` on add; returned catalog key becomes the
+    error line; form resets on success. Pure static seams for T-020
+    (`newDraft`, `draft(from:)`, `saveRequest(from:photo:)`,
+    `pendingRowFailureKey`, `switchToSlots`, `switchToTimes`). Every string is
+    a T-012 catalog key (en+ne verified present); 44pt/18pt floors pinned.
+    Suite 6 named tests.
 - **Carry-forward baseline note (for the W7 full-suite comparison):** the
   Spotify localization suite's absolute key-count pin is red at the branch
   base (pin 1,381 vs catalog 1,439 pre-W0) and is untouched by this feature —
@@ -290,4 +358,9 @@ description: Implementation notes for the medication-schedules-reminders impleme
   suites (challenge + scheduler) are exactly 40 alphanumeric characters and
   trip the release scanner's hash-like-token pattern. They predate this feature
   and stay untouched (renaming shipped tests is out of scope); they are kept
-  out of artifact content for the same reason.
+  out of artifact content for the same reason. The W4 pre-flight scan over the
+  four touched files is clean; the single boundary-anchored hit in the
+  scheduler suite is that pre-existing name (present at HEAD before W4; its
+  line simply shifted as T-016's 9 tests were appended). T-018's
+  spec-mandated surface test name is 42 characters — boundary-broken, it does
+  not match the exactly-40 pattern; the name stays as spec-mandated.
