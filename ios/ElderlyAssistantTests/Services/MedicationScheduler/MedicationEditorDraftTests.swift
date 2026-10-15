@@ -66,7 +66,7 @@ final class MedicationEditorDraftTests: XCTestCase {
 
     /// One time row, nothing typed, nothing saveable — the shape the editor
     /// has always opened with.
-    func testFreshDraftHasOneTimeAndCannotBeSaved() {
+    func testFreshDraftHasOneTimeCannotBeSaved() {
         let draft = makeDraft()
 
         XCTAssertEqual(draft.name, "")
@@ -117,7 +117,7 @@ final class MedicationEditorDraftTests: XCTestCase {
 
     /// A field holding only spaces counts as blank — the family touched it and
     /// typed nothing.
-    func testScanFillsFieldsHoldingOnlyWhitespace() {
+    func testScanFillsFieldsHoldingOnlyWhitespaceRuns() {
         var draft = makeDraft()
         draft.name = "   "
 
@@ -144,7 +144,7 @@ final class MedicationEditorDraftTests: XCTestCase {
     /// The label's times replace the form's — including a time the family had
     /// set, because they just asked the label to fill this form and the rows
     /// are visible pickers.
-    func testScanReplacesTheFormTimesWithTheLabel() {
+    func testScanReplacesTheFormTimesWithLabelValues() {
         var draft = makeDraft()
 
         draft.applyScan(MedicationLabelCandidate(
@@ -543,5 +543,116 @@ final class MedicationEditorDraftTests: XCTestCase {
         XCTAssertFalse(clockMode.canSaveRequest)
         clockMode.name = "Amlodipine"
         XCTAssertTrue(clockMode.canSaveRequest)
+    }
+
+    // MARK: - Frequency scans [MED-OCR-FREQ] (2026-10-15)
+
+    /// The owner's device case, through the real parser: "one tablet twice
+    /// a day" fills the slot form with exactly the rows the owner expected
+    /// — afternoon and evening, after food — and nothing else changes.
+    func testFrequencyScanFillsTwoSlotRowsAfterFood() {
+        var draft = makeSlotDraft()
+        draft.name = "Metformin"
+
+        draft.applyScan(MedicationLabelParser.candidate(fromText: "1 tablet twice a day"))
+
+        XCTAssertEqual(draft.slotRows, [.afternoon, .evening])
+        XCTAssertEqual(draft.mealRelation, .afterMeal)
+        XCTAssertEqual(draft.times.count, 2, "the row carrier stays parallel")
+        XCTAssertEqual(hours(draft), [7, 7],
+                       "carriers are the draft's own day — no scanned clock smuggled in")
+        XCTAssertEqual(draft.storedRows, [.slot(.afternoon), .slot(.evening)])
+        XCTAssertNil(draft.storedQuantity, "a scan still states no quantity")
+        XCTAssertTrue(draft.canSaveRequest)
+    }
+
+    /// The family's stated relation is theirs: a frequency read replaces
+    /// the ROWS (the label's schedule, the shipped rule) and fills only a
+    /// BLANK relation.
+    func testFrequencyScanNeverRewritesTheStatedRelation() {
+        var draft = makeSlotDraft()
+        draft.slotRows = [.morning]
+        draft.mealRelation = .beforeMeal
+
+        draft.applyScan(MedicationLabelParser.candidate(fromText: "1 tablet twice a day"))
+
+        XCTAssertEqual(draft.slotRows, [.afternoon, .evening],
+                       "the label's rows still replace the form's")
+        XCTAssertEqual(draft.mealRelation, .beforeMeal,
+                       "the family's statement stands")
+    }
+
+    /// A row-producing read now picks the after-food default when the
+    /// label states no relational context (2026-10-15, the owner's rule):
+    /// a day pattern names no meal, and unstated means after food on
+    /// every label-derived row — not just the frequency table's.
+    func testPatternScanDefaultsAfterFood() {
+        var draft = makeSlotDraft()
+
+        draft.applyScan(MedicationLabelParser.candidate(fromText: "1-0-1"))
+
+        XCTAssertEqual(draft.slotRows, [.morning, .evening])
+        XCTAssertEqual(draft.mealRelation, .afterMeal, "unstated defaults after food")
+    }
+
+    /// The owner's time-word case through the real parser: "morning and
+    /// evening" with no meal mention fills the slot rows AND the
+    /// after-food default the rows carry.
+    func testTimeWordScanDefaultsAfterFood() {
+        var draft = makeSlotDraft()
+
+        draft.applyScan(MedicationLabelParser.candidate(fromText: "morning and evening"))
+
+        XCTAssertEqual(draft.slotRows, [.morning, .evening])
+        XCTAssertEqual(draft.mealRelation, .afterMeal)
+    }
+
+    /// A label that states "before food" fills the blank relation with
+    /// its own statement — the default never overwrites an explicit
+    /// mention.
+    func testBeforeFoodScanFillsBeforeMeal() {
+        var draft = makeSlotDraft()
+
+        draft.applyScan(MedicationLabelParser.candidate(fromText: "morning before food"))
+
+        XCTAssertEqual(draft.slotRows, [.morning])
+        XCTAssertEqual(draft.mealRelation, .beforeMeal)
+    }
+
+    /// "Once daily" states a frequency and no time of day: nothing is
+    /// filled, cleared or assigned — on the fresh form, one blank row for
+    /// the family to pick, and the request gate waits for their choice.
+    func testOnceDailyScanLeavesTheRowToFamily() {
+        var draft = makeSlotDraft()
+        draft.name = "Amlodipine"
+        let before = draft
+
+        draft.applyScan(MedicationLabelParser.candidate(fromText: "1 tablet once daily"))
+
+        XCTAssertEqual(draft, before, "no times is no schedule — nothing changes")
+        XCTAssertEqual(draft.slotRows, [nil], "one blank row: the family picks")
+        XCTAssertTrue(draft.canSave)
+        XCTAssertFalse(draft.canSaveRequest, "the request gate stays closed until they pick")
+    }
+
+    /// The clock model fills the same way: the frequency table's hours land
+    /// in the pickers, the blank relation fills beside them, and a relation
+    /// the family stated still stands.
+    func testFrequencyScanInClockModeFillsTimesAndBlankRelationOnly() {
+        var draft = makeDraft()
+        draft.mealRelation = .beforeMeal
+
+        draft.applyScan(MedicationLabelParser.candidate(fromText: "1 tablet twice a day"))
+
+        XCTAssertEqual(hours(draft), [13, 19])
+        XCTAssertEqual(draft.storedTimes, [DateComponents(hour: 13, minute: 0),
+                                           DateComponents(hour: 19, minute: 0)])
+        XCTAssertEqual(draft.mealRelation, .beforeMeal, "the family's statement stands")
+
+        var fresh = makeDraft()
+        fresh.applyScan(MedicationLabelParser.candidate(fromText: "1 tablet twice a day"))
+
+        XCTAssertEqual(hours(fresh), [13, 19])
+        XCTAssertEqual(fresh.mealRelation, .afterMeal, "a blank relation takes the label's")
     }
 }
