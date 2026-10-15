@@ -24,6 +24,18 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
     /// box photo in the right dose's banner.
     private let visualAidStore: VisualAidStore?
 
+    /// The response window every `ConfirmationChallenge` this scheduler
+    /// constructs receives (review-l2 R-2). The initializer default is
+    /// the one named home (`ConfirmationChallenge
+    /// .defaultChallengeTimeoutSeconds`), and the value is passed
+    /// EXPLICITLY at both construction sites — the first-call-issues
+    /// challenge and `startConfirmationChallenge` — so no call site
+    /// carries a literal and an injected shorter window is honored
+    /// end-to-end (challenge deadline, timeout path, re-escalation).
+    /// `AckClarificationConfig` (the walk's window) composes from the
+    /// same home, so the two windows can never desynchronize (D4).
+    private let challengeTimeoutSeconds: TimeInterval
+
     private var entries: [UUID: MedicationEntry] = [:]
     /// Escalation engines are keyed by REMINDER id, not medication entry id.
     /// A twice-daily entry produces two concurrent reminders; keying by entry
@@ -164,7 +176,8 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         observabilityBus: ObservabilityBus,
         familyNotifier: FamilyNotifierProtocol,
         caregiverNotifySettings: CaregiverNotifySettings,
-        visualAidStore: VisualAidStore? = nil
+        visualAidStore: VisualAidStore? = nil,
+        challengeTimeoutSeconds: TimeInterval = ConfirmationChallenge.defaultChallengeTimeoutSeconds
     ) {
         self.storage = storage
         self.alarmScheduler = alarmScheduler
@@ -172,6 +185,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         self.familyNotifier = familyNotifier
         self.caregiverNotifySettings = caregiverNotifySettings
         self.visualAidStore = visualAidStore
+        self.challengeTimeoutSeconds = challengeTimeoutSeconds
         self.doubleDoseDetector = DoubleDoseDetector()
     }
 
@@ -252,7 +266,8 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         // call again with the answer. Silently accepting the first response
         // would defeat the dementia FR-D01 confirmation guarantee.
         let challenge = confirmationChallenges[entryId] ?? {
-            let new = ConfirmationChallenge(locale: locale)
+            let new = ConfirmationChallenge(challengeTimeoutSeconds: challengeTimeoutSeconds,
+                                            locale: locale)
             confirmationChallenges[entryId] = new
             _ = new.start(
                 medicationName: entry.medicationName,
@@ -431,7 +446,8 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         guard let entry = entries[entryId] else { return nil }
 
         let challenge = confirmationChallenges[entryId] ?? {
-            let new = ConfirmationChallenge(locale: locale)
+            let new = ConfirmationChallenge(challengeTimeoutSeconds: challengeTimeoutSeconds,
+                                            locale: locale)
             confirmationChallenges[entryId] = new
             return new
         }()
