@@ -170,15 +170,25 @@ enum DesignTokens {
 extension UIScreen {
     /// [MEDIUM-FIT] (2026-10-15) True when the iPhone's display size
     /// option is Medium or Large (Settings → Display & Brightness →
-    /// Display Size: Default/Medium/Large — not Dynamic Type). The
-    /// zoomed options shrink the logical point grid, so the native
-    /// pixel area exceeds `bounds × scale²`; at Default the ratio is
-    /// exactly 1 (measured: 17 Pro Max Medium = 375×812pt logical on a
-    /// 440×956pt native panel, ratio ≈1.38). The optimized Home layout
-    /// applies at any non-default display size.
+    /// Display Size: Default/Medium/Large — not Dynamic Type).
+    ///
+    /// Detection: a zoomed display mode renders a SMALLER pixel grid
+    /// than the panel's native mode, so `currentMode` (the mode in
+    /// use) differs from the largest entry in `availableModes` (the
+    /// panel). `nativeBounds` is deliberately NOT used — on zoomed
+    /// devices it reports the zoomed render size, not the panel, so
+    /// the area-ratio check reads 1.0 (that bug shipped one round as
+    /// "nothing changed on the 17 Pro Max").
     var isDisplayZoomed: Bool {
-        let nativeArea = nativeBounds.width * nativeBounds.height
-        let pointArea = bounds.width * bounds.height * nativeScale * nativeScale
-        return nativeArea > pointArea * 1.005
+        guard let current = currentMode,
+              let modes = availableModes,
+              let largest = modes.max(by: {
+                  $0.size.width * $0.size.height < $1.size.width * $1.size.height
+              }) else { return false }
+        let zoomed = current.size != largest.size
+        #if DEBUG
+        print("[MEDIUM-FIT] currentMode=\(current.size) largest=\(largest.size) zoomed=\(zoomed)")
+        #endif
+        return zoomed
     }
 }
