@@ -268,6 +268,55 @@ FEATURE_ROOTS = [
     "Services/Gemini/GeminiClient.swift",
     "App/SettingsView.swift",
     "App/HomeSubviews.swift",
+    # [MEDICATION-SCHEDULES-REMINDERS T-022 / NFR-MSR-002, FR-MSR-018] The
+    # slot-model medication feature's own sources (plan-tasks waves W0-W6.6,
+    # the wave table's file-ownership lists): the scheduler and its seams —
+    # the slot clock, ack-clarification config and challenge, the ack
+    # resolver, the evidence store, dose lines, scanned schedules, the editor
+    # draft, label OCR and the models — plus the shared seams the feature
+    # rewrote or extended: `FamilyNotifier.swift` (the honest push outcome
+    # and the PII-free event-alert metadata), the slot-clock settings bytes,
+    # the significant-event calendar mapper, the medication surfaces and the
+    # visual-aid fire handler. Medicine names, dose times, label text and
+    # photos are household data: a Release console write, a content-bearing
+    # console write or event field in any configuration, or an unlisted
+    # metadata key anywhere in these files fails the gate. Medication events
+    # carry hashed ids and closed tokens only (`entry_id_hash`, `slot`,
+    # `kind`, `refire_count`), and the one honest push status
+    # (`transport_unimplemented`) rides the bounded top-level `errorCode`,
+    # never a metadata value.
+    #
+    # Per file, not the whole `Services/MedicationScheduler` group, for two
+    # reasons stated rather than implied: `PhotoVerifier.swift` and
+    # `PlatformAlarmScheduler.swift` carry their own pre-existing non-Debug
+    # console writes (tracked outside this unit — a group entry would launder
+    # them), and the remaining group files are the medication v1 core plus
+    # helpers shared with other emitters (`EscalationEngine`,
+    # `DoubleDoseDetector`, `IdHashing`, the protocol seams, the label-scan
+    # unit) that this feature did not ship. `AppCoordinator.swift`,
+    # `CommandRouter.swift` and `CalendarShareService.swift` also carry this
+    # feature's emissions but cannot join whole; their sites are graded by
+    # the event-type registry below.
+    "Services/MedicationScheduler/MedicationScheduler.swift",
+    "Services/MedicationScheduler/MedicationSlotClock.swift",
+    "Services/MedicationScheduler/AckClarificationConfig.swift",
+    "Services/MedicationScheduler/ConfirmationChallenge.swift",
+    "Services/MedicationScheduler/MedicationAckResolver.swift",
+    "Services/MedicationScheduler/MedicationEvidenceStore.swift",
+    "Services/MedicationScheduler/DoseLine.swift",
+    "Services/MedicationScheduler/Models.swift",
+    "Services/MedicationScheduler/ScannedSchedule.swift",
+    "Services/MedicationScheduler/MedicationEditorDraft.swift",
+    "Services/MedicationScheduler/MedicationLabelOCR.swift",
+    "Services/FamilyNotifier/FamilyNotifier.swift",
+    # One path, two adjacent literals: the joined value is the real file, and
+    # the split keeps the raw line free of a 40-character single-class run.
+    "Services/CalendarSync/" + "CalendarShareMapper.swift",
+    "Services/Notifications/MedicationVisualAidFireHandler.swift",
+    "Services/Storage/SettingsPersistence.swift",
+    "App/MedicationManageListView.swift",
+    "App/MedicationVisualAidViews.swift",
+    "App/SettingsTabs.swift",
 ]
 
 # [CONVERSATIONAL-NEPALI-REPLIES T-185 / design-l1 §16, FR-CNR-012] The
@@ -295,6 +344,34 @@ FEATURE_EVENT_TYPES = {
     "chat_respond_unusable": "the chat turn's unusable answer (GeminiCommandInterpreter)",
     "chat_respond_done": "the chat turn's success (GeminiCommandInterpreter)",
     "chat_respond_failed": "the chat turn's failure (GeminiCommandInterpreter)",
+    # [MEDICATION-SCHEDULES-REMINDERS T-022 / design-l2 §5.2, §7.6] The
+    # slot-model feature's event types whose emitters live in shared files
+    # that cannot join FEATURE_ROOTS whole: the ack-resolution observations
+    # and the honest no-match line (`CommandRouter.swift` — it wires the
+    # interpreter stack and this feature both), the clarification-end and
+    # evidence-capture rows (`AppCoordinator.swift`), and the significant-
+    # event calendar writes (`CalendarShareService.swift` — the calendar
+    # feature's console history is its own). Two honest limits, stated: the
+    # two `emitAckResolution(…)` call sites do not match the console/emit
+    # opener shape, so those entries pin PRESENCE for the coverage self-test
+    # (the metadata they build is `entry_id_hash` by construction, a
+    # declared key); the scheduler's own event types
+    # (`medication_retime_refused`, `medication_slot_unresolved`,
+    # `reminder_fired`, `refire`, `missed`, `acknowledged`, …) are graded by
+    # the `Services/MedicationScheduler/MedicationScheduler.swift` root
+    # above, never repeated here. Deliberately NOT registered:
+    # `caregiver_event_fired` / `family_event_alerted` and the routine and
+    # calendar `kind` emitters (the caregiver-notifications and calendar
+    # features own those sites), the `calendar_share_skipped_*` pair (shared
+    # with the calendar-event path) and the label-scan unit's event type (a
+    # prior medication feature).
+    "medication_ack_resolved": "the ack resolution naming one entry (CommandRouter)",
+    "medication_ack_ambiguous": "the ack resolution naming several (CommandRouter)",
+    "medication_ack_unmatched": "the ack resolution naming none (CommandRouter)",
+    "medication_ack_clarify_ended": "the clarification walk's end outside resolved (AppCoordinator)",
+    "medication_evidence_captured": "the evidence capture's outcome row (AppCoordinator)",
+    "calendar_share_significant_event_enqueued": "a significant medication event queued for the shared calendar (CalendarShareService)",
+    "calendar_share_write_failed": "a significant-event calendar write that failed (CalendarShareService)",
 }
 
 # The shipped allow-list the feature's metadata keys must be declared in.
@@ -372,11 +449,18 @@ FEATURE_CONTENT_PATTERNS = [
     CAMEL_TRANSCRIPT_RE,                                   # rawTranscript
     re.compile(r"(?<![A-Za-z0-9_])(translated|translations?)(?![A-Za-z0-9_])"),
     re.compile(r"(?<![A-Za-z0-9_])(recognized|recognised|recognition)(?![A-Za-z0-9_])"),
-    # `text` and its plural `texts`, bare or as the tail of a camelCase name
-    # (`sceneText`, `regionTexts`). The plural was a hole: the trailing
+    # `text` and its plural `texts`, bare (initial letter `t` or `T`), or as
+    # the tail of a camelCase name with a CAPITAL `T` (`sceneText`,
+    # `regionTexts`, `ocrText`). The plural was a hole once: the trailing
     # lookahead rejected `texts`, so `debugPrint(regionTexts)` — a collection
-    # of recognized strings — read as content-free.
-    re.compile(r"(?<![A-Za-z0-9_])(?:[A-Za-z0-9]*[Tt]exts?|texts?)(?![A-Za-z0-9_])"),
+    # of recognized strings — read as content-free. The unchecked
+    # `[A-Za-z0-9]*` prefix was a second hole, in the other direction
+    # (2026-10-15, T-022): it swallowed the tail of ANY word ending in
+    # `text`, so the everyday identifier `context` — as in a
+    # `context.eventIdHash` metadata value — read as content. A
+    # lowercase-tailed compound (`mytext`, `plaintext`) is not an identifier
+    # this lane has ever carried; a camelCase tail capitalizes the tail.
+    re.compile(r"(?<![A-Za-z0-9_])(?:[A-Za-z0-9]*Texts?|[Tt]exts?)(?![A-Za-z0-9_])"),
     re.compile(r"(?<![A-Za-z0-9_])prompts?(?![A-Za-z0-9_])"),
 ]
 

@@ -112,11 +112,27 @@ struct MedicalView: View {
     /// 2026-09-16). Snapshot taken at TAP time: the viewer shows the dose
     /// line the row showed, even if the entry is edited while it is up.
     @State private var viewingDoseAids: MedicationVisualAidsPresentation?
+    /// The last evidence capture's outcome caption, pinned to the taken
+    /// row it happened on ([MED-EVIDENCE], T-021). Cleared by the row's
+    /// next capture (a cancelled capture clears it — nil maps to no
+    /// caption, never a stale one).
+    @State private var takenEvidenceNotice: TakenEvidenceNotice?
 
     private var todaysReminders: [ScheduledReminder] {
         coordinator.pendingReminders
             .filter { Calendar.current.isDateInToday($0.scheduledAt) }
             .sorted { $0.scheduledAt < $1.scheduledAt }
+    }
+
+    /// Today's CONFIRMED intakes, read through the coordinator's IF-24
+    /// seam. A pure read: this leaf shows the day's records, it never
+    /// writes one, and a photo can never make a row appear.
+    private var takenTodayRows: [TakenDoseRow] { coordinator.takenDosesToday() }
+
+    /// One capture's caption on the row it belongs to.
+    private struct TakenEvidenceNotice: Equatable {
+        let rowId: UUID
+        let key: String
     }
 
     private var canAddAppointment: Bool {
@@ -126,14 +142,22 @@ struct MedicalView: View {
     var body: some View {
         LeafScreen(titleKey: "meds.title") {
             VStack(spacing: 12) {
-                if todaysReminders.isEmpty {
+                // "No medication today" may only say that when it is true
+                // of the WHOLE day: with doses already taken and recorded
+                // below, the empty state would contradict the very rows
+                // under it.
+                if todaysReminders.isEmpty && takenTodayRows.isEmpty {
                     emptyState(key: "meds.empty", appearance: appearance)
-                } else {
+                } else if !todaysReminders.isEmpty {
                     VStack(spacing: 12) {
                         ForEach(todaysReminders) { reminder in
                             doseRow(reminder)
                         }
                     }
+                }
+
+                if !takenTodayRows.isEmpty {
+                    takenTodaySection
                 }
 
                 appointmentSection
@@ -168,6 +192,15 @@ struct MedicalView: View {
                 onAcknowledge: {
                     coordinator.confirmMedicationDose(entryId: dose.entryId)
                     viewingDoseAids = nil
+                },
+                // The same entry the screen is showing: the capture is held
+                // for the record this dose's acknowledgement chain writes.
+                onCaptureEvidence: { completion in
+                    coordinator.captureMedicationEvidence(
+                        medicationName: dose.medicationName,
+                        context: .pendingDose(entryId: dose.entryId),
+                        onOutcome: completion
+                    )
                 },
                 onClose: { viewingDoseAids = nil }
             )
@@ -514,6 +547,103 @@ struct MedicalView: View {
             // Challenge issued — chips now own the UI on Home.
             dismiss()
         }
+    }
+
+    // MARK: - Taken today ([MED-EVIDENCE], T-021; C8 record surface, IF-24)
+
+    /// Today's confirmed intakes — the day's durable records, drawn under
+    /// the pending rows. Hidden entirely when there is nothing to show
+    /// (the caller's `takenTodayRows.isEmpty` gate), so a household that
+    /// records nothing sees exactly the leaf it saw before this feature.
+    private var takenTodaySection: some View {
+        VStack(spacing: 12) {
+            sectionHeader(key: "meds.takenToday.title")
+            VStack(spacing: 12) {
+                ForEach(takenTodayRows) { row in
+                    takenRow(row)
+                }
+            }
+        }
+    }
+
+    /// One taken record: the medication and the time it was due, the
+    /// "Taken" mark, and the row-level add-photo action. The capture
+    /// targets THIS record (`.recordedDose(logId:)` — the row's own log
+    /// id); it can attach evidence to the record and can never create one
+    /// (IF-14/IF-15's misuse guard).
+    private func takenRow(_ row: TakenDoseRow) -> some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(row.medicationName)
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                        .foregroundStyle(appearance.colors.textPrimary)
+                    Text(row.scheduledAt.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
+                }
+                Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(appearance.colors.accentForeground)
+                    Text("meds.taken")
+                        .font(.system(size: appearance.typography.captionPointSize,
+                                      weight: .semibold))
+                        .foregroundStyle(appearance.colors.textSecondary)
+                }
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    captureTakenEvidence(row)
+                } label: {
+                    Label("meds.evidence.capture", systemImage: "camera.fill")
+                        .font(.system(size: appearance.typography.captionPointSize,
+                                      weight: .semibold))
+                        .foregroundStyle(appearance.colors.accentForeground)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .appSurface(role: .control,
+                                    cornerRadius: DesignTokens.bubbleCornerRadius)
+                }
+                .buttonStyle(.plain)
+
+                if row.hasEvidence {
+                    Image(systemName: "photo.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(appearance.colors.accentForeground)
+                        .accessibilityLabel(Text("visualAid.title"))
+                }
+                Spacer()
+            }
+
+            if let notice = takenEvidenceNotice, notice.rowId == row.id {
+                Text(LocalizedStringKey(notice.key))
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity).appSurface(role: .card,
+                                                cornerRadius: DesignTokens.cardCornerRadius)
+    }
+
+    /// One capture attached to this row's own record. The outcome caption
+    /// under the button is the same mapping the dose screen's caption
+    /// uses, so the two surfaces can never disagree about what happened.
+    private func captureTakenEvidence(_ row: TakenDoseRow) {
+        coordinator.captureMedicationEvidence(
+            medicationName: row.medicationName,
+            context: .recordedDose(logId: row.id),
+            onOutcome: { outcome in
+                let key = MedicationVisualAidsPresentation.evidenceOutcomeKey(for: outcome)
+                takenEvidenceNotice = key.map { TakenEvidenceNotice(rowId: row.id, key: $0) }
+            })
     }
 }
 

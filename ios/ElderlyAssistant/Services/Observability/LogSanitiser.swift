@@ -355,7 +355,53 @@ struct LogSanitiser {
         "attempt",
         "option_count",
         "capture_form",
-        "merge_source"
+        "merge_source",
+        // [MEDICATION-SCHEDULES-REMINDERS T-022] (2026-10-15) The medication
+        // slot-model feature's THREE additive keys (FR-MSR-018, NFR-MSR-002).
+        // The feature's own event types reuse keys this list already
+        // declares — `medication_slot_unresolved` carries `slot`;
+        // `medication_retime_refused` carries `entry_id_hash` and `slot`;
+        // the `medication_ack_*` / `medication_ack_clarify_ended` /
+        // `medication_evidence_captured` observations carry `entry_id_hash`
+        // or nothing; and the honest push status rides the bounded
+        // top-level `errorCode` (`transport_unimplemented`) — never
+        // metadata. The three below are the keys the feature's emitters ADD
+        // to SHARED event families, each verified against the shipped call
+        // sites:
+        //
+        //  - `kind` — `EventNotifyKind` raw values (medicationReminder /
+        //    routineReminder / calendarEvent): which alert kind an event
+        //    belongs to. Emitters: `MedicationScheduler
+        //    .notifyCaregiversOfFirstFire` (both the `caregiver_event_skipped`
+        //    and `caregiver_event_fired` legs), `CaregiverEventFireHandler`
+        //    (same two legs), `RoutineScheduler` (same two legs),
+        //    `FamilyNotifier.emitEventAlerted` (`family_event_alerted`, the
+        //    context's own kind), `CalendarShareService` (the significant-
+        //    event path's skipped/enqueued/write-failed events, and
+        //    `calendar_share_reconciled`), and `CalendarSyncService`
+        //    (`calendar_sync_native_changes`).
+        //  - `channel` — `NotifyChannel` raw values (sms / whatsApp /
+        //    messenger): the channel a delivery attempt rode. Emitter:
+        //    `FamilyNotifier.emitEventAlerted` ONLY.
+        //  - `event_id_hash` — the EVENT's own id, already hashed at the
+        //    producer: an `IdHashing.shortHash` digest (24 hex chars; the
+        //    external-calendar path reuses its own stable-key digest), never
+        //    a raw identifier. Emitters:
+        //    `MedicationScheduler.notifyCaregiversOfFirstFire`,
+        //    `CaregiverEventFireHandler`, `RoutineScheduler` and
+        //    `FamilyNotifier.emitEventAlerted`.
+        //
+        // All three are bounded BY CONSTRUCTION (enum raw values and
+        // one-way short hashes), which is why they are plain allowed keys
+        // rather than redacted ones: unlike the transcript lane above, no
+        // value here can carry a medication name, a dose, free text or a
+        // raw id. A test pins the declaration and the admission
+        // (`LogSanitiserTests.testNewMedicationMetadataKeysAreAdmittedAndDeclared`),
+        // and the allow-list diff test counts these three among the
+        // declared extensions.
+        "kind",
+        "channel",
+        "event_id_hash"
     ]
 
     /// Metadata keys that carry **content by declaration**: the value is

@@ -419,11 +419,13 @@ final class DialogueLogAndEgressTests: XCTestCase {
     func testTheClosedVocabularyRedactsOutOfVocabularyTokensAndDropsUnlistedKeys() {
         XCTAssertTrue(dialogueKeys.isSubset(of: LogSanitiser.allowedKeys),
                       "the six documented dialogue keys must be in the shipped allow-list")
-        XCTAssertEqual(LogSanitiser.allowedKeys.count, 87,
+        XCTAssertEqual(LogSanitiser.allowedKeys.count, 90,
                        "T-137's documented 78→84 diff plus [CORRECTION-REVIVE]'s "
                        + "three count-only keys (correction_band, "
-                       + "correction_judge_eligible, correction_clarify_reason): "
-                       + "nine added, none removed")
+                       + "correction_judge_eligible, correction_clarify_reason) "
+                       + "plus [MEDICATION-SCHEDULES-REMINDERS]'s three keys "
+                       + "(kind, channel, event_id_hash): "
+                       + "twelve added, none removed")
         XCTAssertTrue(LogSanitiser.allowedKeys.contains("reason"),
                       "reason is a shipped key")
         XCTAssertFalse(dialogueKeys.contains("reason"),

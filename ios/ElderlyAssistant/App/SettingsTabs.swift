@@ -455,7 +455,11 @@ struct SettingsDestinationView: View {
         // coordinator is passed in rather than looked up, so the model's
         // save path is the same single writer the wizard uses.
         case .profile: ProfileSettingsView(coordinator: coordinator)
-        case .meds: MedicationScheduleSettingsView()
+        // [T-023] Settings → Medications lands on the MANAGE list — the
+        // household's existing schedules first, with the explicit add
+        // control and the row-tap editor. The form this route used to
+        // open inline is now only ever reached from there.
+        case .meds: MedicationManageListView()
         // Daily routines (routine-settings move, 2026-09-17) — the
         // enable/disable toggles and photo management that used to live
         // at the bottom of the Reminders leaf.
