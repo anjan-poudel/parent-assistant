@@ -544,4 +544,89 @@ final class MedicationEditorDraftTests: XCTestCase {
         clockMode.name = "Amlodipine"
         XCTAssertTrue(clockMode.canSaveRequest)
     }
+
+    // MARK: - Frequency scans [MED-OCR-FREQ] (2026-10-15)
+
+    /// The owner's device case, through the real parser: "one tablet twice
+    /// a day" fills the slot form with exactly the rows the owner expected
+    /// — afternoon and evening, after food — and nothing else changes.
+    func testFrequencyScanFillsTwoSlotRowsAfterFood() {
+        var draft = makeSlotDraft()
+        draft.name = "Metformin"
+
+        draft.applyScan(MedicationLabelParser.candidate(fromText: "1 tablet twice a day"))
+
+        XCTAssertEqual(draft.slotRows, [.afternoon, .evening])
+        XCTAssertEqual(draft.mealRelation, .afterMeal)
+        XCTAssertEqual(draft.times.count, 2, "the row carrier stays parallel")
+        XCTAssertEqual(hours(draft), [7, 7],
+                       "carriers are the draft's own day — no scanned clock smuggled in")
+        XCTAssertEqual(draft.storedRows, [.slot(.afternoon), .slot(.evening)])
+        XCTAssertNil(draft.storedQuantity, "a scan still states no quantity")
+        XCTAssertTrue(draft.canSaveRequest)
+    }
+
+    /// The family's stated relation is theirs: a frequency read replaces
+    /// the ROWS (the label's schedule, the shipped rule) and fills only a
+    /// BLANK relation.
+    func testFrequencyScanNeverRewritesTheStatedRelation() {
+        var draft = makeSlotDraft()
+        draft.slotRows = [.morning]
+        draft.mealRelation = .beforeMeal
+
+        draft.applyScan(MedicationLabelParser.candidate(fromText: "1 tablet twice a day"))
+
+        XCTAssertEqual(draft.slotRows, [.afternoon, .evening],
+                       "the label's rows still replace the form's")
+        XCTAssertEqual(draft.mealRelation, .beforeMeal,
+                       "the family's statement stands")
+    }
+
+    /// A read whose shape states no relation (a day pattern) still picks
+    /// none: the after-food context is the frequency table's alone.
+    func testPatternScanStillStatesNoRelation() {
+        var draft = makeSlotDraft()
+
+        draft.applyScan(MedicationLabelParser.candidate(fromText: "1-0-1"))
+
+        XCTAssertEqual(draft.slotRows, [.morning, .evening])
+        XCTAssertNil(draft.mealRelation)
+    }
+
+    /// "Once daily" states a frequency and no time of day: nothing is
+    /// filled, cleared or assigned — on the fresh form, one blank row for
+    /// the family to pick, and the request gate waits for their choice.
+    func testOnceDailyScanLeavesTheRowToTheFamily() {
+        var draft = makeSlotDraft()
+        draft.name = "Amlodipine"
+        let before = draft
+
+        draft.applyScan(MedicationLabelParser.candidate(fromText: "1 tablet once daily"))
+
+        XCTAssertEqual(draft, before, "no times is no schedule — nothing changes")
+        XCTAssertEqual(draft.slotRows, [nil], "one blank row: the family picks")
+        XCTAssertTrue(draft.canSave)
+        XCTAssertFalse(draft.canSaveRequest, "the request gate stays closed until they pick")
+    }
+
+    /// The clock model fills the same way: the frequency table's hours land
+    /// in the pickers, the blank relation fills beside them, and a relation
+    /// the family stated still stands.
+    func testFrequencyScanInClockModeFillsTimesAndBlankRelationOnly() {
+        var draft = makeDraft()
+        draft.mealRelation = .beforeMeal
+
+        draft.applyScan(MedicationLabelParser.candidate(fromText: "1 tablet twice a day"))
+
+        XCTAssertEqual(hours(draft), [13, 19])
+        XCTAssertEqual(draft.storedTimes, [DateComponents(hour: 13, minute: 0),
+                                           DateComponents(hour: 19, minute: 0)])
+        XCTAssertEqual(draft.mealRelation, .beforeMeal, "the family's statement stands")
+
+        var fresh = makeDraft()
+        fresh.applyScan(MedicationLabelParser.candidate(fromText: "1 tablet twice a day"))
+
+        XCTAssertEqual(hours(fresh), [13, 19])
+        XCTAssertEqual(fresh.mealRelation, .afterMeal, "a blank relation takes the label's")
+    }
 }

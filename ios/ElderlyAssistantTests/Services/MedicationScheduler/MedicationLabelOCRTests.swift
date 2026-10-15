@@ -171,6 +171,148 @@ final class MedicationLabelOCRTests: XCTestCase {
         XCTAssertEqual(candidate.frequency, .daily)
     }
 
+    // MARK: - Frequency-based schedules [MED-OCR-FREQ] (2026-10-15)
+
+    /// The owner's own device report: "one tablet twice a day" captured
+    /// NOTHING — no day pattern, no time word, and the count table only
+    /// reads a DIGIT. The phrase means after lunch and after dinner, and
+    /// that is what it now captures: the two conventional hours (13:00,
+    /// 19:00 — the pinned hour table converts them to afternoon and
+    /// evening) plus the after-food context frequency rows carry.
+    func testTwiceADayPhrasesCaptureAfternoonAndEveningAfterFood() {
+        for line in ["one tablet twice a day", "1 tablet twice a day",
+                     "two times a day", "2 times daily", "BD", "b.i.d",
+                     "Take 1 tablet twice daily"] {
+            let candidate = MedicationLabelParser.candidate(fromLines: [line])
+
+            XCTAssertEqual(hours(candidate), [13, 19], "from \"\(line)\"")
+            XCTAssertEqual(minutes(candidate), [0, 0], "from \"\(line)\"")
+            XCTAssertEqual(candidate.frequency, .daily, "from \"\(line)\"")
+            XCTAssertEqual(candidate.mealRelation, .afterMeal, "from \"\(line)\"")
+        }
+    }
+
+    /// Three-times-a-day forms are the whole day, still after food.
+    func testThreeTimesADayPhrasesCaptureMorningThroughEveningAfterFood() {
+        for line in ["three times a day", "3 times daily", "TDS", "t.i.d", "T.D.S"] {
+            let candidate = MedicationLabelParser.candidate(fromLines: ["Paracetamol", line])
+
+            XCTAssertEqual(hours(candidate), [8, 13, 19], "from \"\(line)\"")
+            XCTAssertEqual(candidate.frequency, .daily, "from \"\(line)\"")
+            XCTAssertEqual(candidate.mealRelation, .afterMeal, "from \"\(line)\"")
+        }
+    }
+
+    /// OCR splits lines wherever it likes: a phrase broken across two
+    /// recognition lines still reads (the whitespace-collapsed match).
+    func testFrequencyPhraseBrokenAcrossLinesStillReads() {
+        let candidate = MedicationLabelParser.candidate(
+            fromLines: ["Paracetamol", "1 tablet twice a", "day"])
+
+        XCTAssertEqual(hours(candidate), [13, 19])
+        XCTAssertEqual(candidate.mealRelation, .afterMeal)
+    }
+
+    /// The once-a-day family states a frequency and NO time of day — the
+    /// parser refuses to guess morning, and the family picks the row.
+    func testOnceDailyPhrasesYieldNoTimesAndNoMealGuess() {
+        for line in ["once daily", "once a day", "1 time daily", "OD", "o.d."] {
+            let candidate = MedicationLabelParser.candidate(fromLines: ["Amlodipine", line])
+
+            XCTAssertEqual(candidate.scheduleTimes, [], "from \"\(line)\"")
+            XCTAssertEqual(candidate.frequency, .daily, "from \"\(line)\"")
+            XCTAssertNil(candidate.mealRelation, "from \"\(line)\"")
+        }
+    }
+
+    /// "1 time a day" is the digit twin of "once a day" and follows the
+    /// same rule: no times. This pins the removed count-1 guess — the old
+    /// count table turned it into 08:00 morning, exactly the inference
+    /// the owner's rule forbids ("Do NOT guess morning").
+    func testDigitOnceADayDoesNotGuessMorning() {
+        let candidate = MedicationLabelParser.candidate(
+            fromLines: ["Paracetamol", "1 time a day"])
+
+        XCTAssertEqual(candidate.scheduleTimes, [], "no morning guess")
+        XCTAssertEqual(candidate.frequency, .daily)
+        XCTAssertNil(candidate.mealRelation)
+    }
+
+    /// Stated times outrank a frequency phrase, and nothing from the
+    /// frequency table is recorded beside them — the "mixed signals" rule.
+    func testStatedTimesOutrankAConflictingFrequency() {
+        let words = MedicationLabelParser.candidate(
+            fromLines: ["Amlodipine", "morning and twice a day"])
+        XCTAssertEqual(hours(words), [8], "the stated time word decides")
+        XCTAssertEqual(words.frequency, .daily)
+        XCTAssertNil(words.mealRelation, "the frequency's after-food context is not recorded")
+
+        let pattern = MedicationLabelParser.candidate(
+            fromLines: ["Amlodipine", "1-0-1", "twice a day"])
+        XCTAssertEqual(hours(pattern), [8, 20], "the explicit day pattern decides")
+        XCTAssertNil(pattern.mealRelation)
+
+        let counted = MedicationLabelParser.candidate(
+            fromLines: ["Amlodipine", "2 times a day", "three times daily"])
+        XCTAssertEqual(hours(counted), [8, 20], "the digit count table decides")
+        XCTAssertNil(counted.mealRelation)
+    }
+
+    /// Unknown frequency phrasing gets NO schedule — the refuse-to-guess
+    /// invariant. "twice a week" is a weekly cadence the table does not
+    /// state and "4 times daily" a real prescription it does not carry,
+    /// and neither is repaired into one.
+    func testUnknownFrequencyPhrasesAreRefused() {
+        for line in ["twice a week", "thrice a day", "as needed",
+                     "every other day", "4 times daily"] {
+            let candidate = MedicationLabelParser.candidate(fromLines: ["Medicine", line])
+
+            XCTAssertEqual(candidate.scheduleTimes, [], "from \"\(line)\"")
+            XCTAssertNil(candidate.mealRelation, "from \"\(line)\"")
+        }
+
+        // …and the frequency field stays what the text actually says: a
+        // line carrying no daily/weekly token records nil.
+        for line in ["twice a week", "thrice a day", "as needed",
+                     "every other day"] {
+            XCTAssertNil(MedicationLabelParser.candidate(
+                fromLines: ["Medicine", line]).frequency, "from \"\(line)\"")
+        }
+    }
+
+    /// The abbreviations fire only as standalone tokens: "od" inside
+    /// "food" or "blood", "bd" inside a word — none may become a
+    /// frequency. This is the lookarounds' whole job.
+    func testAbbreviationsFireOnlyAsStandaloneTokens() {
+        for line in ["Take after food", "Product of Nepal", "Blood pressure"] {
+            let candidate = MedicationLabelParser.candidate(fromLines: ["Medicine", line])
+
+            XCTAssertEqual(candidate.scheduleTimes, [], "from \"\(line)\"")
+            XCTAssertNil(candidate.mealRelation, "from \"\(line)\"")
+        }
+    }
+
+    /// The Nepali frequency WORDS ("दिनमा दुई पटक") — the digit forms
+    /// ("दिनमा २ पटक") stay on the shipped count table, unchanged.
+    func testReadsNepaliFrequencyWords() {
+        let twice = MedicationLabelParser.candidate(
+            fromLines: ["प्यारासिटामोल", "दिनमा दुई पटक"])
+        XCTAssertEqual(hours(twice), [13, 19])
+        XCTAssertEqual(twice.frequency, .daily)
+        XCTAssertEqual(twice.mealRelation, .afterMeal)
+
+        let thrice = MedicationLabelParser.candidate(
+            fromLines: ["प्यारासिटामोल", "दिनमा तीन पटक"])
+        XCTAssertEqual(hours(thrice), [8, 13, 19])
+        XCTAssertEqual(thrice.mealRelation, .afterMeal)
+
+        let once = MedicationLabelParser.candidate(
+            fromLines: ["प्यारासिटामोल", "दिनमा एक पटक"])
+        XCTAssertEqual(once.scheduleTimes, [])
+        XCTAssertEqual(once.frequency, .daily)
+        XCTAssertNil(once.mealRelation)
+    }
+
     // MARK: - The shapes that only look like one
 
     /// A bare number next to a batch code is not a strength: "500" alone, and

@@ -16,10 +16,14 @@ import Foundation
 // the quantity and the before/after-meal relation the entry carries) — and
 // the three shipped scan rules extend to it UNCHANGED: text pre-fills blank
 // fields only, the label's stated schedule replaces the rows, and a read
-// that found nothing changes nothing. Nothing here persists, resolves a
-// clock time, or infers a slot, a meal relation or a quantity: the draft
-// carries what the family stated, the slot clock (C1) resolves times at
-// arming/save, and the save gate (C12) binds nothing until the family saves.
+// that found nothing changes nothing. [MED-OCR-FREQ] (2026-10-15) The one
+// context a label can state — the after-food relation of a frequency-table
+// read ("one tablet twice a day") — rides the same blank-only rule as text.
+// Nothing here persists, resolves a clock time, or infers a slot, a meal
+// relation or a quantity beyond what the label stated: the draft carries
+// what the family (and the reviewed read) stated, the slot clock (C1)
+// resolves times at arming/save, and the save gate (C12) binds nothing
+// until the family saves.
 
 // MARK: - The slot model's vocabulary for the form
 
@@ -222,9 +226,14 @@ struct MedicationEditorDraft: Equatable {
     ///  - **A read that found nothing changes nothing.** An empty candidate
     ///    leaves the form exactly as it was and the photo is still attached;
     ///    the scanner has already said out loud that it could not read it.
-    ///  - **Nothing is inferred.** A scan never fills the quantity, never
-    ///    picks a meal relation and never touches the purpose step: those
-    ///    are the family's statements, and the label does not print them.
+    ///  - **Nothing is inferred.** A scan never fills the quantity and
+    ///    never touches the purpose step: those are the family's
+    ///    statements, and the label does not print them. The meal relation
+    ///    is the one context a label CAN state [MED-OCR-FREQ] — the
+    ///    frequency table's rows are after-food rows ("one tablet twice a
+    ///    day" = after lunch and after dinner) — and it fills exactly like
+    ///    text: into a blank relation only. A relation the family picked
+    ///    is their statement and stands.
     mutating func applyScan(_ candidate: MedicationLabelCandidate) {
         if let scannedName = candidate.name, isBlank(name) {
             name = scannedName
@@ -255,6 +264,7 @@ struct MedicationEditorDraft: Equatable {
         guard !scannedTimes.isEmpty else { return }
         times = scannedTimes
         slotRows = Array(repeating: nil, count: times.count)
+        fillBlankMealRelation(from: candidate)
     }
 
     /// The same rule, for the slot model: the converted slots replace the
@@ -270,6 +280,19 @@ struct MedicationEditorDraft: Equatable {
         guard !scannedSlots.isEmpty else { return }
         slotRows = scannedSlots.map(Optional.some)
         times = scannedSlots.map { _ in referenceDate }
+        fillBlankMealRelation(from: candidate)
+    }
+
+    /// The label's stated meal context, into a BLANK relation only
+    /// [MED-OCR-FREQ]: a frequency-table read ("twice a day") states
+    /// after-food beside its rows, and it lands the way text does — only
+    /// while the family has stated none. A relation they picked is their
+    /// statement and survives the scan, and a read that states no
+    /// relation (every shape but the frequency table) changes nothing
+    /// here.
+    private mutating func fillBlankMealRelation(from candidate: MedicationLabelCandidate) {
+        guard let scannedRelation = candidate.mealRelation, mealRelation == nil else { return }
+        mealRelation = scannedRelation
     }
 
     /// The parsed times as `Date`s on the draft's own day, in the order the

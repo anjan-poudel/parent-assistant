@@ -51,15 +51,24 @@ struct MedicationLabelCandidate: Equatable {
     var scheduleTimes: [DateComponents]
     /// The parser's frequency guess, or nil when the label did not say.
     var frequency: MedicationFrequency?
+    /// The meal context the label's stated schedule carries, or nil when
+    /// the schedule's shape states none [MED-OCR-FREQ]. Only the frequency
+    /// table produces one: "one tablet twice a day" is an after-food
+    /// schedule (the owner's own reading — after lunch and after dinner),
+    /// while the day-pattern and time-word shapes state actual times and
+    /// no meal context at all.
+    var mealRelation: MealRelation?
 
     init(name: String? = nil,
          strength: String? = nil,
          scheduleTimes: [DateComponents] = [],
-         frequency: MedicationFrequency? = nil) {
+         frequency: MedicationFrequency? = nil,
+         mealRelation: MealRelation? = nil) {
         self.name = name
         self.strength = strength
         self.scheduleTimes = scheduleTimes
         self.frequency = frequency
+        self.mealRelation = mealRelation
     }
 
     /// Nothing was read. The scanner still reports the photo — see
@@ -68,7 +77,8 @@ struct MedicationLabelCandidate: Equatable {
     static let empty = MedicationLabelCandidate()
 
     var isEmpty: Bool {
-        name == nil && strength == nil && scheduleTimes.isEmpty && frequency == nil
+        name == nil && strength == nil && scheduleTimes.isEmpty
+            && frequency == nil && mealRelation == nil
     }
 }
 
@@ -99,7 +109,8 @@ enum MedicationLabelParser {
             name: name(fromLines: normalized),
             strength: strength(inLines: normalized),
             scheduleTimes: schedule.times,
-            frequency: schedule.frequency
+            frequency: schedule.frequency,
+            mealRelation: schedule.mealRelation
         )
     }
 
@@ -155,8 +166,8 @@ enum MedicationLabelParser {
 
     // MARK: Schedule
 
-    /// What the label says about WHEN, from the two shapes a label actually
-    /// carries:
+    /// What the label says about WHEN, from the shapes a label actually
+    /// carries, tried in order of specificity:
     ///
     ///  - **A day pattern** — `1-0-1`, `1.0.1`, `1 0 1`, in ASCII or
     ///    Devanagari digits: one digit per slot (morning, midday, night),
@@ -167,29 +178,55 @@ enum MedicationLabelParser {
     ///    English counterparts, matched as substrings because Devanagari
     ///    postpositions fuse onto the stem ("बिहानको औषधि" ⊃ "बिहान", the
     ///    same convention `MedicationPurpose.voiceKeys` relies on).
+    ///  - **A digit count** — `<n> times a day` / `दिनमा <n> पटक`, n default
+    ///    times from the count table below.
+    ///  - **A frequency phrase** — [MED-OCR-FREQ] "twice a day", "BD",
+    ///    "दिनमा दुई पटक": the frequency table below turns HOW OFTEN into
+    ///    the conventional slot hours its meaning implies ("twice a day" =
+    ///    after lunch and after dinner) and states the after-food context
+    ///    those rows carry. This is the ONE shape that produces a
+    ///    `mealRelation`.
     ///
-    /// Failing both, a `<n> times a day` count becomes n default times. A
-    /// label saying none of these yields no times — an empty schedule is the
+    /// The order IS the precedence rule: the first shape that matches
+    /// decides. A label that states actual times (a pattern, a time word)
+    /// never gets an extra frequency inference — "mixed signals" resolve
+    /// to the stated time and record nothing else.
+    ///
+    /// Failing all of these, a bare daily/weekly token yields a frequency
+    /// with no times — the once-a-day family (which includes digits:
+    /// "1 time a day") states no time of day, and none is guessed. A label
+    /// saying none of these yields no times — an empty schedule is the
     /// honest answer, and the editor keeps the time the family already had.
-    static func schedule(in lines: [String]) -> (times: [DateComponents], frequency: MedicationFrequency?) {
+    static func schedule(in lines: [String]) -> (times: [DateComponents],
+                                                 frequency: MedicationFrequency?,
+                                                 mealRelation: MealRelation?) {
         let text = normalizedDigits(lines.joined(separator: "\n")).lowercased()
+        // The phrase tables below match against a whitespace-collapsed
+        // copy, so a phrase OCR split across two lines ("twice a\nday") or
+        // double-spaced still reads. Only the new frequency matchers use
+        // it — every shipped matcher reads `text`, exactly as before.
+        let phraseText = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
 
         let weekly = weeklyTokens.contains { text.contains($0) }
         // The day pattern first: an explicit 1-0-1 outranks a stray "morning"
         // in a warning line, and outranks the count table below.
         if let pattern = dayPatternTimes(in: text) {
-            return (pattern, weekly ? .weekly : .daily)
+            return (pattern, weekly ? .weekly : .daily, nil)
         }
         let words = timeWordTimes(in: text)
         if !words.isEmpty {
-            return (words, weekly ? .weekly : .daily)
+            return (words, weekly ? .weekly : .daily, nil)
         }
         if let counted = countedDoseTimes(in: text) {
-            return (counted, weekly ? .weekly : .daily)
+            return (counted, weekly ? .weekly : .daily, nil)
         }
-        if weekly { return ([], .weekly) }
-        if dailyTokens.contains(where: { text.contains($0) }) { return ([], .daily) }
-        return ([], nil)
+        if let frequencyTimes = frequencyRowTimes(in: phraseText) {
+            return (frequencyTimes, weekly ? .weekly : .daily, .afterMeal)
+        }
+        if weekly { return ([], .weekly, nil) }
+        if isOnceDaily(in: phraseText) { return ([], .daily, nil) }
+        if dailyTokens.contains(where: { text.contains($0) }) { return ([], .daily, nil) }
+        return ([], nil, nil)
     }
 
     // MARK: - Schedule tables and matchers
@@ -214,11 +251,18 @@ enum MedicationLabelParser {
         (8, 0), (13, 0), (20, 0)
     ]
 
-    /// How many default times a "twice a day" count means, and which hours.
-    /// Off-table counts (0, or 5+) yield nothing rather than a guess: "5
-    /// times a day" is a real prescription and a real thing to get wrong.
+    /// How many default times a `<n> times a day` DIGIT count means, and
+    /// which hours. Off-table counts (0, or 5+) yield nothing rather than
+    /// a guess: "5 times a day" is a real prescription and a real thing to
+    /// get wrong.
+    ///
+    /// Count 1 is deliberately absent (2026-10-15, the owner's frequency
+    /// report): "1 time a day" is the digit twin of "once a day", and the
+    /// once-a-day shape states no time of day. The old count-1 row guessed
+    /// 08:00 morning — exactly the inference the owner's rule forbids
+    /// ("Do NOT guess morning"). The count now falls through to the
+    /// once-daily phrases below, which yield the frequency and no times.
     static let countedDoseHours: [Int: [(hour: Int, minute: Int)]] = [
-        1: [(8, 0)],
         2: [(8, 0), (20, 0)],
         3: [(8, 0), (13, 0), (20, 0)],
         4: [(8, 0), (13, 0), (19, 0), (21, 0)]
@@ -233,6 +277,71 @@ enum MedicationLabelParser {
     /// not every day").
     private static let weeklyTokens = ["weekly", "once a week", "per week",
                                        "every week", "हप्ता", "साताको"]
+
+    // MARK: - The frequency table [MED-OCR-FREQ] (2026-10-15)
+
+    /// Frequency phrases → the hours their meaning implies: the "one
+    /// tablet twice a day" fix. The owner scanned exactly that label on
+    /// device and the schedule stayed empty — no day pattern, no time
+    /// word, and the count table only reads a DIGIT, so nothing matched
+    /// the words or the abbreviations.
+    ///
+    /// The hours are the conventional times of day these phrases name in
+    /// the household ("twice a day" = after lunch and after dinner, the
+    /// owner's own reading), expressed in the same convention hours the
+    /// rest of this file emits, so the pinned hour table converts them to
+    /// slots with no second mapping:
+    ///
+    ///  - twice a day → 13:00, 19:00 → afternoon, evening
+    ///  - three times a day → 8:00, 13:00, 19:00 → morning, afternoon,
+    ///    evening
+    ///
+    /// Every row matched here is a FREQUENCY-derived row, and a
+    /// frequency-derived row is an after-food row ("take twice a day" =
+    /// with meals) — which is why its one caller states `.afterMeal`
+    /// beside the times it returns.
+    ///
+    /// Conservative on purpose: the phrase lists are the families a label
+    /// actually states this way, and nothing else is inferred ("twice a
+    /// week", "thrice a day", "as needed" match nothing and get no
+    /// schedule at all — a wrong schedule costs a dose).
+    static let frequencyRowHours: [(phrases: [String], hours: [(hour: Int, minute: Int)])] = [
+        (["twice a day", "twice daily", "two times a day", "two times daily",
+          "2 times daily",
+          "दिनमा दुई पटक"],
+         [(13, 0), (19, 0)]),
+        (["three times a day", "three times daily", "3 times daily",
+          "दिनमा तीन पटक"],
+         [(8, 0), (13, 0), (19, 0)])
+    ]
+
+    /// The abbreviation row of the frequency table: "BD" / "b.i.d" and
+    /// "TDS" / "t.i.d", as STANDALONE tokens — dots between the letters
+    /// optional, non-alphanumerics required on both sides.
+    ///
+    /// Deliberately regexes and not phrase-list substrings: two- and
+    /// three-letter ASCII abbreviations matched as substrings would fire
+    /// inside ordinary words ("od" in "food", "bd" in "abdomen"), and a
+    /// frequency invented out of a warning line becomes schedule rows
+    /// nobody stated. The lookarounds are the whole guard, and they are
+    /// why the two-letter forms can be trusted at all.
+    private static let twiceDailyPattern = try? NSRegularExpression(
+        pattern: "(?<![a-z0-9])(?:b\\.?i\\.?d\\.?|b\\.?d\\.?)(?![a-z0-9])")
+    private static let thriceDailyPattern = try? NSRegularExpression(
+        pattern: "(?<![a-z0-9])(?:t\\.?d\\.?s\\.?|t\\.?i\\.?d\\.?)(?![a-z0-9])")
+    private static let onceDailyPattern = try? NSRegularExpression(
+        pattern: "(?<![a-z0-9])o\\.?d\\.?(?![a-z0-9])")
+
+    /// The once-a-day forms: one dose whose TIME OF DAY the label does
+    /// not state — and this parser does not guess one. "Once daily" is
+    /// the phrase that used to guess 08:00 morning through the count
+    /// table's count-1 row; under the owner's rule it now yields the
+    /// frequency and no times, and the family picks the time of day for
+    /// a single daily dose. The editor shows one blank row; nothing is
+    /// assigned for them.
+    private static let onceDailyPhrases = ["once daily", "once a day",
+                                           "1 time daily", "1 time a day",
+                                           "दिनमा एक पटक"]
 
     /// The `d` `sep` `d` `sep` `d` day pattern, ASCII digits only (the input
     /// is digit-normalized before this runs). The lookarounds keep it from
@@ -297,6 +406,40 @@ enum MedicationLabelParser {
             return sorted(hours.map { DateComponents(hour: $0.hour, minute: $0.minute) })
         }
         return nil
+    }
+
+    /// The frequency table's times for the phrases in `text` (the
+    /// whitespace-collapsed copy — see `schedule(in:)`), or nil.
+    ///
+    /// Row order decides when a text somehow carries phrases from two
+    /// rows: the twice-daily row is tested first, then the thrice-daily
+    /// row, each by its phrase list and then its abbreviation. An
+    /// off-table phrase matches nothing here — the caller's fall-through
+    /// then records no schedule, which is the honest answer.
+    private static func frequencyRowTimes(in text: String) -> [DateComponents]? {
+        let abbreviations = [twiceDailyPattern, thriceDailyPattern]
+        for (row, abbreviation) in zip(frequencyRowHours, abbreviations) {
+            let phraseHit = row.phrases.contains { text.contains($0) }
+            let abbreviationHit: Bool
+            if let abbreviation {
+                abbreviationHit = abbreviation.firstMatch(
+                    in: text, range: NSRange(text.startIndex..., in: text)) != nil
+            } else {
+                abbreviationHit = false
+            }
+            guard phraseHit || abbreviationHit else { continue }
+            return sorted(row.hours.map { DateComponents(hour: $0.hour, minute: $0.minute) })
+        }
+        return nil
+    }
+
+    /// Whether the text states a once-a-day frequency — by phrase
+    /// ("once a day") or by the standalone "OD" abbreviation.
+    private static func isOnceDaily(in text: String) -> Bool {
+        if onceDailyPhrases.contains(where: { text.contains($0) }) { return true }
+        guard let onceDailyPattern else { return false }
+        return onceDailyPattern.firstMatch(
+            in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 
     /// Dose times in clock order, one entry per hour:minute. The editor's
