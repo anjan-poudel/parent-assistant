@@ -15,6 +15,7 @@
 | define-requirements | `specs/define-requirements.lock.yaml` | `requirements_lock` | COMPLETED | 2026-10-14 |
 | define-requirements | `specs/define-requirements.md` | `requirements_doc` | COMPLETED | 2026-10-14 |
 | design-l1 | `specs/design-l1.md` | `architecture_l1` | COMPLETED | 2026-10-15 |
+| review-l1 | `specs/review-l1.md` | `review_report` | COMPLETED | 2026-10-15 |
 | final-sign-off | `specs/final-sign-off.md` | `—` | COMPLETED | 2026-10-10 |
 | define-requirements | `.ai-sdd/outputs/define-requirements.md` | `—` | COMPLETED | 2026-03-03 |
 | design-l1 | `.ai-sdd/outputs/design-l1.md` | `—` | COMPLETED | 2026-03-03 |
