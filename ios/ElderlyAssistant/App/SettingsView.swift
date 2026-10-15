@@ -4536,6 +4536,18 @@ struct MedicationScheduleSettingsView: View {
     /// "the same form pre-filled from the entry".
     @State private var editingEntryId: UUID?
 
+    /// [MED-SLOT] (T-020) The "Medicine times" card's working values —
+    /// the three household times as the pickers hold them. nil until the
+    /// card first appears; loaded from the coordinator's ONE accessor
+    /// (`currentMedicationSlotClock`), never from a store this view
+    /// composes itself (the T-018 deviation-3 follow-up T-020 closes).
+    @State private var medicineTimesDraft: MedicineTimesDraft?
+
+    /// [MED-SLOT] The lines the last "Medicine times" save surfaced —
+    /// catalog keys, exactly `SlotClockSaveResult.lineKeys`, rendered in
+    /// the active locale. Empty until a save.
+    @State private var medicineTimesLines: [String] = []
+
     /// The new-entry form opens on the SLOT model (design-l2 C8): the
     /// family states a time of day, and the clock model stays one explicit
     /// tap away on the model chooser. The default lives here rather than in
@@ -4562,6 +4574,13 @@ struct MedicationScheduleSettingsView: View {
                     }
                 }
                 addForm
+                // [MED-SLOT] (T-020) The household's OWN times: the
+                // mapping every slot row resolves through, editable here
+                // only (IF-9 — the one writer), with the m-5 one-shot
+                // note. It stays outside the emptiness branch above: the
+                // family may set its times before the first medicine
+                // exists.
+                medicineTimesSection
                 // This leaf edits the household's MEDICINES — nothing else
                 // (calendar-split task, 2026-09-17). The native-calendar
                 // mirror/two-way/import cards left for the Calendar settings
@@ -4817,18 +4836,20 @@ struct MedicationScheduleSettingsView: View {
     }
 
     /// The household mapping's read seam for the family's model switch —
-    /// read at the tap and never cached: the store is stateless over the
-    /// storage seam (`MedicationSlotClockStore`'s own contract; the
-    /// `MedicationScheduler.init` precedent), so an instance composed here
-    /// reads the ONE stored record the save gate and the arming path read,
-    /// and the chips can never be filled against a divergent clock.
+    /// read at the tap and never cached, and read through the
+    /// COORDINATOR's own store (`currentMedicationSlotClock`, T-020):
+    /// this view composes no second `MedicationSlotClockStore` over its
+    /// own `MigratingEncryptedStorage`, so the chips can never be filled
+    /// against a clock divergent from the one the save gate and the
+    /// arming path read (the T-018 deviation-3 follow-up this unit
+    /// closes; the card above reads through the same accessor).
     ///
     /// Nothing here resolves a time FOR the save — the view hands slots to
     /// IF-21; the mapping is consulted only to fill the chips, and the
     /// switch to the clock model only to seed the pickers at the times the
     /// entry already fires at.
     private func householdMapping() -> MedicationSlotClock {
-        MedicationSlotClockStore(storage: MigratingEncryptedStorage()).load()
+        coordinator.currentMedicationSlotClock()
     }
 
     /// The slot model's dose rows: one card per dose with a three-chip
@@ -5484,6 +5505,282 @@ struct MedicationScheduleSettingsView: View {
                 draft.times[index] = newValue
             }
         )
+    }
+
+    // MARK: - Medicine times: the household mapping ([MED-SLOT], T-020)
+
+    /// The household "Medicine times" card — the ONLY mutation point of
+    /// the slot mapping (design-l2 IF-9; the one-writer rule). Three rows
+    /// (morning / afternoon / evening), each a large time control beside
+    /// the time rendered the way the assistant SPEAKS it (NFR-MSR-004 —
+    /// the SpokenTime formatter is the only clock renderer on this card,
+    /// the Updates leaf's alarm-row precedent: the senior reads what he
+    /// will hear), then the honest result lines and the two actions —
+    /// "Back to the usual times" (reset) and Save. The m-5 one-shot
+    /// retime note sits at the card's foot until dismissed once.
+    private var medicineTimesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("settings.meds.times.title")
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                .foregroundStyle(appearance.colors.textPrimary)
+            ForEach(MedicationSlot.allCases, id: \.self) { slot in
+                medicineTimeRow(slot)
+            }
+            ForEach(medicineTimesLines, id: \.self) { key in
+                Text(LocalizedStringKey(key))
+                    .font(.system(size: appearance.typography.bodyPointSize))
+                    .foregroundStyle(medicineTimesLineColor(key))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
+            }
+            HStack(spacing: 10) {
+                medicineTimesResetButton
+                medicineTimesSaveButton
+            }
+            if coordinator.medicationRetimeNotePresented {
+                medicationRetimeNoteBanner
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
+        .onAppear { loadMedicineTimesIfNeeded() }
+    }
+
+    /// One household time: the slot's own label, the picker's current
+    /// value in SPOKEN words (NFR-MSR-004), and the 44pt floor picker
+    /// beside them.
+    private func medicineTimeRow(_ slot: MedicationSlot) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(LocalizedStringKey(Self.medicineTimesLabelKey(for: slot)))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                    .foregroundStyle(appearance.colors.textPrimary)
+                Text(spokenMedicineTime(for: slot))
+                    .font(.system(size: appearance.typography.bodyPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
+            }
+            Spacer(minLength: 0)
+            DatePicker("", selection: medicineTimeBinding(for: slot),
+                       displayedComponents: .hourAndMinute)
+                .labelsHidden()
+                .environment(\.locale, coordinator.activeLocale)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+        }
+        .padding(14)
+        .fixedSize(horizontal: false, vertical: true)
+        .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+    }
+
+    /// The slot's current value as WORDS — `SpokenTime` and nothing else
+    /// (NFR-MSR-004): no raw hour/minute interpolation anywhere on this
+    /// card, and no `Date.FormatStyle` clock string either. The value
+    /// comes from the card's live draft (falling back to the stored
+    /// mapping for the single frame before `onAppear` loads it), so the
+    /// words shown are never a lie.
+    private func spokenMedicineTime(for slot: MedicationSlot) -> String {
+        let time = liveMedicineTimesDraft.timeOfDay(for: slot)
+        return SpokenTime.string(hour: time.hour, minute: time.minute,
+                                 locale: coordinator.activeLocale)
+    }
+
+    /// Failure and unresolved lines read as errors; the clean
+    /// acknowledgment reads as secondary text.
+    private func medicineTimesLineColor(_ key: String) -> Color {
+        key == SlotClockSaveResult.savedLineKey
+            ? appearance.colors.textSecondary
+            : appearance.statusForeground(DesignTokens.stateError)
+    }
+
+    /// "Back to the usual times" — restores the DOCUMENTED defaults
+    /// (morning 08:00, afternoon 13:00, evening 19:00,
+    /// `MedicationSlotClock.default`) in the controls AND saves them
+    /// through IF-9: the label names a state, and one tap must actually
+    /// reach it — never a two-step edit the family has to discover.
+    /// Nothing is re-stated here: the seed IS `MedicationSlotClock.default`.
+    private var medicineTimesResetButton: some View {
+        Button {
+            resetMedicineTimes()
+        } label: {
+            Text("settings.meds.times.reset")
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.accentForeground)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.chipHeight)
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Save — hands the card's three values to IF-9 and renders exactly
+    /// the lines the result carries. The primary action keeps the
+    /// editor's own filled-surface shape.
+    private var medicineTimesSaveButton: some View {
+        Button {
+            saveMedicineTimes()
+        } label: {
+            Text("settings.meds.save")
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.chipHeight)
+                .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The m-5 one-shot note: the slot-model rule in the family's words,
+    /// dismissible once. Seen only while `medicationRetimeNotePresented`
+    /// (a refusal surfaced it and it has not been dismissed); the
+    /// dismissal persists and the note never returns.
+    private var medicationRetimeNoteBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("settings.meds.times.retimeNote")
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                coordinator.dismissMedicationRetimeNote()
+            } label: {
+                Text("settings.meds.times.retimeNote.dismiss")
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.accentForeground)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
+                    .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+    }
+
+    /// The card's current values — the loaded draft, or (for the single
+    /// render before `onAppear` runs) the mapping read fresh through the
+    /// coordinator's accessor. NEVER a second store: the read path is the
+    /// coordinator's, and the values shown are always the stored ones or
+    /// the family's own edits.
+    private var liveMedicineTimesDraft: MedicineTimesDraft {
+        medicineTimesDraft
+            ?? MedicineTimesDraft.loaded(from: coordinator.currentMedicationSlotClock(),
+                                         now: Date(), calendar: .current)
+    }
+
+    /// Seed the pickers ONCE per screen: the draft loads from the
+    /// coordinator the first time the card appears, and a later
+    /// appearance never reloads over the family's edits.
+    private func loadMedicineTimesIfNeeded() {
+        guard medicineTimesDraft == nil else { return }
+        medicineTimesDraft = MedicineTimesDraft.loaded(from: coordinator.currentMedicationSlotClock(),
+                                                        now: Date(), calendar: .current)
+    }
+
+    private func medicineTimeBinding(for slot: MedicationSlot) -> Binding<Date> {
+        Binding(
+            get: { liveMedicineTimesDraft.date(for: slot) },
+            set: { newValue in
+                if medicineTimesDraft == nil { loadMedicineTimesIfNeeded() }
+                medicineTimesDraft?.set(newValue, for: slot)
+            }
+        )
+    }
+
+    /// A save always answers in the result's own words: the lines ARE
+    /// `SlotClockSaveResult.lineKeys`, never composed here.
+    private func saveMedicineTimes() {
+        let result = coordinator.saveMedicationSlotClock(
+            liveMedicineTimesDraft.clock(calendar: .current))
+        medicineTimesLines = result.lineKeys
+    }
+
+    /// Reset restores the documented defaults in the controls and saves
+    /// them in the same tap (see the button's doc).
+    private func resetMedicineTimes() {
+        medicineTimesDraft = MedicineTimesDraft.loaded(from: MedicationSlotClock.default,
+                                                        now: Date(), calendar: .current)
+        saveMedicineTimes()
+    }
+
+    /// The card's OWN row label key for a slot
+    /// (`settings.meds.times.<slot>` — the section inventory's keys).
+    /// `slotKey(for:)` stays the entry rows' and the medication
+    /// vocabulary's home; this card names its rows with its own family,
+    /// exactly as the catalog splits them.
+    static func medicineTimesLabelKey(for slot: MedicationSlot) -> String {
+        "settings.meds.times." + slot.rawValue
+    }
+
+    /// The card's working value: the three household times as `Date`s
+    /// (what the shipped `DatePicker` speaks), converted from and back to
+    /// `TimeOfDay` at the card's edges. The conversions mirror
+    /// `draft(from:)` / `switchToTimes` above (today at the stated hour
+    /// and minute), so the card sees exactly the clock the rest of the
+    /// leaf sees.
+    ///
+    /// Internal, not private, on purpose — the suite's reset test drives
+    /// the exact seed→save circle the reset button makes
+    /// (`loaded(from: .default, ...).clock() == .default`), the same way
+    /// `draft(from:)` and `switchToTimes` above are reachable to the
+    /// editor suite. Nothing here is UI.
+    struct MedicineTimesDraft {
+        var morning: Date
+        var afternoon: Date
+        var evening: Date
+
+        /// The pickers' seed: the mapping's times, placed on `now`'s day.
+        static func loaded(from clock: MedicationSlotClock,
+                           now: Date, calendar: Calendar = .current) -> MedicineTimesDraft {
+            MedicineTimesDraft(
+                morning: place(clock.morning, on: now, calendar: calendar),
+                afternoon: place(clock.afternoon, on: now, calendar: calendar),
+                evening: place(clock.evening, on: now, calendar: calendar)
+            )
+        }
+
+        func date(for slot: MedicationSlot) -> Date {
+            switch slot {
+            case .morning: return morning
+            case .afternoon: return afternoon
+            case .evening: return evening
+            }
+        }
+
+        mutating func set(_ date: Date, for slot: MedicationSlot) {
+            switch slot {
+            case .morning: morning = date
+            case .afternoon: afternoon = date
+            case .evening: evening = date
+            }
+        }
+
+        /// The picker value as a `TimeOfDay` — the readback the save hands
+        /// to IF-9. `dateComponents` yields in-range components for a real
+        /// `Date`, so the mapping this card can build is always
+        /// determinate; the validation gate in IF-9 remains the backstop
+        /// for any other caller.
+        func timeOfDay(for slot: MedicationSlot, calendar: Calendar = .current) -> TimeOfDay {
+            let components = calendar.dateComponents([.hour, .minute], from: date(for: slot))
+            return TimeOfDay(hour: components.hour ?? 0, minute: components.minute ?? 0)
+        }
+
+        /// The three picker values as the mapping IF-9 validates.
+        func clock(calendar: Calendar = .current) -> MedicationSlotClock {
+            MedicationSlotClock(morning: timeOfDay(for: .morning, calendar: calendar),
+                                afternoon: timeOfDay(for: .afternoon, calendar: calendar),
+                                evening: timeOfDay(for: .evening, calendar: calendar))
+        }
+
+        private static func place(_ time: TimeOfDay, on day: Date,
+                                  calendar: Calendar) -> Date {
+            calendar.date(bySettingHour: time.hour, minute: time.minute,
+                          second: 0, of: day) ?? day
+        }
     }
 
     // The two calendar cards that used to close this leaf — the

@@ -18,9 +18,19 @@ description: Implementation notes for the medication-schedules-reminders impleme
 | W2 | T-008, T-009, T-011, T-013, T-015 | 7 classes — 176 tests (2026-10-15) | PASS — 176/176, 0 failures |
 | W3 | T-010, T-014, T-017 | 4 classes — 65 tests (2026-10-15) | PASS — 65/65, 0 failures |
 | W4 | T-016, T-018 | 4 classes — 77 tests (2026-10-15) | PASS — 77/77, 0 failures |
-| W5 | T-019, T-020 | pending | pending |
-| W6 | T-021 | pending | pending |
-| W7 | T-022 | pending | pending |
+| W5 | T-019, T-020 | code + typecheck only (speed directive) | GREEN — combined-tree module emit 0 errors; probes green |
+| W6 | T-021 | code + typecheck only (speed directive) | pending |
+| W7 | T-022 | full suite vs documented baseline (the tail's single test gate) | pending |
+
+> **Speed directive (owner, mid-run 2026-10-15):** W5 and W6 are code + typecheck
+> only — their consolidated scoped passes are skipped, and per-unit
+> report-vs-file spot-checks are dropped (typecheck is the per-unit bar). The
+> single test gate for the remaining tail is the W7 full-suite run against the
+> documented pre-existing baseline. Kept unchanged: the confidence overlay on
+> implement units, the W7 full-suite run + release-log-safety gate, and
+> final-sign-off (T2 + HIL + DV-1..7 + advisory safety pass). The trade-off is
+> owner-accepted: a defect introduced in W5/W6 surfaces only at the W7 suite.
+> Do not re-add the scoped passes.
 
 ## Deviations
 
@@ -154,6 +164,39 @@ description: Implementation notes for the medication-schedules-reminders impleme
   tap on the selected meal chip clears the relation to nil (the model admits
   nil); every new interactive element carries the 44pt/18pt floors pinned
   line-by-line in the suite.
+- T-019 recorded judgment calls (4): the new `evidenceStore` init parameter is
+  defaulted nil — holds register but file deletions are skipped, and the
+  composition obligation (W6/T-021 passes the shared store) is stated at the
+  init site; `attachEvidence`'s unknown-log arm deletes nothing (a bare file
+  name cannot resolve its entry directory — guessing is not the seam's
+  business); observability ownership split — T-019 emits
+  `medication_evidence_discarded` (outcomes late_hold / replaced / denied /
+  persistence_failed / attach_failed) and `medication_evidence_attached` with
+  entry-id hashes only, while `medication_evidence_captured` remains T-021's;
+  the runtime harness used a Foundation-only store double (UIKit unavailable
+  off-Simulator) against the real frozen scheduler sources.
+- T-020 recorded judgment calls (8): hook wiring sits beside `onScheduleChanged`
+  (after all stored properties initialize) and the discarded calendar-write
+  result is deliberate (share-consent-gated, inert when unavailable; the
+  caregiver-notify toggle is consulted nowhere in the region — T-016's flag
+  held); the coordinator's injected `slotClockStore` is now passed through into
+  the `MedicationScheduler` construction so save gate, re-arm, arming feed and
+  `currentMedicationSlotClock` are one instance (nil keeps prior behavior
+  byte-identical); **boundary exception, disclosed:** a paired two-line edit to
+  `SettingsPersistenceTests.swift` (one comment + the new allow-list key) —
+  that suite pins the backfill list exactly, so without the edit the W5 gate
+  would be structurally red; no 40-char token introduced there (two
+  pre-existing names in that file remain untouched); the saved line reuses the
+  closest existing key (`profile.saved`) and the rearmed/kept counts ride
+  `SlotClockSaveResult` fields rather than interpolated copy (T-012 follow-up
+  flagged: a dedicated re-arm summary key if W6 wants counts spoken);
+  `settings.meds.times.unresolved` carries no placeholder, so unresolved slots
+  render as a plain sentence with the slot list riding the struct; reset = seed
+  the documented defaults (08:00/13:00/19:00) then save through the same IF-9
+  path (validated, persisted, re-armed, honest lines); `MedicineTimesDraft` is
+  internal for the reset round-trip test; a literal `.frame(minHeight: 56)` the
+  suite's own token pin caught was fixed in the source, not by weakening the
+  test.
 
 ## Verification
 
@@ -349,6 +392,56 @@ description: Implementation notes for the medication-schedules-reminders impleme
     `pendingRowFailureKey`, `switchToSlots`, `switchToTimes`). Every string is
     a T-012 catalog key (en+ne verified present); 44pt/18pt floors pinned.
     Suite 6 named tests.
+- **W5 (code + typecheck only — speed directive; no scoped pass):**
+  - T-019: `swiftc -parse` 0 on both files; frozen-snapshot module emit exit 0
+    (164 warnings = the T-018 baseline, 0 errors); test-file typecheck exit 0;
+    both error-sensitivity probes exit 1 at the injected lines; optional
+    runtime harness over the real frozen scheduler sources ran 121 checks /
+    0 failures (the 7 T-019 scenarios plus T-016's 8 as a no-regression
+    signal); sha256 re-check matched the frozen bytes after all runs.
+  - T-020: `swiftc -parse` 0 on all five files; frozen-snapshot module emit
+    exit 0 / 0 errors over a snapshot that INCLUDED T-019's landed scheduler
+    (the combined W5 tree typechecks), 164 warnings unchanged; new suite and
+    the paired SettingsPersistenceTests edit both typecheck exit 0; both
+    probes exit 1 at the injected lines; all 11 consumed catalog keys
+    verified non-empty in en+ne; 23 in-suite source pins dry-run pass against
+    the final sources; sha256 re-check matched.
+  - Not run by directive: the W5 `-only-testing` pass (scheduler / slot-clock
+    settings / save plumbing) — the W7 full suite is the tail's single gate.
+- **W5 unit outcomes:**
+
+  - T-019 — `MedicationScheduler.swift`: IF-15 evidence hold —
+    `holdPendingEvidence(logId:fileName:for:)` (`@discardableResult -> Bool`;
+    R-3 late hold deletes the stored file, emits, registers nothing, returns
+    false; re-capture deletes the superseded file first);
+    `attachEvidence(fileName:toLog:) -> Result<Void, SafetyError>` attaches to
+    an existing log only (unknown log = `.reminderPersistenceFailed`, nothing
+    created); `finalizeAcknowledgement` mints `held?.logId ?? UUID()`, sets
+    `evidencePhotoFileName` before the single persist, and on the failure arm
+    deletes the held file, clears the hold, strips the retained record's name
+    (intakeRecorded already does not fire); deny arm discards; success emits
+    `_attached` once and clears the hold WITHOUT deleting the claimed file.
+    Holds are in-memory only (process death loses the claim — honest loss).
+    `MedicationSchedulerProtocol` unchanged (residual open 8 default held).
+    Suite 34 → 41 tests (7 named).
+  - T-020 — `SettingsView.swift` + `AppCoordinator.swift` +
+    `SettingsPersistence.swift` (+ new suite): the "Medicine times" card in
+    the medication settings — three slot rows with spoken times ONLY through
+    the SpokenTime formatter (zero interpolation on the card, pinned),
+    DatePickers at the 44pt/18pt floors, reset + save, honest result lines
+    (saveFailed / unresolved / saved), and the one-shot retime banner. IF-9
+    `saveMedicationSlotClock(_:) -> SlotClockSaveResult` ordered
+    validate → persist → `rearmForSlotClockChange()` (invalid or failed
+    persist = nothing stored, no re-arm; unresolved slots surface honestly;
+    re-arm persistence failure reuses the saveFailed line) with a pure
+    `lineKeys(for:)` mapper; `currentMedicationSlotClock()` accessor (closes
+    T-018's deviation-3 follow-up; the view constructs no store). One-shot
+    note mirrors the appointment-SMS precedent exactly (didSet persist,
+    `medicationRetimeNoteDismissed.v1` allow-listed, construction read,
+    presented-until-dismissed then never again). Composition wiring:
+    `onSignificantEvent` → main hop → `calendarShareService.writeSignificantEvent`
+    and `onSlotEntryRetimeRefused` → main hop → surface the note; no caregiver
+    toggle anywhere in the region. Suite 7 named tests.
 - **Carry-forward baseline note (for the W7 full-suite comparison):** the
   Spotify localization suite's absolute key-count pin is red at the branch
   base (pin 1,381 vs catalog 1,439 pre-W0) and is untouched by this feature —

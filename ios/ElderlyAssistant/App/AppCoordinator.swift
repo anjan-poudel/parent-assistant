@@ -177,6 +177,85 @@ struct MedicationSaveRequest: Equatable {
     var photo: UIImage?
 }
 
+/// The honest outcome of one "Medicine times" save — the household
+/// mapping's ONE write path (`saveMedicationSlotClock`, IF-9; T-020).
+///
+/// A flat value, not a rule-carrying one: by the time this is built the
+/// coordinator has already judged everything (validate, then persist,
+/// then re-arm), so the settings card renders the fields and re-derives
+/// nothing.
+///
+/// The fields mirror IF-9's three outcomes and IF-12's report, losing no
+/// fact between the scheduler and the screen:
+///
+///  - `persisted == false` with `invalidSlot != nil`: validation (IF-2)
+///    refused the mapping BEFORE any write — the offending slot rides
+///    along, nothing was stored and nothing re-armed;
+///  - `persisted == false` with `persistenceFailed == true`: the store
+///    (IF-4) refused or failed the write — the stored mapping is
+///    unchanged and no re-arm ran;
+///  - `persisted == true`: the mapping is stored and
+///    `rearmForSlotClockChange` (IF-12) ran; its four facts travel back
+///    verbatim (m-1).
+///
+/// `lineKeys` is the honest line set for the settings card, as CATALOG
+/// KEYS (the house convention: the view resolves them in the active
+/// locale, and the tests pin the keys, never a rendered string) — one
+/// line per fact, failure first:
+///
+///  - `saveFailedLineKey` for a refused save or a failed re-arm write;
+///  - `unresolvedLineKey` when the re-arm left slots unresolved;
+///  - `savedLineKey` (exactly alone) for a clean commit.
+///
+/// Catalog gaps, flagged as T-012 follow-ups: no key exists for a
+/// count-bearing "saved and re-armed N" line, so the counts stay in the
+/// fields above and the line stays the plain saved key — this type never
+/// claims a number the catalog cannot speak — and the T-012
+/// `unresolvedLineKey` value carries NO placeholder, so no slot name is
+/// interpolated into its sentence; the unresolved slots ride the field
+/// for the caller and are deliberately not re-worded here.
+struct SlotClockSaveResult: Equatable {
+
+    /// True when the mapping itself was validated and persisted through
+    /// the C1 store. False covers both refusal points.
+    let persisted: Bool
+
+    /// The slot validation (IF-2) refused, or nil when validation passed.
+    let invalidSlot: MedicationSlot?
+
+    /// IF-12 report facts, verbatim — all zero/false when no re-arm ran.
+    let rearmedCount: Int
+    let keptLiveCount: Int
+    let unresolvedSlots: [MedicationSlot]
+    let persistenceFailed: Bool
+
+    /// The honest lines for the settings card, as catalog keys — never
+    /// empty (a save always says something).
+    let lineKeys: [String]
+
+    /// The failure line: a refused save, or a re-arm write that failed.
+    static let saveFailedLineKey = "settings.meds.times.saveFailed"
+    /// The unresolved line: the re-arm left slots without a determinate
+    /// time under the new mapping.
+    static let unresolvedLineKey = "settings.meds.times.unresolved"
+    /// The clean acknowledgment. Catalog gap (T-012 follow-up): the
+    /// closest existing key; a `settings.meds.times.saved` key is the
+    /// eventual home.
+    static let savedLineKey = "profile.saved"
+
+    /// The line set one re-arm report surfaces (m-1). Pure, so the suite
+    /// pins all four report shapes without staging device states: a
+    /// failed write is the failure line, a non-empty unresolved list the
+    /// unresolved line, and a clean pass the plain saved line.
+    static func lineKeys(for report: SlotClockRearmReport) -> [String] {
+        var keys: [String] = []
+        if report.persistenceFailed { keys.append(saveFailedLineKey) }
+        if !report.unresolvedSlots.isEmpty { keys.append(unresolvedLineKey) }
+        if keys.isEmpty { keys.append(savedLineKey) }
+        return keys
+    }
+}
+
 /// Central coordinator that wires all services together.
 /// Starts safety-critical services first (medication scheduler, health monitor),
 /// then voice pipeline, then LLM.
@@ -1337,6 +1416,32 @@ final class AppCoordinator: ObservableObject {
         }
     }
     private static let appointmentSmsNoteDismissedKey = "appointmentSmsNoteDismissed.v1"
+
+    /// One-shot retime-refused note (IF-10, m-5; T-020): a slot entry's
+    /// retime was refused, so the medication settings leaf's "Medicine
+    /// times" section explains the slot-model rule once. The persist half
+    /// is exactly the `appointmentSmsNoteDismissed` precedent above —
+    /// dismissal is a preference, not a secret: persisted on every write
+    /// through the property's own didSet, allow-listed in
+    /// `SettingsPersistence` so a reinstall keeps it, and read back in
+    /// init. Dismissal is confined to `dismissMedicationRetimeNote`.
+    @Published private(set) var medicationRetimeNoteDismissed: Bool {
+        didSet {
+            SettingsPersistence.shared.set(medicationRetimeNoteDismissed,
+                                      forKey: Self.medicationRetimeNoteDismissedKey)
+        }
+    }
+    private static let medicationRetimeNoteDismissedKey = "medicationRetimeNoteDismissed.v1"
+
+    /// The note's PRESENTATION state — transient and deliberately not
+    /// persisted (the dismissal above is the durable half): a refusal
+    /// surfaces the note unless it was dismissed, and the note stays up
+    /// until dismissed once. `surfaceMedicationRetimeNote` is its only
+    /// setter of true and `dismissMedicationRetimeNote` the only clearer.
+    /// Not read back in init: a relaunch between a refusal and its
+    /// dismissal does not resurrect the note — the NEXT refusal brings it
+    /// back for a household that never dismissed it.
+    @Published private(set) var medicationRetimeNotePresented: Bool = false
 
     // Voice
     private let audioEngine: AVAudioEngine
@@ -3255,6 +3360,13 @@ final class AppCoordinator: ObservableObject {
         appointmentStore.calendarWritesEnabled = appointmentsToCalendarValue
         self.appointmentSmsNoteDismissed =
             SettingsPersistence.shared.bool(forKey: Self.appointmentSmsNoteDismissedKey)
+        // [MED-SLOT] (T-020) The retime note's persisted half — the
+        // construction read, the precedent's exact shape (this is the
+        // property's ONLY initial assignment, so its didSet does not
+        // fire). The transient presentation half keeps its declaration
+        // default (false).
+        self.medicationRetimeNoteDismissed =
+            SettingsPersistence.shared.bool(forKey: Self.medicationRetimeNoteDismissedKey)
 
         // Safety-critical service (no LLM dependency)
         self.medicationScheduler = MedicationScheduler(
@@ -3269,7 +3381,19 @@ final class AppCoordinator: ObservableObject {
             // entry's photo folder when the medication is deleted. Built
             // with the MEDICATION prefix, so dose photos never resolve
             // into a routine entry's folder.
-            visualAidStore: medicationVisualAidStore
+            visualAidStore: medicationVisualAidStore,
+            // [MED-SLOT] (T-020) The mapping store flows to the scheduler
+            // VERBATIM from this initializer's seam. In the app the
+            // argument is nil and the scheduler composes its own store
+            // over the SAME storage seam — byte-identical to the T-017
+            // composition (the store is stateless, so both instances read
+            // the ONE record). Where a store IS injected, the scheduler,
+            // the IF-9 save gate and `currentMedicationSlotClock` are now
+            // the SAME instance: an injected mapping governs the re-arm
+            // and the arming feed exactly as it governs the save, and no
+            // composition can persist through one seam while arming
+            // through another.
+            slotClockStore: slotClockStore
         )
 
         // Routine reminders (v2 pivot Phase 1): the medication path's
@@ -3754,6 +3878,39 @@ final class AppCoordinator: ObservableObject {
             // below rather than taking it here, so there is exactly one
             // path that decides what the mirror should contain.
             self?.calendarSync.syncNow(entries: self?.routineScheduler.entries() ?? [])
+        }
+        // [MED-SLOT] (T-020) The medication scheduler's two remaining
+        // composition hooks (T-016's seams). Attached here, with the
+        // schedule seam above, because the closures capture self — legal
+        // only after every stored property holds its initial value.
+        //
+        //  - `onSignificantEvent` → the shared calendar's one-off write
+        //    path (T-015): the three at-risk events (missed dose, blocked
+        //    double dose, escalation started) additionally surface on the
+        //    family calendar. The MAIN HOP runs first — the hook may fire
+        //    off-main, and hopping keeps the LAZY `calendarShareService`
+        //    constructed on main. The write's result is deliberately
+        //    discarded HERE and only here: the service reports its own
+        //    honest outcome through observability, and a failure must
+        //    never affect the scheduler's local behaviour. NOTHING in
+        //    this wiring consults the caregiver notification toggle: the
+        //    calendar channel is consent-gated inside the service
+        //    (`canShare`), and gating it on the notify preference would
+        //    silently drop the at-risk alert types the preference was
+        //    never about (T-016's flag).
+        //  - `onSlotEntryRetimeRefused` → the one-shot settings note
+        //    (IF-10, m-5) through the same main hop. The entry id is
+        //    deliberately dropped: the note names no medication
+        //    (NFR-MSR-002).
+        medicationScheduler.onSignificantEvent = { [weak self] event, entry in
+            DispatchQueue.main.async { [weak self] in
+                _ = self?.calendarShareService.writeSignificantEvent(event, entry: entry)
+            }
+        }
+        medicationScheduler.onSlotEntryRetimeRefused = { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                self?.surfaceMedicationRetimeNote()
+            }
         }
         // Forward the external calendar service's publishes (Settings
         // status/lead, scan results reaching the Reminders + Calendar
@@ -12231,6 +12388,93 @@ self.noteTalkContractChanged()
         // [BOOT-REVIEW P1-7] Removing an entry can empty today's doses —
         // the row hides itself, so the count must follow.
         refreshActiveNotificationCount()
+    }
+
+    // MARK: - Medicine times: the household mapping (IF-9/IF-10) [MED-SLOT]
+
+    /// The current household mapping, read through the coordinator's OWN
+    /// store — the T-018 deviation-3 follow-up this unit closes. The
+    /// "Medicine times" card seeds its three rows from here instead of
+    /// composing a second store over the storage seam, so the view reads
+    /// the ONE record through the ONE seam the save gate and the arming
+    /// path already read, and can never hold a divergent clock. A read,
+    /// never a cache: `load()` is the store's non-throwing read (defaults
+    /// on missing/corrupt), and nothing here writes.
+    func currentMedicationSlotClock() -> MedicationSlotClock {
+        slotClockStore.load()
+    }
+
+    /// Saves the household "Medicine times" mapping (IF-9; T-020) — the
+    /// ONE write path of the slot clock (the settings card is its caller).
+    ///
+    /// The order is the contract (persist-before-effect, design-l2 IF-9):
+    ///
+    ///  1. **Validate first** (IF-2): a mapping with any indeterminate
+    ///     slot is refused BEFORE anything is written or re-armed; the
+    ///     result names the offending slot and carries the failure line.
+    ///     The stored mapping is untouched;
+    ///  2. **Persist through the C1 store** (IF-4): a refused or failed
+    ///     write leaves the stored record unchanged and runs NO re-arm —
+    ///     nothing may arm against a mapping that was not stored;
+    ///  3. **Re-arm** (`rearmForSlotClockChange`, IF-12; T-010): the
+    ///     report's four facts travel back verbatim (m-1) and the result's
+    ///     lines follow the report, never a claim beside it.
+    ///
+    /// Main thread, like every scheduler call beside it. The result is
+    /// the complete honest outcome — no fact here is inferred later at
+    /// the view.
+    func saveMedicationSlotClock(_ clock: MedicationSlotClock) -> SlotClockSaveResult {
+        // 1. Validation before persist (IF-2). The offending slot is the
+        //    one fact the family-facing line does not carry; it rides the
+        //    result for the caller and the tests.
+        if case .failure(.indeterminate(let slot)) = MedicationSlotClock.validate(clock) {
+            return SlotClockSaveResult(persisted: false,
+                                       invalidSlot: slot,
+                                       rearmedCount: 0,
+                                       keptLiveCount: 0,
+                                       unresolvedSlots: [],
+                                       persistenceFailed: false,
+                                       lineKeys: [SlotClockSaveResult.saveFailedLineKey])
+        }
+        // 2. Persist (IF-4). The store validates again as its own
+        //    backstop; a refused or failed write is reported honestly and
+        //    re-arms nothing.
+        guard case .success = slotClockStore.save(clock) else {
+            return SlotClockSaveResult(persisted: false,
+                                       invalidSlot: nil,
+                                       rearmedCount: 0,
+                                       keptLiveCount: 0,
+                                       unresolvedSlots: [],
+                                       persistenceFailed: true,
+                                       lineKeys: [SlotClockSaveResult.saveFailedLineKey])
+        }
+        // 3. Re-arm under the mapping just stored (IF-12) and surface its
+        //    facts verbatim (m-1).
+        let report = medicationScheduler.rearmForSlotClockChange()
+        return SlotClockSaveResult(persisted: true,
+                                   invalidSlot: nil,
+                                   rearmedCount: report.rearmedCount,
+                                   keptLiveCount: report.keptLiveCount,
+                                   unresolvedSlots: report.unresolvedSlots,
+                                   persistenceFailed: report.persistenceFailed,
+                                   lineKeys: SlotClockSaveResult.lineKeys(for: report))
+    }
+
+    /// Surfaces the one-shot retime note (IF-10, m-5; T-020) — set from
+    /// the scheduler's refusal hook through a main hop. Shown until
+    /// dismissed ONCE; a household that dismissed it never sees it again,
+    /// whatever refuses retimes afterwards.
+    func surfaceMedicationRetimeNote() {
+        guard !medicationRetimeNoteDismissed else { return }
+        medicationRetimeNotePresented = true
+    }
+
+    /// Dismisses the retime note for good: the dismissal persists (the
+    /// property's own didSet) and the note is never shown again (IF-10).
+    /// Idempotent — dismissing twice writes the same value.
+    func dismissMedicationRetimeNote() {
+        medicationRetimeNotePresented = false
+        medicationRetimeNoteDismissed = true
     }
 
     // MARK: - Doctor's appointments (medical task, 2026-09-07)
