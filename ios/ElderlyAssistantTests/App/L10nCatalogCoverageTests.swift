@@ -485,8 +485,11 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// master keys plus `feeds.readerTitle`), so this baseline is 1,416.
     /// Re-measured at the T-171 cloud-chat copy landing (2026-10-14): the
     /// 18-key cloud-chat family (design-l1 §17) lands on the same tree —
-    /// total 1,439 — so this baseline is 1,434.
-    private static let callingBaselineKeyCount = 1_434
+    /// total 1,439 — so this baseline is 1,434. Re-measured at the home
+    /// medium-fit dock labels (2026-10-15): two medium-mode dock keys
+    /// (`home.dock.appliance`, `home.dock.translate`) land on the same
+    /// tree — total 1,441 — so this baseline is 1,436.
+    private static let callingBaselineKeyCount = 1_436
 
     /// The authored copy, both languages. The design freezes the keys and
     /// the parameter contracts, not the wording (catalog-time copy), so
@@ -1038,8 +1041,10 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// `feeds.readerTitle`), so this baseline is 1,398. Re-measured at the
     /// T-171 cloud-chat copy landing (2026-10-14): the 18-key cloud-chat
     /// family (design-l1 §17) lands on the same tree — total 1,439 — so
-    /// this baseline is 1,416.
-    private static let familyContactsBaselineKeyCount = 1_416
+    /// this baseline is 1,416. Re-measured at the home medium-fit dock
+    /// labels (2026-10-15): two medium-mode dock keys land on the same
+    /// tree — total 1,441 — so this baseline is 1,418.
+    private static let familyContactsBaselineKeyCount = 1_418
 
     /// Scenario: All 21 keys exist in both languages — the behavioural
     /// half. Every key resolves through the shipped lproj bundles in both
@@ -1660,7 +1665,10 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// unit adds exactly its 18 — total 1,439 — so the baseline is 1,421.
     /// The +18 delta is the constant, not the absolute; a later landing on
     /// the same tree re-measures this pin deliberately rather than guessing.
-    private static let cloudChatBaselineKeyCount = 1_421
+    /// Re-measured at the home medium-fit dock labels (2026-10-15): two
+    /// medium-mode dock keys land on the same tree — total 1,441 — so
+    /// this baseline is 1,423.
+    private static let cloudChatBaselineKeyCount = 1_423
 
     /// The design-l1 §17 copy as authored by this unit, verbatim, both
     /// languages. T-176 owns the final disclosure-copy review; this pin
