@@ -192,8 +192,11 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// adds `feeds.readerTitle` — total 1,421, so this baseline is 1,402.
     /// Re-measured at the T-171 cloud-chat copy landing (2026-10-14): the
     /// 18-key cloud-chat family (design-l1 §17) lands on the same tree —
-    /// total 1,439 — so this baseline is 1,420.
-    private static let dialogueBaselineKeyCount = 1_420
+    /// total 1,439 — so this baseline is 1,420. Re-measured at the home
+    /// medium-fit dock labels (2026-10-15): two medium-mode dock keys
+    /// (`home.dock.appliance`, `home.dock.translate`) land on the same
+    /// tree — total 1,441 — so this baseline is 1,422.
+    private static let dialogueBaselineKeyCount = 1_422
 
     /// The design-l2 §16 draft copy, verbatim, both languages. The owner
     /// copy review is a later step recorded in the plan; this pin makes

@@ -890,12 +890,22 @@ struct HomeDock: View {
         VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 6 : 4) {
             LazyVGrid(columns: topColumns, alignment: .center, spacing: 8) {
                 Button(action: onAppliance) {
-                    tile(artwork: "settings", titleKey: "plugin.applianceHelper.name", onRail: false)
+                    // [MEDIUM-FIT] (2026-10-15) Medium labels drop the
+                    // qualifier — owner: just "उपकरण", no "सहायता".
+                    tile(artwork: "settings",
+                         titleKey: dynamicTypeSize <= .medium
+                             ? "home.dock.appliance" : "plugin.applianceHelper.name",
+                         onRail: false)
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("home.action.appliance")
                 Button(action: onLiveTranslate) {
-                    tile(artwork: "translate", titleKey: LiveTranslateEntry.labelKey, onRail: false)
+                    // [MEDIUM-FIT] (2026-10-15) Medium labels drop the
+                    // qualifier — owner: just "अनुवाद", no "लाइभ".
+                    tile(artwork: "translate",
+                         titleKey: dynamicTypeSize <= .medium
+                             ? "home.dock.translate" : LiveTranslateEntry.labelKey,
+                         onRail: false)
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("home.action.liveTranslate")
