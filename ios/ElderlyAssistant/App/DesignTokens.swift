@@ -1,6 +1,5 @@
 import SwiftUI
 import UIKit
-import os
 
 /// Shared accessibility, layout and invariant operational colours.
 /// Skin colours belong to the environment's AppAppearance palette.
@@ -181,29 +180,20 @@ extension UIScreen {
     /// the area-ratio check reads 1.0 (that bug shipped one round as
     /// "nothing changed on the 17 Pro Max").
     var isDisplayZoomed: Bool {
-        let current = currentMode
-        let largest = availableModes.max(by: {
-            $0.size.width * $0.size.height < $1.size.width * $1.size.height
-        })
-        let zoomed: Bool
-        if let current, let largest {
-            zoomed = current.size != largest.size
-        } else {
-            zoomed = false
-        }
+        // Device-verified (17 Pro Max, Medium display option, 2026-10-15):
+        //   currentMode = (1125, 2436)  — the zoomed render grid
+        //   nativeBounds = (1320, 2868) — the panel, reported correctly
+        //   availableModes = [current only] — useless on iOS 26
+        // On Default display size the current mode IS the native panel
+        // (Anzaan: 1290x2796 == 1290x2796), so the area comparison is
+        // 1.0; on Medium/Large it is ~1.38.
+        guard let current = currentMode else { return false }
+        let nativeArea = nativeBounds.width * nativeBounds.height
+        let currentArea = current.size.width * current.size.height
+        let zoomed = nativeArea > currentArea * 1.001
         #if DEBUG
-        let line = "currentMode=\(String(describing: current?.size)) modesCount=\(availableModes.count) largest=\(String(describing: largest?.size)) bounds=\(Int(bounds.width))x\(Int(bounds.height)) nativeBounds=\(Int(nativeBounds.width))x\(Int(nativeBounds.height)) scale=\(nativeScale) zoomed=\(zoomed)"
-        print("[MEDIUM-FIT] \(line)")
-        MediumFitLogger.shared.info("\(line, privacy: .public)")
+        print("[MEDIUM-FIT] currentMode=\(current.size) nativeBounds=\(nativeBounds) zoomed=\(zoomed)")
         #endif
         return zoomed
     }
-}
-
-/// [MEDIUM-FIT] (2026-10-15) Unified-logging channel for the
-/// display-size detector — `devicectl process launch --console`
-/// streams unified logs, not stdout, so a plain `print` is invisible
-/// to the console probe.
-enum MediumFitLogger {
-    static let shared = Logger(subsystem: "ai.voicebridge.senior.assistant", category: "MediumFit")
 }
