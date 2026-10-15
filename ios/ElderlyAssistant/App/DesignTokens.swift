@@ -192,7 +192,9 @@ extension UIScreen {
             zoomed = false
         }
         #if DEBUG
-        MediumFitLogger.shared.info("currentMode=\(String(describing: current?.size), privacy: .public) modesCount=\(availableModes.count, privacy: .public) largest=\(String(describing: largest?.size), privacy: .public) bounds=\(Int(bounds.width), privacy: .public)x\(Int(bounds.height), privacy: .public) nativeBounds=\(Int(nativeBounds.width), privacy: .public)x\(Int(nativeBounds.height), privacy: .public) scale=\(nativeScale, privacy: .public) zoomed=\(zoomed, privacy: .public)")
+        let line = "currentMode=\(String(describing: current?.size)) modesCount=\(availableModes.count) largest=\(String(describing: largest?.size)) bounds=\(Int(bounds.width))x\(Int(bounds.height)) nativeBounds=\(Int(nativeBounds.width))x\(Int(nativeBounds.height)) scale=\(nativeScale) zoomed=\(zoomed)"
+        print("[MEDIUM-FIT] \(line)")
+        MediumFitLogger.shared.info("\(line, privacy: .public)")
         #endif
         return zoomed
     }

@@ -126,6 +126,15 @@ struct HomeView: View {
             ZStack {
                 VoiceBridgeBackground(theme: coordinator.appTheme)
                 VStack(spacing: 0) {
+                    #if DEBUG
+                    // [MEDIUM-FIT] (2026-10-15) On-screen ground truth
+                    // for the display-size detector during the device
+                    // verification round — removed before merge.
+                    Text("[DEBUG] zoomed=\(zoomed ? "true" : "false")")
+                        .font(.caption2.bold())
+                        .foregroundStyle(Color.red)
+                        .padding(.top, 2)
+                    #endif
                     HomeTopBar(dateLine: homePresentation.dateLine,
                                calendarLine: coordinator.homeCalendarLine,
                                notificationCount: homePresentation.notificationCount) {
