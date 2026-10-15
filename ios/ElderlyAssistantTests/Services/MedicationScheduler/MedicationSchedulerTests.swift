@@ -9,6 +9,13 @@ final class MockEncryptedLocalStorage: EncryptedLocalStorage {
     var writeCallCount = 0
     var readCallCount = 0
     var shouldFailWrite = false
+    /// Fired AFTER a write has actually landed in the store — never on the
+    /// failure path, so a witness built on this hook means "a persistence
+    /// really happened here" and not merely "a write was attempted". It is
+    /// the storage half of the persist-before-arm call-order witness
+    /// (T-008): paired with `MockAlarmScheduler.onScheduleReminder`, the
+    /// two hooks produce an ordered log of the arming pass.
+    var onWriteCompleted: (() -> Void)?
 
     func write<T: Encodable>(key: String, value: T) -> Result<Void, StorageError> {
         writeCallCount += 1
@@ -18,6 +25,7 @@ final class MockEncryptedLocalStorage: EncryptedLocalStorage {
         if let data = try? JSONEncoder().encode(value) {
             store[key] = data
         }
+        onWriteCompleted?()
         return .success(())
     }
 
@@ -46,12 +54,17 @@ final class MockAlarmScheduler: PlatformAlarmScheduler {
     /// The banner photo handed to each arming call (medication-visual-aids
     /// task, 2026-09-16) — nil for a dose with no photos.
     var visualAidURLs: [UUID: URL] = [:]
+    /// Fired after the arm has been recorded — the alarm half of the
+    /// persist-before-arm call-order witness (T-008); see
+    /// `MockEncryptedLocalStorage.onWriteCompleted`.
+    var onScheduleReminder: (() -> Void)?
 
     func scheduleReminder(reminderId: UUID, entryId: UUID, medicationName: String,
                           visualAidURL: URL?, at scheduledTime: Date) {
         scheduleCallCount += 1
         scheduledReminders[reminderId] = scheduledTime
         visualAidURLs[reminderId] = visualAidURL
+        onScheduleReminder?()
     }
 
     func scheduleAckDeadlineCheck(reminderId: UUID, entryId: UUID, deadline: Date) {
@@ -501,7 +514,291 @@ final class MedicationSchedulerTests: XCTestCase {
         XCTAssertTrue(mockFamilyNotifier.contexts.isEmpty)
     }
 
+    // MARK: - Resolution feed at arming (T-008, IF-11)
+
+    /// FR-MSR-002's first scenario, end to end: a household on the default
+    /// mapping prompts the elder at the mapped clock time — and everything
+    /// downstream of that time is derived from it, not from a second
+    /// source.
+    ///
+    /// The entry's own stored times are deliberately a DIFFERENT hour
+    /// (06:15): for a slot entry that value is only the resolved-time
+    /// mirror (D2), so a scheduler that armed from it would prompt this
+    /// household at the wrong hour — the one failure this seam exists to
+    /// prevent.
+    func testSlotEntryArmsAtResolvedTime() {
+        installMapping(MedicationSlotClock.default, into: mockStorage)
+        let now = Date()
+        let entry = makeSlotEntry(slot: .morning, mirrorHour: 6, mirrorMinute: 15)
+
+        scheduler.loadSchedule(entries: [entry])
+
+        // IF-11 directly: the morning slot resolves through the mapping.
+        guard case .success(let resolved) = scheduler.resolvedScheduleTimes(for: entry) else {
+            return XCTFail("a slot entry under the default mapping must resolve")
+        }
+        XCTAssertEqual(resolved.count, 1)
+        XCTAssertEqual(resolved.first?.hour, 8)
+        XCTAssertEqual(resolved.first?.minute, 0)
+
+        guard let reminder = scheduler.pendingReminders.first,
+              let armed = mockAlarm.scheduledReminders[reminder.id] else {
+            return XCTFail("the day's reminder must exist and be armed")
+        }
+        let calendar = Calendar.current
+        XCTAssertEqual(calendar.component(.hour, from: armed), 8,
+                       "the dose is armed at the MAPPED morning time, not at the mirror's 06:15")
+        XCTAssertEqual(calendar.component(.minute, from: armed), 0)
+        XCTAssertGreaterThan(armed, now, "and at its next occurrence, not in the past")
+
+        // The persisted state carries the resolved exact time, and the
+        // escalation deadline is measured from that same instant.
+        XCTAssertEqual(reminder.scheduledAt, armed)
+        XCTAssertEqual(reminder.escalationDeadline, armed.addingTimeInterval(TimeInterval(60 * 60)))
+
+        // The mirror is untouched by arming: the save gate and the mapping
+        // re-arm pass remain its only writers (D2).
+        XCTAssertEqual(scheduler.medicationEntry(for: entry.id)?.scheduleTimes.first?.hour, 6)
+        XCTAssertEqual(scheduler.medicationEntry(for: entry.id)?.scheduleTimes.first?.minute, 15)
+
+        // The acknowledgement window is armed for this reminder's delivery…
+        scheduler.triggerReminder(for: reminder.id)
+        guard let firedAt = scheduler.pendingReminders.first(where: { $0.id == reminder.id })?.lastFiredAt,
+              let ackDeadline = mockAlarm.ackDeadlineChecks[reminder.id] else {
+            return XCTFail("firing must arm the acknowledgement-window check")
+        }
+        XCTAssertEqual(ackDeadline.timeIntervalSince(firedAt), TimeInterval(5 * 60), accuracy: 1,
+                       "the window is the entry's configured ackWindowMinutes from delivery")
+
+        // …and the re-fire schedule is measured from the SAME resolved
+        // scheduled time: re-fire 1 lands at 08:00 + one 12-minute
+        // interval, which the engine can only produce if its
+        // `scheduledTime` is the resolved 08:00.
+        scheduler.handleAckDeadlineExpired(for: reminder.id)
+        XCTAssertEqual(mockAlarm.scheduledReminders[reminder.id],
+                       armed.addingTimeInterval(TimeInterval(12 * 60)),
+                       "the re-fire schedule derives from the same resolved scheduled time")
+    }
+
+    /// The safety ordering (FR-MSR-022): the reminder state reaches the
+    /// store before the platform alarm exists. Witnessed as an ordered log
+    /// produced by both halves of the seam — a successful write, then the
+    /// arm — and cross-checked against what the store held at arm time.
+    func testPersistBeforeArmOrderForSlotEntries() {
+        installMapping(MedicationSlotClock.default, into: mockStorage)
+        let entry = makeSlotEntry(slot: .morning, mirrorHour: 8, mirrorMinute: 0)
+
+        // The hooks go on AFTER the mapping is installed: the witness is
+        // about the arming pass, not about the fixture.
+        let storage = mockStorage!
+        var order: [String] = []
+        var persistedAtArmTime: [String: ScheduledReminder]?
+        storage.onWriteCompleted = { order.append("persist") }
+        mockAlarm.onScheduleReminder = {
+            order.append("arm")
+            if persistedAtArmTime == nil,
+               case .success(let stored) = storage.read(key: "medication.pending_reminders",
+                                                        type: [String: ScheduledReminder].self) {
+                persistedAtArmTime = stored
+            }
+        }
+
+        scheduler.loadSchedule(entries: [entry])
+
+        guard let firstArm = order.firstIndex(of: "arm") else {
+            return XCTFail("the dose must be armed")
+        }
+        XCTAssertEqual(firstArm, 2,
+                       "both writes — the entries payload and the pending list — complete before the first arm")
+        XCTAssertEqual(Array(order.prefix(firstArm)), ["persist", "persist"],
+                       "nothing but persistence precedes the arm")
+        XCTAssertEqual(order.filter { $0 == "arm" }.count, 1)
+
+        // The order is only half the claim: the payload that was on disk
+        // BEFORE the arm already carried the resolved exact time.
+        guard let persisted = persistedAtArmTime?.values.first,
+              let armed = mockAlarm.scheduledReminders.values.first else {
+            return XCTFail("the reminder state must be readable from storage at arm time")
+        }
+        XCTAssertEqual(persisted.scheduledAt, armed)
+        XCTAssertEqual(Calendar.current.component(.hour, from: persisted.scheduledAt), 8)
+        XCTAssertEqual(Calendar.current.component(.minute, from: persisted.scheduledAt), 0)
+        XCTAssertEqual(persisted.state, .pending)
+    }
+
+    /// FR-MSR-002's failure scenario: a mapping that cannot yield a
+    /// determinate hour/minute arms NOTHING for that entry and surfaces the
+    /// slot — no guessed time, no name, no dose content, and the rest of
+    /// the household's schedule keeps working.
+    func testUnresolvedSlotSkipsArming() {
+        // Written raw: the store's `save` validates and would refuse this,
+        // which is exactly the state the decode rule carries forward to
+        // resolution (a half-written or corrupt record on disk).
+        installCorruptMapping(
+            MedicationSlotClock(
+                morning: TimeOfDay(hour: 99, minute: 0),
+                afternoon: MedicationSlotClock.defaultAfternoonTime,
+                evening: MedicationSlotClock.defaultEveningTime
+            ),
+            into: mockStorage
+        )
+        let slotEntry = makeSlotEntry(slot: .morning, mirrorHour: 8, mirrorMinute: 0)
+        // A legacy control: this entry does not depend on the mapping at
+        // all, and the pass must skip ONE entry, not abort the pass.
+        let legacyEntry = makeMedicationEntry(name: "Metformin", timeHour: 10, timeMinute: 0)
+
+        scheduler.loadSchedule(entries: [slotEntry, legacyEntry])
+
+        XCTAssertTrue(scheduler.pendingReminders.allSatisfy { $0.medicationEntryId != slotEntry.id },
+                      "no reminder exists for the entry whose slot cannot resolve")
+        XCTAssertEqual(scheduler.pendingReminders.filter { $0.medicationEntryId == legacyEntry.id }.count,
+                       1, "the other entry in the same pass is unaffected")
+        XCTAssertEqual(mockAlarm.scheduledReminders.count, 1,
+                       "nothing implicit or guessed is armed on the unresolved entry's behalf")
+        XCTAssertEqual(mockAlarm.scheduledReminders.values.first.map {
+            Calendar.current.component(.hour, from: $0)
+        }, 10)
+
+        // The condition surfaces, PII-free: the slot and nothing else.
+        let unresolved = mockObservability.emittedEvents.filter { $0.eventType == "medication_slot_unresolved" }
+        XCTAssertEqual(unresolved.count, 1)
+        XCTAssertEqual(unresolved.first?.metadata, ["slot": "morning"],
+                       "the slot ONLY — no entry id, no name, no dose, no clock value")
+        XCTAssertEqual(unresolved.first?.outcome, "unresolved")
+        XCTAssertEqual(unresolved.first?.component, "medication_scheduler")
+        for event in mockObservability.emittedEvents {
+            for value in event.metadata.values {
+                XCTAssertFalse(value.lowercased().contains("amlodipine"),
+                               "no medication name may reach the metadata: \(value)")
+                XCTAssertFalse(value.contains("99"),
+                               "no corrupt or guessed clock value may reach the metadata: \(value)")
+            }
+        }
+    }
+
+    /// FR-MSR-022's other half, on the slot path: when the persistence the
+    /// arm depends on fails, nothing is armed and the shipped failure
+    /// surface reports it — resolution is NOT the thing that failed.
+    func testStorageFailureBlocksArming() {
+        installMapping(MedicationSlotClock.default, into: mockStorage)
+        let entry = makeSlotEntry(slot: .morning, mirrorHour: 8, mirrorMinute: 0)
+        mockStorage.shouldFailWrite = true
+
+        scheduler.loadSchedule(entries: [entry])
+
+        XCTAssertEqual(mockAlarm.scheduleCallCount, 0,
+                       "a storage failure on the reminder state arms no platform alarm")
+        XCTAssertTrue(mockAlarm.scheduledReminders.isEmpty)
+        XCTAssertTrue(mockObservability.emittedEvents.contains {
+            $0.eventType == "reminder_persistence_failed"
+        }, "the shipped failure path reports the write")
+        XCTAssertFalse(mockObservability.emittedEvents.contains {
+            $0.eventType == "medication_slot_unresolved"
+        }, "the slot resolved — the WRITE is what failed")
+
+        // The failing write left no payload behind, so nothing can be
+        // resurrected at the next launch as if it had armed.
+        if case .success = mockStorage.read(key: "medication.pending_reminders",
+                                            type: [String: ScheduledReminder].self) {
+            XCTFail("a failed write must not leave a reminder payload")
+        }
+    }
+
+    /// The legacy path stays first-class: an entry with no slot arms from
+    /// its stored times, verbatim, and never consults the household
+    /// mapping — not even a mapping that is both edited and corrupt in a
+    /// slot it does not use.
+    func testLegacyEntryArmsFromStoredMirror() {
+        installCorruptMapping(
+            MedicationSlotClock(
+                morning: TimeOfDay(hour: 6, minute: 0),
+                afternoon: MedicationSlotClock.defaultAfternoonTime,
+                evening: TimeOfDay(hour: 19, minute: 99)
+            ),
+            into: mockStorage
+        )
+        let now = Date()
+        let entry = makeMedicationEntry(name: "Metformin", timeHour: 10, timeMinute: 30)
+
+        guard case .success(let resolved) = scheduler.resolvedScheduleTimes(for: entry) else {
+            return XCTFail("a legacy entry always resolves — no mapping is consulted for it")
+        }
+        XCTAssertEqual(resolved.count, 1)
+        XCTAssertEqual(resolved.first?.hour, 10)
+        XCTAssertEqual(resolved.first?.minute, 30)
+        XCTAssertEqual(resolved, entry.scheduleTimes, "legacy times pass through verbatim")
+
+        scheduler.loadSchedule(entries: [entry])
+
+        guard let armed = mockAlarm.scheduledReminders.values.first else {
+            return XCTFail("the legacy dose must be armed from its stored time")
+        }
+        XCTAssertEqual(Calendar.current.component(.hour, from: armed), 10,
+                       "the mapping's 06:00 morning is not this entry's business")
+        XCTAssertEqual(Calendar.current.component(.minute, from: armed), 30)
+        XCTAssertGreaterThan(armed, now)
+        XCTAssertEqual(scheduler.pendingReminders.first?.scheduledAt, armed)
+        XCTAssertFalse(mockObservability.emittedEvents.contains {
+            $0.eventType == "medication_slot_unresolved"
+        }, "nothing about a legacy entry can be unresolved")
+    }
+
     // MARK: - Helpers
+
+    /// A slot entry (T-003's model): its dose lives in `slot`, and
+    /// `scheduleTimes` carries the resolved-time MIRROR — passed here as a
+    /// deliberately explicit value so a test can prove arming ignores it.
+    private func makeSlotEntry(
+        name: String = "Amlodipine",
+        slot: MedicationSlot,
+        mirrorHour: Int,
+        mirrorMinute: Int
+    ) -> MedicationEntry {
+        var components = DateComponents()
+        components.hour = mirrorHour
+        components.minute = mirrorMinute
+
+        return MedicationEntry(
+            id: UUID(),
+            userProfileId: UUID(),
+            medicationName: name,
+            doseDescription: "One tablet",
+            scheduleTimes: [components],
+            frequency: .daily,
+            ackWindowMinutes: 5,
+            maxRefireCount: 5,
+            escalationWindowMinutes: 60,
+            doubleDoseWindowHours: 4,
+            photoVerificationEnabled: false,
+            confirmationDescription: nil,
+            quantity: MedicationQuantity(amount: 1, unit: MedicationDoseUnit.tablet.rawValue),
+            slot: slot,
+            mealRelation: .beforeMeal
+        )
+    }
+
+    /// Persists a mapping the way the settings save action does — through
+    /// the store, so the arming path reads exactly what a household would
+    /// have saved.
+    private func installMapping(_ clock: MedicationSlotClock,
+                               into storage: MockEncryptedLocalStorage) {
+        switch MedicationSlotClockStore(storage: storage).save(clock) {
+        case .success:
+            break
+        case .failure:
+            XCTFail("a valid mapping must persist")
+        }
+    }
+
+    /// Writes a mapping record RAW — bypassing `save`, which validates and
+    /// would refuse it. This is the corrupt/half-written record the store's
+    /// decode rule exists for: it decodes as-is and fails at resolution.
+    private func installCorruptMapping(_ clock: MedicationSlotClock,
+                                       into storage: MockEncryptedLocalStorage) {
+        if case .failure = storage.write(key: MedicationSlotClockStore.storageKey, value: clock) {
+            XCTFail("the raw record must be writable")
+        }
+    }
 
     private func makeMedicationEntry(
         name: String,

@@ -16,6 +16,14 @@ import XCTest
 ///  - **the stored shape is the model's** — hour/minute components only (the
 ///    duplicate check compares them), blank text is nil, and a chip is stored
 ///    as its id while a lookup's words are stored verbatim.
+///
+/// [MED-SLOT] (2026-10-15) The slot model rides the same rules and the suite
+/// proves it: a scan in `.slots` mode replaces the SLOT rows under exactly
+/// the shipped schedule rule (first-occurrence order through T-005's
+/// conversion, an unmapped read changing nothing), text still fills blank
+/// fields only, the save gate is still a name, and preselection from a
+/// legacy entry is exact equality — never a fuzzy match. No shipped test
+/// above changed: the extensions below are additive.
 final class MedicationEditorDraftTests: XCTestCase {
 
     private let english = Locale(identifier: "en")
@@ -33,6 +41,21 @@ final class MedicationEditorDraftTests: XCTestCase {
 
     private func makeDraft() -> MedicationEditorDraft {
         MedicationEditorDraft(now: referenceDate, calendar: calendar)
+    }
+
+    /// The same draft, in the slot model's form (the view's default for the
+    /// new-entry form; the value type's default stays `.times`).
+    private func makeSlotDraft() -> MedicationEditorDraft {
+        var draft = makeDraft()
+        draft.scheduleMode = .slots
+        return draft
+    }
+
+    /// A picker date on the draft's reference day, so every schedule
+    /// assertion is exact.
+    private func date(hour: Int, minute: Int) -> Date {
+        calendar.date(bySettingHour: hour, minute: minute, second: 0,
+                      of: referenceDate)!
     }
 
     private func hours(_ draft: MedicationEditorDraft) -> [Int] {
@@ -263,5 +286,262 @@ final class MedicationEditorDraftTests: XCTestCase {
         draft.applyPurposeLookup("   \n ")
 
         XCTAssertNil(draft.storedPurpose)
+    }
+
+    // MARK: - The slot model [MED-SLOT]: the shipped rules, not relaxed
+
+    /// **The unchanged-rules pair, text half.** The slot model changes which
+    /// rows a scan replaces and nothing about the text rules: a name the
+    /// family typed survives the scan, a blank field still fills, and a
+    /// field holding only spaces still counts as blank.
+    func testScanFillsBlankFieldsOnly() {
+        var draft = makeSlotDraft()
+        draft.name = "Amo"
+
+        draft.applyScan(MedicationLabelCandidate(
+            name: "Amoxicillin",
+            strength: "500 mg",
+            scheduleTimes: [DateComponents(hour: 8, minute: 0)]))
+
+        XCTAssertEqual(draft.name, "Amo", "a scan never overwrites what the family typed")
+        XCTAssertEqual(draft.strength, "500 mg", "a blank field still fills")
+        XCTAssertEqual(draft.slotRows, [.morning], "the label's schedule still replaces the rows")
+
+        draft.name = "   "
+        draft.applyScan(MedicationLabelCandidate(name: "Amoxicillin"))
+
+        XCTAssertEqual(draft.name, "Amoxicillin", "whitespace is blank in the slot model too")
+    }
+
+    /// The shipped "the label's schedule wins" rule, applied to slot rows: a
+    /// scan in `.slots` mode replaces the family's current assignments with
+    /// the converted read, in FIRST-OCCURRENCE order, and the carrier rows
+    /// stay parallel to the assignments (one form, rows = doses).
+    func testScanReplacesSlotRowsShippedRule() {
+        var draft = makeSlotDraft()
+        draft.slotRows = [.afternoon]
+        draft.mealRelation = .beforeMeal
+
+        draft.applyScan(MedicationLabelCandidate(
+            scheduleTimes: [DateComponents(hour: 8, minute: 0),
+                            DateComponents(hour: 20, minute: 0)]))
+
+        XCTAssertEqual(draft.slotRows, [.morning, .evening],
+                       "the label's schedule wins over the form's assignment")
+        XCTAssertEqual(draft.mealRelation, .beforeMeal,
+                       "the meal relation was not inferred — the family's statement stands")
+        XCTAssertNil(draft.storedQuantity, "a scan states no quantity")
+        XCTAssertEqual(draft.times.count, draft.slotRows.count,
+                       "the row carrier stays parallel to the slot rows")
+
+        // First occurrence, not clock order: the conversion keeps the order
+        // it saw, and so do the rows.
+        var reversed = makeSlotDraft()
+        reversed.applyScan(MedicationLabelCandidate(
+            scheduleTimes: [DateComponents(hour: 20, minute: 0),
+                            DateComponents(hour: 8, minute: 0)]))
+
+        XCTAssertEqual(reversed.slotRows, [.evening, .morning])
+    }
+
+    /// An empty read changes NOTHING in the slot model either — no field, no
+    /// row, no assignment — and a read that found a name but stated no
+    /// schedule still only fills blank text.
+    func testEmptyReadChangesNothing() {
+        var draft = makeSlotDraft()
+        draft.name = "Amlodipine"
+        draft.strength = "5 mg"
+        draft.quantity.amount = 1
+        draft.quantity.select(.tablet, locale: english)
+        draft.mealRelation = .beforeMeal
+        draft.applyScan(MedicationLabelCandidate(scheduleTimes: [DateComponents(hour: 8, minute: 0)]))
+        let before = draft
+
+        draft.applyScan(.empty)
+
+        XCTAssertEqual(draft, before)
+
+        var named = before
+        named.name = ""
+        named.applyScan(MedicationLabelCandidate(name: "Amlodipine"))
+
+        XCTAssertEqual(named.name, "Amlodipine", "the text rule still applies")
+        XCTAssertEqual(named.slotRows, before.slotRows, "a name-only read states no schedule")
+        XCTAssertEqual(named.times, before.times)
+        XCTAssertEqual(named.mealRelation, .beforeMeal, "a scan never picks a meal relation")
+        XCTAssertEqual(named.storedQuantity,
+                       MedicationQuantity(amount: 1, unit: MedicationDoseUnit.tablet.rawValue),
+                       "a scan never fills a quantity")
+    }
+
+    /// An unmapped read — times the pinned hour table (m-3) converts to no
+    /// slot — leaves the rows exactly as they were: not cleared, not
+    /// fitted, not "nearest". The table is a lookup, never a guess.
+    func testUnmappedReadLeavesRowsUnchanged() {
+        var draft = makeSlotDraft()
+        draft.applyScan(MedicationLabelCandidate(
+            scheduleTimes: [DateComponents(hour: 8, minute: 0),
+                            DateComponents(hour: 19, minute: 0)]))
+        XCTAssertEqual(draft.slotRows, [.morning, .evening])
+        let before = draft
+
+        draft.applyScan(MedicationLabelCandidate(
+            scheduleTimes: [DateComponents(hour: 10, minute: 0)]))
+        XCTAssertEqual(draft, before, "an unmapped read changes nothing — rows, carrier and all")
+
+        // 10:30 is nearer morning 08:00 than afternoon 13:00, and still
+        // nothing: no nearest-slot inference anywhere on this path.
+        draft.applyScan(MedicationLabelCandidate(
+            scheduleTimes: [DateComponents(hour: 10, minute: 30)]))
+        XCTAssertEqual(draft, before)
+
+        // A named unmapped read follows the text rule only.
+        var named = before
+        named.name = ""
+        named.applyScan(MedicationLabelCandidate(
+            name: "Amlodipine",
+            scheduleTimes: [DateComponents(hour: 10, minute: 0)]))
+
+        XCTAssertEqual(named.name, "Amlodipine")
+        XCTAssertEqual(named.slotRows, before.slotRows)
+        XCTAssertEqual(named.times, before.times)
+    }
+
+    /// Preselection is EXACT equality against the household mapping — hour
+    /// AND minute — and only for rows the family has not assigned. A legacy
+    /// entry is preselected while it is still in clock mode; nothing fuzzy,
+    /// nothing clobbered, no silent conversion.
+    func testSlotPreselectionIsExactEquality() {
+        var draft = makeDraft()
+        draft.name = "Amlodipine"
+        draft.times = [date(hour: 8, minute: 0),      // == morning's mapped time
+                       date(hour: 13, minute: 0),     // == afternoon's mapped time
+                       date(hour: 20, minute: 0)]     // evening maps 19:00 — nearest, not equal
+        draft.slotRows = [nil, nil, nil]
+
+        draft.applySlotPreselection(mapping: .default)
+
+        XCTAssertEqual(draft.scheduleMode, .times, "preselection never converts the model")
+        XCTAssertEqual(draft.slotRows, [.morning, .afternoon, nil],
+                       "exact matches preselect; a near miss stays unassigned")
+        XCTAssertTrue(draft.canSaveRequest,
+                      "clock mode stays saveable exactly as stored — nothing forces the conversion")
+
+        // Only when the family CHOOSES the slot model does the unmatched row
+        // gate the request, until it is assigned or removed.
+        draft.scheduleMode = .slots
+        XCTAssertFalse(draft.canSaveRequest)
+
+        // The family's OWN mapping is what equality is measured against.
+        var custom = makeDraft()
+        custom.times = [date(hour: 7, minute: 30), date(hour: 12, minute: 45)]
+        custom.slotRows = [nil, nil]
+        let familyMapping = MedicationSlotClock(
+            morning: TimeOfDay(hour: 7, minute: 30),
+            afternoon: TimeOfDay(hour: 12, minute: 45),
+            evening: TimeOfDay(hour: 21, minute: 10))
+
+        custom.applySlotPreselection(mapping: familyMapping)
+
+        XCTAssertEqual(custom.slotRows, [.morning, .afternoon])
+
+        var nearMiss = makeDraft()
+        nearMiss.times = [date(hour: 8, minute: 0)]
+        nearMiss.slotRows = [nil]
+
+        nearMiss.applySlotPreselection(mapping: familyMapping)
+
+        XCTAssertEqual(nearMiss.slotRows, [nil], "08:00 is not 07:30 and not 12:45")
+
+        // A corrupt mapping slot resolves .indeterminate and matches nothing
+        // — fail-closed, never repaired into a plausible time.
+        var corrupt = makeDraft()
+        corrupt.times = [date(hour: 8, minute: 0)]
+        corrupt.slotRows = [nil]
+        let broken = MedicationSlotClock(
+            morning: .unset,
+            afternoon: TimeOfDay(hour: 13, minute: 0),
+            evening: TimeOfDay(hour: 19, minute: 0))
+
+        corrupt.applySlotPreselection(mapping: broken)
+
+        XCTAssertEqual(corrupt.slotRows, [nil])
+
+        // Preselection never clobbers a row the family assigned.
+        var assigned = makeDraft()
+        assigned.times = [date(hour: 8, minute: 0)]
+        assigned.slotRows = [.evening]
+
+        assigned.applySlotPreselection(mapping: .default)
+
+        XCTAssertEqual(assigned.slotRows, [.evening])
+    }
+
+    /// `storedRows` is the save request's rows (IF-21), in row order: clock
+    /// rows as their hour/minute-only components, slot rows as their slots.
+    /// A manually added row appends and contributes no stored row until the
+    /// family assigns it.
+    func testStoredRowsShapeMatchesSaveRequest() {
+        var clock = makeDraft()
+        clock.applyScan(MedicationLabelCandidate(
+            scheduleTimes: [DateComponents(hour: 13, minute: 15),
+                            DateComponents(hour: 19, minute: 0)]))
+
+        XCTAssertEqual(clock.storedRows,
+                       [.time(DateComponents(hour: 13, minute: 15)),
+                        .time(DateComponents(hour: 19, minute: 0))],
+                       "clock rows carry hour/minute only — the stored shape")
+        XCTAssertEqual(clock.storedRows.count, clock.times.count)
+
+        var slot = makeSlotDraft()
+        slot.name = "Amlodipine"
+        slot.applyScan(MedicationLabelCandidate(
+            scheduleTimes: [DateComponents(hour: 8, minute: 0),
+                            DateComponents(hour: 20, minute: 0)]))
+
+        XCTAssertEqual(slot.storedRows, [.slot(.morning), .slot(.evening)])
+
+        slot.addTime()
+        XCTAssertEqual(slot.storedRows, [.slot(.morning), .slot(.evening)],
+                       "an unassigned row contributes no stored row")
+        XCTAssertFalse(slot.canSaveRequest, "a name is not enough while a row is unassigned")
+
+        slot.slotRows[2] = .afternoon
+        XCTAssertEqual(slot.storedRows,
+                       [.slot(.morning), .slot(.evening), .slot(.afternoon)],
+                       "manually added rows append in row order")
+        XCTAssertTrue(slot.canSaveRequest)
+    }
+
+    /// **The unchanged-rules pair, gate half.** The shipped save gate stands:
+    /// a name, nothing else. Slot rows — assigned or not — neither make a
+    /// nameless draft saveable nor block a named one; the request-readiness
+    /// readout (`canSaveRequest`, IF-22) sits beside the gate and never
+    /// replaces it.
+    func testCanSaveStillNameOnly() {
+        var draft = makeSlotDraft()
+        draft.addTime()
+        draft.slotRows = [.morning, nil]
+
+        XCTAssertFalse(draft.canSave, "rows do not make a nameless draft saveable")
+        XCTAssertFalse(draft.canSaveRequest)
+
+        draft.name = "   "
+        XCTAssertFalse(draft.canSave)
+        XCTAssertFalse(draft.canSaveRequest)
+
+        draft.name = "  Amlodipine  "
+        XCTAssertTrue(draft.canSave, "the shipped gate: a name, trimmed")
+        XCTAssertFalse(draft.canSaveRequest, "an unassigned slot row still gates the request")
+
+        draft.slotRows = [.morning, .evening]
+        XCTAssertTrue(draft.canSaveRequest)
+
+        // Clock mode: every row is shaped by construction, so the request
+        // gate is the name gate and nothing more.
+        var clockMode = makeDraft()
+        XCTAssertFalse(clockMode.canSaveRequest)
+        clockMode.name = "Amlodipine"
+        XCTAssertTrue(clockMode.canSaveRequest)
     }
 }

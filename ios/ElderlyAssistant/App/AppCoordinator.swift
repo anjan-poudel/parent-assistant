@@ -14,6 +14,130 @@ import SwiftUI
 // code; the import itself is inert on older deployment targets.
 import AlarmKit
 
+// MARK: - Medication acknowledgement clarification walk (C4, IF-8)
+//
+// [MED-ACK-WALK] The state half of the clarification walk (T-013; T-014
+// wires the router to it). When the resolver (T-004) answers an
+// acknowledgement with `.ambiguous(ordered:)` — the elder's words did not
+// identify exactly ONE pending reminder — the walk asks, in the sanctioned
+// copy, until the elder's own answer identifies one entrance or the walk
+// ends. The container contract this file's walk half must uphold:
+//
+// - The walk RECORDS NOTHING. It never calls `acknowledge`,
+//   `acknowledgeWithConfirmation` or `startConfirmationChallenge`; a
+//   resolving answer only ends the walk and HANDS the entry id back
+//   (`AckClarifyOutcome.resolved(entryId:)`), and the caller continues the
+//   shipped safety sequence (challenge → double-dose gate → record).
+// - The walk ALWAYS ends deterministically: an explicit `endAckClarification`,
+//   the response window expiring, or the walk's candidate set changing
+//   under it (a pending reminder it asks about disappearing) — every end
+//   path clears the state and cancels the timer.
+// - The copy is the sanctioned set only ("did you mean X?" / "did you mean
+//   X or Y?" / "OK, nothing was recorded." — the W0 catalog keys): never a
+//   leading question, never a numbered list, in either language.
+// - The walk mints no vocabulary: name matching reuses the resolver's
+//   `MedicationAckVocabulary` table, and yes/no arrives as booleans the
+//   router's SHIPPED classifiers already computed (`CommandRouter`
+//   `isYesResponse` / `isNoResponse`) — the walk never re-parses "हो" or
+//   "yes" itself.
+// - Main-confined, like every other pending-confirmation seam on the
+//   coordinator: the ops are called from the router's route (main) and
+//   the timer runs on the main queue.
+
+/// One in-flight clarification walk (design-l2 §C4).
+///
+/// `@Published private(set) var pendingAckClarification` on the coordinator
+/// holds this value; non-nil IS "a walk is open". The candidate list is the
+/// walk's question set, in the fixed order (`scheduledAt`, canonical
+/// medication name, entry id) — the same order `AckResolution.ambiguous`
+/// carries and `MedicationAckResolver` produces, never firing order,
+/// pending order or recency.
+struct AckClarificationState: Equatable {
+    /// The walk's candidates, in the fixed order. Filtered at
+    /// `beginAckClarification` to what was still pending at that instant;
+    /// never mutated afterwards (a candidate vanishing mid-walk ends the
+    /// walk — see `ackClarificationResponse`).
+    let candidates: [MedicationAckCandidate]
+
+    /// 0-based position of the single-form question ("did you mean X?").
+    var cursor: Int
+
+    /// True while the opening PAIR question ("did you mean X or Y?") is the
+    /// live one — only ever set for exactly two candidates. A "yes" falls
+    /// to the single form at cursor 0 (`pairAsked := false`); a "no" ends
+    /// the walk.
+    var pairAsked: Bool
+
+    /// When the response window closes (from `AckClarificationConfig`, the
+    /// one named home — never a literal). The expiry work item carries this
+    /// value and compares it against the live state, so a superseded or
+    /// already-ended walk's scheduled block can never end a newer walk.
+    let deadline: Date
+}
+
+/// How a walk ended (design-l2 §IF-8, closed set).
+///
+/// `.resolved` is the one end that leads anywhere: the caller continues
+/// the shipped safety sequence for the entry. Every other end records
+/// nothing, leaves the reminders untouched, and is reported honestly —
+/// `.rejected` / `.expired` also speak the ended line, `.denied` and
+/// `.bargedIn` stay silent because the utterance's own path (the refusal
+/// ladder / the acknowledgement path) speaks next.
+enum AckClarifyEndReason: Equatable {
+    /// The elder said "no" through the walk (the pair's "no", a single
+    /// form's "no", or the last candidate's "no" after advancing).
+    case rejected
+    /// The router's denial guard fired: the utterance is a refusal, it
+    /// falls through to the shipped ladder, which speaks its own line.
+    case denied
+    /// The response window closed with the walk unresolved.
+    case expired
+    /// A new acknowledgement barged in and ended the walk before being
+    /// handled by the shipped ack path.
+    case bargedIn
+    /// The elder's answer identified one candidate: the walk ends SILENT
+    /// (the caller speaks the challenge prompt) and the entry id travels
+    /// back in `AckClarifyOutcome.resolved(entryId:)`.
+    case resolved
+
+    /// The observability outcome for `medication_ack_clarify_ended`.
+    /// `.resolved` never reaches the emit seam (resolved ends through the
+    /// resolved path — design-l2 §5.2), but keeps a total mapping.
+    var observationOutcome: String {
+        switch self {
+        case .rejected: return "rejected"
+        case .denied: return "denied"
+        case .expired: return "expired"
+        case .bargedIn: return "bargedIn"
+        case .resolved: return "resolved"
+        }
+    }
+}
+
+/// What one `ackClarificationResponse` did, for the caller (T-014) and
+/// the suite. The walk has already spoken its own line when it spoke one:
+/// nothing here asks the caller to say anything except on `.resolved`,
+/// where the caller continues the shipped sequence
+/// (`startVoiceAckConfirmation(for:)` and its prompt).
+enum AckClarifyOutcome: Equatable {
+    /// The answer identified exactly one candidate; the walk ended
+    /// (silently) and the caller continues the shipped safety sequence
+    /// for this entry.
+    case resolved(entryId: UUID)
+    /// The pair answer "yes" narrowed the walk to the single form at
+    /// cursor 0; the single question was asked.
+    case narrowed
+    /// Three-or-more walk: "no" advanced the cursor and asked the next
+    /// candidate.
+    case advanced
+    /// The walk ended on this response; nothing was recorded.
+    case ended(reason: AckClarifyEndReason)
+    /// Neither a walk candidate's name nor a yes/no: the current
+    /// sanctioned question was asked again. Also the honest answer when
+    /// no walk is open (nothing to re-ask, nothing spoken).
+    case unanswered
+}
+
 /// Central coordinator that wires all services together.
 /// Starts safety-critical services first (medication scheduler, health monitor),
 /// then voice pipeline, then LLM.
@@ -985,6 +1109,13 @@ final class AppCoordinator: ObservableObject {
     /// tracer's handlers are wired. Nil exactly when the recorder is.
     private let turnLatencyReporter: TurnLatencyReporter?
     private let medicationScheduler: MedicationScheduler
+    /// [MED-ACK-WALK] (T-013, design-l2 C4/D4) The clarification walk's
+    /// response-window configuration. The default composes from
+    /// `ConfirmationChallenge.defaultChallengeTimeoutSeconds` (the ONE
+    /// named home, T-006); tests and harnesses inject a shorter window
+    /// through the initializer. The walk reads this value at `begin` and
+    /// never reads a literal.
+    private let ackClarificationConfig: AckClarificationConfig
     private let alarmScheduler: UNNotificationScheduler
     private let familyNotifier: APNsFamilyNotifier
     /// [CAREGIVER-EVENTS] (2026-09-13) Per-event-type caregiver
@@ -2830,10 +2961,16 @@ final class AppCoordinator: ObservableObject {
     ///     construction) = the real `SystemContactPhotoWriter` actor,
     ///     built at FIRST USE, not here; the coordinator suites inject
     ///     the T-154 `FakeSystemContactPhotoWriter` through this seam.
+    ///   - ackClarificationConfig: the clarification walk's response
+    ///     window (T-013; design-l2 C4/D4). Defaults to the composed
+    ///     `AckClarificationConfig()` — the window derived from
+    ///     `ConfirmationChallenge.defaultChallengeTimeoutSeconds` — and is
+    ///     only overridden by a shorter injected window in tests.
     init(profileStorage: ProfilePayloadStorage? = nil,
          wireProfilePersonalization: Bool = true,
          systemContactLinkService: SystemContactLinkReading? = nil,
-         systemContactPhotoWriter: SystemContactPhotoWriting? = nil) {
+         systemContactPhotoWriter: SystemContactPhotoWriting? = nil,
+         ackClarificationConfig: AckClarificationConfig = AckClarificationConfig()) {
         // [BOOT-REVIEW P0 item 1] `bootstrap-init` — the composition root's
         // own cost, measured separately from every other startup metric:
         // this is what runs before the app exists at all (the App struct's
@@ -2879,6 +3016,11 @@ final class AppCoordinator: ObservableObject {
                                      promptGuard: ProfilePromptTextGuard(),
                                      observabilityBus: bus)
             : nil
+        // [MED-ACK-WALK] (T-013) The clarification walk's window — a value
+        // composed from the ONE named home (`AckClarificationConfig` wraps
+        // `ConfirmationChallenge.defaultChallengeTimeoutSeconds`), stored
+        // before anything can begin a walk. No I/O, no side effects.
+        self.ackClarificationConfig = ackClarificationConfig
         // [LIVE-TRANSLATE T-032] The feature's two payloads (the translation
         // cache and the consent record) are sealed with AES-GCM before they
         // reach the file channel — Data Protection Complete alone is "locked
@@ -12913,6 +13055,10 @@ self.noteTalkContractChanged()
     /// [DIRECTIONS] (2026-09-07) The navigation ambiguity walk pends the
     /// same way — while candidates remain, the router's yes/no parsing
     /// stays in force.
+    /// [MED-ACK-WALK] (T-013; design-l2 §C4) The clarification walk rides
+    /// this same OR-fold — while it is open, the router's confirmation
+    /// region owns the follow-up, and the walk's end (explicit, expiry or
+    /// a vanished candidate) flips this flag with it.
     var isAwaitingConfirmation: Bool {
         pendingConfirmationEntryId != nil || pendingCallAction != nil || pendingRephrase != nil
             || pendingCalendarEvent != nil
@@ -12922,6 +13068,7 @@ self.noteTalkContractChanged()
             // rides the same window (the router's confirmation path owns
             // the yes/no while it is pended).
             || pendingCloudChatConsentCapture
+            || pendingAckClarification != nil
     }
 
     /// Used by `CommandRouter` to identify what "I took my medication" refers
@@ -12931,6 +13078,317 @@ self.noteTalkContractChanged()
             .sorted { $0.scheduledAt < $1.scheduledAt }
             .first?
             .medicationEntryId
+    }
+
+    // MARK: - [MED-ACK-WALK] Clarification walk (C4; IF-7 + IF-8)
+
+    /// The walk's state — non-nil while a clarification is in flight
+    /// (design-l2 §C4). `@Published private(set)` like the design pins:
+    /// the router (T-014) consults `isAwaitingAckClarification` and the
+    /// response op; only this file's walk ops ever write it. Main-confined.
+    @Published private(set) var pendingAckClarification: AckClarificationState?
+
+    /// The walk's expiry block, armed once at `beginAckClarification` and
+    /// cancelled by every end. A cancelled `DispatchWorkItem` still
+    /// executes its block when already dispatched, so the block itself
+    /// re-checks the deadline it was armed for against the live state —
+    /// a superseded or already-ended walk's timer can never end a newer
+    /// walk (the `warmWatchdogWork` pattern).
+    private var ackClarifyExpiryWork: DispatchWorkItem?
+
+    /// Is a clarification walk open right now (the router's T-014 consult).
+    var isAwaitingAckClarification: Bool { pendingAckClarification != nil }
+
+    /// IF-7 — the pending reminders as resolver candidates, in the FIXED
+    /// order (`scheduledAt`, canonical medication name, entry id — never
+    /// firing order, pending order or recency; the same order
+    /// `MedicationAckResolver` produces for its own outputs).
+    ///
+    /// A pure in-memory read (the `oldestPendingReminderEntryId`
+    /// precedent): one candidate per pending reminder, no error path —
+    /// the empty case IS the empty array, which the resolver reports as
+    /// `.nothingPending`. The candidate facts come from the live schedule
+    /// exactly as the resolver documents them (IF-6): `fired` is
+    /// `lastFiredAt != nil`, `slot` is the entry's slot (nil for legacy
+    /// entries — they never match a slot word), `voiceKeys` is
+    /// `MedicationVoiceVocabulary.voiceKeys(for:)` (one vocabulary, the
+    /// same the resolver matches with), and `medicationName` is the
+    /// canonical-name tiebreak and the sanctioned copy's noun.
+    ///
+    /// A reminder whose entry is gone (defensive: `loadSchedule` rebuilds
+    /// reminders with their entries, so this is a torn state, not a flow)
+    /// still yields a candidate — parity with
+    /// `oldestPendingReminderEntryId`, no silent filtering — with no
+    /// voice keys and an empty name; it can only ever be settled by a
+    /// yes/no, never by a name match.
+    func medicationAckCandidates() -> [MedicationAckCandidate] {
+        var entriesById: [UUID: MedicationEntry] = [:]
+        for entry in medicationScheduler.medicationEntries() {
+            entriesById[entry.id] = entry
+        }
+        let candidates = medicationScheduler.pendingReminders.map { reminder -> MedicationAckCandidate in
+            let entry = entriesById[reminder.medicationEntryId]
+            return MedicationAckCandidate(
+                entryId: reminder.medicationEntryId,
+                scheduledAt: reminder.scheduledAt,
+                fired: reminder.lastFiredAt != nil,
+                slot: entry?.slot,
+                voiceKeys: entry.map { MedicationVoiceVocabulary.voiceKeys(for: $0) } ?? [],
+                medicationName: entry?.medicationName ?? "")
+        }
+        return Self.ackCandidateFixedOrder(candidates)
+    }
+
+    /// The fixed ordering, derived from candidate facts alone — the same
+    /// comparison `MedicationAckResolver.fixedOrder` performs (its
+    /// comparator is private; this is the coordinator's half of the ONE
+    /// ordering rule, and this suite pins the two against each other):
+    /// `scheduledAt`, then the canonical medication name, then the entry
+    /// id — all three compared, so equal-time, equal-name candidates
+    /// still order totally and stably across calls.
+    private static func ackCandidateFixedOrder(_ candidates: [MedicationAckCandidate]) -> [MedicationAckCandidate] {
+        candidates.sorted { left, right in
+            if left.scheduledAt != right.scheduledAt {
+                return left.scheduledAt < right.scheduledAt
+            }
+            let leftName = MedicationVoiceVocabulary.canonical(left.medicationName)
+            let rightName = MedicationVoiceVocabulary.canonical(right.medicationName)
+            if leftName != rightName {
+                return leftName < rightName
+            }
+            return left.entryId.uuidString < right.entryId.uuidString
+        }
+    }
+
+    /// IF-8 — begin the walk: speaks the first sanctioned question
+    /// (design-l2 C4, "Entry"). Only the candidates that are still pending
+    /// at this instant enter the walk; no candidates, no walk (the
+    /// resolver's `.nothingPending` already covers that upstream — nothing
+    /// here to ask about, nothing spoken).
+    ///
+    /// Defensive guards, both structural halves of design contracts:
+    /// - A live medication challenge outranks the walk (C4 invariant: walk
+    ///   and challenge are mutually exclusive; an acknowledgement arriving
+    ///   while the challenge is open is intercepted by the shipped block
+    ///   and re-prompted, never walked). If one IS open, begin refuses —
+    ///   the challenge never loses its window to a walk.
+    /// - A prior walk is cancelled first (design-l2 §IF-8: "begin cancels
+    ///   any prior walk"; a barge-in re-entry is the only way to arrive
+    ///   with one open, and the router ends the walk before the new
+    ///   acknowledgement is handled — so this path is defense, and it
+    ///   reports the replaced walk honestly as `.bargedIn`).
+    ///
+    /// The response window comes from `ackClarificationConfig` (the T-006
+    /// named home) — never a literal.
+    func beginAckClarification(candidates: [MedicationAckCandidate]) {
+        guard pendingConfirmationEntryId == nil else { return }
+        if pendingAckClarification != nil {
+            endAckClarification(reason: .bargedIn)
+        }
+        let live = Set(medicationAckCandidates().map(\.entryId))
+        let ordered = Self.ackCandidateFixedOrder(candidates.filter { live.contains($0.entryId) })
+        guard !ordered.isEmpty else { return }
+        let deadline = Date().addingTimeInterval(ackClarificationConfig.responseWindowSeconds)
+        let state = AckClarificationState(candidates: ordered,
+                                          cursor: 0,
+                                          pairAsked: ordered.count == 2,
+                                          deadline: deadline)
+        pendingAckClarification = state
+        armAckClarificationExpiry(deadline: deadline)
+        speakAckClarificationQuestion(for: state)
+    }
+
+    /// The design-l2 §IF-8 spelling of the same operation — one
+    /// implementation, two spec-pinned labels (`orderedCandidates:` is
+    /// the design's name for the fixed-order array; the unit spec's is
+    /// `candidates:`).
+    func beginAckClarification(orderedCandidates: [MedicationAckCandidate]) {
+        beginAckClarification(candidates: orderedCandidates)
+    }
+
+    /// IF-8 — one spoken answer. The router's SHIPPED yes/no classifiers
+    /// pass their verdicts in (`isYes` / `isNo`); this op mints no
+    /// vocabulary and re-parses nothing. What happens, in order:
+    ///
+    /// 1. The walk's candidate set is revalidated against the live
+    ///    pending set: if any candidate the walk asks about is no longer
+    ///    pending, the walk's question has expired — it ends (`.expired`,
+    ///    honest ended line, nothing recorded) rather than resolving
+    ///    against a reminder that no longer exists.
+    /// 2. A response naming exactly one WALK candidate (name-key
+    ///    containment over the same vocabulary as C3, at any cursor)
+    ///    resolves to it. Two or more named in one breath refuse to
+    ///    guess: the current question is asked again. Zero named falls
+    ///    through — the elder may be answering the question, not naming
+    ///    a medication.
+    /// 3. `isYes` on the PAIR question falls to the single form at
+    ///    cursor 0 (`.narrowed`); `isYes` on the single form resolves to
+    ///    the cursor's candidate.
+    /// 4. `isNo`: with three or more candidates the cursor advances and
+    ///    the next candidate is asked (m-4); at the last candidate — and
+    ///    for one or two candidates at any form — the walk ends
+    ///    (`.rejected`) with nothing recorded.
+    /// 5. Neither: the current sanctioned question is asked again
+    ///    (`.unanswered`) — the walk stays open until an answer or its
+    ///    window closes.
+    ///
+    /// Resolution NEVER records: the walk ends silently (`.resolved`, no
+    /// ended line, no ended event — resolved ends through the resolved
+    /// path) and returns the entry id; the caller continues the shipped
+    /// safety sequence.
+    @discardableResult
+    func ackClarificationResponse(raw: String, isYes: Bool, isNo: Bool) -> AckClarifyOutcome {
+        guard let state = pendingAckClarification else {
+            // No walk open: nothing was being asked, nothing is re-asked.
+            return .unanswered
+        }
+        let live = Set(medicationAckCandidates().map(\.entryId))
+        guard state.candidates.allSatisfy({ live.contains($0.entryId) }) else {
+            endAckClarification(reason: .expired)
+            return .ended(reason: .expired)
+        }
+
+        // 2. The elder said which medication (the resolver's matching
+        //    rule: canonical keys, Character-cluster containment).
+        let text = MedicationVoiceVocabulary.canonical(raw)
+        let named = state.candidates.filter { candidate in
+            candidate.voiceKeys.contains { key in
+                MedicationAckVocabulary.containsKey(key, inCanonical: text)
+            }
+        }
+        if named.count == 1 {
+            return resolveAckClarification(to: named[0].entryId)
+        }
+        if named.count > 1 {
+            speakAckClarificationQuestion(for: state)
+            return .unanswered
+        }
+
+        // 3./4. The answer to the question: yes or no.
+        if isYes {
+            if state.pairAsked && state.candidates.count == 2 {
+                // "Yes" to "X or Y?" narrows to the single form at
+                // cursor 0 — `state` is a value copy, so re-pend the
+                // narrowed shape before asking.
+                var narrowed = state
+                narrowed.pairAsked = false
+                pendingAckClarification = narrowed
+                speakAckClarificationQuestion(for: narrowed)
+                return .narrowed
+            }
+            let index = min(max(state.cursor, 0), state.candidates.count - 1)
+            return resolveAckClarification(to: state.candidates[index].entryId)
+        }
+        if isNo {
+            if state.candidates.count >= 3 && state.cursor + 1 < state.candidates.count {
+                var advanced = state
+                advanced.cursor += 1
+                pendingAckClarification = advanced
+                speakAckClarificationQuestion(for: advanced)
+                return .advanced
+            }
+            endAckClarification(reason: .rejected)
+            return .ended(reason: .rejected)
+        }
+
+        // 5. Neither a candidate's name nor a yes/no: ask the sanctioned
+        //    question again — never a leading question, never a hint about
+        //    which answer resolves.
+        speakAckClarificationQuestion(for: state)
+        return .unanswered
+    }
+
+    /// The T-013 spelling: an utterance with no classifier verdicts (its
+    /// name-containment half only). The router's call is the flagged form
+    /// above — a yes/no word arriving through here is deliberately NOT
+    /// interpreted, because this file mints no second yes/no vocabulary.
+    @discardableResult
+    func ackClarificationResponse(utterance: String) -> AckClarifyOutcome {
+        ackClarificationResponse(raw: utterance, isYes: false, isNo: false)
+    }
+
+    /// IF-8 — end the walk. Idempotent (a nil state is a no-op, design-l2
+    /// §IF-8), cancels the expiry block, clears the state (so
+    /// `isAwaitingConfirmation` flips with it) and reports the end
+    /// honestly:
+    /// - `medication_ack_clarify_ended` for every end EXCEPT `.resolved`
+    ///   (resolved ends through the resolved path — design-l2 §5.2),
+    ///   PII-free: outcome only, empty metadata, never a name.
+    /// - The ended line (`meds.ack.clarifyEnded`) only for `.rejected`
+    ///   and `.expired` — the ends with no voice of their own. `.denied`
+    ///   falls through to the shipped refusal ladder and `.bargedIn` to
+    ///   the acknowledgement path; both speak next, and a line here would
+    ///   talk over them.
+    func endAckClarification(reason: AckClarifyEndReason) {
+        guard pendingAckClarification != nil else { return }
+        ackClarifyExpiryWork?.cancel()
+        ackClarifyExpiryWork = nil
+        pendingAckClarification = nil
+        if reason == .rejected || reason == .expired {
+            speak(key: "meds.ack.clarifyEnded")
+        }
+        if reason != .resolved {
+            observabilityBus.emit(ObservabilityEvent(
+                component: "medication_ack",
+                eventType: "medication_ack_clarify_ended",
+                durationMs: nil,
+                outcome: reason.observationOutcome,
+                errorCode: nil,
+                metadata: [:]))
+        }
+    }
+
+    /// The design-l2 §IF-8 positional spelling of the same operation —
+    /// one implementation, two spec-pinned labels.
+    func endAckClarification(_ reason: AckClarifyEndReason) {
+        endAckClarification(reason: reason)
+    }
+
+    /// The sanctioned question for a walk state — the ONE home of the
+    /// walk's copy: the pair form for an open pair question, the single
+    /// form at the cursor otherwise. Internal, not private, so the suite
+    /// can pin the exact forms (bare tests have no speaker); the ROUTER
+    /// never calls this — it consults the walk, never rebuilds its
+    /// questions. Empty candidates have no question: "" (nothing to say).
+    func ackClarificationQuestion(for state: AckClarificationState) -> String {
+        guard !state.candidates.isEmpty else { return "" }
+        if state.pairAsked && state.candidates.count == 2 {
+            return L10n.fmt("meds.ack.clarifyPair", locale: activeLocale,
+                            state.candidates[0].medicationName,
+                            state.candidates[1].medicationName)
+        }
+        let index = min(max(state.cursor, 0), state.candidates.count - 1)
+        return L10n.fmt("meds.ack.clarifyOne", locale: activeLocale,
+                        state.candidates[index].medicationName)
+    }
+
+    /// Speak the current sanctioned question (a no-op without a speaker —
+    /// the walk's state still advances; speech is presentation).
+    private func speakAckClarificationQuestion(for state: AckClarificationState) {
+        speak(text: ackClarificationQuestion(for: state))
+    }
+
+    /// The walk's one resolution seam: ends the walk silently and hands
+    /// the id back. NOTHING here records, challenges or speaks — the
+    /// caller continues the shipped safety sequence (T-014's contract).
+    private func resolveAckClarification(to entryId: UUID) -> AckClarifyOutcome {
+        endAckClarification(reason: .resolved)
+        return .resolved(entryId: entryId)
+    }
+
+    /// Arms the expiry block for `deadline` (see `ackClarifyExpiryWork`).
+    private func armAckClarificationExpiry(deadline: Date) {
+        ackClarifyExpiryWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self,
+                  let current = self.pendingAckClarification,
+                  current.deadline == deadline else { return }
+            self.endAckClarification(reason: .expired)
+        }
+        ackClarifyExpiryWork = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + ackClarificationConfig.responseWindowSeconds,
+            execute: work)
     }
 
     /// Creates a reminder entry through the scheduler storage (spec §5.1,

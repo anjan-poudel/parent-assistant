@@ -94,6 +94,106 @@ struct CalendarShareStatus: Equatable {
     }
 }
 
+// MARK: - Significant medication events (C11)
+
+/// One at-risk medication event that ADDITIONALLY surfaces as a one-off
+/// entry on the shared family calendar (design §9.3 / OD-7; FR-MSR-016).
+///
+/// A plain value, not a side effect: the scheduler raises it at the three
+/// at-risk sites (missed dose, blocked double dose, escalation started —
+/// T-016), and `CalendarShareService.writeSignificantEvent` is the only
+/// consumer that acts on it. So "which events surface" is decided at the
+/// raise sites, not by a second rule here — and the set is deliberately
+/// exactly those three: an intake that was RECORDED is not an alert.
+struct SignificantMedicationEvent: Equatable {
+
+    /// The three at-risk events of §9.3, and deliberately nothing else.
+    /// A kind added here without revisiting that decision would put a new
+    /// class of entry on the family's calendar, so the enum is the
+    /// decision's single point of truth.
+    enum Kind: String, Equatable {
+        case missedMedication
+        case possibleDoubleDose
+        case escalationStarted
+
+        /// The string-catalog key of the phrase this event's calendar
+        /// entry opens with (C13 keys, present in both locales). Kept
+        /// beside the cases so a new kind cannot compile without a
+        /// phrase to say.
+        var alertKey: String {
+            switch self {
+            case .missedMedication: return "calendarShare.alert.missed"
+            case .possibleDoubleDose: return "calendarShare.alert.doubleDose"
+            case .escalationStarted: return "calendarShare.alert.escalation"
+            }
+        }
+    }
+
+    let kind: Kind
+    let entryId: UUID
+    /// The trigger instant — the dose occurrence the event is about. It
+    /// is the one-off twin's anchor AND part of the identity below.
+    let occurredAt: Date
+    /// The deterministic identity (D7): derived from the three fields
+    /// above, so a re-trigger of the same logical event composes the same
+    /// calendar key and `LocalGoogleEventMappingStore.enqueue` REPLACES
+    /// the queued entry rather than duplicating it.
+    ///
+    /// Shape: `<kind>_<entry uuid>_<yyyyMMddHHmm UTC>`. The stamp is
+    /// truncated to the minute on purpose — the occurrence identity is
+    /// the dose slot, not the second the escalation engine happened to
+    /// decide — and it carries no colon, so the composed
+    /// `CalendarShareKey.oneOff` form stays a valid 2-component key
+    /// (§4.3 grammar; see the grammar test).
+    let id: String
+
+    init(kind: Kind, entryId: UUID, occurredAt: Date, id: String? = nil) {
+        self.kind = kind
+        self.entryId = entryId
+        self.occurredAt = occurredAt
+        self.id = id ?? Self.identity(kind: kind, entryId: entryId,
+                                      occurredAt: occurredAt)
+    }
+
+    /// The deterministic identity behind `id` — one implementation, so
+    /// the raise site and this value cannot disagree about what "the same
+    /// event" means.
+    static func identity(kind: Kind, entryId: UUID, occurredAt: Date) -> String {
+        "\(kind.rawValue)_\(entryId.uuidString)_\(occurrenceStamp(occurredAt))"
+    }
+
+    /// `yyyyMMddHHmm` in UTC: fixed locale and zone, so the stamp is the
+    /// same on every device and in every timezone the household travels
+    /// to (D7 pins both).
+    private static func occurrenceStamp(_ instant: Date) -> String {
+        occurrenceStampFormatter.string(from: instant)
+    }
+
+    private static let occurrenceStampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMddHHmm"
+        return formatter
+    }()
+}
+
+/// What one significant-event calendar write actually did (design §5.1).
+/// Never a "delivered" claim: `.enqueued` is exactly that — the shipped
+/// flush/backoff path owns the Google write, and the Settings status
+/// card's pending count is the delivery surface.
+enum CalendarShareWriteResult: Equatable {
+    case enqueued
+    case skippedNotActive
+    case skippedNoInvitees
+    case failed(reason: String)
+}
+
+/// The unit spec (T-015) spells this result `SignificantEventWriteResult`;
+/// the frozen design pins `CalendarShareWriteResult` (design-l2 C11 /
+/// IF-17). One type, both names, so either document's spelling resolves.
+typealias SignificantEventWriteResult = CalendarShareWriteResult
+
 // MARK: - Service
 
 /// The bridge between the app's local-first world and Google Calendar
@@ -673,6 +773,100 @@ final class CalendarShareService: ObservableObject {
         }
     }
 
+    // MARK: - Significant-event write (IF-17, D7)
+
+    /// Writes one significant medication event to the shared family
+    /// calendar as a ONE-OFF entry (§9.3 / OD-7, FR-MSR-016). The
+    /// consent-gated calendar channel the three at-risk events
+    /// additionally surface on.
+    ///
+    /// Rules, in the order they run:
+    ///  1. `canShare` first — the shipped gate (signed in + disclosure
+    ///     accepted), no new consent surface. A closed gate is
+    ///     `.skippedNotActive` plus the shipped honest event, and NOTHING
+    ///     is queued: the family has not made the decision yet, and the
+    ///     Settings pending count must only ever mean "waiting on
+    ///     Google".
+    ///  2. The mapper composes the draft with the FAMILY-NOTIFICATION
+    ///     audience (every contact with an email — the M-1-resolved
+    ///     disclosure landed at T-012); nobody eligible →
+    ///     `.skippedNoInvitees`, again reported, never silent.
+    ///  3. `enqueue` only — deliberately NO `markOutbound` (D7): the
+    ///     stale-twin sweep only ever considers outbound keys, and these
+    ///     one-offs have no local EventKit event, so marking them would
+    ///     queue tombstones for live alerts. A failed store write is
+    ///     `.failed(reason:)` — a per-item honest result, nothing claimed
+    ///     delivered.
+    ///
+    /// The Google write itself is the shipped async `flushPending` path
+    /// (launch/foreground/interval passes); `.enqueued` claims exactly
+    /// that and nothing more. Write-once, no re-assert: once created, the
+    /// entry is the family's to curate in Google (documented follow-up).
+    ///
+    /// Main-thread discipline: a call from off-main hops SYNCHRONOUSLY so
+    /// the result stays per-item and immediate; the scheduler's trigger
+    /// sites are main. (The async hop `onMain` would make the result
+    /// unreturnable — this is the one deliberate difference.)
+    @discardableResult
+    func writeSignificantEvent(_ event: SignificantMedicationEvent,
+                               entry: MedicationEntry?) -> CalendarShareWriteResult {
+        if Thread.isMainThread {
+            return performSignificantEventWrite(event, entry: entry)
+        }
+        return DispatchQueue.main.sync {
+            performSignificantEventWrite(event, entry: entry)
+        }
+    }
+
+    private func performSignificantEventWrite(
+        _ event: SignificantMedicationEvent,
+        entry: MedicationEntry?
+    ) -> CalendarShareWriteResult {
+        guard canShare else {
+            emit("calendar_share_skipped_not_active", outcome: "info",
+                 metadata: ["kind": EventNotifyKind.medicationReminder.rawValue])
+            return .skippedNotActive
+        }
+        // No entry, no NAME: the title names the medicine, and inventing
+        // one — or writing an anonymous alert — would put a claim on the
+        // family's calendar that the local truth cannot back. The trigger
+        // sites always hold the entry; this branch is honest, not silent.
+        guard let entry else {
+            emit("calendar_share_write_failed", outcome: "failure",
+                 metadata: ["kind": EventNotifyKind.medicationReminder.rawValue,
+                            "reason": "entry_missing"])
+            return .failed(reason: "entry_missing")
+        }
+        guard let draft = CalendarShareMapper.significantEventDraft(
+            event: event,
+            medicationName: entry.medicationName,
+            contacts: contactsProvider(),
+            timeZone: .current,
+            locale: locale
+        ) else {
+            emit("calendar_share_skipped_no_invitees", outcome: "info",
+                 metadata: ["kind": EventNotifyKind.medicationReminder.rawValue])
+            return .skippedNoInvitees
+        }
+        let key = CalendarShareKey.oneOff(kind: .medicationReminder,
+                                          eventIdentifier: event.id)
+        // D7: the omission of `store.markOutbound(key)` here is the
+        // bookkeeping decision, not an oversight — the sweep's only input
+        // is the outbound set, and these keys must never reach it (see
+        // the method doc and `reconcileSnapshotKeys`).
+        guard store.enqueue(.upsert(key: key, draft: draft,
+                                    googleEventID: store.googleEventID(for: key))) else {
+            emit("calendar_share_write_failed", outcome: "failure",
+                 metadata: ["kind": EventNotifyKind.medicationReminder.rawValue,
+                            "reason": "store_write_failed"])
+            return .failed(reason: "store_write_failed")
+        }
+        emit("calendar_share_significant_event_enqueued", outcome: "success",
+             metadata: ["kind": EventNotifyKind.medicationReminder.rawValue])
+        refreshStatus()
+        return .enqueued
+    }
+
     // MARK: - Reconcile core
 
     /// Whether both gates are open. Enqueueing is gated on this so a
@@ -700,7 +894,14 @@ final class CalendarShareService: ObservableObject {
                            knownKeySnapshot: Set<String>? = nil) {
         guard canShare else { refreshStatus(); return }
         let prefix = ownedKeyPrefix ?? "\(kind.rawValue):"
-        let known = knownKeySnapshot ?? Set(store.knownKeys.filter { $0.hasPrefix(prefix) })
+        // D7: only the SLOT-shaped keys of this kind are the schedule
+        // mirror's to judge. The ledger also holds significant-event
+        // ONE-OFF keys (written via `writeSignificantEvent`), and a
+        // prefix-only snapshot would read a written one-off as "removed
+        // by this schedule edit" and queue a tombstone that deletes a
+        // live alert from the family's calendar.
+        let known = knownKeySnapshot ?? CalendarShareMapper.reconcileSnapshotKeys(
+            from: store.knownKeys, prefix: prefix)
         let plan = CalendarShareMapper.plan(currentKeys: Array(desired.keys),
                                             snapshotKeys: known)
 
