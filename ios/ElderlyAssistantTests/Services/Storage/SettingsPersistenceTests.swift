@@ -293,6 +293,8 @@ final class SettingsPersistenceTests: XCTestCase {
             "quickAccessApps",
             // Medications / appointments.
             "appointmentsToCalendar", "appointmentSmsNoteDismissed.v1",
+            // Slot-clock retime note (the one-shot m-5 dismissal, T-020).
+            "medicationRetimeNoteDismissed.v1",
             // Calendar display + sync + sharing.
             "calendarDisplay.seeded.v1", "calendarDisplay.defaultCalendar.v1",
             "calendarDisplay.bsOverlay.v1", "calendarDisplay.tithiOverlay.v1",

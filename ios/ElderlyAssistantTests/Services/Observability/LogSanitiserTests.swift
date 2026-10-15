@@ -508,6 +508,58 @@ final class LogSanitiserTests: XCTestCase {
                      + "closed at the construction site, not at the bus (M-4)")
     }
 
+    // MARK: Scenario: The medication metadata keys are admitted (T-022)
+
+    /// [MEDICATION-SCHEDULES-REMINDERS T-022] The medication feature's
+    /// three additive keys ride the shared event families its emitters
+    /// write (`MedicationScheduler.notifyCaregiversOfFirstFire`, the
+    /// `FamilyNotifier` alert path, the calendar-share / calendar-sync
+    /// paths). Each value is bounded BY CONSTRUCTION — an
+    /// `EventNotifyKind` raw value, a `NotifyChannel` raw value, or a
+    /// 24-hex-char one-way short hash — so the pairs are declared AND
+    /// admitted whole, with no bus-level value governance: the closed
+    /// vocabularies stay exactly the dialogue six.
+    func testNewMedicationMetadataKeysAreAdmittedAndDeclared() {
+        let clean = sanitiser.sanitise(event(metadata: [
+            "kind": "medicationReminder",
+            "channel": "sms",
+            "event_id_hash": "9f2c41b7a8d3e5f60718c2ab"
+        ]))
+        XCTAssertEqual(clean.metadata["kind"], "medicationReminder",
+                       "the alert kind is a bounded enum raw value and survives whole")
+        XCTAssertEqual(clean.metadata["channel"], "sms",
+                       "the channel is a bounded enum raw value and survives whole")
+        XCTAssertEqual(clean.metadata["event_id_hash"], "9f2c41b7a8d3e5f60718c2ab",
+                       "a one-way short hash is the key's whole value grammar")
+        XCTAssertEqual(Set(clean.metadata.keys), Set([
+            "kind", "channel", "event_id_hash"
+        ]), "every pair survives the filter — none is dropped or invented")
+
+        // The declaration half: each key is in the allow-list, and none
+        // is value-governed — the enum cases and hash widths belong to
+        // the emitters, not to a bus table (unlike the dialogue six).
+        for key in ["kind", "channel", "event_id_hash"] {
+            XCTAssertTrue(LogSanitiser.allowedKeys.contains(key),
+                          "\(key) must be declared in the allow-list")
+            XCTAssertNil(LogSanitiser.closedVocabularyMetadataKeys[key],
+                         "\(key) carries enum raw values / hashes and is not value-governed")
+        }
+
+        // Every token the shipped emitters can produce under these keys
+        // survives untouched: the three EventNotifyKind cases...
+        for token in ["medicationReminder", "routineReminder", "calendarEvent"] {
+            XCTAssertEqual(sanitiser.sanitise(event(metadata: ["kind": token]))
+                            .metadata["kind"], token,
+                           "shipped kind token '\(token)' must survive")
+        }
+        // ...and the three NotifyChannel cases.
+        for token in ["sms", "whatsApp", "messenger"] {
+            XCTAssertEqual(sanitiser.sanitise(event(metadata: ["channel": token]))
+                            .metadata["channel"], token,
+                           "shipped channel token '\(token)' must survive")
+        }
+    }
+
     // MARK: Scenario: An unlisted key is still dropped
 
     func testAnUnlistedDialogueKeyIsDroppedAndTheAllowedPairsAreUnaffected() {
@@ -624,6 +676,12 @@ final class LogSanitiserTests: XCTestCase {
         let correctionKeys: Set<String> = [
             "correction_band", "correction_judge_eligible",
             "correction_clarify_reason"]
+        // [MEDICATION-SCHEDULES-REMINDERS T-022] The medication feature's
+        // three keys ride it too — `EventNotifyKind` raw values, a
+        // `NotifyChannel` raw value and a one-way short hash, each bounded
+        // by construction and declared in the allow-list's own medication
+        // block; the diff stays provably deliberate by naming them here.
+        let medicationKeys: Set<String> = ["kind", "channel", "event_id_hash"]
         // Nothing pre-existing was removed, renamed or re-meant.
         for key in shippedKeysBeforeTheDialogueExtension {
             XCTAssertTrue(LogSanitiser.allowedKeys.contains(key),
@@ -632,17 +690,26 @@ final class LogSanitiserTests: XCTestCase {
         let added = LogSanitiser.allowedKeys
             .subtracting(shippedKeysBeforeTheDialogueExtension)
         XCTAssertEqual(added,
-                       Set(dialogueClosedVocabularies.keys).union(correctionKeys),
-                       "the extension is exactly the six documented dialogue keys "
-                       + "plus the three correction keys — a silent widening fails here")
-        XCTAssertEqual(added.count, 9)
+                       Set(dialogueClosedVocabularies.keys)
+                           .union(correctionKeys).union(medicationKeys),
+                       "the extension is exactly the six documented dialogue keys, "
+                       + "the three correction keys and the three medication keys — "
+                       + "a silent widening fails here")
+        XCTAssertEqual(added.count, 9 + medicationKeys.count)
         XCTAssertEqual(LogSanitiser.allowedKeys.count,
-                       shippedKeysBeforeTheDialogueExtension.count + 9)
+                       shippedKeysBeforeTheDialogueExtension.count + 9 + medicationKeys.count)
         XCTAssertFalse(added.contains("reason"),
                        "reason is reused (already in the shipped set), never re-added")
-        for key in added.subtracting(correctionKeys) {
+        for key in added.subtracting(correctionKeys).subtracting(medicationKeys) {
             XCTAssertNotNil(LogSanitiser.closedVocabularyMetadataKeys[key],
                             "every added dialogue key is governed by a closed vocabulary")
+        }
+        // The medication keys are declared but NOT value-governed — their
+        // token sets belong to the emitters, not to a bus table (the
+        // dialogue six stay exactly six).
+        for key in medicationKeys {
+            XCTAssertNil(LogSanitiser.closedVocabularyMetadataKeys[key],
+                         "\(key) carries enum raw values / hashes, not a bus vocabulary")
         }
     }
 }

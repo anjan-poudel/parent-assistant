@@ -43,7 +43,21 @@ struct MedicationDoseFireScreen: View {
     /// The elder took the dose. The caller records it and gets this screen
     /// out of the way.
     let onAcknowledge: () -> Void
+    /// Take a photo of this dose as evidence ([MED-EVIDENCE], T-021;
+    /// FR-MSR-013). The closure runs ONE capture through the coordinator's
+    /// IF-14 plumbing — camera, on-device store, hold/attach — and
+    /// delivers the outcome on the main thread; nil means no capture was
+    /// made (the elder cancelled, or the camera could not open). The
+    /// capture is bound to the entry this screen is showing: what the
+    /// photo becomes depends on the acknowledgement chain, never on the
+    /// photo.
+    let onCaptureEvidence: (@escaping (EvidenceCaptureOutcome?) -> Void) -> Void
     let onClose: () -> Void
+
+    /// The one-shot caption under the capture button — the last capture's
+    /// outcome line (`evidenceOutcomeKey`, one mapping shared with the
+    /// spoken line), nil while no capture has ended on this screen.
+    @State private var evidenceNoticeKey: String?
 
     /// The dose line, trimmed — the settings editor creates entries with no
     /// description, and an empty line must not reserve space.
@@ -112,6 +126,47 @@ struct MedicationDoseFireScreen: View {
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 24)
+
+            // [MED-EVIDENCE] (T-021) The photo-as-evidence affordance:
+            // a fired dose invites the photo — the box, the pill — and the
+            // capture is HELD for the record the acknowledgement chain
+            // writes, never a record of its own (IF-14/IF-15). Rendered
+            // only on the dose arm (the `footer` gate above renders
+            // `doseFooter` for `.dose` alone; `showsEvidenceAffordance` is
+            // the pinned statement of that rule). The caption under it is
+            // the last capture's honest outcome — attached, not-yet-
+            // delivered, or could-not-be-saved — never a claim.
+            if MedicationVisualAidsPresentation.showsEvidenceAffordance(mode: mode) {
+                VStack(spacing: 8) {
+                    Button {
+                        onCaptureEvidence { outcome in
+                            evidenceNoticeKey =
+                                MedicationVisualAidsPresentation.evidenceOutcomeKey(for: outcome)
+                        }
+                    } label: {
+                        Label("meds.evidence.capture", systemImage: "camera.fill")
+                            .font(.system(size: appearance.typography.bodyPointSize,
+                                          weight: .semibold))
+                            .foregroundStyle(appearance.colors.accentForeground)
+                            .frame(maxWidth: .infinity)
+                            .frame(minHeight: DesignTokens.minTapTargetSize)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .appSurface(role: .control,
+                                        cornerRadius: DesignTokens.bubbleCornerRadius)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 24)
+
+                    if let evidenceNoticeKey {
+                        Text(LocalizedStringKey(evidenceNoticeKey))
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 32)
+                    }
+                }
+            }
         }
         .padding(.top, 4)
     }
@@ -195,6 +250,45 @@ struct MedicationVisualAidsPresentation: Identifiable, Equatable {
     func caption(locale: Locale) -> String {
         Self.caption(medicationName: medicationName, purpose: purpose, locale: locale)
     }
+
+    // MARK: - Evidence capture seams ([MED-EVIDENCE], T-021; D11)
+
+    /// Whether the dose screen carries the photo-as-evidence affordance.
+    /// It is a property of WHY the screen is up — the same reason the
+    /// screen's action row is: a fired dose invites the photo ("I took
+    /// it" and the evidence of it belong to the same moment), while the
+    /// identify mode — the elder asking what a medicine looks like when
+    /// nothing is due — must not grow a capture path: a photo taken there
+    /// would be evidence for a dose that is not happening.
+    static func showsEvidenceAffordance(mode: Mode) -> Bool {
+        mode == .dose
+    }
+
+    /// The announce line spoken when a capture opens (D11): it NAMES the
+    /// medication the capture is for, through the `meds.evidence.spoken`
+    /// catalog line in both app languages. Composed here once, so the
+    /// spoken line and its pins share one source; callers pass the bound
+    /// presentation's own name, so the line can never name a different
+    /// medicine.
+    static func evidenceAnnounceLine(medicationName: String, locale: Locale) -> String {
+        L10n.fmt("meds.evidence.spoken", locale: locale, medicationName)
+    }
+
+    /// The caption for a capture's outcome — ONE mapping for the drawn
+    /// caption and the spoken line, so a screen and a voice can never
+    /// disagree about what happened. nil (no capture made) shows nothing;
+    /// a store failure and a declined capture both land on the honest
+    /// "could not be saved" line — in the declined case the photo really
+    /// is gone (the late-hold cleanup deleted it), and anything friendlier
+    /// would be a claim about a file that no longer exists.
+    static func evidenceOutcomeKey(for outcome: EvidenceCaptureOutcome?) -> String? {
+        switch outcome {
+        case nil: return nil
+        case .held: return "meds.evidence.notYetDelivered"
+        case .attached: return "meds.evidence.attached"
+        case .declinedNoContext, .failed: return "meds.evidence.failed"
+        }
+    }
 }
 
 /// Host for the fired-dose screen, mounted at the app root beside
@@ -207,6 +301,15 @@ struct MedicationVisualAidsPresentation: Identifiable, Equatable {
 /// behaviour (banner + read-aloud).
 struct MedicationVisualAidOverlay: View {
     @Environment(\.appAppearance) private var appearance
+    /// The coordinator hosts the capture plumbing ([MED-EVIDENCE], T-021)
+    /// and is already in the environment at the overlay's mount site
+    /// (ContentView), so the capture closure below needs no new mount
+    /// parameter — the overlay hands the dose screen a closure bound to
+    /// the SAME presentation that is on screen: the medication NAME the
+    /// announce speaks and the entryId the hold binds are read off `fired`,
+    /// never re-resolved, so a screen can never capture evidence for a
+    /// medicine other than the one it shows.
+    @EnvironmentObject private var coordinator: AppCoordinator
     let presentation: MedicationVisualAidsPresentation?
     let store: VisualAidStore
     let locale: Locale
@@ -232,6 +335,13 @@ struct MedicationVisualAidOverlay: View {
                     store: store,
                     locale: locale,
                     onAcknowledge: { onAcknowledge(fired.entryId) },
+                    onCaptureEvidence: { completion in
+                        coordinator.captureMedicationEvidence(
+                            medicationName: fired.medicationName,
+                            context: .pendingDose(entryId: fired.entryId),
+                            onOutcome: completion
+                        )
+                    },
                     onClose: onClose
                 )
             }

@@ -118,8 +118,15 @@ final class LiveTranslateAllowListTests: XCTestCase {
             // T-137 recorded in `LogSanitiserTests`; this suite's delta pin
             // widened with it).
             "intake", "probe_kind", "attempt", "option_count",
-            "capture_form", "merge_source"
-        ], "the extension is exactly the union of the three declared key sets")
+            "capture_form", "merge_source",
+            // [MEDICATION-SCHEDULES-REMINDERS T-022] (2026-10-15) The
+            // medication slot-model feature's three additive keys: the
+            // shared alert-event families' kind enum, the notifier's
+            // channel enum and the event's own producer-side short hash.
+            // Bounded by construction; declared with their full emitter
+            // inventory in `LogSanitiser.swift`.
+            "kind", "channel", "event_id_hash"
+        ], "the extension is exactly the union of the declared key sets")
         XCTAssertNil(sanitisedMetadata(["somethingNoOneDeclared": "x"])["somethingNoOneDeclared"],
                      "unknown keys are still dropped outright")
     }
