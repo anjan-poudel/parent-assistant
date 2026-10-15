@@ -1,6 +1,40 @@
 import Foundation
 import CryptoKit
 
+// MARK: - Mapping-change re-arm report (IF-12, m-1)
+
+/// The honest per-entry effects of one `rearmForSlotClockChange()` pass
+/// (IF-12, review-l1 m-1). The medicine-times save action (T-020) renders
+/// one settings line per field; nothing here is UI and nothing here is
+/// consumed by the scheduler itself.
+///
+/// PII-free by construction: two counts, the closed slot vocabulary and
+/// one Bool — no medication name, no dose, no clock value (NFR-MSR-002).
+/// The counts are REMINDERS, not entries: an entry may hold more than one
+/// pending reminder, and each is kept or replaced on its own merits.
+struct SlotClockRearmReport: Equatable {
+    /// Un-fired reminders replaced through the standard creation path and
+    /// armed on this pass. Zero when the persistence the arming depends
+    /// on failed — nothing was armed on the replaced set.
+    var rearmedCount: Int
+
+    /// Reminders deliberately left in place instead of replaced: every
+    /// reminder of an entry kept by the finalize-in-flight guard, plus
+    /// every fired reminder of an entry that WAS re-armed (live
+    /// escalation never moves).
+    var keptLiveCount: Int
+
+    /// Slots whose resolution failed under the new mapping, ordered
+    /// morning → afternoon → evening and deduplicated. Those entries
+    /// armed nothing; the stored mapping was not repaired or guessed.
+    var unresolvedSlots: [MedicationSlot]
+
+    /// A write this pass depended on failed — the rewritten mirrors or
+    /// the replacement reminder set — so nothing was armed on the
+    /// replaced set. The report never lets that vanish silently (m-1).
+    var persistenceFailed: Bool
+}
+
 // MARK: - MedicationScheduler Implementation (L2 §5.4)
 
 final class MedicationScheduler: MedicationSchedulerProtocol {
@@ -279,6 +313,179 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         case .failure(let error):
             return .failure(error)
         }
+    }
+
+    // MARK: - Guarded re-arm on mapping change (IF-12, m-1)
+
+    /// Re-arms every slot entry against the household mapping as the
+    /// store reads NOW — the walk the medicine-times save action runs
+    /// after it has validated and persisted a new mapping (IF-9/T-020;
+    /// this pass only ever runs behind that order and never validates or
+    /// writes the mapping record itself).
+    ///
+    /// Per step, and why the order is the order:
+    ///
+    /// 1. Every SLOT entry is re-resolved through the arming feed
+    ///    (IF-11). Legacy entries are not this pass's business: no
+    ///    mapping ever produced their times, so nothing about them moves.
+    /// 2. An entry with a finalize in flight — an ACTIVE confirmation
+    ///    challenge — is kept WHOLE: no reminder replaced, no mirror
+    ///    rewritten, no counter beyond the honest `keptLiveCount`.
+    ///    Re-arming an entry under an acknowledgement sequence in
+    ///    progress is the one thing this pass must never do (the HIGH
+    ///    risk of IF-12).
+    /// 3. A slot that cannot resolve under the new mapping arms NOTHING
+    ///    for that entry (fail-closed, the arming feed's own rule): its
+    ///    un-fired reminders are dropped and the slot is named — ordered,
+    ///    deduplicated — in `unresolvedSlots`, with the PII-free
+    ///    `medication_slot_unresolved` event (the slot and nothing else).
+    /// 4. Fired reminders are NEVER moved: a live escalation keeps its
+    ///    persisted time and its engine.
+    /// 5. An un-fired reminder that no longer matches the new resolution
+    ///    is replaced through the STANDARD creation path
+    ///    (`createPendingReminders`) — there is no parallel arming code —
+    ///    which persists the replacement set before it arms it
+    ///    (FR-MSR-022). The entries' resolved-time mirrors (D2) are
+    ///    rewritten and persisted BEFORE any alarm is touched.
+    /// 6. A second pass under unchanged inputs replaces nothing — the
+    ///    equality check finds every armed time and every mirror already
+    ///    matching — and reports the clean no-op without a single write
+    ///    or alarm call.
+    ///
+    /// One shipped-path side effect is worth knowing (and is not the
+    /// guard failing): `createPendingReminders` re-asserts every pending
+    /// alarm in the list, exactly as `loadSchedule` does today. A kept
+    /// entry's alarm is therefore re-added at its OWN time — idempotent
+    /// by reminder id, never moved, and its persisted state, engine and
+    /// challenge all untouched.
+    ///
+    /// Failure honesty (m-1): `persistenceFailed` is set by either write
+    /// this pass depends on, and a failed write arms nothing on the
+    /// replaced set. `onScheduleChanged` fires last and only for a
+    /// committed mirror rewrite — the same contract `loadSchedule` keeps,
+    /// so the share layer sees exactly the version that was stored.
+    @discardableResult
+    func rearmForSlotClockChange() -> SlotClockRearmReport {
+        var report = SlotClockRearmReport(rearmedCount: 0,
+                                          keptLiveCount: 0,
+                                          unresolvedSlots: [],
+                                          persistenceFailed: false)
+        let now = Date()
+
+        // A stable order (name, then id): the same state always walks in
+        // the same order, so the report is deterministic.
+        let slotEntries = entries.values
+            .filter { $0.slot != nil }
+            .sorted {
+                if $0.medicationName != $1.medicationName {
+                    return $0.medicationName < $1.medicationName
+                }
+                return $0.id.uuidString < $1.id.uuidString
+            }
+
+        var rearmEntries: [MedicationEntry] = []
+        var rewrittenById: [UUID: MedicationEntry] = [:]
+        var replacedReminderIds: [UUID] = []
+        var droppedReminderIds: [UUID] = []
+        var unresolvedSeen: Set<MedicationSlot> = []
+
+        // ---- Decide. No write, no alarm, no challenge touched yet. ----
+        for entry in slotEntries {
+            let reminders = pendingRemindersList.values
+                .filter { $0.medicationEntryId == entry.id }
+
+            // Guard (a): a finalize in flight keeps the entry whole.
+            if hasActiveConfirmationChallenge(for: entry.id) {
+                report.keptLiveCount += reminders.filter(isLiveReminder).count
+                continue
+            }
+
+            switch resolvedScheduleTimes(for: entry) {
+            case .failure(.indeterminate(let slot)):
+                unresolvedSeen.insert(slot)
+                emit("medication_slot_unresolved",
+                     metadata: ["slot": slot.rawValue],
+                     outcome: "unresolved")
+                droppedReminderIds.append(contentsOf: reminders
+                    .filter(isUnfiredReminder)
+                    .map(\.id))
+
+            case .success(let times):
+                let unfired = reminders.filter(isUnfiredReminder)
+                let staleUnfired = unfired.contains { !clockMatches($0.scheduledAt, times) }
+                let staleMirror = !mirrorMatches(entry.scheduleTimes, times)
+                // Idempotence: anything that already matches the new
+                // resolution is left alone, so a second pass under the
+                // same mapping replaces nothing at all.
+                guard staleMirror || staleUnfired else { continue }
+                let rewritten = entry.withScheduleTimes(times)
+                if staleMirror { rewrittenById[entry.id] = rewritten }
+                rearmEntries.append(rewritten)
+                replacedReminderIds.append(contentsOf: unfired.map(\.id))
+                report.keptLiveCount += reminders.filter {
+                    isLiveReminder($0) && !isUnfiredReminder($0)
+                }.count
+            }
+        }
+
+        report.unresolvedSlots = MedicationSlot.allCases.filter { unresolvedSeen.contains($0) }
+
+        // Nothing to replace and nothing to drop: the honest no-op, with
+        // no write and no alarm call behind it.
+        guard !rearmEntries.isEmpty || !droppedReminderIds.isEmpty else { return report }
+
+        // ---- The resolved-time mirrors, persisted BEFORE any alarm (D2) ----
+        if !rewrittenById.isEmpty {
+            let payload = entries.values
+                .map { rewrittenById[$0.id] ?? $0 }
+                .sorted { $0.medicationName < $1.medicationName }
+            guard case .success = storage.write(key: storageKeyEntries, value: payload) else {
+                // Nothing armed on the replaced set, and the in-memory
+                // entries keep the version that is actually stored.
+                emit("entry_persistence_failed", metadata: [:])
+                report.persistenceFailed = true
+                return report
+            }
+            for (entryId, rewritten) in rewrittenById {
+                entries[entryId] = rewritten
+            }
+        }
+
+        // ---- Replace / drop the un-fired reminders, then persist, then arm ----
+        for reminderId in replacedReminderIds + droppedReminderIds {
+            pendingRemindersList.removeValue(forKey: reminderId)
+            engines.removeValue(forKey: reminderId)
+        }
+
+        let statePersisted: Bool
+        if !rearmEntries.isEmpty {
+            let createdCount = createPendingReminders(for: rearmEntries, now: now)
+            statePersisted = createdCount != nil
+            report.rearmedCount = createdCount ?? 0
+        } else {
+            // Drop-only pass (every affected slot was unresolved): the
+            // removal still has to be durable before any alarm is touched.
+            statePersisted = persistReminders()
+        }
+        if !statePersisted {
+            // The write that failed already reported itself
+            // (`reminder_persistence_failed`); the report carries it too.
+            report.persistenceFailed = true
+        }
+
+        // ---- Platform alarms last, and only over durable state ----
+        if statePersisted {
+            for reminderId in replacedReminderIds + droppedReminderIds {
+                alarmScheduler.cancelReminder(reminderId: reminderId)
+            }
+        }
+
+        // ---- The share layer last of all: the committed entry payload ----
+        if !rewrittenById.isEmpty {
+            onScheduleChanged?(medicationEntries())
+        }
+
+        return report
     }
 
     // MARK: - Acknowledge (Baseline FR-026 to FR-029)
@@ -781,8 +988,76 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         }
     }
 
-    private func createPendingReminders(for entries: [MedicationEntry], now: Date) {
+    /// The scheduler's EXISTING challenge-active predicate, reused by the
+    /// re-arm guard — no new per-entry flag is minted: a finalize is in
+    /// flight for `entryId` exactly while the shipped
+    /// `ConfirmationChallenge` for it sits in `.awaitingResponse` with
+    /// its window still open.
+    ///
+    /// The deadline is part of the predicate on purpose. A challenge past
+    /// its deadline is a LAPSED window, not a live finalize: the machine's
+    /// own `userResponds` treats any later answer as timed out (re-entering
+    /// escalation over the untouched fired reminder), and the coordinator
+    /// has already cleared its pended question on the same window (R-2's
+    /// single source). Treating a lapsed challenge as active would lock
+    /// that dose out of every future mapping change — a mapping edit the
+    /// family will never see take effect.
+    private func hasActiveConfirmationChallenge(for entryId: UUID) -> Bool {
+        guard let challenge = confirmationChallenges[entryId],
+              case .awaitingResponse(let deadline) = challenge.state else {
+            return false
+        }
+        return Date() <= deadline
+    }
+
+    /// Whether the reminder is a FUTURE dose the standard creation path
+    /// owns: never delivered (`.pending`) and never fired
+    /// (`lastFiredAt` unset). Only these may be replaced by a re-arm pass.
+    private func isUnfiredReminder(_ reminder: ScheduledReminder) -> Bool {
+        reminder.state == .pending && reminder.lastFiredAt == nil
+    }
+
+    /// Whether the reminder still has work to do — a future dose or a
+    /// live escalation. Every other state is history: the pass neither
+    /// replaces it nor counts it as kept.
+    private func isLiveReminder(_ reminder: ScheduledReminder) -> Bool {
+        reminder.state == .pending || reminder.state == .fired
+    }
+
+    /// Whether `date`'s wall-clock hour and minute equal one of the
+    /// resolved times. This is the equality the idempotence rule reads:
+    /// the reminder's armed instant was built from the same hour/minute
+    /// (`nextOccurrence`), so a matching pair means "this dose already
+    /// resolves to the current mapping".
+    private func clockMatches(_ date: Date, _ resolvedTimes: [DateComponents]) -> Bool {
         let calendar = Calendar.current
+        let hour = calendar.component(.hour, from: date)
+        let minute = calendar.component(.minute, from: date)
+        return resolvedTimes.contains { $0.hour == hour && $0.minute == minute }
+    }
+
+    /// Whether a stored mirror already equals the fresh resolution —
+    /// compared as clock values, the only components either side carries
+    /// (D2: the mirror is written as the resolved hour/minute).
+    private func mirrorMatches(_ stored: [DateComponents],
+                               _ resolvedTimes: [DateComponents]) -> Bool {
+        stored.count == resolvedTimes.count
+            && zip(stored, resolvedTimes).allSatisfy {
+                $0.hour == $1.hour && $0.minute == $1.minute
+            }
+    }
+
+    /// Creates (and persists, then arms) one pending reminder per resolved
+    /// time of each given entry, through the ONE arming path every writer
+    /// shares. Returns the number of reminders it created AND armed, or
+    /// nil when the persistence the arming depends on failed (in which
+    /// case nothing was armed). Callers that only want the side effect
+    /// ignore the result (`loadSchedule`); the re-arm pass reads it so its
+    /// report can be honest.
+    @discardableResult
+    private func createPendingReminders(for entries: [MedicationEntry], now: Date) -> Int? {
+        let calendar = Calendar.current
+        var createdCount = 0
 
         for entry in entries {
             // The arming times come from the resolution feed (IF-11): a
@@ -824,6 +1099,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
                 // Engines are keyed per-reminder (C4) — a twice-daily entry
                 // gets two independent escalation engines.
                 engines[reminder.id] = makeEngine(for: entry, from: reminder)
+                createdCount += 1
             }
         }
 
@@ -832,7 +1108,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         // resolved exact time) is on disk before the platform alarm
         // exists, so an interruption between the two can only ever re-arm
         // a dose, never lose one. A failed write arms nothing.
-        guard persistReminders() else { return }
+        guard persistReminders() else { return nil }
 
         for reminder in pendingRemindersList.values {
             guard let entry = self.entries[reminder.medicationEntryId] else { continue }
@@ -844,6 +1120,8 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
                 at: reminder.scheduledAt
             )
         }
+
+        return createdCount
     }
 
     private func nextOccurrence(of time: DateComponents, after now: Date, calendar: Calendar) -> Date? {

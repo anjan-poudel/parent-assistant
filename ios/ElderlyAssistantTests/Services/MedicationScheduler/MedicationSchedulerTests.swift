@@ -9,6 +9,11 @@ final class MockEncryptedLocalStorage: EncryptedLocalStorage {
     var writeCallCount = 0
     var readCallCount = 0
     var shouldFailWrite = false
+    /// Keys whose writes fail on their own, on top of `shouldFailWrite`
+    /// (T-010): lets a test fail exactly the reminder write while the
+    /// entries write succeeds — the two-write sequence the re-arm pass
+    /// depends on. Empty by default, so no existing test changes shape.
+    var failingWriteKeys: Set<String> = []
     /// Fired AFTER a write has actually landed in the store — never on the
     /// failure path, so a witness built on this hook means "a persistence
     /// really happened here" and not merely "a write was attempted". It is
@@ -19,7 +24,7 @@ final class MockEncryptedLocalStorage: EncryptedLocalStorage {
 
     func write<T: Encodable>(key: String, value: T) -> Result<Void, StorageError> {
         writeCallCount += 1
-        if shouldFailWrite {
+        if shouldFailWrite || failingWriteKeys.contains(key) {
             return .failure(.encryptedWriteFailed)
         }
         if let data = try? JSONEncoder().encode(value) {
@@ -743,6 +748,408 @@ final class MedicationSchedulerTests: XCTestCase {
         }, "nothing about a legacy entry can be unresolved")
     }
 
+    // MARK: - Guarded re-arm on mapping change (T-010, IF-12)
+
+    /// The family's edit reaches the ARMED state, not just the settings
+    /// screen: after the pass, the morning entry's reminder resolves —
+    /// and is armed — at 07:30, the old 08:00 alarm is gone, and the
+    /// resolved-time mirror follows the new mapping.
+    func testRearmUsesTheNewMapping() {
+        installMapping(MedicationSlotClock.default, into: mockStorage)
+        let entry = makeSlotEntry(slot: .morning, mirrorHour: 8, mirrorMinute: 0)
+        // A legacy control: no mapping ever produced its 10:00, so no
+        // mapping change may move it or count it.
+        let legacy = makeMedicationEntry(name: "Metformin", timeHour: 10, timeMinute: 0)
+        scheduler.loadSchedule(entries: [entry, legacy])
+
+        guard let initial = scheduler.pendingReminders.first(where: { $0.medicationEntryId == entry.id }),
+              let legacyReminder = scheduler.pendingReminders.first(where: { $0.medicationEntryId == legacy.id }) else {
+            return XCTFail("both doses must be armed under the default mapping")
+        }
+        XCTAssertEqual(Calendar.current.component(.hour, from: initial.scheduledAt), 8)
+
+        // The family sets the morning slot to 07:30 and the save action
+        // persists it BEFORE the pass runs (IF-9: validate → persist →
+        // re-arm).
+        installMapping(mappingWithMorning(hour: 7, minute: 30), into: mockStorage)
+
+        let report = scheduler.rearmForSlotClockChange()
+
+        XCTAssertEqual(report.rearmedCount, 1,
+                       "the morning entry's stale reminder was replaced and armed")
+        XCTAssertEqual(report.keptLiveCount, 0)
+        XCTAssertTrue(report.unresolvedSlots.isEmpty)
+        XCTAssertFalse(report.persistenceFailed)
+
+        // IF-11 against the same persisted mapping — twice, identical
+        // (FR-MSR-002 determinism).
+        guard case .success(let firstResolution) = scheduler.resolvedScheduleTimes(for: entry),
+              case .success(let secondResolution) = scheduler.resolvedScheduleTimes(for: entry) else {
+            return XCTFail("a slot entry under a valid mapping must resolve")
+        }
+        XCTAssertEqual(firstResolution.first?.hour, 7)
+        XCTAssertEqual(firstResolution.first?.minute, 30)
+        XCTAssertEqual(firstResolution, secondResolution,
+                       "resolving the same entry and mapping again yields the same time")
+
+        // The armed reminder is a NEW one, at the mapped time, and the
+        // superseded 08:00 alarm did not survive.
+        guard let rearmed = scheduler.pendingReminders.first(where: { $0.medicationEntryId == entry.id }) else {
+            return XCTFail("the re-armed entry must still have a pending reminder")
+        }
+        XCTAssertNotEqual(rearmed.id, initial.id, "the stale reminder is replaced, never edited in place")
+        XCTAssertEqual(Calendar.current.component(.hour, from: rearmed.scheduledAt), 7)
+        XCTAssertEqual(Calendar.current.component(.minute, from: rearmed.scheduledAt), 30)
+        XCTAssertEqual(mockAlarm.scheduledReminders[rearmed.id], rearmed.scheduledAt,
+                       "armed at the newly resolved time")
+        XCTAssertTrue(mockAlarm.cancelledReminders.contains(initial.id),
+                      "the superseded 08:00 alarm must not survive the pass")
+        XCTAssertNil(mockAlarm.scheduledReminders[initial.id])
+
+        // The resolved-time mirror (D2) was rewritten to the new mapping
+        // and persisted — the save gate and this pass are its only writers.
+        XCTAssertEqual(scheduler.medicationEntry(for: entry.id)?.scheduleTimes.first?.hour, 7)
+        XCTAssertEqual(scheduler.medicationEntry(for: entry.id)?.scheduleTimes.first?.minute, 30)
+        if case .success(let storedEntries) = mockStorage.read(key: "medication.entries",
+                                                               type: [MedicationEntry].self),
+           let stored = storedEntries.first(where: { $0.id == entry.id }) {
+            XCTAssertEqual(stored.scheduleTimes.first?.hour, 7)
+            XCTAssertEqual(stored.scheduleTimes.first?.minute, 30)
+        } else {
+            XCTFail("the rewritten mirror must be persisted")
+        }
+
+        // The legacy entry is outside the pass entirely.
+        XCTAssertEqual(scheduler.pendingReminders.first(where: { $0.medicationEntryId == legacy.id })?.id,
+                       legacyReminder.id)
+        XCTAssertFalse(mockAlarm.cancelledReminders.contains(legacyReminder.id))
+        XCTAssertEqual(scheduler.medicationEntry(for: legacy.id)?.scheduleTimes.first?.hour, 10)
+    }
+
+    /// Every field of the report is the truth of the pass it describes:
+    /// rearmed / kept / unresolvedSlots — and, in its own scheduler,
+    /// `persistenceFailed` with nothing armed on the replaced set (both
+    /// halves of "either write fails").
+    func testRearmReportCountsAreHonest() {
+        installMapping(MedicationSlotClock.default, into: mockStorage)
+        let morning = makeSlotEntry(name: "Amlodipine", slot: .morning, mirrorHour: 8, mirrorMinute: 0)
+        let afternoon = makeSlotEntry(name: "Lisinopril", slot: .afternoon, mirrorHour: 13, mirrorMinute: 0)
+        let evening = makeSlotEntry(name: "Metformin", slot: .evening, mirrorHour: 19, mirrorMinute: 0)
+        scheduler.loadSchedule(entries: [morning, afternoon, evening])
+
+        // The evening entry's finalize is in flight: the dose fired, the
+        // challenge is issued, the answer is outstanding.
+        guard let eveningReminder = scheduler.pendingReminders.first(where: { $0.medicationEntryId == evening.id }),
+              let afternoonReminder = scheduler.pendingReminders.first(where: { $0.medicationEntryId == afternoon.id }) else {
+            return XCTFail("all three doses must be armed")
+        }
+        scheduler.triggerReminder(for: eveningReminder.id)
+        XCTAssertNotNil(scheduler.startConfirmationChallenge(for: evening.id))
+
+        // The new mapping moves the morning slot and cannot resolve the
+        // afternoon slot at all. Written RAW — `save` validates and would
+        // refuse it; this is the corrupt/half-written record the decode
+        // rule carries forward to resolution.
+        installCorruptMapping(
+            MedicationSlotClock(
+                morning: TimeOfDay(hour: 7, minute: 30),
+                afternoon: TimeOfDay(hour: 13, minute: 99),
+                evening: MedicationSlotClock.defaultEveningTime
+            ),
+            into: mockStorage
+        )
+
+        let report = scheduler.rearmForSlotClockChange()
+
+        XCTAssertEqual(report.rearmedCount, 1, "only the morning entry had a reminder to replace")
+        XCTAssertEqual(report.keptLiveCount, 1, "the finalize-in-flight entry is kept, and counted")
+        XCTAssertEqual(report.unresolvedSlots, [.afternoon])
+        XCTAssertFalse(report.persistenceFailed)
+
+        // Unresolved: the entry arms NOTHING — its stale 13:00 reminder is
+        // dropped (fail-closed, the arming feed's own rule) and the slot
+        // is named, PII-free.
+        XCTAssertTrue(scheduler.pendingReminders.allSatisfy { $0.medicationEntryId != afternoon.id },
+                      "an unresolved slot stays unarmed")
+        let unresolvedEvents = mockObservability.emittedEvents.filter {
+            $0.eventType == "medication_slot_unresolved"
+        }
+        XCTAssertEqual(unresolvedEvents.count, 1)
+        XCTAssertEqual(unresolvedEvents.first?.metadata, ["slot": "afternoon"],
+                       "the slot ONLY — no entry id, no name, no dose, no clock value")
+        XCTAssertEqual(unresolvedEvents.first?.outcome, "unresolved")
+        XCTAssertTrue(mockAlarm.cancelledReminders.contains(afternoonReminder.id),
+                      "the dropped reminder's alarm is cancelled once the removal is stored")
+
+        // Kept: the shaken entry is untouched — same reminder, same fired
+        // time, alarm never cancelled, mirror not rewritten.
+        XCTAssertEqual(scheduler.pendingReminders.first(where: { $0.id == eveningReminder.id })?.scheduledAt,
+                       eveningReminder.scheduledAt)
+        XCTAssertFalse(mockAlarm.cancelledReminders.contains(eveningReminder.id))
+        XCTAssertEqual(scheduler.medicationEntry(for: evening.id)?.scheduleTimes.first?.hour, 19)
+
+        // Re-armed: the morning entry followed the new mapping, mirror
+        // included.
+        XCTAssertEqual(scheduler.medicationEntry(for: morning.id)?.scheduleTimes.first?.hour, 7)
+        XCTAssertEqual(scheduler.medicationEntry(for: morning.id)?.scheduleTimes.first?.minute, 30)
+
+        // No field of any event may carry a name or a clock value.
+        for event in mockObservability.emittedEvents {
+            for value in event.metadata.values {
+                for name in ["amlodipine", "lisinopril", "metformin"] {
+                    XCTAssertFalse(value.lowercased().contains(name),
+                                   "no medication name may reach metadata: \(value)")
+                }
+                XCTAssertFalse(value.contains("99"),
+                               "no corrupt clock value may reach metadata: \(value)")
+            }
+        }
+
+        // persistenceFailed, first half: the MIRRORS write fails.
+        // (Fresh scheduler so the counts above stay readable.)
+        let failingStorage = MockEncryptedLocalStorage()
+        let failingScheduler = MedicationScheduler(
+            storage: failingStorage,
+            alarmScheduler: mockAlarm,
+            observabilityBus: mockObservability,
+            familyNotifier: mockFamilyNotifier,
+            caregiverNotifySettings: CaregiverNotifySettings.isolated()
+        )
+        installMapping(MedicationSlotClock.default, into: failingStorage)
+        let straggler = makeSlotEntry(name: "Amlodipine", slot: .morning, mirrorHour: 8, mirrorMinute: 0)
+        failingScheduler.loadSchedule(entries: [straggler])
+        installMapping(mappingWithMorning(hour: 7, minute: 30), into: failingStorage)
+        guard let stragglerReminder = failingScheduler.pendingReminders.first else {
+            return XCTFail("the dose must be armed before the failing pass")
+        }
+        let armsBeforeFailure = mockAlarm.scheduleCallCount
+        failingStorage.shouldFailWrite = true
+
+        let failedMirrorReport = failingScheduler.rearmForSlotClockChange()
+
+        XCTAssertTrue(failedMirrorReport.persistenceFailed, "the failed mirror write is reported, never silent")
+        XCTAssertEqual(failedMirrorReport.rearmedCount, 0, "nothing was armed on the replaced set")
+        XCTAssertEqual(mockAlarm.scheduleCallCount, armsBeforeFailure, "a failed write arms nothing")
+        XCTAssertTrue(failingScheduler.pendingReminders.contains { $0.id == stragglerReminder.id },
+                      "the stale reminder survives its failed replacement")
+        XCTAssertEqual(mockAlarm.scheduledReminders[stragglerReminder.id], stragglerReminder.scheduledAt,
+                       "and it is still armed at its old, stored time")
+        XCTAssertEqual(failingScheduler.medicationEntry(for: straggler.id)?.scheduleTimes.first?.hour, 8,
+                       "the in-memory mirror is the version that is actually stored")
+        XCTAssertTrue(mockObservability.emittedEvents.contains {
+            $0.eventType == "entry_persistence_failed"
+        }, "the shipped failure event reports the write")
+
+        // persistenceFailed, second half: the mirrors write SUCCEEDS and
+        // the REMINDERS write fails — still nothing armed on the replaced
+        // set, and the dropped reminders' alarms are never cancelled over
+        // state that was not stored.
+        let reminderFailStorage = MockEncryptedLocalStorage()
+        let reminderFailScheduler = MedicationScheduler(
+            storage: reminderFailStorage,
+            alarmScheduler: mockAlarm,
+            observabilityBus: mockObservability,
+            familyNotifier: mockFamilyNotifier,
+            caregiverNotifySettings: CaregiverNotifySettings.isolated()
+        )
+        installMapping(MedicationSlotClock.default, into: reminderFailStorage)
+        let trapped = makeSlotEntry(name: "Amlodipine", slot: .morning, mirrorHour: 8, mirrorMinute: 0)
+        reminderFailScheduler.loadSchedule(entries: [trapped])
+        installMapping(mappingWithMorning(hour: 7, minute: 30), into: reminderFailStorage)
+        guard let trappedReminder = reminderFailScheduler.pendingReminders.first else {
+            return XCTFail("the dose must be armed before the failing pass")
+        }
+        let armsBeforeReminderFailure = mockAlarm.scheduleCallCount
+        reminderFailStorage.failingWriteKeys = ["medication.pending_reminders"]
+
+        let failedReminderReport = reminderFailScheduler.rearmForSlotClockChange()
+
+        XCTAssertTrue(failedReminderReport.persistenceFailed)
+        XCTAssertEqual(failedReminderReport.rearmedCount, 0, "nothing was armed")
+        XCTAssertEqual(mockAlarm.scheduleCallCount, armsBeforeReminderFailure)
+        XCTAssertEqual(mockAlarm.scheduledReminders[trappedReminder.id], trappedReminder.scheduledAt,
+                       "the old alarm is left armed rather than cancelled over unstored state")
+        XCTAssertFalse(mockAlarm.cancelledReminders.contains(trappedReminder.id))
+        XCTAssertTrue(mockObservability.emittedEvents.contains {
+            $0.eventType == "reminder_persistence_failed"
+        }, "the shipped reminder-failure event reports the write")
+    }
+
+    /// The HIGH-risk guard: an entry whose finalize is in flight is kept
+    /// WHOLE — same reminder, same fired time, same engine — while the
+    /// very same pass re-arms its unguarded sibling.
+    func testRearmKeepsFinalizeInFlightEntry() {
+        installMapping(MedicationSlotClock.default, into: mockStorage)
+        let shaken = makeSlotEntry(name: "Amlodipine", slot: .morning, mirrorHour: 8, mirrorMinute: 0)
+        let control = makeSlotEntry(name: "Metformin", slot: .morning, mirrorHour: 8, mirrorMinute: 0)
+        scheduler.loadSchedule(entries: [shaken, control])
+
+        guard let shakenReminder = scheduler.pendingReminders.first(where: { $0.medicationEntryId == shaken.id }),
+              let controlReminder = scheduler.pendingReminders.first(where: { $0.medicationEntryId == control.id }) else {
+            return XCTFail("both doses must be armed")
+        }
+
+        // The elder acknowledged the dose; the confirmation challenge is
+        // awaiting the answer — the finalize is in flight.
+        scheduler.triggerReminder(for: shakenReminder.id)
+        XCTAssertNotNil(scheduler.startConfirmationChallenge(for: shaken.id))
+        XCTAssertEqual(scheduler.pendingReminders.first(where: { $0.id == shakenReminder.id })?.state, .fired)
+
+        installMapping(mappingWithMorning(hour: 7, minute: 30), into: mockStorage)
+
+        let report = scheduler.rearmForSlotClockChange()
+
+        // Kept, whole — and reported as kept.
+        XCTAssertEqual(report.rearmedCount, 1, "only the unguarded sibling was re-armed")
+        XCTAssertEqual(report.keptLiveCount, 1, "the in-flight entry is kept, and the report says so")
+        let kept = scheduler.pendingReminders.filter { $0.medicationEntryId == shaken.id }
+        XCTAssertEqual(kept.count, 1, "no reminder was created for the kept entry")
+        XCTAssertEqual(kept.first?.id, shakenReminder.id)
+        XCTAssertEqual(kept.first?.scheduledAt, shakenReminder.scheduledAt)
+        XCTAssertFalse(mockAlarm.cancelledReminders.contains(shakenReminder.id),
+                       "the kept entry's alarm is never cancelled")
+        XCTAssertEqual(scheduler.medicationEntry(for: shaken.id)?.scheduleTimes.first?.hour, 8,
+                       "the kept entry's mirror is not rewritten")
+
+        // Its acknowledgement sequence continues untouched: the same
+        // engine re-fires from the same scheduled time.
+        scheduler.handleAckDeadlineExpired(for: shakenReminder.id)
+        XCTAssertEqual(mockAlarm.scheduledReminders[shakenReminder.id],
+                       shakenReminder.scheduledAt.addingTimeInterval(TimeInterval(12 * 60)),
+                       "the refire derives from the untouched engine and time")
+
+        // The control proves the pass really ran.
+        XCTAssertNotEqual(scheduler.pendingReminders.first(where: { $0.medicationEntryId == control.id })?.id,
+                          controlReminder.id)
+        XCTAssertTrue(mockAlarm.cancelledReminders.contains(controlReminder.id))
+
+        // …and the guard is the challenge WINDOW, not merely a dictionary
+        // entry: the same drive on a scheduler whose window has already
+        // lapsed keeps nothing — the entry is re-armed like any other.
+        let lapsedStorage = MockEncryptedLocalStorage()
+        let lapsedScheduler = MedicationScheduler(
+            storage: lapsedStorage,
+            alarmScheduler: MockAlarmScheduler(),
+            observabilityBus: MockObservabilityBus(),
+            familyNotifier: mockFamilyNotifier,
+            caregiverNotifySettings: CaregiverNotifySettings.isolated(),
+            challengeTimeoutSeconds: -1
+        )
+        installMapping(MedicationSlotClock.default, into: lapsedStorage)
+        let lapsedEntry = makeSlotEntry(name: "Amlodipine", slot: .morning, mirrorHour: 8, mirrorMinute: 0)
+        lapsedScheduler.loadSchedule(entries: [lapsedEntry])
+        guard let lapsedReminder = lapsedScheduler.pendingReminders.first else {
+            return XCTFail("the dose must be armed")
+        }
+        lapsedScheduler.triggerReminder(for: lapsedReminder.id)
+        XCTAssertNotNil(lapsedScheduler.startConfirmationChallenge(for: lapsedEntry.id))
+        installMapping(mappingWithMorning(hour: 7, minute: 30), into: lapsedStorage)
+
+        let lapsedReport = lapsedScheduler.rearmForSlotClockChange()
+
+        XCTAssertEqual(lapsedReport.keptLiveCount, 1,
+                       "the live reminder is kept — fired reminders never move")
+        XCTAssertEqual(lapsedReport.rearmedCount, 1,
+                       "the lapsed window is not a live finalize: the entry was re-armed")
+        XCTAssertEqual(lapsedScheduler.medicationEntry(for: lapsedEntry.id)?.scheduleTimes.first?.hour, 7,
+                       "…mirror included")
+    }
+
+    /// Idempotence: the same inputs run twice replace nothing the second
+    /// time — no new reminder, no re-arm, no write, no cancellation — and
+    /// the report says exactly that.
+    func testRearmSecondPassReplacesNothing() {
+        installMapping(MedicationSlotClock.default, into: mockStorage)
+        let entry = makeSlotEntry(slot: .morning, mirrorHour: 8, mirrorMinute: 0)
+        scheduler.loadSchedule(entries: [entry])
+        installMapping(mappingWithMorning(hour: 7, minute: 30), into: mockStorage)
+
+        let firstPass = scheduler.rearmForSlotClockChange()
+        XCTAssertEqual(firstPass.rearmedCount, 1,
+                       "the precondition: the first pass DID replace the stale reminder")
+
+        let idsAfterFirstPass = Set(scheduler.pendingReminders.map(\.id))
+        let armsAfterFirstPass = mockAlarm.scheduleCallCount
+        let writesAfterFirstPass = mockStorage.writeCallCount
+        let cancellationsAfterFirstPass = mockAlarm.cancelledReminders.count
+
+        let secondPass = scheduler.rearmForSlotClockChange()
+
+        XCTAssertEqual(secondPass, SlotClockRearmReport(rearmedCount: 0,
+                                                        keptLiveCount: 0,
+                                                        unresolvedSlots: [],
+                                                        persistenceFailed: false),
+                       "the report reflects the no-op honestly")
+        XCTAssertEqual(Set(scheduler.pendingReminders.map(\.id)), idsAfterFirstPass,
+                       "it replaces nothing")
+        XCTAssertEqual(mockAlarm.scheduleCallCount, armsAfterFirstPass,
+                       "it re-arms nothing")
+        XCTAssertEqual(mockStorage.writeCallCount, writesAfterFirstPass,
+                       "it persists nothing — there was nothing to persist")
+        XCTAssertEqual(mockAlarm.cancelledReminders.count, cancellationsAfterFirstPass,
+                       "it cancels nothing")
+    }
+
+    /// FR-MSR-022 on the re-arm path: both writes — the rewritten mirrors
+    /// and the replacement reminder set — complete before the first
+    /// platform alarm, and the payload already on disk at arm time
+    /// carries the resolved 07:30.
+    func testRearmPersistsBeforeArming() {
+        installMapping(MedicationSlotClock.default, into: mockStorage)
+        let entry = makeSlotEntry(slot: .morning, mirrorHour: 8, mirrorMinute: 0)
+        scheduler.loadSchedule(entries: [entry])
+        installMapping(mappingWithMorning(hour: 7, minute: 30), into: mockStorage)
+
+        // The hooks go on AFTER the fixture pass: the witness is about the
+        // re-arm walk, not about the load.
+        let storage = mockStorage!
+        var order: [String] = []
+        var pendingAtFirstArm: ScheduledReminder?
+        var entriesAtFirstArm: [MedicationEntry]?
+        storage.onWriteCompleted = { order.append("persist") }
+        mockAlarm.onScheduleReminder = {
+            order.append("arm")
+            if pendingAtFirstArm == nil,
+               case .success(let stored) = storage.read(key: "medication.pending_reminders",
+                                                        type: [String: ScheduledReminder].self) {
+                pendingAtFirstArm = stored.values.first
+            }
+            if entriesAtFirstArm == nil,
+               case .success(let stored) = storage.read(key: "medication.entries",
+                                                        type: [MedicationEntry].self) {
+                entriesAtFirstArm = stored
+            }
+        }
+        var observedAtCommit: [MedicationEntry]?
+        scheduler.onScheduleChanged = { observedAtCommit = $0 }
+
+        let report = scheduler.rearmForSlotClockChange()
+        XCTAssertEqual(report.rearmedCount, 1)
+
+        XCTAssertEqual(order, ["persist", "persist", "arm"],
+                       "the mirrors and the replacement set are persisted before the first arm")
+        XCTAssertEqual(order.filter { $0 == "arm" }.count, 1,
+                       "one arm — for the one replacement")
+
+        // The order is only half the claim: the bytes on disk BEFORE the
+        // arm already carried the resolved 07:30 — on both keys.
+        guard let persistedAtArm = pendingAtFirstArm else {
+            return XCTFail("the reminder state must be readable from storage at arm time")
+        }
+        XCTAssertEqual(Calendar.current.component(.hour, from: persistedAtArm.scheduledAt), 7)
+        XCTAssertEqual(Calendar.current.component(.minute, from: persistedAtArm.scheduledAt), 30)
+        XCTAssertEqual(entriesAtFirstArm?.first?.scheduleTimes.first?.hour, 7,
+                       "the rewritten mirror is on disk before the first arm")
+        XCTAssertEqual(entriesAtFirstArm?.first?.scheduleTimes.first?.minute, 30)
+
+        // The share layer is told last, with exactly the version that was
+        // stored (the loadSchedule ordering contract).
+        XCTAssertEqual(observedAtCommit?.first?.scheduleTimes.first?.hour, 7)
+        XCTAssertEqual(observedAtCommit?.first?.scheduleTimes.first?.minute, 30)
+        XCTAssertEqual(order.last, "arm",
+                       "the observer is told after the local work is fully committed")
+    }
+
     // MARK: - Helpers
 
     /// A slot entry (T-003's model): its dose lives in `slot`, and
@@ -788,6 +1195,18 @@ final class MedicationSchedulerTests: XCTestCase {
         case .failure:
             XCTFail("a valid mapping must persist")
         }
+    }
+
+    /// The household mapping with the morning slot moved to `hour:minute`
+    /// (afternoon and evening keep the documented defaults) — the shape
+    /// the medicine-times save action persists when the family retimes
+    /// the morning dose (T-020/IF-9).
+    private func mappingWithMorning(hour: Int, minute: Int) -> MedicationSlotClock {
+        MedicationSlotClock(
+            morning: TimeOfDay(hour: hour, minute: minute),
+            afternoon: MedicationSlotClock.defaultAfternoonTime,
+            evening: MedicationSlotClock.defaultEveningTime
+        )
     }
 
     /// Writes a mapping record RAW — bypassing `save`, which validates and

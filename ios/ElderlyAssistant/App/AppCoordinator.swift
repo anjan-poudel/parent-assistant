@@ -138,6 +138,45 @@ enum AckClarifyOutcome: Equatable {
     case unanswered
 }
 
+// MARK: - Medication save plumbing (C12, IF-21) [MED-SLOT]
+//
+// T-017 (design-l2 C12/D1/D2/m-2): the slot-model save's request value.
+// The view half (C8) builds it from `MedicationEditorDraft.storedRows` —
+// `MedicationDoseRow` is declared in `MedicationEditorDraft.swift`
+// (T-009), this request is its first consumer — and the coordinator
+// resolves slot rows through the household mapping (C1), composes the
+// dose line (C2) and persists through the shipped `loadSchedule` path.
+// File scope, the T-013 walk-types convention: a value the save API
+// speaks, not coordinator state.
+
+/// One medication save request (design-l2 IF-21).
+///
+/// `rows` is the dose list in row order, all `.time` (the shipped clock
+/// model) or all `.slot` (the slot model). The MIXED shape is refused by
+/// the save gate (`settings.meds.slotRequired`) — one medicine's doses
+/// are stated in one model at a time, never resolved cell by cell. A
+/// slot-row request carries NO clock time: the row is a slot, the
+/// household mapping resolves it at save (never the view, never a raw
+/// time smuggled beside it).
+///
+/// `quantity` and `mealRelation` are the family's own statements
+/// (NFR-MSR-006 — nothing is inferred from them, and nothing else fills
+/// them): `quantity` feeds the stored dose line through `DoseLine` (C2)
+/// and is stored structured beside it; `mealRelation` is context the
+/// dose screen renders. `strength` is the free-text dose ("500 mg", the
+/// scan target). `photo` is the scan flow's picture — written to the
+/// medication `VisualAidStore` under each new entry's id, fail-soft,
+/// never a path and never bytes in the model.
+struct MedicationSaveRequest: Equatable {
+    var name: String
+    var strength: String?
+    var purpose: String?
+    var quantity: MedicationQuantity?
+    var mealRelation: MealRelation?
+    var rows: [MedicationDoseRow]
+    var photo: UIImage?
+}
+
 /// Central coordinator that wires all services together.
 /// Starts safety-critical services first (medication scheduler, health monitor),
 /// then voice pipeline, then LLM.
@@ -1116,6 +1155,24 @@ final class AppCoordinator: ObservableObject {
     /// through the initializer. The walk reads this value at `begin` and
     /// never reads a literal.
     private let ackClarificationConfig: AckClarificationConfig
+    /// [MED-SLOT] (T-017, design-l2 C1/IF-21) The household mapping's read
+    /// seam the save gate resolves slot rows through. Defaulted to a store
+    /// composed over the SAME storage seam the scheduler writes through:
+    /// the store is stateless, so two instances read the ONE stored record
+    /// and the coordinator can never hold a second, divergent clock (the
+    /// `MedicationScheduler.init` precedent, T-008). Tests inject a store
+    /// over an in-memory seam. Construction reads nothing — the mapping is
+    /// read at save time only, and it is never cached between saves.
+    private let slotClockStore: MedicationSlotClockStore
+    /// [MED-SLOT] (T-017, design-l2 C12/IF-13) The on-device evidence store
+    /// the `removeMedication` cascade drops an entry's whole photo folder
+    /// through — beside `medicationVisualAidStore` and for the same
+    /// reason: a photo that documented an intake of a medicine the
+    /// household no longer takes must not outlive the entry, and nothing
+    /// else can find those files afterwards. Construction resolves a path
+    /// and performs NO disk IO (the `NoIOInInitTests` boot contract); the
+    /// directory appears on the first write, and the cascade is fail-soft.
+    private let medicationEvidenceStore: MedicationEvidenceStore
     private let alarmScheduler: UNNotificationScheduler
     private let familyNotifier: APNsFamilyNotifier
     /// [CAREGIVER-EVENTS] (2026-09-13) Per-event-type caregiver
@@ -2966,11 +3023,27 @@ final class AppCoordinator: ObservableObject {
     ///     `AckClarificationConfig()` — the window derived from
     ///     `ConfirmationChallenge.defaultChallengeTimeoutSeconds` — and is
     ///     only overridden by a shorter injected window in tests.
+    ///   - slotClockStore: the household mapping's read seam the save gate
+    ///     resolves slot rows through (T-017; design-l2 C1/IF-21). nil
+    ///     (the app's own construction) composes a store over the SAME
+    ///     storage seam the scheduler writes through — the store is
+    ///     stateless, so both instances read the ONE stored record (the
+    ///     T-008 default). The save-plumbing suite injects a store over an
+    ///     in-memory seam, which is how a mapping and a corrupt mapping
+    ///     are pinned deterministically.
+    ///   - medicationEvidenceStore: the on-device evidence store the
+    ///     `removeMedication` cascade drops an entry's photo folder
+    ///     through (T-017; design-l2 C12/IF-13). nil (the app's own
+    ///     construction) = the real store under Application Support; the
+    ///     save-plumbing suite injects one rooted at a scratch directory
+    ///     so the cascade can be observed without touching real evidence.
     init(profileStorage: ProfilePayloadStorage? = nil,
          wireProfilePersonalization: Bool = true,
          systemContactLinkService: SystemContactLinkReading? = nil,
          systemContactPhotoWriter: SystemContactPhotoWriting? = nil,
-         ackClarificationConfig: AckClarificationConfig = AckClarificationConfig()) {
+         ackClarificationConfig: AckClarificationConfig = AckClarificationConfig(),
+         slotClockStore: MedicationSlotClockStore? = nil,
+         medicationEvidenceStore: MedicationEvidenceStore? = nil) {
         // [BOOT-REVIEW P0 item 1] `bootstrap-init` — the composition root's
         // own cost, measured separately from every other startup metric:
         // this is what runs before the app exists at all (the App struct's
@@ -3021,6 +3094,17 @@ final class AppCoordinator: ObservableObject {
         // `ConfirmationChallenge.defaultChallengeTimeoutSeconds`), stored
         // before anything can begin a walk. No I/O, no side effects.
         self.ackClarificationConfig = ackClarificationConfig
+        // [MED-SLOT] (T-017) The save gate's mapping read seam: composed
+        // here exactly as `MedicationScheduler.init` composes its own (the
+        // store is stateless over the storage seam, so two instances read
+        // the ONE stored record — never a second, divergent clock). No
+        // I/O: the store reads only when resolution asks, at save time.
+        self.slotClockStore = slotClockStore ?? MedicationSlotClockStore(storage: storage)
+        // [MED-SLOT] (T-017) The remove cascade's evidence store, beside
+        // the visual-aid store and with the same no-IO construction rule
+        // (path resolution only; the directory appears on the first
+        // write). The cascade itself is a fail-soft Void call.
+        self.medicationEvidenceStore = medicationEvidenceStore ?? MedicationEvidenceStore()
         // [LIVE-TRANSLATE T-032] The feature's two payloads (the translation
         // cache and the consent record) are sealed with AES-GCM before they
         // reach the file channel — Data Protection Complete alone is "locked
@@ -11821,6 +11905,309 @@ self.noteTalkContractChanged()
         return nil
     }
 
+    // MARK: - Slot-model save plumbing (C12, IF-21) [MED-SLOT]
+
+    /// Saves a medication through the slot-model API (design-l2 IF-21;
+    /// T-017, C12). ONE dose row is ONE entry (D1): N rows create N
+    /// single-slot entries, in row order — `slot` is singular on the
+    /// shipped model, and one row is one dose, so a twice-daily medicine
+    /// is two rows and two entries.
+    ///
+    /// The row shapes are all `.time` or all `.slot`; a mixed list is
+    /// refused (`settings.meds.slotRequired`), never resolved halfway.
+    /// The coordinator — NEVER the view — turns each row into the
+    /// entry's stored schedule:
+    ///
+    ///  - a `.slot` row resolves through the household mapping (C1) and
+    ///    the entry's `scheduleTimes` is written as the D2 resolved-time
+    ///    MIRROR. A slot the mapping cannot resolve (fail-closed
+    ///    `.indeterminate`) leaves the mirror EMPTY and does NOT fail the
+    ///    save: the entry lands with the family's slot, the arming path
+    ///    resolves fresh (IF-11) and surfaces the slot with the honest
+    ///    `medication_slot_unresolved` line (FR-MSR-018 — no guessed
+    ///    time, no invented fallback);
+    ///  - a `.time` row stores its stated components verbatim, the
+    ///    shipped shape (legacy rows stay first-class).
+    ///
+    /// The duplicate gate (m-2) is the SHIPPED expression — exact name
+    /// equality plus effective-time intersection — over EFFECTIVE times:
+    /// a slot row contributes its resolved mirror (so a mixed legacy/slot
+    /// pair compares resolved-vs-stored and still flags), an unresolvable
+    /// row contributes nothing (an empty mirror intersects nothing — a
+    /// corrupt mapping does NOT flag), and entries created earlier in the
+    /// same save participate (two rows on the same resolved time flag the
+    /// second). Nothing is persisted when the gate flags.
+    ///
+    /// `doseDescription` is composed once through `DoseLine` (C2, IF-5) —
+    /// the one documented composition of quantity and dose text — and
+    /// every entry persists through the shipped `loadSchedule` + re-arm
+    /// path. The request's photo is written to the medication
+    /// `VisualAidStore` under EACH new entry's id, fail-soft, exactly the
+    /// shipped scan path's rule.
+    ///
+    /// `photoVerificationEnabled: false` at every NEW-entry construction
+    /// site: the dementia photo machinery is not part of this flow and a
+    /// save must not switch it on (FR-MSR-020).
+    ///
+    /// Returns nil on success, or a shipped catalog error KEY — the
+    /// editor's own error line: `settings.meds.nameRequired` (the
+    /// unchanged name gate), `settings.meds.timeRequired` (a save needs
+    /// at least one dose row), `settings.meds.slotRequired` (mixed row
+    /// shapes) or `settings.meds.duplicateError` (the gate above, m-2).
+    func addMedication(_ request: MedicationSaveRequest) -> String? {
+        saveMedication(request, replacing: nil)
+    }
+
+    /// Updates an existing medication through the same request (IF-21;
+    /// the C8 edit-existing form itself is T-018).
+    ///
+    /// Row 1 edits the entry IN PLACE — same id, same history linkage,
+    /// visual aids kept, and every field the request does not speak
+    /// (windows, frequency, confirmation text, the stored dementia
+    /// toggle) carried over verbatim from the entry. Rows 2+ create NEW
+    /// entries with copies of the entry's visual aids (D1's conversion
+    /// shape: a converted legacy medicine with two times is two entries).
+    ///
+    /// The duplicate gate is the shipped one with the entry being edited
+    /// EXCLUDED from its own check (m-2): re-saving an entry at its own
+    /// effective time must not flag itself, while every other entry —
+    /// and every entry this save creates, and the entry's own NEW
+    /// effective time for the later rows — still participates. An id
+    /// that no longer resolves (deleted since the form opened) degrades
+    /// to the add path: the family's edit is saved rather than silently
+    /// dropped.
+    ///
+    /// Returns the same catalog error KEYs as `addMedication(_:)`.
+    func updateMedication(id: UUID, _ request: MedicationSaveRequest) -> String? {
+        saveMedication(request, replacing: id)
+    }
+
+    /// The gate + resolve + construct + persist core both entry points
+    /// share (IF-21). All state is read once per save — the mapping, the
+    /// schedule, the dose line — so every row of one save is judged and
+    /// written against one consistent snapshot.
+    private func saveMedication(_ request: MedicationSaveRequest,
+                                replacing entryId: UUID?) -> String? {
+        // The shipped gates, in the shipped order: a name, then at least
+        // one dose row, then the row shape (IF-21 refuses the mixed list).
+        let trimmed = request.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "settings.meds.nameRequired" }
+        guard !request.rows.isEmpty else { return "settings.meds.timeRequired" }
+        guard rowsShareOneShape(request.rows) else { return "settings.meds.slotRequired" }
+
+        // The mapping is read ONCE for the whole save, so every slot row
+        // of one request resolves against the same household record. The
+        // D2 effective times per row, in row order: a `.time` row's
+        // stated components, a `.slot` row's resolved mirror — EMPTY
+        // when the mapping cannot resolve it (fail-closed, never guessed,
+        // never defaulted).
+        let mapping = slotClockStore.load()
+        let rowTimes: [[DateComponents]] = request.rows.map { row in
+            switch row {
+            case .time(let components):
+                return [components]
+            case .slot(let slot):
+                switch mapping.resolve(slot: slot) {
+                case .success(let time):
+                    return [time.dateComponents]
+                case .failure:
+                    return []
+                }
+            }
+        }
+
+        // The entry an update edits in place. nil = a fresh add; an id
+        // that no longer resolves degrades to the add path below.
+        let replaced = entryId.flatMap { medicationScheduler.medicationEntry(for: $0) }
+
+        // The m-2 gate, the SHIPPED expression over effective times.
+        // `working` starts as the stored schedule WITHOUT the entry being
+        // edited (its own check must not flag the edit), and every entry
+        // this save creates — or, for an update, the entry's own
+        // replacement — is appended as it is made, so a collide-within-
+        // one-save pair flags the second row.
+        var working = medicationScheduler.medicationEntries()
+        working.removeAll { $0.id == entryId }
+
+        let doseLine = DoseLine.compose(quantity: request.quantity,
+                                        doseText: request.strength ?? "",
+                                        locale: activeLocale)
+        let purpose = Self.normalizedOptionalText(request.purpose)
+
+        var updated: MedicationEntry?
+        var created: [MedicationEntry] = []
+        for (index, row) in request.rows.enumerated() {
+            let times = rowTimes[index]
+            let duplicate = working.contains { entry in
+                entry.medicationName == trimmed
+                    && entry.scheduleTimes.contains { times.contains($0) }
+            }
+            guard !duplicate else { return "settings.meds.duplicateError" }
+
+            if index == 0, let existing = replaced {
+                let entry = editedEntry(existing, name: trimmed, doseLine: doseLine,
+                                        times: times, slot: slot(of: row), purpose: purpose,
+                                        quantity: request.quantity,
+                                        mealRelation: request.mealRelation,
+                                        visualAids: existing.visualAids
+                                            + savedAids(from: request.photo, for: existing.id))
+                updated = entry
+                working.append(entry)
+            } else {
+                let id = UUID()
+                let entry = newEntry(id: id, name: trimmed, doseLine: doseLine,
+                                     times: times, slot: slot(of: row), purpose: purpose,
+                                     quantity: request.quantity,
+                                     mealRelation: request.mealRelation,
+                                     visualAids: copiedAids(of: replaced, for: id)
+                                         + savedAids(from: request.photo, for: id))
+                created.append(entry)
+                working.append(entry)
+            }
+        }
+
+        // The shipped persist + re-arm tail, unchanged: the re-armed
+        // schedule is what every arming read resolves fresh (D2 — the
+        // mirror is a carrier, never an arming input).
+        var entries = medicationScheduler.medicationEntries()
+        if let updated {
+            entries.removeAll { $0.id == updated.id }
+            entries.append(updated)
+        }
+        entries.append(contentsOf: created)
+        medicationScheduler.loadSchedule(entries: entries)
+        medicationScheduler.scheduleAll()
+        calendarSync.syncNow(entries: routineScheduler.entries())
+        // [BOOT-REVIEW P1-7] A schedule edit changes today's dose total —
+        // one of the count's two inputs.
+        refreshActiveNotificationCount()
+        return nil
+    }
+
+    /// True when every row is a `.time` or every row is a `.slot` — the
+    /// IF-21 shape rule. An empty list is the other gate's business
+    /// (`settings.meds.timeRequired`); a mixed list is refused here and
+    /// never resolved row by row (one save states one model).
+    private func rowsShareOneShape(_ rows: [MedicationDoseRow]) -> Bool {
+        guard let first = rows.first else { return false }
+        switch first {
+        case .time:
+            return rows.allSatisfy { row in
+                if case .time = row { return true }
+                return false
+            }
+        case .slot:
+            return rows.allSatisfy { row in
+                if case .slot = row { return true }
+                return false
+            }
+        }
+    }
+
+    /// The slot a row contributes to its entry: the family's stated slot,
+    /// or nil for a `.time` row (the legacy shape — and the D2 mirror is
+    /// NOT a slot: a clock entry does not acquire one by being saved).
+    private func slot(of row: MedicationDoseRow) -> MedicationSlot? {
+        if case .slot(let slot) = row { return slot }
+        return nil
+    }
+
+    /// The aid records a request's photo produces for one entry — written
+    /// through the medication `VisualAidStore` under the entry's id
+    /// BEFORE the payload persists, exactly the shipped scan path's rule,
+    /// applied per entry (D1: each row is its own entry and each carries
+    /// the picture). Fail-soft: a photo that cannot be written leaves the
+    /// entry with no aid, never a failed medication save — a nicety,
+    /// never a failed medicine, the shipped stance.
+    private func savedAids(from photo: UIImage?, for entryId: UUID) -> [VisualAid] {
+        guard let photo, let aid = medicationVisualAidStore.save(photo, for: entryId) else {
+            return []
+        }
+        return [aid]
+    }
+
+    /// Copies a source entry's visual aids to a NEW entry's id — the D1
+    /// conversion shape for an update's rows 2+ ("new entries with copied
+    /// visual aids"). A copy is the BYTES re-saved under the new entry's
+    /// folder: aid files resolve per entry id, so copying the bare file
+    /// names without their files would leave a claim no surface could
+    /// render. One unreadable aid is skipped — fail-soft, like every
+    /// other visual-aid write; the new entry simply carries one fewer
+    /// photo. nil source (a fresh add) copies nothing.
+    private func copiedAids(of source: MedicationEntry?, for entryId: UUID) -> [VisualAid] {
+        guard let source else { return [] }
+        return source.visualAids.compactMap { aid in
+            guard let image = medicationVisualAidStore.load(aid, for: source.id) else {
+                return nil
+            }
+            return medicationVisualAidStore.save(image, for: entryId, caption: aid.caption)
+        }
+    }
+
+    /// A NEW entry for one save row. Every construction site of this path
+    /// passes `photoVerificationEnabled: false` (the shipped default; the
+    /// dementia toggle is not part of this form and a save must not turn
+    /// it on — FR-MSR-020).
+    private func newEntry(id: UUID, name: String, doseLine: String,
+                          times: [DateComponents], slot: MedicationSlot?, purpose: String?,
+                          quantity: MedicationQuantity?, mealRelation: MealRelation?,
+                          visualAids: [VisualAid]) -> MedicationEntry {
+        MedicationEntry(
+            id: id,
+            userProfileId: UUID(),
+            medicationName: name,
+            doseDescription: doseLine,
+            scheduleTimes: times,
+            frequency: .daily,
+            ackWindowMinutes: 5,
+            maxRefireCount: 5,
+            escalationWindowMinutes: 60,
+            doubleDoseWindowHours: 4,
+            photoVerificationEnabled: false,
+            confirmationDescription: nil,
+            purpose: purpose,
+            visualAids: visualAids,
+            quantity: quantity,
+            slot: slot,
+            mealRelation: mealRelation
+        )
+    }
+
+    /// The in-place edit for an update's row 1: same id, and EVERY field
+    /// the request does not speak is carried over verbatim from the entry
+    /// being edited — windows, frequency, confirmation text, visual aids.
+    /// The dementia toggle rides the same carry-over deliberately:
+    /// `photoVerificationEnabled` is the caregiver's stored setting on
+    /// THIS entry (FR-MSR-020: the dementia photo machinery is untouched
+    /// by this feature), and an edit must never silently disable it. (The
+    /// model's own `withScheduleTimes` trap, C6, is why each carried
+    /// field is named explicitly here: when `MedicationEntry` gains a
+    /// field, this constructor must carry it.)
+    private func editedEntry(_ existing: MedicationEntry, name: String, doseLine: String,
+                             times: [DateComponents], slot: MedicationSlot?, purpose: String?,
+                             quantity: MedicationQuantity?, mealRelation: MealRelation?,
+                             visualAids: [VisualAid]) -> MedicationEntry {
+        MedicationEntry(
+            id: existing.id,
+            userProfileId: existing.userProfileId,
+            medicationName: name,
+            doseDescription: doseLine,
+            scheduleTimes: times,
+            frequency: existing.frequency,
+            ackWindowMinutes: existing.ackWindowMinutes,
+            maxRefireCount: existing.maxRefireCount,
+            escalationWindowMinutes: existing.escalationWindowMinutes,
+            doubleDoseWindowHours: existing.doubleDoseWindowHours,
+            photoVerificationEnabled: existing.photoVerificationEnabled,
+            confirmationDescription: existing.confirmationDescription,
+            purpose: purpose,
+            visualAids: visualAids,
+            quantity: quantity,
+            slot: slot,
+            mealRelation: mealRelation
+        )
+    }
+
     /// Removes a medication entry and re-arms (spec §4.4.3).
     func removeMedication(id: UUID) {
         var entries = medicationScheduler.medicationEntries()
@@ -11833,6 +12220,13 @@ self.noteTalkContractChanged()
         // those files afterwards. Same rule the routine scheduler applies
         // when a reminder is removed.
         medicationVisualAidStore.deleteAll(for: id)
+        // The dose EVIDENCE goes with it too (T-017, FR-MSR-013's remove
+        // cascade): a photo that documented an intake of a medicine the
+        // household no longer takes must not outlive the entry. Fail-soft
+        // — `deleteAll` is a Void that no-ops on an absent folder, so
+        // removing a medication can never fail in the family's face over
+        // a photo (and never did have evidence to begin with).
+        medicationEvidenceStore.deleteAll(for: id)
         calendarSync.syncNow(entries: routineScheduler.entries())
         // [BOOT-REVIEW P1-7] Removing an entry can empty today's doses —
         // the row hides itself, so the count must follow.
