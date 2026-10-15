@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import os
 
 /// Shared accessibility, layout and invariant operational colours.
 /// Skin colours belong to the environment's AppAppearance palette.
@@ -186,8 +187,18 @@ extension UIScreen {
               }) else { return false }
         let zoomed = current.size != largest.size
         #if DEBUG
-        print("[MEDIUM-FIT] currentMode=\(current.size) largest=\(largest.size) zoomed=\(zoomed)")
+        MediumFitLogger.shared.info(
+            "currentMode=\(current.size.width)x\(current.size.height) "
+            + "largest=\(largest.size.width)x\(largest.size.height) zoomed=\(zoomed)")
         #endif
         return zoomed
     }
+}
+
+/// [MEDIUM-FIT] (2026-10-15) Unified-logging channel for the
+/// display-size detector — `devicectl process launch --console`
+/// streams unified logs, not stdout, so a plain `print` is invisible
+/// to the console probe.
+enum MediumFitLogger {
+    static let shared = Logger(subsystem: "ai.voicebridge.senior.assistant", category: "MediumFit")
 }
