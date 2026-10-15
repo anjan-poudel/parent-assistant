@@ -1,1357 +1,1134 @@
-# Design L2 — Family Contacts Unify
+# Design L2 — Medication Schedules and Reminders
 
-Feature: `family-contacts-unify` (worktree branch `feat/family-contacts-unify`, worktree
-`elderly-ai-assistant-family-contacts-unify`; base master `8089c735`).
+Feature: `medication-schedules-reminders` (worktree `elderly-ai-assistant-medication-schedules-reminders`,
+branch `feat/medication-schedules-reminders`; worktree HEAD 5704b50f).
 Task: `design-l2`, agent `principal-engineer`, contract `component_design_l2`.
-Date: 2026-10-12.
-Revision: rev 3 (2026-10-12) — review iteration-2 residual R4 applied: the fifth access
-consumer `AppCoordinator.refreshNativeMissedCallNames` (:8327-8358) added to the §3.5
-enumeration with its fix spec (:8336 status re-read, :8338 `allowsReading` guard, :8346 real
-`access:` passthrough) and pinned (§8.2, §6.4, §8.3).
-Revision: rev 2 (2026-10-12) — review-l2 NO_GO rework applied: R1 `.limited` gates
-(§2.2, §3.5, §8.2, §9 R2); R2 drain-loop coalescing (§4.2, §3.6); R3 contiguity pin
-(§7); minors (§1.7, §2.2, §8.2).
-Status: elaboration of the FROZEN `specs/design-l1.md` — nothing here redesigns L1; every
-section resolves an L1 §19 deferral or fixes a component-level detail L1 left to L2.
+Date: 2026-10-15.
+Status: elaboration of the approved `specs/design-l1.md` (review-l1 GO, 6 required resolutions).
+Nothing here redesigns L1; each section resolves an L1 §24 deferral, fixes a component-level
+detail L1 left to L2, or resolves one of the six review-l1 findings inside its stated bound.
 
-Inputs read: `specs/design-l1.md` (frozen architecture — the source of truth),
-`specs/define-requirements.md` + `FR/`/`NFR/` (locked set), `specs/family-contacts-unify/constitution.md`,
-project `constitution.md`, and verified code anchors at base master `8089c735` (file:line
-references below were re-read in this worktree).
+Inputs read: `specs/design-l1.md` (approved architecture), `specs/review-l1.md` (GO with
+resolutions M-1, m-1…m-5 and notes n-1…n-5), `specs/medication-schedules-reminders/constitution.md`,
+`specs/define-requirements.md` + all 22 FR-MSR / 10 NFR-MSR files, and symbol-level verification
+of the code at the worktree HEAD (file:line references below are orientation; symbols are the
+contracts): `MedicationScheduler.swift`, `Models.swift`, `MedicationEditorDraft.swift`,
+`MedicationLabelOCR.swift`, `MedicationPurpose.swift`, `EscalationEngine.swift`,
+`ConfirmationChallenge.swift`, `DoubleDoseDetector.swift`, `PhotoVerifier.swift`,
+`PlatformAlarmScheduler.swift`, `IdHashing.swift`, `VisualAidStore.swift`,
+`CommandRouter.swift`, `AckFastLane.swift`, `DialogueManager.swift`, `AppCoordinator.swift`,
+`SettingsView.swift`, `LeafViews.swift`, `MedicationVisualAidFireHandler.swift`,
+`MedicationVisualAidViews.swift`, `FamilyNotifier.swift`, `CaregiverNotifySettings.swift`,
+`CalendarShareService.swift`, `CalendarShareMapper.swift`, `LocalGoogleEventMappingStore.swift`,
+`Localizable.xcstrings`.
 
-## 0. L1 §19 deferral checklist (this document's binding scope)
+*Reference convention:* section refs use section names or numbered subsections in document order (Data Models §4.1–4.3, Error Handling §5.1–5.3, Performance and Security §6.1–6.4); components are C1–C13; interface contracts IF-1–IF-24.
 
-| L1 §19 deferral | Resolved in |
+## Overview
+
+### What this document decides
+
+The L1 architecture is frozen. L1 §24 left eight items to `design-l2`; all eight are resolved
+below, together with the six review-l1 resolutions:
+
+| L1 §24 deferral | Resolved in |
 |---|---|
-| Wizard sheet restructure (state flow, subviews), coordinator's new methods, exact placement of `normalizedNicknames` | §1.9, §2, §3.4, §8.2 |
-| Final en/ne wording for the §12 keys | §7 |
-| `SystemContactLinkService.photoImageData` cache constants; worker's retry-free sequencing around refresh epochs | §4.3, §4.4 |
-| Already-linked steering micro-flow (tap targets, back-navigation) | §2.3 |
-| `contactPhoto(for:)` delete vs retain | §8.1 |
-| Verification scheduling (launch/foreground hook ordering); a11y labels per control | §4.4, §2.5, §7 |
-| Unit/task decomposition and wave ordering | out of scope — `plan-tasks` follows approval |
+| Clarification-walk state representation; response-window plumbing | Components (C4); Interfaces (IF-8); Configuration and Timeouts |
+| Slot/meal word lists (exact strings, both languages); additive ack-phrase additions | Components (C3); Interfaces (IF-6) |
+| Exact L10n copy strings | key sets pinned in C13; final wording at implementation (both locales) |
+| Evidence store internals (file naming, compression, replace/delete ordering) | Components (C5); Data Models §4.1 |
+| Capture-surface placement/details | Components (C5) |
+| Calendar one-off bookkeeping (key lifecycle, reconcile interplay, title format) | Components (C11); Data Models §4.3 |
+| Editor interaction details (quantity/strength coexistence; mapping control layout) | Components (C8) |
+| Wave decomposition | out of scope — `plan-tasks` follows approval |
 
-Deviations from L1 sketches (interface-shape only, intent identical; flagged for the reviewer):
+### The six review-l1 resolutions, resolved (full dispositions in Review-l1 Resolutions)
 
-1. `SystemContactLinkReading.invalidate(identifier:)` is `async` in L2. An actor method cannot
-   satisfy a synchronous protocol requirement while touching actor state; the marker is
-   technically required for `SystemContactLinkService: SystemContactLinkReading`.
-2. L1 §9.3's second pure mapping is expressed as
-   `SystemContactWriteAccess.from(_ access: ContactsAccess)` over the ALREADY-mapped
-   `ContactsAccess` (which owns the single `#available(iOS 18)` gate) instead of a second
-   availability-gated switch over `CNAuthorizationStatus`. Same behavior table, one gate.
-3. L1 §9.2's `mutableCopy() as! CNMutableContact` becomes a checked `as?` cast that maps to
-   `.failed(.saveRejected)` with a DEBUG `assertionFailure` — the write seam may not crash
-   (§10.1 no-crash rule) even on a platform change.
-4. L1 §10.2's "primary button to Done" uses the EXISTING key `common.close` (en "Close", ne
-   "बन्द गर्नुहोस्") — verified present in the catalog; zero new keys beyond the frozen 21.
+| # | Finding | Resolution decision | Bound by |
+|---|---|---|---|
+| M-1 | Calendar invitee/disclosure mismatch | **Option (ii): amend `calendarShare.consent.whoCanSee` in BOTH locales** (exact text in Review-l1 Resolutions, M-1); significant-event one-offs keep the family-notification audience (all contacts with an email, de-dup, emergency-first, toggle-independent). No surface claims the old text covers the deviation; `calendarShare.consent.body` already discloses the content class and is unchanged. | FR-MSR-016/017, NFR-MSR-004 |
+| m-1 | `rearmForSlotClockChange()` outcome | Returns `SlotClockRearmReport` (Interfaces IF-12): rearmed/kept counts, unresolved slots, persistenceFailed; the mapping-save action surfaces failure on the settings leaf. | FR-MSR-002, FR-MSR-018, FR-MSR-022 |
+| m-2 | Duplicate rule for slot-model saves | The shipped guard is kept and its input pinned: slot entries store the **resolved-time mirror** in `scheduleTimes` (decision D2), so name + effective-time intersection stays the rule across every shape pair; mixed pairs compare the slot's resolved time against the legacy times; a corrupt mapping (mirror empty) does not flag. | FR-MSR-001, NFR-MSR-006 |
+| m-3 | Hour→slot table for scanned schedules | Pinned at the parser's emission level (Components C9): 8:00→morning; 12:00 and 13:00→afternoon; 19:00, 20:00 and 21:00→evening; every other hour fills nothing; per-slot dedup, first-occurrence order. | FR-MSR-005/006 |
+| m-4 | Multi-candidate clarification "no" | Pinned (Components C4): with three or more candidates **"no" advances the cursor** and asks the next single-candidate question; after the last candidate's "no" the walk ends honestly (nothing recorded). Pair form holds L1's rule ("no" ends; "yes" falls to the single form at cursor 0). Test obligation named in Components C4. | FR-MSR-008, FR-MSR-021 |
+| m-5 | Retime refusal visibility + event name | Event named **`medication_retime_refused`** (§5.2); family visibility decided: a one-shot honest note on the medication settings leaf ("Medicine times" section) explains the slot-model rule, dismissible, persisted (the `appointmentSmsNoteDismissed` precedent); the specific entry identity stays in observability (`entry_id_hash`) only. | FR-MSR-002, FR-MSR-018 |
 
-## 1. Component interfaces and contracts
+Notes carried from the review are dispositioned under Review-l1 Resolutions (n-1 accepted; n-2 confirmed there;
+n-3 orientation-level, symbols used here; n-4 accepted; n-5 realized in C5/C13).
 
-All signatures are final unless a line is marked `(internal)`. Every interface declares its
-normal return AND its error/outcome type; none returns `any`/`unknown` error shapes, none
-throws across a seam that a UI path consumes.
+### L2-level design decisions introduced here (flagged for review-l2)
 
-### 1.1 `SystemContactLink` — FamilyContactStore.swift
+Everything below honors a frozen L1 contract; these are the places where L2 had to choose a
+concrete shape. Each is cross-referenced to its section.
+
+- **D1 — A dose row is an entry.** The slot-model save with N dose rows produces N single-slot
+  entries (one per row), never a multi-slot entry: `MedicationEntry.slot` is singular in the
+  frozen L1 model, and L1 §11's conversion ("assigns each legacy time to a slot … every row
+  assigned") plus L1 §4.4's "one pending reminder per day per slot" both read row-by-row. Components (C8).
+- **D2 — `scheduleTimes` on a slot entry is a resolved-time mirror, never an arming input.**
+  Written only by the save gate and the mapping-change pass; arming always resolves fresh
+  (L1 §4.4). This keeps the display row, the native mirror (`planMedicationMutations`) and the
+  shared-calendar mirror (`medicationDrafts`) working for slot entries without touching them.
+  Components (C6, C7, C8).
+- **D3 — The clarification walk rides the confirmation block.** Coordinator state
+  (`pendingAckClarification`) reflected in `isAwaitingConfirmation`; the router intercepts walk
+  answers inside its confirmation follow-up region, ahead of the generic yes/no arms; the walk
+  and a challenge are mutually exclusive by construction. Components (C4); Interfaces (IF-8).
+- **D4 — Walk window is the challenge timeout, one source.** `AckClarificationConfig
+  .responseWindowSeconds` is composed from the same injected challenge-timeout value the
+  scheduler's `ConfirmationChallenge` receives — no literal at any call site. Configuration and Timeouts.
+- **D5 — Evidence hold lives in the scheduler; record surface is the Meds leaf.** Pending
+  evidence is held per entry on `MedicationScheduler` (so only `finalizeAcknowledgement` can
+  attach it); the post-record capture surface is a new "Taken today" section on the Meds leaf
+  (Components C5). FR-MSR-013's acceptance scenario ("completed the chain, then photographs") requires a
+  record surface to exist.
+- **D6 — Retime refusal is family-visible.** One-shot settings-leaf note + the named event
+  (m-5). Components (C7, C12); §5.2.
+- **D7 — Calendar one-off bookkeeping.** Significant-event one-offs reuse `EventNotifyKind
+  .medicationReminder` with the 2-component `CalendarShareKey.oneOff` form; their keys are kept
+  OUT of `outboundKeys` (the stale-twin sweep must never tombstone them) and out of the
+  medication schedule reconcile's known-key snapshot (so a schedule edit can never tombstone
+  them). Event identity is deterministic per (kind, entry, dose occurrence). Components (C11); Data Models §4.3.
+- **D8 — `EvidenceStoreError` case names.** L1 §21.2's outline "(writeRequested,
+  storageUnavailable, removeFailed)" is realized as `compressionFailed` (the capped JPEG could
+  not be produced — the write is then not attempted), `storageUnavailable`, `removeFailed`. Interfaces (IF-13).
+- **D9 — `v: 1` on the wire.** `buildPayload` gains the documented envelope version key `v: 1`
+  (the E2E plan's `FamilyAlertPayload { v, alert_type, timestamp }`) alongside both the shipped
+  keys and the optional `entry_id_hash`. No deployed consumer exists; recorded. Components (C10).
+- **D10 — `escalationStarted` trigger.** The reminder's first re-fire decision = the
+  `.fireReminder(let refireCount)` arm of `handleAckDeadlineExpired` with `refireCount == 1`
+  (state-derived, once per reminder). Components (C7).
+- **D11 — The capture affordance announces its bound medication** (n-5): the fired-dose screen
+  already titles the bound entry; the record row shows the entry name; the spoken line on
+  capture names it. Components (C5).
+
+### Invariants carried unchanged (checked at L2 level)
+
+- Safety delta (a): scan stays candidate → draft → family save; nothing here writes a store on
+  scan.
+- Safety delta (b): pure total slot→clock resolution; the typed `.indeterminate(slot:)` failure
+  arms nothing and is never guessed; all derived instants come from one resolved `Date`.
+- Safety delta (c): a photo never creates a record; attach happens only inside
+  `finalizeAcknowledgement` or onto an existing `MedicationAdherenceLog` (Components C5; Interfaces IF-14/15).
+- Safety delta (d): PII-free wire and events; names/titles in memory only; `entry_id_hash` is
+  `IdHashing.shortHash` (a truncated one-way digest).
+- OCR confirm-before-binding, deterministic total slot→clock mapping, Devanagari grapheme pin
+  (Character-cluster substring containment is the matching convention — no per-grapheme
+  fuzzy matching is introduced anywhere), SpokenTime for every spoken time, 44pt/18pt targets.
+
+## Components
+
+Component inventory with L1 status. "NEW" and "CHANGED" files are the only ones this feature
+touches; everything else is bound by the L1 preservation rows.
+
+| # | Component / file | Status | Responsibility |
+|---|---|---|---|
+| C1 | `Services/MedicationScheduler/MedicationSlotClock.swift` | NEW | Slot/meal/quantity types, `TimeOfDay`, the record, pure resolve, validation, the store |
+| C2 | `Services/MedicationScheduler/DoseLine.swift` | NEW | Quantity → dose-line composition |
+| C3 | `Services/MedicationScheduler/MedicationAckResolver.swift` | NEW | Pure ack resolution + the closed vocabulary |
+| C4 | Walk state + router wiring (`AppCoordinator.swift`, `CommandRouter.swift`) | CHANGED | Clarification walk, interception, speaking |
+| C5 | `Services/MedicationScheduler/MedicationEvidenceStore.swift` | NEW | On-device evidence file store + capture plumbing |
+| C6 | `Services/MedicationScheduler/Models.swift` | CHANGED | Entry/log/taxonomy additions; the `withScheduleTimes` trap |
+| C7 | `Services/MedicationScheduler/MedicationScheduler.swift` | CHANGED | Resolution feed, guarded re-arm, trigger sites, retime refusal, evidence hold |
+| C8 | `MedicationEditorDraft.swift` + `App/SettingsView.swift` + `App/LeafViews.swift` | CHANGED | Slot/quantity/meal editor, conversion, duplicate rule, mapping section, record surface |
+| C9 | `MedicationLabelOCR.swift` + `ScannedSchedule` | CHANGED (bounded) | Pinned hour→slot conversion |
+| C10 | `Services/FamilyNotifier/FamilyNotifier.swift` | CHANGED | Honest transport outcome, envelope extension, significant-event contexts |
+| C11 | `Services/CalendarSync/CalendarShareService.swift` + `CalendarShareMapper.swift` | CHANGED | Significant-event one-off writes, invitee rule, bookkeeping |
+| C12 | `App/AppCoordinator.swift` | CHANGED | Candidate seam, save plumbing, mapping save, capture plumbing, settings note |
+| C13 | `Resources/Localizable.xcstrings` (+ `L10n.swift`, coverage test) | CHANGED | New key sets, M-1 copy amendment, both locales |
+
+### C1 — MedicationSlotClock (NEW)
+
+Types exactly as frozen in L1 §4.1/§4.2 (`MedicationSlot`, `MealRelation`, `TimeOfDay`,
+`MedicationSlotClock`, `SlotClockError`, `MedicationQuantity`, `MedicationDoseUnit`), plus:
+
+- `MedicationSlotClock.default` = morning 08:00 / afternoon 13:00 / evening 19:00 (OD-1).
+- Custom decode: a record with a missing per-slot key decodes that slot as the default; an
+  absent record decodes as `.default`. Present-but-invalid values (hour/minute outside range)
+  decode as the stored value **as-is** and resolve as `.indeterminate(slot:)` — never clamped,
+  never repaired (L1 §4.2).
+- Store key `medication.slot_clock` on the shipped `EncryptedLocalStorage` seam; the record is
+  small and JSON-encodable like the scheduler's other keys.
+- One writer: the settings save action (C12). The scheduler only reads, at arming time
+  (C7), through the same store instance.
+- `MedicationSlotClockStore` is a thin, stateless façade over `EncryptedLocalStorage`
+  (`load()` non-throwing with the decode-with-defaults rules; `save(_:)` validates first and
+  returns `Result<Void, StorageError>`); one instance is composed and shared by the scheduler
+  (read) and coordinator (write).
+- Control shape and copy keys per L1 §4.2 (three rows + reset), localised both languages (C13).
+  The rows display each time through `SpokenTime` — the established Updates-leaf display
+  exception ("a senior reads what they hear"), since this screen is where the family sets what
+  the assistant will speak.
+
+### C2 — DoseLine (NEW)
+
+`DoseLine.compose(quantity:doseText:locale:)` with L1 §4.6's four rules verbatim. Localized
+unit labels are catalog keys (`meds.unit.tablet` … `meds.unit.sachet`); a unit string matching
+no `MedicationDoseUnit` case is stored and rendered verbatim (the purpose chip-or-free-text
+precedent — `MedicationPurposeDraft` is the model for the unit control). The fixed separator
+between quantity and non-blank dose text is `", "` (implementation-fixed per L1; the composed
+string is the stored `doseDescription`).
+
+### C3 — MedicationAckResolver (NEW, pure)
+
+L1 §7.2's algorithm verbatim, with the L2-pinned vocabulary:
+
+```
+MedicationAckVocabulary (closed sets, canonical form via MedicationVoiceVocabulary.canonical):
+  slotWords: morning -> ["morning", "बिहान", "सकाळ"]
+             afternoon -> ["afternoon", "midday", "noon", "दिउँसो"]
+             evening -> ["evening", "night", "बेलुका", "राति"]
+  mealWords (recognised only; NEVER filters, discriminates or selects — OD-1):
+             beforeMeal -> ["before meal", "before food", "before eating", "खानु अघि", "खाना अघि"]
+             afterMeal  -> ["after meal", "after food", "after eating", "खानु पछि", "खाना खाएपछि"]
+```
+
+The slot word families mirror the scanner's word families (`MedicationLabelOCR.timeWordHours`
+:203) so the house has ONE vocabulary, not two inventions. Word sets are matched as
+substrings of the canonical transcript with the Devanagari grapheme pin respected
+(NFR-MSR-007): Swift Character-cluster containment, exactly the shipped convention.
+
+Resolver inputs: `transcript` (canonicalised internally), `candidates` (one per pending
+reminder, ordered by `scheduledAt`). Output `AckResolution` with L1 §7.2's four cases. Name
+keys come from `MedicationVoiceVocabulary.voiceKeys(for:)` (name first, then purpose keys,
+dedup, stable order — the first matching key decides nothing by itself; matching is per
+candidate). The walk order for `ambiguous`/`noMatch` is fixed here at entry: `scheduledAt`,
+then canonical medication name, then id.
+
+Additive ack-phrase additions (L1 §7.1 leaves the lists extendable additively): the resolver
+itself needs none — the owner's utterance shape already matches the shipped lists; if
+implementation extends `medicationAckPhrases`/`medicationAckTokens`, the denial guard stays
+first and the lists are extended only (never reordered).
+
+### C4 — Clarification walk (state + router wiring)
+
+**State (coordinator, main thread).**
 
 ```swift
-/// A pointer to one record in the system address book, with the fingerprint
-/// needed to prove it is still the same person. Local-only; never transmitted.
-/// Defined next to `FamilyContact` because it is part of the persisted payload
-/// shape the decoder reads in the same file.
-struct SystemContactLink: Codable, Equatable {
-    var identifier: String   // CNContact.identifier at link time
-    var numberKey: String    // ContactNumberKey.normalized of the FIRST dialable
-                             // number of the picked entry at link time
+struct AckClarificationState {
+    let candidates: [MedicationAckCandidate]   // ordered: scheduledAt, canonical name, id
+    var cursor: Int                            // 0-based single-form position
+    var pairAsked: Bool                        // exactly-2 opening question spoken
+    let deadline: Date
+}
+@Published private(set) var pendingAckClarification: AckClarificationState?
+var isAwaitingAckClarification: Bool { pendingAckClarification != nil }
+// isAwaitingConfirmation becomes: challenge-open || pendingAckClarification != nil
+```
+
+**Router wiring**: inside the confirmation follow-up region of `CommandRouter.route` (the
+`if coordinator?.isAwaitingConfirmation == true` block :1049), the walk is consulted FIRST with
+this exact order (refusal-first preserved):
+
+1. Explicit acknowledgement → end the walk (`.bargedIn`), call
+   `handleMedicationAcknowledgement(transcript: raw)`, return `.acknowledgedMedication`
+   (the L1 §7.3 barge-in rule; an ack is never consumed as a yes/no answer).
+2. Denial (the shipped `medicationDenialPhrases` :2425 checked via one extracted helper —
+   one list, no second vocabulary) → end the walk (`.denied`); the utterance falls through
+   to the ladder unchanged (the walk's end flips `isAwaitingConfirmation` false, so the shipped
+   confirmation block below cannot swallow the denial; refusal semantics preserved, FR-MSR-011).
+3. Otherwise → `coordinator.ackClarificationResponse(raw:isYes:isNo:)`; return
+   `.unrecognised(transcript: raw)`. The coordinator speaks its own lines (the navigation-walk
+   precedent — the router's generic `router.confirmationYes/No` text must not be reached while
+   the walk is open).
+
+**Walk behaviour (coordinator), pinned:**
+
+- Entry: `beginAckClarification(orderedCandidates:)` is called only when no challenge is open
+  (invariant: walk and challenge are mutually exclusive — an acknowledgement arriving while a
+  medication challenge is open is intercepted by the shipped block and re-prompted; a
+  resolution that resolves opens the challenge, never a walk).
+- Exactly two candidates: the pair question first ("did you mean X or Y?"); "yes" falls to the
+  single form at cursor 0; "no" ends the walk (nothing recorded). One candidate (and `noMatch`
+  with one pending): single form; "yes" resolves; "no" ends.
+- Three or more: single-candidate form from cursor 0; **"no" advances the cursor and asks the
+  next candidate**; after the last candidate's "no" the walk ends (nothing recorded, honest
+  ended line). Never a numbered list, never a leading question.
+- A response naming any walk candidate (name-key containment over the same vocabulary as C3)
+  resolves to it at any cursor.
+- Resolution → the shipped sequence: `startVoiceAckConfirmation(for:)` → prompt spoken →
+  `handleMedicationConfirmation` → challenge → detector → record. Nothing in that chain is
+  touched.
+- Expiry: the walk timer ends it (`.expired`), nothing recorded, reminders untouched,
+  escalation continues on its own clock. Every ending other than a resolved yes records
+  nothing and says so honestly (catalog key, both locales).
+- Test obligation (m-4): a walk over three candidates where two "no"s advance and a third
+  "yes" resolves to the third candidate; three "no"s end with nothing recorded; the walk order
+  is the fixed `scheduledAt`/name/id order.
+
+### C5 — MedicationEvidenceStore (NEW)
+
+File-per-record storage, one directory per entry (the `VisualAidStore` pattern — a directory
+per entry so the entry-delete cascade is one call):
+
+```
+Application Support/MedicationEvidence/<entryId>/<logId>.jpg     // .completeFileProtection
+```
+
+- Cap: `MedicationEvidenceStore.maxPhotoBytes = 200_000` (the FR-D04b `PhotoVerifier` :27
+  precedent; named once, not a literal at call sites). Compression: downscale-to-fit plus a
+  JPEG-quality loop until the cap holds — implemented INSIDE this store; `PhotoVerifier` is not
+  called, wired or repurposed (FR-MSR-020 / L1 §8.5: the dementia machinery stays unwired).
+- One photo per record: re-capture writes the same `<logId>.jpg` (replace in place; atomic
+  write, so the old file is never half-gone). The model stores the bare file name only —
+  never a path, never bytes (L1 §8.2).
+- All methods fail soft toward the truth, never toward a claim: a missing/corrupt read returns
+  nil (never a fabricated image), a failed write returns a typed failure, a delete of an
+  absent file is success (idempotent — the goal state is achieved).
+- Caller-side threading: the coordinator runs store calls off the main thread (the scanner's
+  `offload` discipline :81) and hops back to the main queue for model writes. The store itself
+  is stateless over the filesystem; the camera discipline (one capture at a time, the shipped
+  `isRunning` guard pattern) serialises per-record writes at the caller.
+
+### C6 — Models (CHANGED)
+
+- `MedicationEntry`: `quantity: MedicationQuantity?`, `slot: MedicationSlot?`,
+  `mealRelation: MealRelation?` — all `decodeIfPresent` in the custom `init(from:)` (:114,
+  CodingKeys extended), memberwise init gains them with `nil` defaults.
+- **The `withScheduleTimes` copy trap (:144)**: the memberwise rebuild MUST carry every field,
+  including the three new ones; implementation replaces the memberwise rebuild with a
+  `withScheduleTimes` that copies `self` and replaces only `scheduleTimes` (or passes every
+  field explicitly). A migration test pins "a slot entry copies with its slot intact"
+  (NFR-MSR-006 obligation carried from review-l1 risk 7).
+- `MedicationAdherenceLog`: `var evidencePhotoFileName: String? = nil` (synthesized Codable
+  treats an optional as `decodeIfPresent`, so pre-existing payloads decode with nil; the
+  default keeps the three construction sites compiling).
+- `FamilyAlertType`: `case intakeRecorded`, `case escalationStarted`. `alertBody` (:186-ish
+  switch) gains the two cases with catalog keys `family.alertIntakeRecorded` /
+  `family.alertEscalationStarted` (both locales).
+- `MedicationSlot`/`MealRelation`/`MedicationQuantity`/`MedicationDoseUnit` live in C1's file
+  (L1 §19 row) and are referenced by the model.
+- `SignificantMedicationEvent` (C11's input) lives in the calendar service's file, not here.
+
+### C7 — MedicationScheduler (CHANGED)
+
+1. **Resolution feed** (L1 §4.4 verbatim): `resolvedScheduleTimes(for:)`; legacy → verbatim
+   `.success(entry.scheduleTimes)`; slot → the mapping's `TimeOfDay` as `[.hour,.minute]`;
+   `.indeterminate(slot:)` → the entry is skipped, `medication_slot_unresolved` event,
+   settings error surfaces. `createPendingReminders` (:707) consumes this seam in place of
+   reading `entry.scheduleTimes`. Nothing else in the creation pipeline changes
+   (persist :733 → arm :735–744 stays byte-identical in order).
+2. **Guarded re-arm** (L1 §4.5 verbatim) as `rearmForSlotClockChange() -> SlotClockRearmReport`
+   (IF-12): fired reminders keep their persisted `scheduledAt`/engine (live escalation never
+   moves); un-fired reminders whose resolution changed are replaced via the standard creation
+   rules; **the slot entries' `scheduleTimes` mirrors are rewritten to the new mapping and
+   persisted (entries write) before any reminder is armed; `onScheduleChanged` is invoked
+   after the local work is committed** (the `loadSchedule` ordering comment :180–199 is the
+   precedent — the calendar mirrors must see the new times); failure of either write sets
+   `persistenceFailed` and arms nothing on the replaced set.
+3. **Trigger sites** (L1 §9.1): `intakeRecorded` inside `finalizeAcknowledgement` after the
+   adherence-log write succeeds (:476) and before runtime cleanup; `escalationStarted` in
+   `handleAckDeadlineExpired`'s `.fireReminder(let refireCount)` arm when `refireCount == 1`
+   (the first re-fire decision; state-derived — never a stored per-event flag). Both call
+   `notifyAll(alertType:at:context:)` with a `FamilyAlertContext(kind: .medicationReminder,
+   eventIdHash: IdHashing.shortHash(of: entry.id), eventTitle: entry.medicationName,
+   fireAt: scheduledAt)` — the in-memory-only title rule stands. `recordMissedDose` and the
+   double-dose blocked branch gain the same context (they currently pass none).
+4. **Significant-event calendar hook**: `var onSignificantEvent:
+   ((SignificantMedicationEvent, MedicationEntry?) -> Void)?` (the `onScheduleChanged`
+   precedent :58), invoked at the three at-risk trigger sites (recordMissedDose; the blocked
+   branch of `checkDoubleDoseAndRecord`; the first re-fire decision) on the main thread.
+   `events` = the notifier call and the calendar hook are independent channels; neither gates
+   the other.
+5. **Retime refusal** (`setScheduleTimes` :152): a slot entry (`slot != nil`) returns `false`
+   without writing; emits `medication_retime_refused` (metadata: `entry_id_hash`, `slot`);
+   invokes `onSlotEntryRetimeRefused?(entryId)` (the settings-note hook, C12). Legacy entries:
+   byte-identical shipped behavior. The refusal is the non-interpretation (L1 §11): the
+   authority stays the settings editor.
+6. **Evidence hold** (safety delta (c)): `holdPendingEvidence(fileName:for:)` stores one held
+   file name per entry (in-memory; a new hold replaces and deletes the prior file);
+   `finalizeAcknowledgement` attaches the held file to the log it just wrote (setting
+   `evidencePhotoFileName` + persisting; a failed attach persists nothing and deletes the
+   file — no orphan); `reEnterEscalation` and the challenge-deny path call
+   `discardPendingEvidence(for:)` (delete + clear; idempotent). `attachEvidence(fileName:
+   toLog:)` is the record-surface attach (persist the mutated log; on failure delete the
+   just-stored file and return the typed failure).
+
+### C8 — Editor draft, Settings editor, Meds leaf (CHANGED)
+
+- **Draft** (`MedicationEditorDraft`): adds `scheduleMode: ScheduleMode` (`.times` | `.slots`),
+  `slotRows: [MedicationSlot?]` parallel to `times` (single form, rows = doses), the quantity
+  fields (amount + unit, the `MedicationPurposeDraft` chip-or-free-text shape), and
+  `mealRelation`. All shipped rules stay bound: `applyScan` pre-fills blank text only, the
+  label's schedule wins, an empty read changes nothing, `storedTimes` stays `[.hour,.minute]`
+  (:143), `canSave` still requires a name (:149). The scanned schedule is applied through C9's
+  conversion: in `.slots` mode the scanned slots replace the slot rows; `times` never becomes
+  empty (the last row cannot be removed, :126).
+- **New-entry form** (`addForm` :4640, C12 save): `.slots` mode by default; the time pickers
+  are replaced by big slot controls (44pt+/18pt+, the mapping time as read-only context in
+  spoken form); a "add another dose" row lets the family add a second row (a twice-daily
+  medicine) — on save each row becomes its own entry (D1). The quantity/strength coexistence
+  follows the purpose precedent: the strength field stays the scan target and free text; the
+  quantity control composes into `doseDescription` via C2 at save (rule 2 keeps both:
+  "1 tablet, 500 mg").
+- **Edit-existing flow (new, required by L1 §11's conversion).** The medication row becomes
+  tappable (photos/delete buttons unchanged) → the same form pre-filled from the entry
+  (`MedicationEditorDraft(from: entry)`, `scheduleMode = .times` for a legacy entry showing its
+  times). A "Use morning / afternoon / evening" control switches to `.slots`; exact-equality
+  preselection applies (a legacy time whose hour:minute equals the mapping's time for a slot
+  may preselect it — visible in the chips, family-confirmed on save); any unmatched row
+  requires the family to pick a slot or remove the row; the slot-model save is gated on every
+  row being assigned; the family may save in `.times` mode (legacy stays first-class). Save via
+  C12's `updateMedication`. Conversion of row 1 updates the entry in place (same id, visual
+  aids and history linkage kept); rows 2+ create new entries with copied visual aids (D1).
+- **Duplicate rule (m-2)**: the guard keeps the shipped expression (exact name equality +
+  effective-time intersection, `addMedication` :11641–11645) over EFFECTIVE times: legacy rows
+  contribute their stored components, slot rows contribute the slot's resolved time (the
+  mirror, D2 — a corrupt mapping leaves the mirror empty and does not flag). Save-time checks
+  include entries created earlier in the same save (two rows assigned the same slot → the
+  second flags). `updateMedication` excludes the entry being updated from its own check.
+- **Mapping section** ("Medicine times", `settings.meds.times.*` keys): three rows (slot label +
+  SpokenTime string) with large controls, validation before persist, a reset action, the m-5
+  one-shot retime note (dismissible), and the honest failure lines for the save/re-arm outcome.
+
+### C9 — Scanned schedule → slots (CHANGED, bounded)
+
+`ScannedSchedule` (pure helper, new small type beside the parser):
+
+```
+static func slots(from scheduleTimes: [DateComponents]) -> [MedicationSlot]
+```
+
+Pinned conversion table (m-3), applied to the parser's emitted hours:
+8:00 → morning; 12:00 and 13:00 → afternoon; 19:00, 20:00 and 21:00 → evening. Every other hour
+fills nothing. Output order = first occurrence in the parser's clock-ordered list, deduplicated
+per slot (a count-4 read yielding 8:00/13:00/19:00/21:00 converts to
+[morning, afternoon, evening]). The parser surface itself is untouched (no new tables, no
+`timeWordHours` change), and the conversion never consults the household mapping — it maps the
+parser's convention hours (L1 §6 boundary).
+
+### C10 — FamilyNotifier (CHANGED)
+
+- `APNsProvider.sendPush(payload:deviceToken:) async -> PushOutcome` where
+  `enum PushOutcome: Equatable { case delivered; case notDelivered(reason: String) }`. The stub
+  returns `.notDelivered(reason: "transport_unimplemented")` and logs nothing that claims
+  delivery (the current `[APNsProvider] Push sent…` print goes away). `notifyAll` maps
+  delivered → `success: true`; notDelivered → `success: false, errorCode: reason` (replacing
+  the generic `apns_delivery_failed`); partial results stay partial.
+- `buildPayload(alertType:timestamp:entryIdHash:)`: emits `aps`, `v: 1` (D9), `alert_type`,
+  `timestamp`, and `entry_id_hash` only when supplied. The four medication significant events
+  (missedMedication, possibleDoubleDose, intakeRecorded, escalationStarted) supply
+  `context.eventIdHash`; `eventReminder` payloads keep their current shape (no entry_id_hash;
+  the context stays in memory). No name, dose, label text or title on any wire.
+- `family_event_alerted` observability outcome becomes honest (per-contact result mapped to
+  `success`/`failed` with `error_code`) instead of the hardcoded `"success"`.
+- The per-contact loop, `NotifyChannel.resolve`, and the default protocol extension are
+  unchanged; existing notifier tests that asserted stub success flip with the honest stub
+  (NFR-MSR-008 obligation carried from review-l1 risk 4).
+
+### C11 — CalendarShareService / CalendarShareMapper (CHANGED)
+
+```swift
+struct SignificantMedicationEvent: Equatable {
+    enum Kind: String { case missedMedication, possibleDoubleDose, escalationStarted }
+    let kind: Kind
+    let entryId: UUID
+    let occurredAt: Date        // the trigger timestamp — the entry's start
+    let id: String              // deterministic identity, see below
 }
 ```
 
-Error contract: none (pure value). Corrupt persistence is handled at decode (§3.4): an empty
-`identifier` or `numberKey` decodes to `nil` — "unlinked", never a crash (FR-FCU-002 scenario 3).
+- **Identity (D7)**: `id = "\(kind.rawValue)_\(entryId.uuidString)_\(occurrenceStamp)"` where
+  `occurrenceStamp` = the dose occurrence's `scheduledAt` formatted `yyyyMMddHHmm` in UTC. The
+  key is `CalendarShareKey.oneOff(kind: .medicationReminder, eventIdentifier: id)` — a valid
+  2-component key (no colon in the id). Deterministic ⇒ a re-trigger of the same logical event
+  enqueues the same key (the store's replace-same-key behavior), no duplicates.
+- **Write** (`writeSignificantEvent(_:entry:) -> CalendarShareWriteResult`): on the main queue;
+  `canShare` gate first (not signed in / no consent → `.skippedNotActive`, the shipped
+  honest event with the kind; nothing queued — the shipped no-queue-when-gated rule);
+  attendees = the family-notification audience (all contacts with an email, de-dup
+  case-insensitively, emergency-first — the M-1-resolved rule; the notify toggles are NOT
+  consulted for significant events); no eligible invitee → `.skippedNoInvitees` (shipped honest
+  event); otherwise `enqueue(key:draft:)` → `.enqueued`. The write does NOT `markOutbound`
+  (the stale-twin sweep only considers outbound keys, and these have no local EventKit event —
+  marking them would queue tombstones for live entries). Result is reported per item; the
+  Settings status card's pending count remains the delivery surface.
+- **Reconcile interplay (D7)**: `reconcileMedication` computes its known-key snapshot as the
+  slot-shaped keys of its kind (3-component keys) so significant-event one-offs can never be
+  read as "removed" and tombstoned by a schedule edit. The forward mirror path is otherwise
+  untouched.
+- **Title format (L2-deferred item)**: `"<Localized event phrase> — <medicationName>"`
+  (e.g. "Missed medicine — Metformin 500"), keys `calendarShare.alert.missed` /
+  `.doubleDose` / `.escalation`, both locales. Start = `occurredAt` (one rule for all three:
+  the entry is anchored at the moment the event happened; duration = the house 30-minute
+  default, `recurrence = nil`). Same content class as the shipped mirror (medication name +
+  time), inside the amended consent disclosure (M-1). Honesty: the mapper is a pure
+  function; the service gates.
+- `CalendarShareWriteResult`:
+  `enum CalendarShareWriteResult: Equatable { case enqueued, skippedNotActive,
+  skippedNoInvitees, failed(reason: String) }`.
 
-### 1.2 `FamilyContactIndex` — new file `Services/Contacts/FamilyContactIndex.swift`
+### C12 — AppCoordinator (CHANGED)
+
+Adds the candidate seam, the walk ops, the save plumbing, the mapping save + note, and the
+capture plumbing and the `removeMedication` evidence cascade (`deleteAll(for:)`, beside the visual-aid cascade); all main-thread state, verified in Interfaces. The `addForm` save now routes
+through `addMedication(MedicationSaveRequest)`; `medicationEntries`, `pendingReminders`,
+`medicationVoiceEntries`, `oldestPendingReminderEntryId` :12929 and the confirmation helpers
+remain (`oldestPendingReminderEntryId` keeps its only remaining purpose as the router's
+fallback path should the resolver be unavailable — the baseline `handleMedicationAcknowledgement
+(entryId:)` path; it is no longer the resolution step).
+
+### C13 — Localisation (CHANGED)
+
+New key SETS (exact wording at implementation, both locales, catalog coverage test extended):
+
+- Slot/meal/quantity labels: `meds.slot.morning|afternoon|evening`, `meds.meal.before|after`,
+  `meds.quantity.amount`, `meds.quantity.unit`, `meds.unit.tablet|capsule|milliliter|teaspoon|
+  drop|puff|sachet`, `meds.quantity.customUnit`.
+- Mapping section: `settings.meds.times.title|morning|afternoon|evening|reset`,
+  `settings.meds.times.saveFailed`, `settings.meds.times.unresolved`,
+  `settings.meds.times.retimeNote` (m-5 note), `settings.meds.times.retimeNote.dismiss`.
+- Editor: `settings.meds.useSlotModel`, `settings.meds.keepTimes`,
+  `settings.meds.slotRequired` (a row without a slot blocks the slot save),
+  `meds.addDose`.
+- Walk + outcomes: `meds.ack.clarifyOne` ("did you mean %@?") and `meds.ack.clarifyPair`
+  ("did you mean %@ or %@?") — the ONLY permitted forms; `meds.ack.clarifyEnded` (nothing
+  recorded, honestly).
+- Evidence: `meds.evidence.capture`, `meds.evidence.spoken` ("photo for %@" — names the bound
+  medication), `meds.evidence.attached`, `meds.evidence.failed`,
+  `meds.evidence.notYetDelivered` (the honest state per L1 §8.1), `meds.takenToday.title`.
+- Family alerts: `family.alertIntakeRecorded`, `family.alertEscalationStarted`;
+  `calendarShare.alert.missed|doubleDose|escalation`.
+- **M-1 copy amendment** (Review-l1 Resolutions, M-1): `calendarShare.consent.whoCanSee` amended in both locales.
+- `L10nCatalogCoverageTests` extended for every key; no new string ships in one language only
+  (NFR-MSR-004/005).
+
+## Interfaces
+
+Every seam below is an in-process Swift contract (single iOS process; no network surface is
+added). Each entry states: signature, outcome/error type, concurrency, and idempotence where
+it matters. 24 numbered interface contracts; their error types are collected in the Error Handling catalogue (§5.1).
+
+### IF-1 — Slot resolution (pure)
 
 ```swift
-/// Derived, value-type index over the family roster (L1 §5.4). Rebuilt wholesale on
-/// every roster publish; never persisted; never mutated in place.
-struct FamilyContactIndex: Equatable {
-    struct Entry: Equatable {
-        let id: UUID
-        let normalizedName: String         // NepaliTextNormalizer.normalize(name)
-        let normalizedNicknames: [String]  // per entry, order preserved (normalizedNicknames applied)
-        let rawNicknames: [String]         // stored spellings, order preserved (containment parity)
-    }
-
-    private(set) var entries: [Entry]                  // roster order preserved
-    private(set) var idsByNickname: [String: [UUID]]   // normalized exact key → ids, roster order
-
-    init(family: [FamilyContact])
-    static let empty = FamilyContactIndex(family: [])   // == today's behavior anchor
-
-    func nicknameEntries(for id: UUID) -> [String]     // normalized nicknames of one contact
-    func exactNicknameHolders(_ normalizedQuery: String) -> [UUID]  // O(1) map hit
-    func entry(for id: UUID) -> Entry?                 // hot-path lookup for ContactResolver
+extension MedicationSlotClock {
+    func resolve(slot: MedicationSlot) -> Result<TimeOfDay, SlotClockError>
 }
 ```
 
-Isolation: pure value, no shared mutable state, safe on any thread (L1 §13.1). Empty index
-reproduces today's name-only behavior byte-for-byte (L1 §5.4, compatibility anchor).
+Pure, total over the three-case enum; the one failure is `.indeterminate(slot:)` from a
+present-but-invalid stored value. No clock, no IO (the record is a value). Thread-safe by
+construction; callable from any context. Idempotent (pure).
 
-### 1.3 Link verification — new file `Services/Contacts/SystemContactLinkService.swift`
+### IF-2 — Mapping validation (pure)
 
 ```swift
-/// Published snapshot of VERIFIED links (L1 §6.2). `.empty` ⇒ unlinked semantics.
-struct VerifiedLinksSnapshot: Equatable {
-    var links: [UUID: SystemContactLink]           // verified only
-    var linkedRecordNumbers: [String: [String]]    // identifier → current normalized numbers
-    var generation: UInt64                         // bumps once per COMPLETED fetch
-
-    static let empty = VerifiedLinksSnapshot(links: [:], linkedRecordNumbers: [:], generation: 0)
-
-    /// The family contact id whose verified link points at `identifier`, or nil
-    /// (unique by L1 §6.2; duplicate stored claims were dropped at verification).
-    func familyID(forIdentifier identifier: String) -> UUID?
-    /// The family contact id whose linked record carries a number matching `phone`
-    /// (MissedCallContactResolver.matches trailing-digit rule, reused unchanged).
-    func familyID(matchingRecordNumber phone: String) -> UUID?
-}
-
-/// The narrow platform seam both new services share — fakeable in tests
-/// (CNContactStore is not constructible or fakeable in unit tests).
-protocol SystemContactReading: AnyObject {
-    func currentAccess() -> ContactsAccess
-    /// Records matching `identifiers`, under the CURRENT access. A withheld
-    /// record is simply absent (limited access). Throws on store-level failure.
-    func contacts(identifiers: [String], keysToFetch: [CNKeyDescriptor]) throws -> [CNContact]
-}
-
-protocol SystemContactLinkReading: AnyObject {
-    func refresh(contacts: [FamilyContact]) async -> VerifiedLinksSnapshot
-    func photoImageData(forIdentifier identifier: String) async -> Data?   // nil: absent/unreadable
-    func invalidate(identifier: String?)                                    // one record, or all
-}
-
-/// actor: all state below is actor-isolated (L1 §13.1).
-actor SystemContactLinkService: SystemContactLinkReading {
-    init(reader: SystemContactReading = AddressBookDirectory(),
-         observabilityBus: ObservabilityBus? = nil)
-
-    /// ONE batched fetch (≤12 identifiers; keys [identifier, phoneNumbers]).
-    /// - fetch throws            → previous snapshot returned unchanged (degraded, reason-coded)
-    /// - per-link: verified iff the record exists AND any current normalized number
-    ///   satisfies MissedCallContactResolver.matches(storedNumberKey, current)
-    /// - duplicate identifier claims: first in ROSTER order wins; later ones unverified
-    /// - access not readable (.denied/.notDetermined) → NO store call, snapshot unchanged
-    func refresh(contacts: [FamilyContact]) async -> VerifiedLinksSnapshot
-
-    /// System photo bytes keyed by identifier; nil when absent/unreadable/not readable.
-    func photoImageData(forIdentifier identifier: String) async -> Data?
-
-    /// One identifier or the whole photo cache (nil = all).
-    func invalidate(identifier: String?)
+extension MedicationSlotClock {
+    static func validate(_ clock: MedicationSlotClock) -> Result<Void, SlotClockError>
 }
 ```
 
-Isolation and cache: the photo-byte cache is `NSCache<NSString, NSData>` INSIDE the actor
-(constants in §4.3), so the actor is the only mutator; concurrent callers await serialized
-access. `AddressBookDirectory` conforms:
+Rejects out-of-range hour/minute as `.indeterminate(slot:)` for the offending slot (first
+offending slot in morning/afternoon/evening order). Used by the store's save and by the
+settings editor before persisting.
+
+### IF-3 — Mapping store read
 
 ```swift
-extension AddressBookDirectory: SystemContactReading {
-    func currentAccess() -> ContactsAccess { Self.access() }
-    func contacts(identifiers: [String], keysToFetch: [CNKeyDescriptor]) throws -> [CNContact] {
-        let predicate = CNContact.predicateForContacts(withIdentifiers: identifiers)
-        return try store.unifiedContacts(matching: predicate, keysToFetch: keysToFetch)
-    }
+final class MedicationSlotClockStore {
+    func load() -> MedicationSlotClock        // non-throwing; decode-with-defaults (C1)
 }
 ```
 
-(Placed in AddressBookDirectory.swift; the store stays private.)
+Main-thread composition point (the shipped storage seam is synchronous); reads are stateless
+and safe to repeat. Never throws, never returns a partly-defaulted mix beyond the documented
+per-slot defaults.
 
-### 1.4 Write seam — new file `Services/Contacts/SystemContactPhotoWriter.swift`
+### IF-4 — Mapping store write (one writer)
 
 ```swift
-enum SystemContactWriteAccess: Equatable {
-    case notDetermined, denied, limited, full
-
-    /// Pure mapping from the already-mapped read access (single iOS-18 gate lives
-    /// in `ContactsAccess.from`). `.allowed → .full`, `.limited → .limited`.
-    static func from(_ access: ContactsAccess) -> SystemContactWriteAccess
-}
-
-enum SystemContactWriteFailure: String, Equatable {   // raw values ARE the log reason codes
-    case fetchFailed = "fetch_failed"
-    case notInGrantedSelection = "not_in_granted_selection"
-    case saveRejected = "save_rejected"
-    case readBackMismatch = "read_back_mismatch"
-}
-
-enum SystemContactPhotoWriteOutcome: Equatable {
-    case written                                   // saved AND verified by read-back
-    case skippedNoLink                             // unlinked/unverified → no attempt (today's behavior)
-    case skippedNoAuthorization(SystemContactWriteAccess)
-    case recordGone                                // identifier no longer resolves
-    case identityMismatch                          // fingerprint failed at attempt time
-    case failed(SystemContactWriteFailure)
-
-    /// Closed log vocabulary (observability only — never user-visible).
-    var logToken: String
-}
-
-protocol SystemContactPhotoWriting: AnyObject {
-    func writeAccess() async -> SystemContactWriteAccess                // detected, never assumed
-    func writePhoto(_ jpeg: Data, to link: SystemContactLink) async -> SystemContactPhotoWriteOutcome
-    func clearPhoto(from link: SystemContactLink) async -> SystemContactPhotoWriteOutcome
-}
-
-/// The confined real glue (L1 §9.2). The ONLY file in the tree permitted to
-/// construct CNSaveRequest / CNMutableContact (pinned by a source-scan test, §6.4).
-actor SystemContactPhotoWriter: SystemContactPhotoWriting {
-    init(store: CNContactStore = CNContactStore(), observabilityBus: ObservabilityBus? = nil)
+extension MedicationSlotClockStore {
+    func save(_ clock: MedicationSlotClock) -> Result<Void, StorageError>
 }
 ```
 
-Attempt sequence inside `writePhoto`/`clearPhoto` (exact):
-1. Fetch by identifier, keys `[CNContactIdentifierKey, CNContactPhoneNumbersKey,
-   CNContactImageDataKey, CNContactImageDataAvailableKey]` via
-   `unifiedContacts(matching: CNContact.predicateForContacts(withIdentifiers:))`.
-   - throw + access `.limited` → `.failed(.notInGrantedSelection)`; throw otherwise → `.failed(.fetchFailed)`
-   - empty + `.limited` → `.failed(.notInGrantedSelection)`; empty otherwise → `.recordGone`
-2. Fingerprint re-check AT ATTEMPT TIME: the record's current numbers must contain one
-   matching `link.numberKey` (`MissedCallContactResolver.matches`). No match, or no numbers at
-   all → `.identityMismatch` — the wrong-contact write is PREVENTED, not detected.
-3. Build `PhotoWriteIntent { identifier, numberKey, fields: Set<PhotoWriteField> }` where
-   `enum PhotoWriteField { case photo }` — the invariant is `fields == [.photo]`; DEBUG
-   `assert(intent.fields == [.photo])`. `mutable = contact.mutableCopy()` checked-cast (see
-   deviation 3); assign ONLY `imageData` (`clearPhoto`: `imageData = nil`); `CNSaveRequest().update(mutable)`;
-   `try request.execute(store)` in do/catch → `.failed(.saveRejected)`.
-4. Read-back: re-fetch `CNContactImageDataKey`; byte equality with the written JPEG →
-   `.written`; anything else → `.failed(.readBackMismatch)` (never a false success).
-5. Serialization: actor isolation makes saves strictly serial (L1 §13.2). No retries, no
-   backoff, no timeouts (§4.5).
+Validates via IF-2 first (invalid input is rejected before any write), then persists; failure
+leaves the stored record unchanged. Caller: the settings save action only. Idempotent.
 
-### 1.5 Outcome→UI mapping — total by construction
+### IF-5 — Dose line composition (pure)
 
 ```swift
-/// The editor's photo outcome states (consumed by the wizard, §2.4).
-enum FamilyPhotoEditorState: Equatable {
-    case updatedInSystem                          // family.photo.state.updatedInSystem
-    case keptOnPhone                              // family.photo.state.keptOnPhone
-    case keptOnPhoneAccessDenied                  // keptOnPhone + family.photo.accessDeniedBody
-    case systemPhotoRemains                       // family.photo.state.systemPhotoRemains
-
-    /// TOTAL mapping from every write outcome; nil = "no label, today's UX".
-    /// Exhaustive switch, no default — a new outcome case must decide its UI
-    /// consequence at compile time (L1 §10.3 totality).
-    static func from(_ outcome: SystemContactPhotoWriteOutcome) -> FamilyPhotoEditorState?
+enum DoseLine {
+    static func compose(quantity: MedicationQuantity?, doseText: String, locale: Locale) -> String
 }
 ```
 
-| Outcome | State | Label keys |
-|---|---|---|
-| `.written` | `.updatedInSystem` | `family.photo.state.updatedInSystem` |
-| `.skippedNoLink` | `nil` | none (today's behavior) |
-| `.skippedNoAuthorization(.notDetermined)` | `.keptOnPhone` | `family.photo.state.keptOnPhone` |
-| `.skippedNoAuthorization(.denied)` | `.keptOnPhoneAccessDenied` | `keptOnPhone` + `accessDeniedBody` |
-| `.skippedNoAuthorization(.limited)` | `.keptOnPhone` | `family.photo.state.keptOnPhone` |
-| `.failed(.notInGrantedSelection)` | `.keptOnPhone` | `family.photo.state.keptOnPhone` |
-| `.recordGone` | `.keptOnPhone` | `family.photo.state.keptOnPhone` (+ stale-link line on next refresh) |
-| `.identityMismatch` | `.keptOnPhone` | `family.photo.state.keptOnPhone` + wizard stale line |
-| `.failed(.saveRejected)` | `.keptOnPhone` | `family.photo.state.keptOnPhone` |
-| `.failed(.readBackMismatch)` | `.keptOnPhone` | `family.photo.state.keptOnPhone` (never false success) |
-| remove-flow, clear succeeded but the record keeps its own photo | `.systemPhotoRemains` | `family.photo.state.systemPhotoRemains` |
+L1 §4.6 rules; pure and deterministic. The stored `doseDescription` is exactly its output.
 
-Placement: the enum + mapping live in `SystemContactPhotoWriter.swift` next to the outcome
-enum (totality is a seam property; tested in `SystemContactPhotoWriterTests`). The label KEYS
-are resolved only in the view (`SettingsView.swift`), never in the seam.
-
-### 1.6 Unified search — UnifiedContactSearch.swift changes
+### IF-6 — Ack resolution (pure)
 
 ```swift
-struct Outcome: Equatable {
-    let entries: [Result]
-    let moreAvailable: Bool
-    /// Keyed by FAMILY result id ("family-<uuid>") → the linked phone-book record's
-    /// display name, per L1 §7.1 Pass 3. Only synthesized rows appear here; the map
-    /// is EMPTY for unlinked searches. Default [:] keeps existing constructions compiling.
-    let linkedBookNames: [String: String]
-
-    init(entries: [Result], moreAvailable: Bool, linkedBookNames: [String: String] = [:])
+enum MedicationAckResolver {
+    static func resolve(transcript: String, candidates: [MedicationAckCandidate]) -> AckResolution
 }
+```
 
-enum FamilyMatchTier: Int, Comparable {
-    case exactName = 0
-    case relationship = 1
-    case nickname = 2        // NEW — any stored nickname: exact OR normalized substring
-    case containment = 3     // renumbered (was 2); rawValue order IS quality order
+`AckResolution` as frozen (`.resolved(entryId:)`, `.ambiguous(ordered:)`,
+`.noMatch(orderedPending:)`, `.nothingPending`). No state, no IO, no clock beyond inputs
+(`candidates` carry `scheduledAt`). Thread-safe; deterministic — same inputs, same case and
+order (the FR-MSR-008 determinism scenario).
+
+### IF-7 — Ack candidate read seam (coordinator, read-only)
+
+```swift
+struct MedicationAckCandidate {
+    let entryId: UUID
+    let scheduledAt: Date        // the reminder's resolved time — the ordering key
+    let fired: Bool              // lastFiredAt != nil
+    let slot: MedicationSlot?    // nil for legacy entries
+    let voiceKeys: [String]      // MedicationVoiceVocabulary.voiceKeys(for: entry)
+    let medicationName: String   // for the sanctioned copy only
 }
-
-static func search(query: String,
-                   family: [FamilyContact],
-                   index: FamilyContactIndex,
-                   in entries: [AddressBookEntry],
-                   verifiedLinks: VerifiedLinksSnapshot = .empty,
-                   recency: [String: Date] = [:],
-                   limit: Int = defaultLimit) -> Outcome
-
-static func familyMatches(query: String,
-                          in family: [FamilyContact],
-                          index: FamilyContactIndex) -> [(contact: FamilyContact, tier: FamilyMatchTier)]
-
-static func addressBookMatches(query: String, in entries: [AddressBookEntry]) -> [AddressBookEntry]  // unchanged
-
-static func dedupe(matchedFamily: [FamilyContact],
-                   in bookMatches: [AddressBookEntry]) -> [AddressBookEntry]   // unchanged (Pass 4)
-
-static func rank(family: [(contact: FamilyContact, tier: FamilyMatchTier)],
-                 book: [AddressBookEntry],
-                 recency: [String: Date]) -> [Result]                          // unchanged
+func medicationAckCandidates() -> [MedicationAckCandidate]   // one per pending reminder, scheduledAt-sorted
 ```
 
-Algorithm (L1 §7.1 Passes 1-5, exact):
-- Pass 1 `familyMatches`: tiers checked best-first. `.exactName` = index `normalizedName ==
-  NepaliTextNormalizer.normalize(needle)`. `.relationship` unchanged. `.nickname` = the
-  normalized query equals one of `entry.normalizedNicknames` (exact checked first via the O(1)
-  map) OR the normalized query is a Character-safe substring of any normalized nickname —
-  `range(of:options:[.caseInsensitive, .diacriticInsensitive])`, same direction as the name
-  tier (nickname contains the query). Both land in tier `.nickname`; "exact > substring" is
-  check ORDER only, with no ranking consequence by construction. `.containment` = today's name
-  containment / digit rule, unchanged.
-- Pass 2 `addressBookMatches` unchanged.
-- Pass 3 link merge (new pure step): for each matched book row `b` whose `b.identifier` has
-  `verifiedLinks.familyID(forIdentifier:)` = `f`:
-  - `f ∈ matchedFamily` → DROP `b`.
-  - else → SYNTHESIZE `(contact: f, tier: .containment)` and DROP `b`; set
-    `linkedBookNames["family-\(f.id)"] = b.name`, suppressed when `NepaliTextNormalizer.normalize(b.name)
-    == index.entry(for: f.id)?.normalizedName`.
-- Pass 4 today's number `dedupe` over the REMAINING book rows (byte-for-byte today for
-  unlinked pairs; every linked row is already gone).
-- Pass 5 recount before the limit slice: `moreAvailable = familyCount + bookCount > limit`.
+Main thread; a pure in-memory read (the `oldestPendingReminderEntryId` precedent). No error
+path: the empty case is expressed by `AckResolution.nothingPending`.
 
-Single code path: the `index:` parameter is REQUIRED (no convenience overload that could
-drift); all call sites (3 in LeafViews, the wizard, tests) pass an explicit index. Tests build
-`FamilyContactIndex(family: family)` inline.
-
-### 1.7 Voice resolution — ContactResolver.swift changes
+### IF-8 — Clarification walk (coordinator, main thread)
 
 ```swift
-init(contactsProvider: @escaping () -> [FamilyContact],
-     indexProvider: (() -> FamilyContactIndex)? = nil)   // nil ⇒ build per call (test-parity path)
+func beginAckClarification(orderedCandidates: [MedicationAckCandidate])   // speaks the first question
+func ackClarificationResponse(raw: String, isYes: Bool, isNo: Bool)        // speaks the next line or resolves
+func endAckClarification(_ reason: AckClarifyEndReason)
+enum AckClarifyEndReason: Equatable { case rejected, denied, expired, bargedIn, resolved }
 ```
 
-Scoring in `score(_:against:)` (bands per L1 §8.3; accept 0.6 and margin 0.15 remain the
-private constants at :61-62; ties ⇒ ambiguity, never order):
+`begin` cancels any prior walk (a barge-in re-entry is the only way to arrive with one open).
+`ackClarificationResponse` does its own name-containment over the walk's candidates
+(MedicationVoiceVocabulary.canonical + voiceKeys — one vocabulary). `end` is idempotent
+(a nil state is a no-op). The walk timer is armed at `begin`, cancelled by every end; expiry
+calls `end(.expired)` + the honest ended line. Resolution inside `ackClarificationResponse`
+proceeds through `startVoiceAckConfirmation` + the shipped prompt/notification — byte-identical
+to the direct-resolved path. Timeout parameter: `AckClarificationConfig.responseWindowSeconds`
+(Configuration and Timeouts) — the coordinator never reads a literal.
 
-| Band | Score | Source |
-|---|---|---|
-| exact name | 1.00 | index `normalizedName` |
-| relationship | 0.90 | unchanged |
-| exact nickname | 0.85 | index `normalizedNicknames` exact |
-| name containment | 0.80 | unchanged |
-| nickname containment | 0.75 | any normalized nickname contains the query (or query contains it — same both-direction shape as the name band) |
-| token overlap | 0.60 | unchanged (name tokens) |
-
-(Consequence-table note: the name-exact 1.00 vs nickname-exact 0.85 gap computes to
-0.15000000000000002 in IEEE-754, so the strict `<` margin check resolves to the name-exact
-contact — not ambiguous; pinned explicitly in §8.3.)
-
-`nearMiss(_:)`: candidate set = contacts whose normalized name OR any normalized nickname is
-within the edit budget (2) of a query variant; the existing exactly-one rule is preserved —
-name-near-miss + nickname-near-miss in one query = two candidates = abstain. The hot path
-consumes the index (no per-call renormalization of names/nicknames); relationship is
-normalized per call exactly as today. Error type: none (pure); `.none` IS the honest failure.
-
-### 1.8 Link-aware number reach — MissedCallContactResolver.swift changes
+### IF-9 — Mapping save action (coordinator)
 
 ```swift
-static func familyMatch(phone: String, in contacts: [FamilyContact]) -> FamilyContact?   // UNCHANGED
-
-/// NEW: the family contact whose VERIFIED linked record carries this number —
-/// roster order; each contact's own phone was already checked first by callers.
-static func linkedFamilyMatch(phone: String,
-                              in contacts: [FamilyContact],
-                              snapshot: VerifiedLinksSnapshot) -> FamilyContact?
-
-static func resolve(phone: String,
-                    family: [FamilyContact],
-                    native: [AddressBookEntry],
-                    access: ContactsAccess,                       // now includes .limited
-                    snapshot: VerifiedLinksSnapshot = .empty) -> NameResolution
-```
-
-`resolve` order (L1 §6.3, §7.3): (1) `familyMatch` on the family's own phones → family name;
-(2) `linkedFamilyMatch` — a call from the linked record's number resolves to the FAMILY
-person; (3) native half (gated on `access.allowsReading`): a matched entry whose
-`identifier` is a verified link remaps to that family contact's name, else the book name;
-(4) `.notDetermined` → `.needsPermission`; denial → `.unresolved`. Unverified/stale links are
-absent from the snapshot, so they fall through to today's behavior exactly.
-
-### 1.9 Coordinator API — AppCoordinator.swift additions
-
-Published/derived state (all main-confined, L1 §13.1):
-
-```swift
-@Published private(set) var familyContacts: [FamilyContact] = [] {
-    didSet {
-        familyIndex = FamilyContactIndex(family: familyContacts)   // wholesale rebuild — drift-impossible
-        refreshVerifiedLinks()                                     // no-op unless a stored link exists
-    }
+enum SlotClockSaveResult: Equatable {
+    case invalidInput(slot: MedicationSlot)
+    case storageFailed
+    case saved(SlotClockRearmReport)
 }
-@Published private(set) var familyIndex: FamilyContactIndex = .empty
-@Published private(set) var verifiedLinks: VerifiedLinksSnapshot = .empty
-@Published private(set) var faceEpoch: UInt64 = 0        // identity/cache bump (§4.4)
-private var systemPhotoTokens: [UUID: String] = [:]      // last-resolved system photo hash prefix
+func saveMedicationSlotClock(_ clock: MedicationSlotClock) -> SlotClockSaveResult
 ```
 
-Faces (L1 §10.1):
+Validate (IF-2) → persist (IF-4) → re-arm (IF-12); the report travels back for the settings
+lines. Main thread. Failure at any step leaves the stored mapping unchanged and the re-arm
+not run (persist-before-effect).
+
+### IF-10 — Retime note (coordinator, settings surface)
 
 ```swift
-/// ".task(id:)" identity: "<id>:<sysphoto-hash-token or link-nil>:<filename>:<faceEpoch>".
-/// Token = sha256 prefix (16 hex chars) of the last-resolved system bytes for this
-/// contact's verified link ("-" = linked, not yet resolved; "link-nil" = no verified link).
-@MainActor func faceIdentity(for contact: FamilyContact) -> String
-
-/// Precedence: (1) verified link + readable access + photoImageData → system image;
-/// (2) app-local photoFilename; (3) nil (initials). System images are downsampled to
-/// ContactPhotoStore.maxDimension before returning (memory bound). Never throws.
-@MainActor func faceImage(for contact: FamilyContact) async -> UIImage?
-@MainActor func faceThumbnail(for contact: FamilyContact, diameter: CGFloat,
-                              displayScale: CGFloat) async -> UIImage?
+@Published private(set) var medicationRetimeRefusedNotice: Bool
+func dismissMedicationRetimeRefusedNotice()
 ```
 
-`faceThumbnail` cache keys (L1 §10.1; the two sources can never collide):
-`"sysphoto:<identifier>:<sha256-prefix(16)>"` via `DownsampledImageCache.shared.thumbnail(...)`,
-or `"contact:<filename>"` via the existing `contactFace(...)` path. `faceIdentity` and both
-face methods are `@MainActor` — the token map and published state are only ever touched on main.
+Set by the scheduler hook (IF-20) when a slot-entry retime is refused; persisted as a one-shot
+flag (the `appointmentSmsNoteDismissed` precedent — a UI preference in UserDefaults).
+Dismissal is idempotent.
 
-Links:
+### IF-11 — Arming resolution feed (scheduler)
 
 ```swift
-enum SystemContactUnlinkMode: Equatable {
-    case unlinkKeepingLocalAsIs                 // default: app-local file untouched
-    case unlinkKeepingDisplayedPhotoLocally     // copy displayed system bytes app-local, then clear
-    case unlinkAndClearAppLocalPhoto            // explicit "remove everything" choice
+func resolvedScheduleTimes(for entry: MedicationEntry) -> Result<[DateComponents], SlotClockError>
+```
+
+Main thread (scheduler confinement). Legacy → `.success(entry.scheduleTimes)` verbatim. Slot →
+the mapping's time; failure `.indeterminate(slot:)`. Consumed by `createPendingReminders`
+(replacing the direct `entry.scheduleTimes` read) and by the re-arm pass. No timeout is
+possible or needed (pure value + one store read).
+
+### IF-12 — Mapping-change re-arm (scheduler)
+
+```swift
+struct SlotClockRearmReport: Equatable {
+    var rearmedCount: Int                  // un-fired reminders replaced and armed
+    var keptLiveCount: Int                 // fired reminders whose live escalation was kept
+    var unresolvedSlots: [MedicationSlot]  // skipped: resolution failed (ordered, deduplicated)
+    var persistenceFailed: Bool            // a write this pass depended on failed; nothing armed on the replaced set
 }
-
-/// Pure mode rule the wizard applies before calling:
-/// app-local file exists → .unlinkKeepingLocalAsIs; else displayed photo is the
-/// system one → .unlinkKeepingDisplayedPhotoLocally; else → .unlinkKeepingLocalAsIs.
-static func unlinkMode(appLocalFileExists: Bool, displayedPhotoIsSystem: Bool) -> SystemContactUnlinkMode
-
-/// The ONLY unlink path (L1 §6.4). Clears the stored link, books the photo
-/// consequence per `mode`, bumps the epoch, triggers a refresh. Never writes to
-/// the system record. `true` = cleared (or already absent); `false` = no such contact
-/// or the local copy failed (mode .unlinkKeepingDisplayedPhotoLocally without a
-/// successful copy does NOT clear — the never-lose rule wins over the unlink).
-@discardableResult @MainActor
-func setFamilyContactLink(id: UUID, mode: SystemContactUnlinkMode) async -> Bool
-
-/// The wizard's post-save system-photo step (L1 §10.2 step 2-3).
-/// nil = the contact no longer exists; `.skippedNoLink` = no verified link;
-/// `.skippedNoAuthorization(access)` = no attempt, honest fallback.
-@MainActor
-func syncSystemPhoto(forContactID id: UUID, clearing: Bool) async -> SystemContactPhotoWriteOutcome?
-
-/// Refresh entry point: single-flight via the actor; early-returns (no fetch, no
-/// generation bump) when NO roster contact carries a stored link. Never blocks main.
-func refreshVerifiedLinks()
+@discardableResult
+func rearmForSlotClockChange() -> SlotClockRearmReport
 ```
 
-Add/update (L1 §11.1 signatures; `nickname:` is REPLACED — no shim):
+Main thread; persists the rewritten mirrors and the replaced reminders BEFORE any
+`alarmScheduler` call (FR-MSR-022). Idempotent: run twice under the same mapping, the second
+pass replaces nothing (resolution equality) and re-arms nothing. Caller: IF-9 and nothing else.
+
+### IF-13 — Evidence store (NEW, fail-soft)
+
+```swift
+enum EvidenceStoreError: Error, Equatable {
+    case compressionFailed     // the capped JPEG could not be produced; the write is not attempted
+    case storageUnavailable    // directory creation / file write failed
+    case removeFailed          // the file exists and could not be deleted
+}
+final class MedicationEvidenceStore {
+    static let maxPhotoBytes = 200_000
+    func store(image: UIImage, for logId: UUID, entryId: UUID) -> Result<String, EvidenceStoreError> // bare file name
+    func load(fileName: String, entryId: UUID) -> UIImage?          // nil when missing/corrupt — never fabricated
+    func delete(fileName: String, entryId: UUID) -> Result<Void, EvidenceStoreError> // absent file = success
+    func deleteAll(for entryId: UUID)                                // entry-delete cascade; fail-soft
+}
+```
+
+Synchronous; callers offload to a background task (C5). `store` idempotent per (entryId, logId)
+— same name written in place. `delete` idempotent. Concurrency: different records' files are
+independent; the caller's one-capture-at-a-time discipline serialises same-record writes.
+
+### IF-14 — Evidence capture plumbing (coordinator)
+
+```swift
+enum EvidenceCaptureContext: Equatable {
+    case pendingDose(entryId: UUID)     // fired-dose screen: hold; attach at finalize
+    case recordedDose(logId: UUID)      // record surface: attach now
+}
+enum EvidenceCaptureOutcome: Equatable {
+    case held(entryId: UUID)
+    case attached(logId: UUID)
+    case declinedNoContext              // defensive: no capture without a bound record context
+    case failed(EvidenceStoreError)
+}
+func captureEvidence(image: UIImage, context: EvidenceCaptureContext) -> EvidenceCaptureOutcome
+```
+
+Main-thread entry point; the store work happens on a background task and the outcome is
+delivered back on main. There is no context for which this creates a record — safety delta (c)
+holds by construction (no `.create` case exists).
+
+### IF-15 — Evidence hold / attach / discard (scheduler)
+
+```swift
+func holdPendingEvidence(fileName: String, for entryId: UUID)      // replaces (deletes the prior hold)
+func discardPendingEvidence(for entryId: UUID)                     // idempotent (no hold = no-op)
+func attachEvidence(fileName: String, toLog logId: UUID) -> Result<Void, SafetyError>
+```
+
+Main thread. The pending hold is in-memory only (a process kill discards it honestly — the
+photo was never attached to a record). `finalizeAcknowledgement` performs the same attach
+internally for the held file; the failure branch persists nothing and deletes the file (no
+orphan claims). `attachEvidence` on persist failure deletes the just-stored file and returns
+`.reminderPersistenceFailed` (the shipped error case).
+
+### IF-16 — `setScheduleTimes` (scheduler, changed behavior)
 
 ```swift
 @discardableResult
-func addFamilyContact(id: UUID = UUID(),            // NEW defaulted id: the wizard knows the contact
-                      name: String, phone: String, relationship: String,
-                      messengerHandle: String? = nil,
-                      photo: UIImage? = nil,
-                      nicknames: [String] = [],
-                      address: String? = nil, email: String? = nil,
-                      isEmergencyContact: Bool = false,
-                      link: SystemContactLink? = nil) -> Bool
-
-@discardableResult
-func updateFamilyContact(id: UUID, name: String, phone: String, relationship: String,
-                         messengerHandle: String?,
-                         photo: UIImage? = nil, removingPhoto: Bool = false,
-                         nicknames: [String] = [],          // REQUIRED at the wizard call site (no default there)
-                         address: String? = nil, email: String? = nil,
-                         isEmergencyContact: Bool = false,
-                         link: SystemContactLink? = nil) -> Bool
+func setScheduleTimes(_ times: [DateComponents], entryId: UUID) -> Bool
 ```
 
-Semantics:
-- `nicknames` normalized via `FamilyContact.normalizedNicknames` before persisting.
-- `link` non-nil → set/replace; `link` nil on UPDATE → keep the stored link UNCHANGED (unlink
-  is only `setFamilyContactLink`); nil on ADD → unlinked.
-- Duplicate-claim guard (defense in depth, L1 §6.1): a non-nil `link.identifier` already
-  claimed by ANOTHER contact's stored link → the write is REFUSED (return `false`, nothing
-  persisted, reason-coded event `duplicate_claim`). The wizard's steering prevents this path.
-- Return type stays `Bool`; callers at `SettingsView.swift:2761/2768`, `ProfileInterviewSteps.swift:530/562`,
-  `OnboardingWizardView.swift:405` compile with the parameter changes only.
-- After a successful persist: `familyContacts` republish (→ index rebuild + link refresh).
-- Unchanged: photo save-first/delete-on-failure sequencing; `removeFamilyContact` unchanged
-  except it rides the same republish choke point (a removed contact's link simply leaves the roster).
+Legacy entry: shipped behavior (returns true; the copy trap handled per C6). Slot entry:
+returns `false`, no write, emits `medication_retime_refused`, calls IF-20's hook. Unknown
+entry / write failure: false (shipped). Main thread (the coordinator's
+`applyMedicationCalendarMutations` path).
 
-`contactPhotoStore` gains one reader used by `syncSystemPhoto` and nothing else:
+### IF-17 — Significant-event calendar write (service)
 
 ```swift
-/// Raw bytes of a stored thumbnail (the exact processed JPEG on disk), nil when
-/// absent/unsafe. Avoids a decode+re-encode round trip for the system write —
-/// the bytes written are byte-identical to the bytes the app holds.
-func loadData(named filename: String?) -> Data?
+func writeSignificantEvent(_ event: SignificantMedicationEvent,
+                           entry: MedicationEntry?) -> CalendarShareWriteResult
 ```
 
-## 2. Wizard sheet restructure (`FamilyContactWizardSheet`, SettingsView.swift:1779ff)
+Hops to main internally (the service's `onMain` discipline). Consent/sign-in gate first, then
+audience, then enqueue; never marks outbound (D7); deterministic identity makes a repeated
+write for the same logical event replace rather than duplicate. `CalendarShareWriteResult`
+per C11. The actual Google write remains the shipped async `flushPending` path (its network
+behavior, backoff and honesty are untouched; no new timeout is introduced — the shipped
+Google SDK paths own their transport timeouts).
 
-Steps stay five; the indicator is untouched. `Step` enum unchanged.
-
-### 2.1 Draft state (final)
-
-Removed: `@State private var nickname = ""`.
-Added/changed:
-
-```swift
-@State private var nicknames: [String] = []          // committed entries (draft)
-@State private var nicknameDraft = ""                // the add-field text
-
-@State private var draftLink: SystemContactLink?     // picked-but-uncommitted link
-@State private var draftLinkBookName: String?        // the picked record's display name at pick time
-@State private var steerTarget: FamilyContact?       // the other contact shown in a steering card
-@State private var photoSaveState: FamilyPhotoEditorState?   // post-save outcome label (§1.5)
-```
-
-Unchanged: `name/phone/relationshipOption/messengerHandle/address/email/isEmergencyContact`,
-the photo trio (`pickedPhoto/removingStoredPhoto/storedPhoto`), the search block
-(`searchText/access/entries/loadFailed/showManualEntry`), `directory`.
-
-`init` gains the steering callback:
+### IF-18 — Significant-event draft (mapper, pure)
 
 ```swift
-init(target: FamilyContactsSettingsView.FamilyContactEditorTarget,
-     onSteerTo: @escaping (FamilyContact) -> Void)
-```
-
-parent call site :1587 becomes `FamilyContactWizardSheet(target: target) { other in editorTarget = .edit(other) }`.
-
-### 2.2 Find step — subview breakdown
-
-`findStep` = `stepTitle("family.step.find")` + `searchSection` + `linkSection` +
-(`showManualEntry ? manualEntryFields : addManuallyButton`). The link area renders INSIDE the
-find step (L1 §11.1) and is present in add AND edit.
-
-- `searchSection` (:2114-2139; a `switch` over `ContactsAccess?` — the new case breaks the
-  build, so this site IS compile-forced): `.allowed` and `.limited` share one arm (field +
-  loading/loadFailed card + results); for `.limited` the `call.search.accessLimited` caption
-  renders directly under `searchField` (one line, caption token, secondary color). `.denied` /
-  `.notDetermined` / `nil` arms unchanged — `.denied` is the ONLY blocked path on both
-  surfaces. The load gate `refreshSearchAccess` (:2325) moves to `status.allowsReading`
-  (entries load for `.limited`; §3.5, §8.2).
-- `searchResults` — NOW `UnifiedContactSearch.search(query: trimmedSearch,
-  family: coordinator.familyContacts, index: coordinator.familyIndex, in: entries,
-  verifiedLinks: coordinator.verifiedLinks, recency: coordinator.contactCallRecency)` —
-  renders per row kind:
-  - `.addressBook(entry)`: if `storedClaimant(entry.identifier)` is a DIFFERENT roster
-    contact (stored link, verified or stale — the superset) → `steeringResultRow(claimant)`;
-    else today's selectable row (tap = `prefill`), which additionally records the draft link.
-  - `.family(contact)`: `steeringResultRow(contact)`, EXCEPT when `contact.id ==
-    editingContact?.id` — skipped entirely (it is the contact already being edited; its own
-    link is shown in the link area).
-  - `noResults` / `moreAvailable` unchanged.
-- `steeringResultRow(_ other: FamilyContact)`: a card containing
-  `Text(L10n.fmt("family.link.alreadyLinked", locale: coordinator.activeLocale, other.name))`
-  and a ≥44 pt button (person
-  glyph + `other.name`, a11y label `settings.family.edit`) whose tap calls
-  `onSteerTo(other)`. Tap target: whole card ≥44 pt (`DesignTokens.minTapTargetSize` floor);
-  the button itself also ≥44 pt.
-- `prefill(_ entry: AddressBookEntry)` gains the link record (L1 §11.1 "selects it as today
-  AND records the link in the draft"):
-
-```swift
-private func prefill(_ entry: AddressBookEntry) {
-    name = entry.name
-    phone = entry.phone
-    showManualEntry = true
-    searchText = ""
-    guard !entry.identifier.isEmpty else { return }        // defensive canLink guard (L1 §5.3)
-    draftLink = SystemContactLink(identifier: entry.identifier, numberKey: entry.normalized)
-    draftLinkBookName = entry.name
+enum CalendarShareMapper {
+    static func significantEventTitle(kind: SignificantMedicationEvent.Kind,
+                                      medicationName: String, locale: Locale) -> String
+    static func significantEventDraft(event: SignificantMedicationEvent,
+                                      medicationName: String,
+                                      contacts: [FamilyContact],
+                                      timeZone: TimeZone,
+                                      locale: Locale) -> CalendarTwinDraft?
 }
 ```
 
-- `storedClaimant(_ identifier: String) -> FamilyContact?` (private): first roster contact
-  `c != editingContact` with `c.systemContact?.identifier == identifier` (roster order).
-- `linkSection` states (top of the find step, under the search):
-  1. `draftLink != nil` → `linkedToLine(draftLinkBookName ?? "-")` + `unlinkButton` (clears
-     `draftLink`/`draftLinkBookName` only — nothing was stored).
-  2. else an EDITING contact with a stored link, verified (`coordinator.verifiedLinks.links[contact.id]`
-     present) → `linkedToLine(resolvedBookName)` + `unlinkButton` (commits immediately via
-     `setFamilyContactLink`, §2.6).
-  3. else an EDITING contact with a stale (stored, unverified) link → `staleLine`
-     (`family.link.stale`) + `unlinkButton`.
-  4. else → `Text("family.link.pickHint")` caption only (with `family.link.sectionTitle`
-     heading at the top of the section in all four states).
-- `resolvedBookName` = `entries?.first { $0.identifier == link.identifier }?.name`; when the
-  record is not in the sweep while the snapshot still verifies it (narrow window), the
-  linkedTo line renders without a name — the stale line is the snapshot's decision, not the
-  sweep's. `family.link.linkedTo` is rendered with `L10n.fmt`.
-- a11y for `unlinkButton`: label `family.link.unlink`, hint `family.link.unlinkHint` (the
-  hint text is also visible as a caption under the button).
+Pure; nil when no contact has an email (the shipped no-invitee → no-draft rule). Attendees:
+de-dup case-insensitively, emergency-first, toggle-independent (the M-1-resolved audience).
+`recurrence = nil`; duration = the house default; `kind = .medicationReminder`.
 
-### 2.3 Steering micro-flow (final, L1 §19 item)
-
-1. Tap on an already-linked result (or a synthesized family row) → `steerTarget = other`;
-   nothing is selected, no field changes, no store write.
-2. The steering card renders inline under the results (a `family.link.alreadyLinked` text +
-   the edit button). Tap targets ≥44 pt; VoiceOver reads the sentence, then the button.
-3. Tapping the edit button calls `onSteerTo(other)`; the PARENT sets `editorTarget = .edit(other)`
-   and `.sheet(item:)` swaps the sheet's content to the other contact's editor in place (the
-   item id changes → SwiftUI replaces the content; the old draft is discarded, which is
-   correct — nothing was saved). No dismiss/re-present race.
-4. Back-navigation INTO the other contact's editor: the swapped sheet opens at its
-   `.relationship` step (the edit rule); its Back reaches ITS find step; closing returns to
-   the family list. There is no in-sheet stack back to the first contact (documented; the
-   first contact's draft was never committed and re-opening it is one row away).
-5. `steerTarget` is cleared by any new search keystroke or a successful pick.
-
-### 2.4 Photo step — subview breakdown
-
-`photoStep` = `stepTitle("family.step.photo")` + `photoPreview` + `sourceCaption` +
-`photoControls` + `writeAccessCards` + `photoStateLine`.
-
-- `sourceCaption`: renders `family.photo.sourceSystem` when the displayed photo is the
-  resolved SYSTEM one (verified link + readable access + bytes present). Derived, not stored.
-- `writeAccessCards` (linked + editing only):
-  - access `.notDetermined` → `askCard(title: family.photo.accessTitle, body: family.photo.accessBody,
-    allow: call.search.allowButton)` reusing the wizard's existing ask-card pattern; Allow
-    calls the existing `grantAccess()`; declining (just not tapping) continues with fallback.
-  - access `.denied` → `deniedLine(family.photo.accessDeniedBody)` + Open Settings
-    (`call.search.openSettings`, existing system-settings link pattern).
-  - access `.limited` → NO card (readable; honest caption already lives in the find step).
-- `photoStateLine`: renders `photoSaveState` (§1.5 mapping) under the preview — caption token,
-  secondary color, plus `family.photo.accessDeniedBody` when the state is
-  `.keptOnPhoneAccessDenied`.
-- `photoControls` unchanged (`family.photo.add/change`, `family.photo.remove` for stored photos).
-
-### 2.5 Nickname step — subview breakdown
-
-`nicknameStep` = `stepTitle("family.step.nickname")` + `nicknameList` + `nicknameAddRow` +
-`nicknameHint` + the unchanged address/email fields below.
-
-For each entry (`ForEach(Array(nicknames.enumerated()), id: \.offset)` — one row per
-OCCURRENCE; duplicates are preserved per §3.4):
-
-```
-HStack(spacing: 12) {
-    Text(entry)                                   // the stored spelling verbatim
-        .font(bodyPointSize), textPrimary, lineLimit(2)
-    Spacer()
-    Button(remove) { nicknames.remove(at: index) }
-        .frame(minWidth: minTapTargetSize, minHeight: minTapTargetSize)   // ≥44pt
-        .accessibilityLabel(Text(L10n.fmt("family.nickname.removeLabel", locale, entry)))
-}
-.frame(minHeight: minTapTargetSize).appSurface(role: .control, cornerRadius: bubbleCornerRadius)
-```
-
-`nicknameAddRow` (hidden at 8 entries — the L1 §8.4 budget envelope; nothing is ever dropped,
-the control simply stops offering more):
-
-```
-TextField("", text: $nicknameDraft, prompt: family.nickname.entryPlaceholder)   // placeholder key
-Button(family.nickname.add) {
-    let trimmed = nicknameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return }        // whitespace-only never stored (FR-FCU-011)
-    nicknames.append(trimmed)                     // stored AS ENTERED — no transliteration (OD-2)
-    nicknameDraft = ""
-}
-.frame(minHeight: minTapTargetSize)               // Add button ≥44pt; accessibilityLabel family.nickname.add
-```
-
-`nicknameHint` = `family.nickname.hint` caption. Validation summary: trim at the Add control;
-whitespace-only rejected at entry; `normalizedNicknames` re-applies the rule at save and at
-decode (defense in depth). Duplicates allowed by design (decode preserves them; the editor is a
-faithful editor of the stored list); "sanu" and "सानु" are always distinct entries.
-Removal is a save-time edit like every other field; saved changes take effect immediately
-after Save (index rebuild on the roster republish — FR-FCU-015).
-
-`loadDraft()`: `nicknames = contact.nicknames` (replaces `nickname = contact.nickname ?? ""`).
-
-### 2.6 Save flow (final, L1 §10.2 sequencing)
+### IF-19 — Honest push transport
 
 ```swift
-private func save() {
-    let savedID = editingContact?.id ?? newDraftID      // @State let for the add case (see below)
-    let succeeded: Bool
-    if let contact = editingContact {
-        succeeded = coordinator.updateFamilyContact(id: contact.id, ..., nicknames: nicknames, link: draftLink)
-    } else {
-        succeeded = coordinator.addFamilyContact(id: savedID, ..., nicknames: nicknames, link: draftLink)
-    }
-    guard succeeded else { return }                     // failure keeps the draft (today)
-    let photoIntent = pickedPhoto != nil || removingStoredPhoto
-    guard photoIntent else { dismiss(); return }        // no photo changed → today's UX
-    Task { @MainActor in
-        let outcome = await coordinator.syncSystemPhoto(forContactID: savedID, clearing: removingStoredPhoto)
-        if let state = outcome.flatMap(FamilyPhotoEditorState.from) {
-            photoSaveState = state
-            step = .photo                              // show the honest label where it lives
-        } else {
-            dismiss()                                  // .skippedNoLink or nil outcome → today's UX (F4, T-165: .written → .updatedInSystem, shown)
-        }
-    }
-}
+enum PushOutcome: Equatable { case delivered; case notDelivered(reason: String) }
+func sendPush(payload: [String: Any], deviceToken: String) async -> PushOutcome
 ```
 
-- `newDraftID`: `@State private var newDraftID = UUID()` created in `init` for the add case
-  (stable across re-saves) — the wizard knows the contact's id before the store write.
-- Footer: when `photoSaveState != nil` the primary button becomes `common.close` (dismiss) —
-  the sheet stays open exactly so the owner sees what happened (L1 §10.2 step 3).
-- The unlink control in the link area calls, in a Task,
-  `coordinator.setFamilyContactLink(id:mode:)` with the mode from `unlinkMode(...)` using the
-  CURRENT state (verified snapshot + `photoFilename`); on `false` nothing changes (draft kept,
-  the stale line stays).
-- `.systemPhotoRemains` is set in the REMOVE path (removingPhoto + linked): the clear attempt
-  returns `.written`; the wizard then checks the display precedence — a system photo still
-  present (its bytes were not ours / access lost between attempts) maps to the label via the
-  `systemPhotoRemains` row of §1.5. Any other outcome maps through the same table.
+Async, no timeout parameter at this layer (the transport is the stub; the E2E plan owns real
+request timeouts when it lands — recorded). `notifyAll(alertType:at:context:)` keeps its
+frozen signature; the mapping to `NotificationResult(success:errorCode:channel:)` is per
+contact, partial results stay partial.
 
-### 2.7 Family list (SettingsView, `FamilyContactsSettingsView`)
-
-- Row gains the link chip: `family.link.chip` capsule appended to the role-chip row when
-  `coordinator.verifiedLinks.links[contact.id] != nil` (verified links only; a stale link
-  shows nothing here — the editor owns that line).
-- Row faces migrate: `.task(id: contactPhotoKey)` where `contactPhotoKey` becomes the array of
-  `coordinator.faceIdentity(for:)` for every roster contact (identity includes filename, link
-  token and epoch). The pass resolves each face via
-  `await coordinator.faceThumbnail(for: diameter: DesignTokens.iconBadgeDiameter, displayScale:)`
-  and assigns per-row only after re-checking the identity is unchanged (stale-pass drop).
-- `loadDraft`'s stored-photo preview: `storedPhoto = await coordinator.faceImage(for: contact)`
-  (the editor shows the DISPLAY photo — system when present, with the source caption).
-
-## 3. Data model and persistence contract
-
-### 3.1 Final `FamilyContact` (FamilyContactStore.swift:61)
+### IF-20 — Scheduler wiring closures (set once at composition)
 
 ```swift
-struct FamilyContact: Codable, Identifiable, Equatable {
-    let id: UUID
+var onSignificantEvent: ((SignificantMedicationEvent, MedicationEntry?) -> Void)?   // C7.4
+var onSlotEntryRetimeRefused: ((UUID) -> Void)?                                     // C7.5
+```
+
+Main thread, called synchronously within the trigger/refusal path. Unset = the behavior
+degrades to no-calendar-write / no-note while the local truth is untouched (the
+`onScheduleChanged` precedent's nullability rule).
+
+### IF-21 — Save plumbing (coordinator)
+
+```swift
+enum MedicationDoseRow: Equatable { case time(DateComponents); case slot(MedicationSlot) }
+struct MedicationSaveRequest: Equatable {
     var name: String
-    var phone: String
-    var relationship: String
-    var messengerHandle: String?
-    var photoFilename: String?
-    var nicknames: [String]              // REPLACES nickname: String? (no shim — L1 §5.2)
-    var address: String?
-    var email: String?
-    var isEmergencyContact: Bool
-    var preferredVideoApp: CallApp
-    var preferredCallApp: CallApp
-    var systemContact: SystemContactLink?   // NEW
+    var strength: String?                 // stored via DoseLine
+    var purpose: String?
+    var quantity: MedicationQuantity?
+    var mealRelation: MealRelation?
+    var rows: [MedicationDoseRow]         // all .time OR all .slot — mixed is rejected
+    var photo: UIImage?
+}
+func addMedication(_ request: MedicationSaveRequest) -> String?      // nil = saved; else an error KEY
+func updateMedication(id: UUID, _ request: MedicationSaveRequest) -> String?
+```
 
-    init(id: UUID = UUID(), name: String, phone: String, relationship: String,
-         messengerHandle: String? = nil,
-         preferredVideoApp: CallApp = .faceTime, preferredCallApp: CallApp = .phone,
-         photoFilename: String? = nil, nicknames: [String] = [],
-         address: String? = nil, email: String? = nil,
-         isEmergencyContact: Bool = false, systemContact: SystemContactLink? = nil)
+Main thread. Duplicate rule m-2 (C8); mixed shapes → `settings.meds.slotRequired`-class error
+key; slot rows resolve via IF-11 (failure of one resolution does not fail the save — mirror
+empty, arming surfaces later). `updateMedication`: row 1 updates in place (id kept, visual
+aids kept), extra rows create entries with copied visual aids; `canSave` name gate as shipped.
+Empty `rows` is rejected (the save path needs at least one dose row).
+
+### IF-22 — Editor draft value API (pure)
+
+```swift
+extension MedicationEditorDraft {
+    var scheduleMode: ScheduleMode { get set }              // .times | .slots
+    var slotRows: [MedicationSlot?] { get set }             // parallel to times
+    mutating func applyScan(_ candidate: MedicationLabelCandidate)   // + C9 slot application in .slots mode
+    mutating func applySlotPreselection(mapping: MedicationSlotClock) // exact-equality preselection
+    var storedRows: [MedicationDoseRow]                     // the request's rows
+    var canSaveRequest: Bool                                // name + every row shaped
 }
 ```
 
-### 3.2 `normalizedNicknames` — exact placement and semantics (L1 §19 item)
+Pure; tested without a view. The shipped rules stay bound (C8).
 
-`static func normalizedNicknames(_ raw: [String]) -> [String]` on `FamilyContact` in
-`FamilyContactStore.swift` (same file as the decode contract it serves): trim each entry with
-`.whitespacesAndNewlines`, drop entries that become empty, preserve order and duplicates.
-Applied at exactly three places: the decoder (defensive for hand-edited/corrupt payloads), the
-wizard's Add control (single-entry trim), and the coordinator's add/update save path (the
-enforcement point every caller passes through). The store never sees a whitespace-only entry.
-
-### 3.3 Encoder contract
-
-Synthesized `Encodable` is kept (L1 §5.2 — a hand-written encoder risks silent field loss).
-Nil optionals are omitted (`encodeIfPresent`); `nicknames`/`systemContact` are always encoded
-as stored (`[]` keeps encoding an empty array — same shape as any empty array today). No
-legacy `nickname` key is ever written (downgrade reads simply show no nickname — accepted).
-
-### 3.4 Decoder contract (FamilyContactStore.swift:122-150 pattern)
+### IF-23 — Scanned schedule conversion (pure)
 
 ```swift
-private enum LegacyNicknameKeys: String, CodingKey { case nickname }
-
-init(from decoder: Decoder) throws {
-    let container = try decoder.container(keyedBy: CodingKeys.self)
-    // ... existing required fields and optionals unchanged ...
-    preferredVideoApp = (try? container.decode(CallApp.self, forKey: .preferredVideoApp)) ?? .faceTime
-    preferredCallApp  = (try? container.decode(CallApp.self, forKey: .preferredCallApp)) ?? .phone
-    photoFilename     = (try? container.decodeIfPresent(String.self, forKey: .photoFilename)) ?? nil
-
-    // nicknames — L1 §5.2 order, lossless:
-    if let list = (try? container.decodeIfPresent([String].self, forKey: .nicknames)) ?? nil {
-        nicknames = FamilyContact.normalizedNicknames(list)          // presence wins, even empty
-    } else if let legacy = try? decoder.container(keyedBy: LegacyNicknameKeys.self),
-              let single = (try? legacy.decodeIfPresent(String.self, forKey: .nickname)) ?? nil,
-              !single.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        nicknames = [single.trimmingCharacters(in: .whitespacesAndNewlines)]
-    } else {
-        nicknames = []
-    }
-
-    // systemContact — corrupt/empty shapes decode to nil (FR-FCU-002 scenario 3):
-    let decodedLink = (try? container.decodeIfPresent(SystemContactLink.self, forKey: .systemContact)) ?? nil
-    if let link = decodedLink, !link.identifier.isEmpty, !link.numberKey.isEmpty {
-        systemContact = link
-    } else {
-        systemContact = nil
-    }
-    // ... address/email/isEmergencyContact unchanged ...
+enum ScannedSchedule {
+    static func slots(from scheduleTimes: [DateComponents]) -> [MedicationSlot]
 }
 ```
 
-`CodingKeys` contains ONLY stored properties (`nicknames`, `systemContact` included); the
-legacy key is read through the separate `LegacyNicknameKeys` container so the synthesized
-`CodingKeys`/encoder stay authoritative. `(try? ...) ?? nil` covers absent key, wrong type and
-unknown shape — decode-degrade, never a failed store read.
+m-3 table (C9); pure; deterministic; never consults the household mapping.
 
-### 3.5 AddressBookEntry.identifier (AddressBookDirectory.swift)
-
-`var identifier: String = ""` added to the stored properties (`Equatable`/`Identifiable`
-unchanged); `make(...)` gains `identifier: String = ""` so every existing labeled call site
-(test fixtures included) compiles unchanged; `fetchKeys` (:333) adds `CNContactIdentifierKey`;
-`allEntries()` passes `contact.identifier` through. Linking is available only for non-empty
-identifiers (the `prefill` guard — §2.2). No persistence of book entries exists, so no
-migration applies. `ContactsAccess` gains the case + helper (same file):
+### IF-24 — Record-surface read (coordinator)
 
 ```swift
-enum ContactsAccess: Equatable {
-    case notDetermined, allowed, denied
-    case limited                                    // iOS 18+ "Select Contacts"
-
-    /// `.allowed` and `.limited` are READABLE; denial/nagging logic keys on
-    /// `.denied` only — limited never re-prompts (L1 §9.3).
-    var allowsReading: Bool { self == .allowed || self == .limited }
-
-    /// Pure mapping — the ONE iOS-18 availability gate in the feature.
-    static func from(_ status: CNAuthorizationStatus) -> ContactsAccess {
-        if #available(iOS 18.0, *), status == .limited { return .limited }
-        switch status {
-        case .authorized: return .allowed
-        case .denied, .restricted: return .denied
-        case .notDetermined: return .notDetermined
-        @unknown default: return .denied          // future statuses fail closed
-        }
-    }
+struct TakenDoseRow: Identifiable, Equatable {
+    let id: UUID                 // the adherence-log id
+    let entryId: UUID
+    let medicationName: String
+    let scheduledAt: Date
+    let hasEvidence: Bool
 }
-// AddressBookDirectory.access() :348 becomes: ContactsAccess.from(CNContactStore.authorizationStatus(for: .contacts))
+func takenDosesToday() -> [TakenDoseRow]
 ```
 
-`.limited` reaches consumers through `AddressBookDirectory.access()`. Handling is NOT
-uniformly compile-forced — equality checks compile cleanly with the new case and silently
-take the else path — so every site is enumerated and decided here (each listed line is a
-required change):
+Main thread; pure read built from the scheduler's adherence log (the new read seam
+`func takenLogs(on day: Date) -> [MedicationAdherenceLog]` on the scheduler, same visibility
+discipline as `pendingReminders`). Rows only for entries that still exist (a deleted entry's
+history stays stored but is not surfaced here).
 
-- **Compile-forced switches**: `MissedCallContactResolver.resolve` (its `access:` switch) and
-  the wizard's `searchSection` (`SettingsView.swift:2117`, a switch over `ContactsAccess?`)
-  fail the build until `.limited` is handled. Resolver: `.limited` is readable (§1.8).
-  Wizard: `.allowed`/`.limited` share the search body; `.limited` adds the caption (§2.2).
-- **CallView (`LeafViews.swift`) — equality checks, NOT compile-forced; `.limited` takes
-  today's `.allowed` display path (field + entries + mic) and `.denied` stays the only
-  blocked path; every site below moves to `allowsReading`** (`access` is `ContactsAccess?`
-  there, hence the optional form):
-  - :1343 `if access == .allowed { searchField }` → `if access?.allowsReading == true`.
-  - :1347-1362 display branches → `if access?.allowsReading == true { <micCaption; loading /
-    loadFailed card / results> } else if access == .denied { blocked card } else if
-    access == .notDetermined { ask card }` (`nil` renders nothing, as today). `.limited` can
-    never render the empty dead area.
-  - :1370 `refreshDirectory` → `guard status.allowsReading else { return }`; `loadEntries()`
-    runs for `.limited` (the granted set loads).
-  - :1379-1388 `grantAccess` load condition `if granted` → `if access?.allowsReading == true`
-    (the system sheet may yield `.limited`).
-  - :1413 `micButtonVisible` → `guard !micHidden, access?.allowsReading == true`.
-  - :1519 `announceVoiceResultIfReady` → `access?.allowsReading == true`.
-- **Caption placement (decided)**: `call.search.accessLimited` renders on BOTH search
-  surfaces — CallView: the FIRST line of the readable block inside `searchArea`, directly
-  under the field row and above `micCaption` (caption token, secondary color, one line);
-  wizard: directly under `searchField` in the shared `.allowed`/`.limited` arm (§2.2). This
-  satisfies L1 §9.3's honesty requirement at the point of use on both surfaces.
-- **Wizard load gate + grant**: `refreshSearchAccess` (:2322-2329; called from `.onAppear`
-  :1977 and `scenePhase` :1983) → `guard status.allowsReading`; `loadEntries()` runs for
-  `.limited`. `grantAccess` (:2331-2339) load condition `if granted` →
-  `if access?.allowsReading == true`. Without these, relaunching with already-granted limited
-  access renders the §2.2 search UI over an unloaded book.
-- **AppCoordinator — `refreshNativeMissedCallNames` (:8327-8358), the FIFTH
-  `AddressBookDirectory.access()` consumer** (runs on a detached utility Task with a LOCAL
-  access snapshot — nothing in this call touches published state): after `requestAccess()`
-  (:8335) RE-READ the status — replace `access = granted ? .allowed : .denied` (:8336) with
-  `_ = await directory.requestAccess()` + `access = AddressBookDirectory.access()` (a
-  limited-selection sheet must not be collapsed to `.allowed`) — change the guard (:8338) to
-  `guard access.allowsReading, let entries = try? directory.allEntries()` (the granted set
-  enumerates under `.limited`), and pass the REAL value at :8346 (`access: access`) instead
-  of the hardcoded `access: .allowed` — the resolver's own `.limited`-readable arm then
-  makes the decision.
-- **Pins that can fail**: `ContactsAccessTests` (new) pins the pure mapping
-  (`.limited` ⇒ `.allowsReading`; `.denied`/`.notDetermined` ⇒ false; the `from(_:)` table);
-  `ContactsAccessGateTests` (new, source-scan) extracts each enumerated expression/function
-  body above and asserts `allowsReading` is present and a `== .allowed` gate is ABSENT — a
-  reverted gate fails the suite. (§6.4, §8.3, §9 R2.)
-- **Footnote — the one adjacent `allEntries()` consumer outside this enumeration (security
-  review F6)**: `AppCoordinator.makeDialectBiasProfileProvider` also reads
-  `AddressBookDirectory().allEntries()` — definition at `AppCoordinator.swift:2660` (the
-  `allEntries()` call at `:2664`; its two recognizer call sites at `:1337` and `:1377`), the
-  line position verified against the merged tree at `4d4d1e28` (the review-time anchor was
-  `:2529` at `f6ba251b`; the line moved with the implementation units that followed). It is NOT
-  an `AddressBookDirectory.access()` consumer and its behavior is unchanged by this feature:
-  it never gates, never prompts and never nags — a denied/absent book yields an honest empty
-  contact-name list — so no enumeration change, gate change or new pin is required. Recorded at
-  T-165 with the F6 closure evidence in `specs/FCU-security-evidence-index.md`.
+## Data Models and Persistence
 
-### 3.6 Snapshot / index lifecycle
+### 4.1 Persisted schema changes
 
-- **Index**: rebuilt wholesale inside `familyContacts.didSet` (one choke point — boot restore,
-  add, update, remove, notifier paths all assign through it). `FamilyContactIndex` never
-  disagrees with the published roster by construction (L1 §5.4).
-- **Snapshot**: `verifiedLinks` starts `.empty`; `refreshVerifiedLinks()` early-returns unless
-  some contact carries a stored link (so an unlinked roster NEVER fetches) and otherwise
-  spawns one Task that captures the roster by value, awaits the actor, and publishes on main:
-  publish iff `snapshot.generation > verifiedLinks.generation`; bump `faceEpoch` when
-  `snapshot.links != verifiedLinks.links` (verification-set change). Stale snapshots
-  (lower generation) are dropped — the counter orders PUBLICATION only; input freshness is
-  guaranteed by the §4.2 drain loop, not by the generation guard. `.empty` ⇒ today's behavior
-  exactly.
+| Datum | Change | Store / migration |
+|---|---|---|
+| `MedicationEntry` | + `quantity: MedicationQuantity?`, `slot: MedicationSlot?`, `mealRelation: MealRelation?` | key `medication.entries` (shipped); custom `init(from:)` gains `decodeIfPresent` per field; `withScheduleTimes` MUST carry them (C6 trap; pinned by a migration test). No backfill of any kind (NFR-MSR-006). |
+| Entry `scheduleTimes` semantics | Legacy entries: exactly as shipped. Slot entries: the RESOLVED-time mirror (D2), written by the save gate and IF-12 only | Same key; arming never reads it for slot entries (IF-11). |
+| `MedicationAdherenceLog` | + `evidencePhotoFileName: String?` (bare file name) | key `medication.adherence_log`; synthesized Codable decodes missing as nil; construction sites gain the defaulted parameter only. |
+| `MedicationSlotClock` | NEW record | key `medication.slot_clock`; custom decode with per-slot defaults; absent → `.default`; invalid values decode as-is and resolve `.indeterminate` (never repaired). |
+| Evidence files | JPEG ≤ 200,000 B, one per record | `Application Support/MedicationEvidence/<entryId>/<logId>.jpg`, `.completeFileProtection`; deleted with the entry (cascade) or on pre-record discard. A retained log whose entry was deleted keeps a dangling name — the read fails soft and no surface claims evidence for a deleted entry. |
+| `ScheduledReminder` | unchanged (`scheduledAt` = the resolved exact time) | key `medication.pending_reminders` (shipped). |
+| Family-alert wire | `{v:1, alert_type, timestamp, entry_id_hash?}` | `buildPayload` (D9); entry_id_hash only for the four medication significant events. |
+| Calendar one-off ledger | keys + fingerprints for significant events | the shipped `LocalGoogleEventMappingStore` (encrypted map/queue/fingerprints; keys are local bookkeeping). Keys are NOT in outboundKeys and NOT in the medication reconcile snapshot (D7). |
 
-## 4. Concurrency specification (explicit)
+### 4.2 Store-key and namespace map (new entries only)
 
-### 4.1 Isolation matrix (extends L1 §13.1)
+| Key / namespace | Writer | Readers |
+|---|---|---|
+| `medication.slot_clock` | settings save action (IF-9 → IF-4) | scheduler arming (IF-11), settings editor, `rearmForSlotClockChange` |
+| `calendarShare.eventMap` etc. (existing) | the service (IF-17 enqueue → shipped commit) | the service, the sweep (sweep never sees these keys — D7) |
 
-| Component | Isolation | Readers | Writers | Mechanism |
-|---|---|---|---|---|
-| `familyContacts`, `familyIndex`, `verifiedLinks`, `faceEpoch`, `systemPhotoTokens` | main thread | views, coordinator methods | the coordinator (main-queue blocks) | ObservableObject main confinement; `@MainActor` on the new async face/link methods |
-| `FamilyContactIndex`, `UnifiedContactSearch`, resolvers, normalizer | pure values | any thread | construction only | no shared mutable state |
-| `SystemContactLinkService` (+ its photo cache) | actor | concurrent `await`s | the actor alone | actor isolation; `NSCache` internal to the actor |
-| `SystemContactPhotoWriter` | actor | — | the actor alone | actor isolation ⇒ writes strictly serial |
-| `DownsampledImageCache` | existing `NSCache` | any thread | any thread | NSCache thread safety (unchanged) |
+### 4.3 Calendar key grammar addition
 
-### 4.2 Single-flight verification — latest-roster capture, coalesced drain
-
-Inside `SystemContactLinkService`:
-
-```swift
-private var refreshInFlight = false
-private var pendingContacts: [FamilyContact]? = nil   // the LATEST coalesced roster request
-private var lastSnapshot: VerifiedLinksSnapshot = .empty
-private var generation: UInt64 = 0
+```text
+medicationReminder:<kind>_<entryUuid>_<yyyyMMddHHmm>     // significant-event one-off (2 components)
+medicationReminder:<entryUuid>:<slot>                    // shipped schedule mirror (3 components)
 ```
 
-`refresh(contacts:)` (actor-serialized):
+`CalendarShareKey.parts`/`oneOffIdentifier` parse both correctly (the id component contains no
+colon); the grammar distinction (2 vs 3 components) is what the reconcile snapshot uses (D7).
 
-- **Fast path** (`refreshInFlight == false`): set in-flight, then drain:
+## Error Handling and Observability
 
-```swift
-var next: [FamilyContact]? = contacts
-while let batch = next {
-    next = nil
-    // ONE batched fetch over `batch`; on success: generation += 1; lastSnapshot = snapshot.
-    // Fetch throw / unreadable access: lastSnapshot unchanged (degraded, reason-coded).
-    next = pendingContacts    // a trigger that arrived during THIS pass is consumed here
-    pendingContacts = nil
-}
-refreshInFlight = false
-return lastSnapshot
-```
+### 5.1 Error-path catalogue (L2 resolutions on top of L1 §14)
 
-- **Coalesced path** (`refreshInFlight == true`): `pendingContacts = contacts` — OVERWRITE
-  with the LATEST roster (never merged, never the first one seen) — then return `lastSnapshot`.
-
-Flag lifecycle when a dirty-set lands DURING the follow-up pass: `refreshInFlight` stays true
-for the whole drain, so every trigger arriving during ANY pass (first or follow-up) takes the
-coalesced path and overwrites `pendingContacts`; the loop's consume converts it into exactly
-one more pass running with THAT latest roster. The loop exits only after a pass completes with
-`pendingContacts == nil`, and the in-flight flag clears only then — so a trigger arriving
-after the flag clears takes the fast path instead (actor serialization makes the two cases —
-captured vs. fresh start — mutually exclusive; no trigger is lost in either ordering).
-
-What the mechanism actually guarantees (this replaces the earlier "latest wins" phrasing):
-
-- **No trigger is dropped**: every accepted call either runs a pass itself or leaves a pending
-  roster the drain consumes — a just-created link submitted during an in-flight refresh is
-  verified by the follow-up pass, NOT deferred to the next external trigger.
-- **Each pass runs with the latest roster captured before that pass started** — the follow-up
-  consumes `pendingContacts`, never the in-flight call's older roster.
-- **At quiescence** (no pass running, no pending roster) the published snapshot was computed
-  over the most recent roster submitted to `refresh(contacts:)`; a submission landing after
-  quiescence starts a new pass and becomes the new latest (convergence one pass later in the
-  worst case). Each completed pass updates `lastSnapshot`/`generation`; the drained result is
-  carried back by the fast-path caller, while coalesced callers' early `lastSnapshot` returns
-  are dropped by the coordinator's generation guard.
-- **Bounded work / coalescing**: ANY number of triggers arriving during one pass cost exactly
-  ONE additional pass (not N); the drain terminates when a pass completes with no pending
-  roster — each extension needs a new external trigger. The `generation` counter orders
-  PUBLICATION (the coordinator drops a snapshot whose generation ≤ the published one); it
-  detects stale snapshots, NOT stale inputs — input freshness is provided solely by the
-  `pendingContacts` capture above.
-- Testable via the fake reader (`SystemContactLinkServiceTests`, §8.3): trigger-during-pass
-  runs one follow-up with the new roster; N triggers during one pass cost one extra pass; a
-  trigger after the flag clears runs a fresh pass; coalesced returns are droppable by the
-  generation guard.
-
-### 4.3 Photo cache constants (L1 §19 item — final)
-
-```swift
-// SystemContactLinkService, both named (no literals anywhere):
-static let photoCacheCountLimit = 24          // ≈ 12 linked contacts × 2 sweep generations
-static let photoCacheTotalCostLimit = 16 * 1024 * 1024    // 16 MiB of raw photo bytes
-static let photoKeyHashPrefixLength = 16      // hex chars of the sha256 cache-key prefix
-```
-
-`cost` = `data.count` (raw bytes). Eviction: NSCache default (cost-bounded + memory pressure).
-Invalidation: WHOLESALE (`invalidate(identifier: nil)`) on foreground (after which the app
-cannot know whether the user edited a photo in Contacts.app) and PER-IDENTIFIER after our own
-successful `writePhoto`/`clearPhoto`. Reads are cache-aside; a miss costs one CNContact fetch
-(≤12 linked contacts, never a loop).
-
-### 4.4 Face resolution — identity-keyed tasks, stale-completion dropping, refresh epochs
-
-- `faceIdentity(for:)` = `"<id.uuidString>:<token>:<photoFilename ?? "-">:<faceEpoch>"`, where
-  `token` = `systemPhotoTokens[contact.id]` (sha256 prefix of the last-resolved system bytes)
-  or `"-"` (linked, not yet resolved) or `"link-nil"` (no verified link). `systemPhotoTokens`
-  is written ONLY inside the `@MainActor` face methods.
-- Convergence: a foreground epoch bump re-runs `.task(id:)`; the resolve observes new system
-  bytes, updates the token, and the identity changes once more → exactly one extra resolve
-  that now hits the photo cache (bytes unchanged ⇒ same hash ⇒ identity stable). Bounded; no
-  loop.
-- Call sites: `ContactTile.task(id: coordinator.faceIdentity(for: contact))`;
-  the Settings list and CallView batch passes key on the ARRAY of identities. Every task body
-  re-checks `coordinator.faceIdentity(for:)` after its `await` and abandons the assignment on
-  a mismatch (`.task` cancellation is best-effort; the guard is the guarantee).
-- `faceEpoch` bumps (main): `setFamilyContactLink` success; add/update where `systemContact`
-  changed; `verifiedLinks.links` change on publish; every successful `writePhoto`/`clearPhoto`
-  (paired with `invalidate(identifier:)`); every foreground activation (after wholesale cache
-  invalidation — the only way an EXTERNAL photo edit surfaces). Cost: ≤12 re-resolves per
-  foreground, each a cache hit or one bounded fetch.
-
-### 4.5 Refresh-epoch ordering — launch/foreground hooks (L1 §19 item)
-
-- **Launch**: inside `bootRestoreData`'s main block (`AppCoordinator.swift:3955-3986`), the
-  `self.familyContacts = batch.contacts` assignment already fires `didSet` → index rebuild +
-  `refreshVerifiedLinks()`. This lands AFTER the roster publish and BEFORE
-  `startupBoot.advance(to: .preparingVoice)` (the Task spawn is non-blocking; the boot
-  signpost interval semantics are untouched).
-- **Foreground**: in `handleScenePhase(.active)` (`:9967`), after the existing hooks append
-  exactly one call:
-
-```swift
-refreshContactsIdentity()   // (1) await-free: spawns Task { await linkService.invalidate(identifier: nil);
-                            //     faceEpoch += 1 }; then (2) refreshVerifiedLinks()
-```
-
-  Order inside: (1) invalidation + epoch bump, (2) refresh — the refresh's photo reads (if
-  any) then see fresh bytes. Both non-blocking; `.background` is untouched.
-- **Roster mutation**: covered by the `didSet` choke point (add/update/remove/boot all assign).
-- **Access change**: the wizard's `grantAccess()` and CallView's grant path call
-  `refreshVerifiedLinks()` after a successful `requestAccess()` (a newly readable book can
-  verify links); returning from iOS Settings is already covered by the `.active` hook.
-- **After write outcomes**: `.written` → `invalidate(identifier:)` + `faceEpoch += 1`;
-  `.recordGone`/`.identityMismatch` → `refreshVerifiedLinks()` (the link may now degrade —
-  §1.5). No other outcome triggers anything.
-- **No retries, no backoff, no delays, no timeouts** (L1 §13.4). A failed refresh leaves the
-  previous snapshot; the next trigger (mutation/foreground/access/write) re-runs it. If a
-  wait ever became necessary it MUST be a named configurable constant on the existing
-  configuration surface — never a literal. None exists today.
-
-## 5. Error handling and observability
-
-### 5.1 Total outcome→UI mapping
-
-See §1.5 — the table is the complete mapping; `FamilyPhotoEditorState.from` is an exhaustive
-switch (adding a case breaks the build, forcing a UI decision). Byte-level guarantee relied
-on by the fallback copy: the app-local processed JPEG is persisted in the SAME store write as
-the contact, BEFORE any system attempt (L1 §10.2 step 1), so "kept in this app only" is true
-even for `.failed(.readBackMismatch)`, where the system bytes may in fact have landed.
-
-### 5.2 Logging rules per file (NFR-FCU-002)
-
-- New feature-role files (`SystemContactLinkService.swift`, `SystemContactPhotoWriter.swift`,
-  `FamilyContactIndex.swift`): NO console writes at all — any configuration, any build (the
-  gate's rule 3). All diagnostics go through an injected `ObservabilityBus`
-  (`Services/MedicationScheduler/DependencyProtocols.swift:23`) with the closed vocabularies
-  below and only allow-listed metadata keys (`outcome`, `state`, `error_code`, `duration_ms`,
-  `entry_count`, `contact_id_hash` — verified in `LogSanitiser.allowedKeys`).
-- Existing touched files (AppCoordinator, SettingsView, LeafViews, AddressBookDirectory,
-  MissedCallContactResolver, ContactResolver, ContactPhotoStore, ViewCaches): no new console
-  writes; any future line must stay reason-code-only (no names, numbers, identifiers,
-  nicknames, filenames, image bytes, no content-bearing event fields).
-- Events (classification-only; `contact_id_hash` unused — no id is needed to diagnose):
-
-| component | eventType | outcome (closed) | errorCode | metadata |
-|---|---|---|---|---|
-| `contacts_link` | `refresh_completed` | `ok` \| `degraded` | nil \| `fetch_failed` | `{"entry_count": "<verified count>"}` |
-| `contacts_link` | `unlink` | `keeping_local_as_is` \| `keeping_displayed_photo_locally` \| `clear_app_local_photo` | nil | none |
-| `contacts_link` | `claim_refused` | `refused` | `duplicate_claim` | none |
-| `contacts_photo` | `write` | outcome `logToken`: `written` \| `skipped_no_link` \| `skipped_no_authorization` \| `record_gone` \| `identity_mismatch` \| `failed` | failure raw value when `.failed`, else nil | `{"state": <not_determined\|denied\|limited\|full>}` for `skipped_no_authorization`; none otherwise |
-
-`duration_ms` set on `refresh_completed` and `write`. `PhotoWriteIntent.imageBytesHash` (test
-fake + DEBUG assertion) is a hash by construction. No name/number/nickname byte content ever
-enters an event field.
-
-### 5.3 Release-gate wiring
-
-`ios/tools/check-release-log-safety.py` `FEATURE_ROOTS` (source-root-relative) gains:
-
-```py
-    # [FAMILY-CONTACTS-UNIFY design-l2 §5.2] Link/nickname identity + the write seam:
-    # names, nicknames, phone numbers, identifiers and photo bytes are household data.
-    # A Release console write or an unlisted metadata key anywhere in these files
-    # fails the gate; events route through ObservabilityBus with allow-listed keys only.
-    "Services/Contacts/SystemContactLinkService.swift",
-    "Services/Contacts/SystemContactPhotoWriter.swift",
-    "Services/Contacts/FamilyContactIndex.swift",
-```
-
-The fixture harness keeps passing unchanged (positive/negative fixture per rule); the gate
-stays wired into `ios/build.sh` ahead of every test scope. Existing coordinator/UI paths stay
-outside the feature role (they carry pre-existing console writes), but their new lines follow
-the reason-code rule and the transcript rules (gate rules 1-2 walk the whole tree already).
-
-## 6. Performance and security implementation patterns
-
-### 6.1 ≤20 ms budgets (NFR-FCU-001)
-
-- **Build** (once per roster publish): 12 contacts × (1 name + ≤8 nicknames) = ≤108
-  `NepaliTextNormalizer.normalize` calls + ≤108 map insertions — measured sub-millisecond;
-  asserted by `FamilyContactIndexTests` (max-roster build ≤20 ms ceiling).
-- **Search per keystroke**: normalize the query ONCE; `.exactName` compares against
-  `entry.normalizedName` (no per-call normalization); `.nickname` exact via one
-  `idsByNickname[normalizedQuery]` O(1) hit; `.nickname` substring = ≤9 `range(of:)` checks
-  per contact over PREcomputed normalized strings (bounded 12×9 = ≤108 range checks);
-  `.containment` today's raw checks. Strictly cheaper than today's per-call name
-  normalization. Measured assertion ceiling in `UnifiedContactSearchTests`.
-- **Voice per utterance**: one query normalization + variants; per contact: 1 index lookup +
-  ≤9 normalized comparisons (exact nickname) + ≤9 containment checks + relationship + token
-  logic; near-miss walks name + ≤8 nicknames with the early-exit edit distance. Bounded
-  12×(1+9+9) small-string ops; measured ceiling in `ContactResolverTests`.
-- The 8-per-contact editor cap (§2.5) keeps production inside the tested envelope; the MODEL
-  and decoder accept more without failing (budgets degrade gracefully, nothing truncates).
-- Measured values are logged into the test output and recorded at DV; no production timers.
-
-### 6.2 CNSaveRequest confinement — three enforcement layers
-
-1. **File-local construction**: `CNSaveRequest` and `CNMutableContact` are constructed ONLY in
-   `Services/Contacts/SystemContactPhotoWriter.swift` (confirmed absent anywhere today).
-   Pinned by a new source-scan test using `FeatureSourceScan.swiftFiles(in:)` + `codeText(of:)`:
-   every occurrence of `CNSaveRequest`/`CNMutableContact` in `ios/ElderlyAssistant` must be in
-   that one file (`CNContactStore` additionally allowed in `AddressBookDirectory.swift` — read glue).
-2. **Intent-record assertion**: the writer builds `PhotoWriteIntent` before the save and
-   `assert(intent.fields == [.photo])`; the test fake records the same record type and the
-   suite asserts the field-set invariant on every call.
-3. **Read-back byte verification**: after `execute`, re-fetch `CNContactImageDataKey` and
-   compare bytes with the written JPEG — `.written` requires equality; anything else is
-   `.failed(.readBackMismatch)` (never a false success; §10.3's fallback state stands).
-
-Plus the fingerprint re-check AT ATTEMPT TIME (§1.4 step 2): a stale/moved identifier can never
-write to a different person — the write is prevented before `execute`.
-
-### 6.3 STRIDE notes for security-design-review
-
-- **Spoofing** (wrong-contact write): fingerprint re-check + read-back + the
-  identifier→family uniqueness at link time; a re-used identifier fails the fingerprint, never
-  silently redirects.
-- **Tampering** (partial/other-field mutation): the request mutates exactly `imageData`
-  (intent assertion + confinement + source scan); read-back verifies the outcome.
-- **Repudiation**: classification events (§5.2) record refresh/write/unlink/refusal outcomes
-  without content.
-- **Information disclosure**: nothing new leaves the device (NFR-FCU-003); no log content; the
-  photo cache is in-memory only; `PhotoWriteIntent` carries a hash, never bytes.
-- **Denial of service**: bounded batches (≤12 identifiers), serial writes, no retries/backoff,
-  cache bounded by count+cost; a corrupt payload degrades to unlinked (no crash loop).
-- **Elevation of privilege**: the app's only write intent is the edited contact's photo field;
-  there is no API surface to write any other field or any other contact.
-- Unlink never writes to the system record (FR-FCU-005/FR-FCU-006); the never-lose copy runs
-  BEFORE the link clears.
-
-### 6.4 Source-scan pins (new tests)
-
-- `testSystemContactWriteSeamIsTheOnlyCNSaveRequestSite` (§6.2 layer 1).
-- `testSyncContactPhotoResolverIsRemoved` — asserts `func contactPhoto(for` no longer exists
-  anywhere in `ios/ElderlyAssistant` (the §8.1 deletion is pinned).
-- L10n contiguity/coverage pins (§7).
-- `FamilyContactWizardSheet` search uses `UnifiedContactSearch` (assert the call string exists
-  in SettingsView.swift and the old `SystemContactSearch.search` call is gone from the wizard
-  region) — a cheap drift pin for §2.2.
-- `ContactsAccess` gate pins (the R1 fix, made able to fail): `ContactsAccessTests` (mapping —
-  `.limited` ⇒ `.allowsReading`; `from(_:)` table) and `ContactsAccessGateTests` (per-site
-  source pins asserting `allowsReading` present / `== .allowed` absent in each §3.5-enumerated
-  expression of LeafViews.swift, SettingsView.swift AND AppCoordinator.swift
-  (`refreshNativeMissedCallNames`: :8336 re-read present, :8338 `allowsReading`, :8346
-  `access: access`, no hardcoded `.allowed`)).
-
-## 7. Localization — FINAL frozen copy (21 keys)
-
-Structure: 8 `family.link.*` + 7 `family.photo.*` (merged with the 3 existing) + 4
-`family.nickname.*` = 19 contiguous `family.*` keys, plus 2 `call.search.*` insertions.
-Placeholders: exactly four keys carry one `%@` (`family.link.linkedTo`, `family.link.alreadyLinked`,
-`family.nickname.removeLabel`, `call.search.linkedBookName`). No key has any other `%`.
-
-| # | Key | en (FROZEN) | ne (FROZEN) |
+| Interface / flow | Failure | Returned outcome | Consumer behavior |
 |---|---|---|---|
-| 1 | family.link.chip | Linked | जोडिएको |
-| 2 | family.link.linkedTo | Linked to %@ | %@सँग जोडिएको |
-| 3 | family.link.unlink | Remove link | लिंक हटाउनुहोस् |
-| 4 | family.link.unlinkHint | This only separates the two records. Nothing is deleted, and your phone's contact is not changed. | यसले दुई रेकर्डलाई मात्र छुट्याउँछ। केही मेटिँदैन, र तपाईंको फोनको सम्पर्क परिवर्तन हुँदैन। |
-| 5 | family.link.alreadyLinked | %@ is already a family contact. | %@ पहिले नै परिवारको सम्पर्क हो। |
-| 6 | family.link.stale | This phone contact is no longer in your address book. The link is ignored. | यो फोन सम्पर्क अब तपाईंको फोनबुकमा छैन। लिंक बेवास्ता गरिएको छ। |
-| 7 | family.link.pickHint | Choose the phone contact this person is in. | यो व्यक्ति फोनमा कुन सम्पर्कको रूपमा छ, त्यो छान्नुहोस्। |
-| 8 | family.link.sectionTitle | Phone contact | फोन सम्पर्क |
-| 9 | family.photo.accessTitle | Update this person's photo in your phone's contacts? | यो व्यक्तिको फोटो फोनको सम्पर्कमा पनि अपडेट गर्ने हो? |
-| 10 | family.photo.accessBody | Allowing contacts access lets the app copy the photo you choose onto this person's contact card. Nothing else in your contacts is changed. The app works fully even if you say no. | सम्पर्क पहुँच अनुमति दिनुभयो भने, तपाईंले छान्नुभएको फोटो यो व्यक्तिको सम्पर्क कार्डमा प्रतिलिपि गर्न सकिन्छ। तपाईंको सम्पर्कमा अरू केही परिवर्तन हुँदैन। तपाईंले नभन्नुभए पनि एप पूरै चल्छ। |
-| 11 | family.photo.accessDeniedBody | Contacts access is off, so the photo will be kept in this app only. You can change this in iPhone Settings. | सम्पर्कको पहुँच बन्द छ, त्यसैले फोटो यही एपमा मात्र रहन्छ। तपाईं आईफोनको सेटिङमा यो बदल्न सक्नुहुन्छ। |
-| 12 | family.photo.state.updatedInSystem | Photo updated in your phone's contacts. | फोटो फोनको सम्पर्कमा अपडेट भयो। |
-| 13 | family.photo.state.keptOnPhone | Kept in this app only. | यही एपमा मात्र राखिएको। |
-| 14 | family.photo.state.systemPhotoRemains | Your phone's contact still has its own photo. Change it in the Contacts app to remove it. | तपाईंको फोनको सम्पर्कमा अझै आफ्नै फोटो छ। हटाउन कन्ट्याक्ट्स एपमा गएर बदल्नुहोस्। |
-| 15 | family.photo.sourceSystem | Shown from your phone's contacts. | फोनको सम्पर्कबाट देखाइएको। |
-| 16 | family.nickname.entryPlaceholder | Add a name or variation (e.g. sanu, सानु) | नाम वा अर्को रूप थप्नुहोस् (जस्तै sanu, सानु) |
-| 17 | family.nickname.add | Add | थप्नुहोस् |
-| 18 | family.nickname.removeLabel | Remove %@ | %@ हटाउनुहोस् |
-| 19 | family.nickname.hint | Any of these names finds this person — typed or spoken. Names are kept exactly as you enter them. | यीमध्ये कुनै नामले यो व्यक्ति भेटिन्छ — टाइप गरेको वा बोलेको। नामहरू तपाईंले लेखेकै रूपमा राखिन्छ। |
-| 20 | call.search.linkedBookName | Also in your phone book as %@ | फोनबुकमा %@ को रूपमा पनि छ |
-| 21 | call.search.accessLimited | Searching shows only the contacts you allowed. | खोज्दा तपाईंले अनुमति दिनुभएका सम्पर्कहरू मात्र देखिन्छन्। |
+| IF-1/IF-11 resolution | corrupt stored mapping value | `.indeterminate(slot:)` | no reminder armed for the entry; `medication_slot_unresolved`; settings line; never guessed |
+| IF-4 mapping save | out-of-range input / store write fails | `.indeterminate(slot:)` / `StorageError` | editor shows the honest line; stored mapping unchanged; re-arm not run |
+| IF-12 re-arm | either write fails | report `persistenceFailed: true` | nothing armed on the replaced set; `reminder_persistence_failed` (shipped shape); settings line |
+| IF-12 re-arm | resolution fails for some slot | report `unresolvedSlots` | those entries arm nothing; settings line; event |
+| IF-6 ack resolution | ambiguous / unmatched / nothing | `AckResolution` cases | sanctioned walk or the shipped `router.noPendingReminder` line; nothing recorded |
+| IF-8 walk | expiry / rejection / denial / barge-in | `AckClarifyEndReason` | honest ended line; nothing recorded; reminders untouched |
+| Challenge | "No" / timeout | `reEnterEscalation` (shipped) | not recorded; held evidence discarded (IF-15) |
+| `finalizeAcknowledgement` | adherence-log write fails | `.reminderPersistenceFailed` (shipped) | not reported as recorded; intake-recorded alert NOT fired (it follows the write); no evidence attach |
+| Evidence capture | camera unavailable | the shipped `CameraAvailability` reasons (the capture affordance never presents) | voice path is the floor; honest guidance |
+| Evidence capture | store write fails | `.failed(EvidenceStoreError)` | photo not presented as evidence; honest line |
+| IF-15 attach | adherence-log persist fails | `.reminderPersistenceFailed` | file deleted (no orphan); honest line |
+| IF-17 calendar write | no consent / not signed in | `.skippedNotActive` | shipped honest event; nothing queued |
+| IF-17 calendar write | no invitee has an email | `.skippedNoInvitees` | shipped honest event; nothing queued |
+| IF-17 enqueue | local store write fails | `.failed(reason)` | per-item honest result; nothing claimed delivered |
+| IF-19 push | transport unimplemented | `.notDelivered(reason: "transport_unimplemented")` | `NotificationResult(success:false, errorCode:)`; partial reported partial; no surface claims notified |
+| IF-16 retime | slot entry | `false` + `medication_retime_refused` + settings note | schedule of record unchanged; legacy unaffected |
 
-Wording notes for the reviewer: #16's ne deliberately contains the romanized example "sanu"
-(the store-as-entered showcase) — the ONLY ne value permitted to carry ASCII letters
-(documented exception in the coverage function; the Devanagari-presence rule still applies to
-it). Every other ne value is pure Devanagari (loanwords transliterated, e.g. कन्ट्याक्ट्स,
-फोनबुक, आईफोन, लिंक — matching the dialogue family's convention).
+### 5.2 Observability vocabulary (classification only, PII-free)
 
-Catalog placement (exact, alphabetical; the file sorts keys case-insensitively as verified):
+New events (metadata: `entry_id_hash` via `IdHashing.shortHash` and categorical fields ONLY;
+never a medication name, dose text, label text, photo content or utterance content):
 
-- `family.link.alreadyLinked`, `family.link.chip`, `family.link.linkedTo`, `family.link.pickHint`,
-  `family.link.sectionTitle`, `family.link.stale`, `family.link.unlink`, `family.link.unlinkHint`
-- `family.nickname.add`, `family.nickname.entryPlaceholder`, `family.nickname.hint`,
-  `family.nickname.removeLabel`
-- `family.photo.accessBody`, `family.photo.accessDeniedBody`, `family.photo.accessTitle`,
-  (existing) `family.photo.add`, `family.photo.change`, `family.photo.remove`,
-  `family.photo.sourceSystem`, `family.photo.state.keptOnPhone`,
-  `family.photo.state.systemPhotoRemains`, `family.photo.state.updatedInSystem`
-- `call.search.accessLimited` directly BEFORE `call.search.allowBody`;
-  `call.search.linkedBookName` between the existing `call.search.familyChip` and `call.search.loadFailed`.
+| Event | Where | Outcome values |
+|---|---|---|
+| `medication_slot_clock_changed` | IF-9 saved | success / failure |
+| `medication_slot_unresolved` | IF-11 failure | unresolved (slot in metadata) |
+| `medication_retime_refused` | IF-16 slot entry | info (slot in metadata) — **the m-5 name** |
+| `medication_ack_resolved` / `_ambiguous` / `_unmatched` | router after IF-6 | classification of the resolution case |
+| `medication_ack_clarify_ended` | IF-8 end | rejected / denied / expired / bargedIn (resolved ends through the resolved path) |
+| `medication_evidence_captured` / `_discarded` / `_attached` | IF-14/15 | classification only (no image, no text) |
+| `family_event_alerted` (shipped, extended) | notifier | honest success/failed + error_code + channel + alert_type (name and kind only) |
 
-L10n test extension (`L10nCatalogCoverageTests.swift`, the established pin pattern):
-- `familyContactsKeys` = the 21 keys; both-languages resolution; values-differ;
-  placeholder-count equality (`%` counting); the verbatim `familyContactsCopy` table = the
-  rows above; source-catalog coverage via the existing extraction-state checks (both values
-  `translated`, ne non-empty + Devanagari, ne ASCII-forbidden with the #16 exemption).
-- Contiguity pin (exact span, corrected): the raw catalog key lines between
-  `family.emergencyToggleHint` (:5874, predecessor) and `family.relationship.brother`
-  (:5942, successor) — both EXCLUDED — must be EXACTLY these 22 lines in order: the 12 new
-  family.link./family.nickname. keys, then the 10 family.photo.* keys, which include the 3
-  PRE-EXISTING keys at their alphabetical positions (19 new + 3 existing = 22):
-  1 family.link.alreadyLinked · 2 family.link.chip · 3 family.link.linkedTo ·
-  4 family.link.pickHint · 5 family.link.sectionTitle · 6 family.link.stale ·
-  7 family.link.unlink · 8 family.link.unlinkHint · 9 family.nickname.add ·
-  10 family.nickname.entryPlaceholder · 11 family.nickname.hint · 12 family.nickname.removeLabel ·
-  13 family.photo.accessBody · 14 family.photo.accessDeniedBody · 15 family.photo.accessTitle ·
-  16 family.photo.add (pre-existing, :5891) · 17 family.photo.change (pre-existing, :5908) ·
-  18 family.photo.remove (pre-existing, :5925) · 19 family.photo.sourceSystem ·
-  20 family.photo.state.keptOnPhone · 21 family.photo.state.systemPhotoRemains ·
-  22 family.photo.state.updatedInSystem.
-  (The rev-1 "19 lines" count omitted the 3 in-place existing keys; the pin now names them
-  explicitly so it can actually pass.) Plus two named-neighbor pins for the `call.search.*`
-  insertions (accessLimited → allowBody; familyChip → linkedBookName → loadFailed).
-- Baseline key-count pin updated DELIBERATELY, count recorded in the test comment: this branch
-  measures 1,389 keys before and 1,410 after the 21 insertions (re-measure and record the
-  post-call-dialer-merge number at implement time; the +21 delta is the constant, not the absolute).
+Reused shipped events (unchanged names): `reminder_persistence_failed`, `calendar_share_*`
+(skipped/not-active/reconciled/flush), `command_ack_*`, the `medication_photo_query` family.
+The retime-refusal's family visibility is IF-10's settings note; the event itself is
+operator-facing and completes m-5 together with it.
 
-`Info.plist:115` — replacement `NSContactsUsageDescription` (L1 §12 wording, frozen):
+### 5.3 PII-free discipline
 
-> Searching from the phone screen can call anyone in your phone book — including people added
-> by WhatsApp, Messenger and other apps. When you set a photo for a family contact who is also
-> in your phone book, the app can save that photo onto the person's contact card if you allow
-> it; it changes nothing else. The app works fully even if you say no.
+`LogSanitiser` discipline unchanged; the release log gate
+(`ios/tools/check-release-log-safety.sh`, wired in `ios/build.sh`) must cover the new source
+paths and exit 0 (NFR-MSR-002/009). Titles (medication names) are never logged, never encoded,
+never placed in event metadata.
 
-## 8. L1 §19 dispositions and exact placement
+## Performance and Security Implementation Patterns
 
-### 8.1 `contactPhoto(for:)` — DELETE (decided)
+### 6.1 Firing latency (NFR-MSR-010)
 
-After the four live call sites migrate (`SettingsView.swift:1596`, `:2710`,
-`LeafViews.swift:1161`, `:2650` — all become the async face path), `AppCoordinator.contactPhoto(for:)`
-(:6492) has ZERO references (verified: comments only). Deleted because: (a) two photo paths
-(sync app-local-only vs the async precedence resolver) are the exact drift hazard L1 §10.1
-forbids; (b) dead code contradicts house practice; (c) deletion is compile-verified. The
-underlying `ContactPhotoStore.load(named:)` STAYS (the resolver's local branch + `loadData`'s
-sibling). Pinned by the source-scan test (§6.4).
+No fire-time resolution step exists: `createPendingReminders` and the re-arm pass resolve once
+and persist concrete `scheduledAt` instants; `nextOccurrence` (:747) and the
+`UNCalendarNotificationTrigger`-based arming (`UNNotificationScheduler` :37, exact trigger
+:114) are untouched. The mapping is read once per arming pass (point-in-time). The design
+introduces no work between the alarm callback and `triggerReminder` (:287). Reminder re-arm
+after a mapping change re-uses the shipped creation path, so the 30-second envelope is
+inherited, not approximated.
 
-### 8.2 Placement table (everything new/changed)
+### 6.2 On-device and egress
 
-| Symbol | File |
-|---|---|
-| `SystemContactLink`; `FamilyContact.normalizedNicknames`; `LegacyNicknameKeys`; `FamilyContact` schema/decoder | `Services/Storage/FamilyContactStore.swift` |
-| `FamilyContactIndex` (+`Entry`, lookups) | NEW `Services/Contacts/FamilyContactIndex.swift` |
-| `VerifiedLinksSnapshot` (+ helpers), `SystemContactReading`, `SystemContactLinkReading`, `SystemContactLinkService` | NEW `Services/Contacts/SystemContactLinkService.swift` |
-| `SystemContactWriteAccess`, `SystemContactWriteFailure`, `SystemContactPhotoWriteOutcome`, `PhotoWriteField`, `SystemContactPhotoWriting`, `FamilyPhotoEditorState` (+total mapping), `SystemContactPhotoWriter` | NEW `Services/Contacts/SystemContactPhotoWriter.swift` |
-| `ContactsAccess.limited`/`allowsReading`/`from(_:)`; `AddressBookDirectory: SystemContactReading`; `fetchKeys` + identifier key; `allEntries` identifier pass-through; `AddressBookEntry.identifier`; `make(..., identifier:)` | `Services/Contacts/AddressBookDirectory.swift` |
-| `MissedCallContactResolver.linkedFamilyMatch`, `.limited`-readable `resolve(snapshot:)` | `Services/Contacts/MissedCallContactResolver.swift` |
-| `UnifiedContactSearch` signature/Outcome/tier changes (per §1.6) | `Services/Contacts/UnifiedContactSearch.swift` |
-| `ContactResolver` index provider + bands + near-miss | `Services/Intents/ContactResolver.swift` |
-| `ContactPhotoStore.processedJPEG(_:) -> Data?` (static extraction: `scaledForStorage` → `jpegData`; `save` refactored to call it — byte-identical output) + `loadData(named:)` | `Services/Storage/ContactPhotoStore.swift` |
-| Coordinator state, `faceIdentity/faceImage/faceThumbnail`, `SystemContactUnlinkMode`, `unlinkMode`, `setFamilyContactLink`, `syncSystemPhoto`, `refreshVerifiedLinks`, `refreshContactsIdentity`, add/update signatures, link-aware `familyContact(matchingPhone:)` | `App/AppCoordinator.swift` (`familyContact(matchingPhone:)` :8367 delegates to `familyMatch` then `linkedFamilyMatch`; missed-call family pass :8301 uses the same; `refreshNativeMissedCallNames` :8342 passes `verifiedLinks` AND the real access — :8336 status re-read after the prompt, :8338 guard → `allowsReading`, :8346 `access: access`) |
-| Wizard restructure (state, subviews, steering, save flow), list chip + face migration, `loadDraft` faces; search access gates → `allowsReading` (`searchSection` switch arm :2117, `refreshSearchAccess` :2325, `grantAccess` :2331) | `App/SettingsView.swift` |
-| `CallView` face migration, `UnifiedContactResultRow.caption: String? = nil` + synthesized-row caption render, `ContactTile` face task; CallView `.limited` gates → `allowsReading` (:1343, :1347-1362, :1370, :1379, :1413, :1519) + the `call.search.accessLimited` caption in `searchArea` | `App/LeafViews.swift` |
-| `DownsampledImageCache` doc note for the `sysphoto:` key family (no API change) | `App/ViewCaches.swift` |
-| 21 keys; `L10nCatalogCoverageTests` pins | `Resources/Localizable.xcstrings`; `ElderlyAssistantTests/App/L10nCatalogCoverageTests.swift` |
-| Write disclosure | `Info.plist` (`NSContactsUsageDescription`) |
-| `FEATURE_ROOTS` entries | `ios/tools/check-release-log-safety.py` |
+Label scanning (Vision), the ack resolver, the slot mapping and evidence capture are
+device-local; nothing new leaves the device. The amended consent copy discloses the calendar
+content class (M-1); the wire carries no PII (D9). Evidence files carry
+`.completeFileProtection` (the encrypted-store protection class); models carry bare file
+names, never paths or bytes. Camera permission is requested at point of use with the shipped
+plain-language copy; capture is an alternative to the voice floor, never a requirement.
 
-### 8.3 Test placement (L1 §17 suites)
+### 6.3 Memory and concurrency
 
-- Extended: `FamilyContactStoreTests` (link + nicknames round-trip, legacy lossless, corrupt
-  degrade), `UnifiedContactSearchTests` (Passes 1-5, unlinked parity, `linkedBookNames`,
-  recount, Devanagari nickname pins positive+negative), `ContactResolverTests` (bands,
-  ambiguity consequence table — including the name-exact 1.00 vs nickname-exact 0.85 pair
-  explicitly: the IEEE-754 gap is 0.15000000000000002, so the strict `<` margin check resolves
-  to name-exact, NOT ambiguous — near-miss), `MissedCallContactResolverTests` (linked-record
-  numbers, identifier remap, `.limited`-readable `access:`), `ContactPhotoStoreTests` (`processedJPEG` pins
-  + `loadData`), `L10nCatalogCoverageTests`.
-- New: `Services/Contacts/FamilyContactIndexTests.swift`,
-  `Services/Contacts/SystemContactLinkServiceTests.swift` (fake `SystemContactReading`; the
-  §4.2 drain cases: follow-up runs with the latest roster, coalescing, no-trigger-drop),
-  `Services/Contacts/SystemContactPhotoWriterTests.swift` (fake writer; intent confinement;
-  no-attempt matrix; outcome mapping totality incl. `FamilyPhotoEditorState.from`;
-  source-scan pins), `Services/Contacts/ContactsAccessTests.swift` (`from(_:)` table +
-  `.limited` ⇒ `.allowsReading` mapping pins), `App/ContactsAccessGateTests.swift` (per-site
-  source pins on the §3.5 gate expressions, including
-  `AppCoordinator.refreshNativeMissedCallNames`'s :8336 re-read / :8338 guard / :8346
-  passthrough).
+Images are held only for the duration of a capture/compress operation (off the main thread);
+they are never stored in models, published state or observability. The walk state is a small
+value (candidates + cursor). The evidence hold is one file name per entry. The re-arm pass
+touches only the in-memory entries/reminders on main.
 
-## 9. Technical risks and mitigations
+### 6.4 Concurrency and isolation (shared resources, explicit)
 
-| # | Risk | Mitigation | Pinning test |
+| Resource | Readers (concurrent) | Writers | Isolation |
 |---|---|---|---|
-| R1 | **Identifier instability** — iOS may delete/reissue `CNContact.identifier`s (iCloud merges, restores); a stale link must never call the wrong person | Fingerprint re-check at EVERY use: verification (§6.2 L1) at refresh, attempt-time check before any write; unverified links behave as absent; never auto-removed; `family.link.stale` surfaces the state; the number path (dial/routing) still resolves by NUMBER under the trailing-digit rule | `SystemContactLinkServiceTests` degrade matrix; `UnifiedContactSearchTests` unlinked-pair parity; `SystemContactPhotoWriterTests` no-write-on-mismatch |
-| R2 | **Limited access (iOS 18/26)** — granted-subset reads, writes refused for non-granted records, `.limited` currently collapsed into `.denied` by `@unknown default`; equality-based access gates (CallView) compile cleanly and would silently take the else path | `.limited` added end-to-end: readable via `allowsReading` at every ENUMERATED gate (§3.5 — switch arms, equality sites, load gates, grant conditions), never re-prompting; distinct honest caption (`call.search.accessLimited`) on BOTH search surfaces; write detection is attempt-based (`notInGrantedSelection` outcome); UI never claims success or failure it can't verify | mapping pins (`ContactsAccessTests`: `.limited` ⇒ `.allowsReading`, `from(_:)` table; `SystemContactWriteAccess.from` table) + per-site source pins (`ContactsAccessGateTests`: every §3.5 gate asserts `allowsReading` present, `== .allowed` absent — a reverted gate FAILS) + writer outcome matrix |
-| R3 | **Unversioned-store migration** — a corrupt/partial payload could crash the boot read or silently drop fields | The optional-field decoder pattern; separate `LegacyNicknameKeys` container keeps the synthesized encoder authoritative; corrupt link fields → nil; decoder pinned by fixtures from every historical shape | `FamilyContactStoreTests` round-trip + legacy blank/whitespace/nil cases + corrupt-link fixture; DV-6 |
-| R4 | **Call-dialer union conflicts** — both features touch AppCoordinator/LeafViews/MethodResolver (in flight on master) | Sequence behind its merge (L1 §16); our resolution UPSTREAM (choose the person), their chain DOWNSTREAM (choose the channel) — never inverted; `MethodResolver` untouched; union-preserving edits in shared structs | call-dialer scoped suites + ours on the merged build; manual chain check at DV |
-| R5 | **Grapheme pin hazards** — nickname matching must not introduce new Character-cluster behavior (Devanagari partial-word semantics are regression-pinned) | All matching funnels through `NepaliTextNormalizer` + the SAME `range(of:options:)` semantics as today; no new grapheme logic; the new nickname tiers are additive branches gated on non-empty nicknames | `UnifiedContactSearchTests` + `ContactResolverTests` Devanagari pins (positive AND negative), including a Character-cluster partial-word case asserted to behave EXACTLY like the name tier |
-| R6 | **Performance budget regression** — index build/query could exceed ≤20 ms at max roster | Precomputed normalized strings, O(1) exact map, ≤108 substring checks; build in one pass; measured assertions with ceilings; the editor caps entries at 8 (tested envelope) | `FamilyContactIndexTests` build ceiling; search/resolve perf tests (measured values recorded) |
-| R7 | **Concurrency regressions** — off-main published-state mutation, stale snapshot/face publication, two saves racing one record | Main-confined published state; actor-isolated services; single-flight refresh with latest-roster capture and generation-ordered publication (§4.2); identity-guarded task assignment; strictly serial writes (actor) | `SystemContactLinkServiceTests` coalescing; face identity unit tests; writer serialization test via the fake (no interleaved intents) |
-| R8 | **False-success copy** — any path that shows "updated in your phone's contacts" without byte-verified proof | `.written` requires read-back byte equality; every other attempt outcome maps to kept-on-phone copy; the app-local copy is persisted first (never-lose) so the fallback sentence is always true | `SystemContactPhotoWriterTests` read-back mismatch → `.keptOnPhone`; `FamilyPhotoEditorState.from` totality test |
+| `MedicationSlotClock` record | scheduler arming, settings editor, re-arm (all main) | the settings save action ONLY | main-thread confinement; validate-then-persist; no partial states observable |
+| `MedicationEntry` list | coordinator views, scheduler, calendar hooks (main) | `loadSchedule`/`addMedication`/`updateMedication`/`removeMedication`/IF-12 mirror rewrite | main-thread confinement (shipped); the re-arm pass rewrites mirrors before arming |
+| Pending reminders | scheduler + coordinator reads (main) | scheduler paths only (shipped + IF-12) | main-thread confinement; persist-before-arm on every arming path |
+| Adherence log | `takenDosesToday`/widgets (main) | `finalizeAcknowledgement`/`recordMissedDose`/blocked branch/IF-15 attach | main-thread confinement; persist-before-cleanup |
+| Evidence files | any (fail-soft reads) | capture path (serialized by the one-camera discipline), attach/discard/cascade | filesystem + caller serialization; atomic replace per file; one writer at a time via the capture gate |
+| Walk state | coordinator + router (main) | coordinator walk ops only | main-thread confinement; one active walk (begin replaces); every end path listed in IF-8 (deregistration: resolved/denied/rejected/expired/bargedIn + timer cancel) |
+| Pending evidence hold | scheduler (main) | IF-15 only | in-memory; deregistration paths: attach at finalize, discard on deny/re-enter, replace on re-capture, process death (honest loss) |
+| Calendar ledger keys | service (main) | service enqueue/commit + shipped sweep | the shipped store discipline; significant-event keys are excluded from outbound/sweep and from the medication snapshot (D7 deregistration: none needed — write-once, family may curate in Google) |
+| Retime note flag | settings view (main) | scheduler hook sets, user dismisses | main + UserDefaults; one-shot |
 
-## 10. Traceability additions (beyond L1 §18)
+Deregistration paths are designed alongside every registration path: walk registration ↔ its
+five end paths + timer cancel; evidence hold ↔ attach/discard/replace/death; one-off calendar
+keys ↔ expiry-by-family-curation (no app-side tombstone, recorded); pending queue ↔ shipped
+tombstone/flush; retime note ↔ dismissal.
+
+## Review-l1 Resolutions — dispositions
+
+### M-1 (major) — calendar invitee/disclosure mismatch → RESOLVED (copy amendment)
+
+Decision: option (ii). The significant-event write path (IF-17/IF-18) uses the
+family-notification audience (every contact with an email; de-dup; emergency-first;
+toggle-independent — the unconditional significant set's audience, unchanged from frozen
+L1 §9.3), and `calendarShare.consent.whoCanSee` is amended in BOTH locales to disclose it.
+Exact amended strings (the facts are pinned; wording may be polished at implementation without
+changing the disclosed facts):
+
+- en: "Emergency contacts are always invited. Other family members are invited for the kinds
+  of reminders you switch on in Notify caregivers. Safety alerts — a missed dose, a possible
+  double dose, or a dose that needs attention — are always shared with every family contact
+  who has an email."
+- ne: "आपतकालीन सम्पर्कहरूलाई सधैं निम्ता जान्छ। अरू परिवारलाई खबर गर्नेमा खोल्नुभएका
+  सम्झनाका प्रकारअनुसार निम्ता जान्छ। सुरक्षा सूचनाहरू — छुटेको औषधि, दोहोरो डोजको सम्भावना,
+  वा ध्यान चाहिने औषधिको समय — इमेल भएका परिवारका सबै सदस्यहरूलाई सधैं पठाइन्छ।"
+
+`calendarShare.consent.body` already discloses the content class ("Event titles, including
+medicine names…") and is unchanged; the shipped Nepali `whoCanSee` duplication is repaired as
+part of the amended string. The consent mechanism itself (per-installation acceptance
+boolean) is unchanged — no re-consent machinery is introduced (recorded: no released build of
+this feature exists; the amended text is what the consent screen displays, and the screen's
+existing revoke/re-view behavior stands). Until implementation lands this amendment, no
+surface, log line or test may claim the pre-amendment text covers the significant-event
+audience (the review's hold condition). Bounds: FR-MSR-016/017 (channels, PII), NFR-MSR-004
+(both locales).
+
+### m-1 — re-arm outcome → RESOLVED
+
+IF-12 returns `SlotClockRearmReport` (per-entry effects: rearmed/kept counts, `unresolvedSlots`,
+`persistenceFailed`); IF-9 carries it to the settings leaf, which surfaces the honest failure
+line(s) in both locales. The shipped `reminder_persistence_failed` event remains as the
+observability half. Bounds: FR-MSR-002, FR-MSR-018, FR-MSR-022.
+
+### m-2 — duplicate rule for slot-model saves → RESOLVED
+
+Rule (Components C8): the shipped guard (exact name equality + effective-time intersection) is kept; a
+slot row's effective time is the slot's resolved time (the D2 mirror); legacy rows contribute
+their components; same-save entries participate; the entry being updated is excluded from its
+own check; a corrupt mapping (empty mirror) does not flag (the unresolved line is the honest
+signal). Bounds: FR-MSR-001, NFR-MSR-006.
+
+### m-3 — hour→slot conversion table → RESOLVED
+
+Pinned at the parser's emission level (Components C9): 8:00→morning; 12:00/13:00→afternoon;
+19:00/20:00/21:00→evening; every other hour fills nothing; per-slot dedup, first-occurrence
+order; never consults the household mapping. Bounds: FR-MSR-005/006.
+
+### m-4 — multi-candidate clarification "no" → RESOLVED
+
+Pinned (Components C4): three or more candidates — "no" ADVANCES the cursor; after the last
+candidate the walk ends (nothing recorded, honest ended line). Pair form and single form keep
+L1's pinned rules. Test obligation stated. Bounds: FR-MSR-008, FR-MSR-021.
+
+### m-5 — retime refusal visibility + event → RESOLVED
+
+Event named `medication_retime_refused` (§5.2). Family visibility: IF-10's one-shot note on
+the "Medicine times" section ("a medicine's time comes from its Morning/Afternoon/Evening
+setting — change it here if you changed it in the Calendar app"), dismissible, persisted; the
+entry identity stays in `entry_id_hash`. The twin-revert remains the mechanism; it is no longer
+unexplained where the family configures medicines. Bounds: FR-MSR-002, FR-MSR-018.
+
+### Notes
+
+- n-1 (fired-preference): accepted as-is; implemented by C3 without change.
+- n-2 (mapping change past today's time → tomorrow's occurrence): CONFIRMED intended for the
+  mapping-change surface too — a mapping change is prospective; the standard `nextOccurrence`
+  rule applies (no retroactive firing, no immediate fire of a passed time). Consistent with
+  the shipped retime semantics.
+- n-3 (citation drift): orientation-level; this document names symbols, not line numbers, as
+  contracts.
+- n-4 (`addVoiceReminder` legacy shape): accepted; untouched.
+- n-5 (capture announces the bound medication): realized in C5/C13 — the fired-dose
+  screen titles the bound entry; the record row shows the name; the spoken capture line names
+  it (`meds.evidence.spoken` "photo for %@").
+
+## Configuration and Timeouts
+
+No timeout or window is a literal at a call site; every parameter is named, defaulted and
+composed from one source.
+
+| Parameter | Default | Where configurable | Status |
+|---|---|---|---|
+| `MedicationSlotClock.default` | morning 08:00 / afternoon 13:00 / evening 19:00 | household mapping (settings save, IF-9) | NEW named defaults (OD-1) |
+| `ConfirmationChallenge.challengeTimeoutSeconds` | 30 (existing, injected :28) | composition | untouched |
+| `AckClarificationConfig.responseWindowSeconds` | EQUAL to the challenge timeout by construction — composed from the same injected value the scheduler's challenge receives (D4); no second constant, no literal | composition (tests inject shorter) | NEW |
+| Ack window / refire count / escalation window / refire interval | 5 / 5 / 60 / 12 (entry fields) | per-entry (shipped) | untouched (FR-MSR-019) |
+| `MedicationEvidenceStore.maxPhotoBytes` | 200,000 (FR-D04b precedent) | one named constant | reused precedent, not a timeout |
+| Push / calendar async calls | no new timeouts | shipped paths own their transports (the E2E plan owns real push timeouts) | unchanged |
+
+## Traceability
 
 | Requirement | L2 sections |
 |---|---|
-| FR-FCU-002 (degrade, corruption) | §3.4, §9 R1/R3 |
-| FR-FCU-003 (dedupe contract) | §1.6 (Passes 1-5) |
-| FR-FCU-004 (one person everywhere) | §1.3, §1.8, §2.2 |
-| FR-FCU-005 (unlink never loses) | §1.9 (`unlinkMode`, copy-before-clear), §2.6 |
-| FR-FCU-006 (unlink) | §1.9 |
-| FR-FCU-008/009/010 (write, authorization, fallback) | §1.4, §1.5, §2.4, §2.6, §6.2, §6.3 |
-| FR-FCU-011 (storage/migration) | §3.2, §3.4 |
-| FR-FCU-012 (search matching) | §1.6 |
-| FR-FCU-013/014 (voice, ambiguity) | §1.7 |
-| FR-FCU-015 (editor UI, immediate effect) | §2.5 |
-| NFR-FCU-001 (performance) | §6.1 |
-| NFR-FCU-002 (PII/log safety) | §5.2, §5.3 |
-| NFR-FCU-004 (l10n) | §7 |
-| NFR-FCU-005 (a11y) | §2.3, §2.5, §7 |
-| NFR-FCU-006 (reliability) | §3.1-§3.4 |
-| NFR-FCU-007 (Devanagari pin) | §6.1, §9 R5 |
-| NFR-FCU-008 (sequencing) | §9 R4 |
-| NFR-FCU-009 (honest gates) | §8.3, §5.3 |
+| FR-MSR-001 slot entry model | C1, C6, C8, §4.1 (m-2) |
+| FR-MSR-002 deterministic mapping, configurable | C1, IF-1/2/3/4/9/11/12, Configuration and Timeouts, Review-l1 Resolutions (m-1, m-5) |
+| FR-MSR-003 quantity + composed dose line, detector unchanged | C2, IF-5, C6 (no detector input added) |
+| FR-MSR-004 purpose optional, no dependency | C8 (purpose untouched), C13 |
+| FR-MSR-005 scan-to-fill additive | C8, C9, IF-22/23 |
+| FR-MSR-006 OCR confirm-before-binding | C8 (applyScan rules), C9 (no store write on scan) |
+| FR-MSR-007 ack names medication/slot; resolution by what was said | C3, IF-6/7 |
+| FR-MSR-008 conservative disambiguation, sanctioned copy | C3, C4, IF-6/8, Review-l1 Resolutions (m-4) |
+| FR-MSR-009 safety sequence preserved, no path around it | C4 (resolution feeds the shipped chain), C7 (hold/attach inside finalize), IF-14/15 |
+| FR-MSR-010 recorded against the schedule | C7 (one resolved Date), §4.1 |
+| FR-MSR-011 refusal-first denial guard | C4 (walk denial arm), C3 (denial untouched) |
+| FR-MSR-012 mic continuity around acks | unchanged seams; walk lines use the shipped speak path, pre-ack behavior untouched (AckFastLane property extended by tests only) |
+| FR-MSR-013 evidence augments, never creates | C5, IF-13/14/15, §6.2, §4.1 |
+| FR-MSR-014 deterministic shared-slot photo resolution | C5 (context-bound), IF-14 (no context → no bind) |
+| FR-MSR-015 significant set + triggers | C7.3 (D10), C10 |
+| FR-MSR-016 channels + honest delivery + consent gate | C10, C11 (IF-17/18/19), Review-l1 Resolutions (M-1) |
+| FR-MSR-017 PII-free wire | C10 (D9), §5.3 |
+| FR-MSR-018 honest degradation, no silent stubs | §5.1/§5.2, C10 (stub honesty), C11 (skip events), C12 (note) |
+| FR-MSR-019 reminder/escalation semantics preserved | C7.1/7.2 (order preserved), C4 (chain untouched) |
+| FR-MSR-020 dementia machinery preserved | C5 (PhotoVerifier not wired), C6 (photoVerification untouched), C7 (challenge/detector untouched) |
+| FR-MSR-021 elderly-fit new flows | C4 (voice-reachable), C5 (capture alternative + spoken line), C8 (44/18, one idea per utterance), C13 |
+| FR-MSR-022 persistence before alarm + re-arm | C7.2/7.6, IF-12/15, §6.1 |
+| NFR-MSR-001 LLM independence | C3/C4 pure Swift; no new engine symbol |
+| NFR-MSR-002 PII-free observability + release gate | §5.2/§5.3 |
+| NFR-MSR-003 on-device processing | C5, C9, §6.2 |
+| NFR-MSR-004 localisation + SpokenTime | C13, C1 (spoken-form display exception), C4 (no clock literals in copy) |
+| NFR-MSR-005 accessibility | C1/C8 control shapes, C13 |
+| NFR-MSR-006 migration, no loss, no inference | C6 (decode + trap), §4.1, C8 (conversion is family-directed) |
+| NFR-MSR-007 Devanagari pin | C3 (Character-cluster containment), Overview (Invariants) |
+| NFR-MSR-008 test coverage + confidence | named test obligations (m-4 walk in C4), C6 (trap), C10 (stub flip), C9 (table) |
+| NFR-MSR-009 compliance/release gates | §5.3 (gate coverage) |
+| NFR-MSR-010 firing latency | §6.1 |
+
+Every locked requirement is bound at L2 without new scope.
+
+## Risks and Residual Opens
+
+1. **Multi-row save = N entries (D1).** Preserves twice-daily scheduling and L1's conversion
+   wording, but the family list shows one row per dose. Review-l2 should confirm a row is a
+   dose is an entry; the alternative (a multi-slot entry) contradicts the frozen singular
+   `slot` field.
+2. **Significant-event one-offs in the shared calendar.** Keyed, gated and honest; the family
+   may curate (delete) them in Google and the app will not re-assert (write-once, no
+   tombstone) — recorded. A future inbound reconcile could make this richer; out of scope.
+3. **`withScheduleTimes` trap.** The highest-risk silent defect; the migration test is the
+   named mitigation (C6) and must ride into plan-tasks as its own unit obligation.
+4. **Honest push stub flips existing tests.** Expected (review-l1 risk 4); the notifier suite
+   and every test that asserted stub success must flip with the honest outcome.
+5. **Walk-answer interception ordering.** The walk block must precede the generic yes/no arms
+   while never swallowing a denial (the fall-through relies on `isAwaitingConfirmation`
+   flipping false when the walk ends). A router test pins: "होइन" inside a walk does not reach
+   the challenge handler; an acknowledgement inside a walk restarts resolution.
+6. **Evidence hold across process death.** In-memory by design; a photo held but not attached
+   is lost honestly (never claimed attached). Recorded, accepted.
+7. **Copy finalisation.** The M-1 strings and the walk/evidence lines need the owner's voice
+   pass at implementation (facts pinned here); catalog coverage test gates both locales.
+8. **Residual opens for plan-tasks/implement:** wave decomposition; exact copy wording;
+   test-file names; the `v: 1` payload key's inventory note for the E2E plan; whether
+   `MedicationSchedulerProtocol` gains the new seams for test doubles (currently the concrete
+   scheduler; the protocol stays the small shipped test seam unless a suite needs it).
+   Nothing above reopens an L1 contract.
