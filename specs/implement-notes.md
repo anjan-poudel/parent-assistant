@@ -22,7 +22,7 @@ description: Implementation notes for the medication-schedules-reminders impleme
 | W6 | T-021 | code + typecheck only (speed directive) | GREEN — combined-tree module emit 0 errors; 3 suites typechecked; probes exit 1 at injected lines |
 | W6.5 | T-023 | 7 classes — 139 tests (2026-10-15) | PASS — 139/139, 0 failures; xcresult result Passed |
 | W6.6 | T-024 | 3 classes — 72 tests (2026-10-15) | PASS — 72/72, 0 failures; xcresult result Passed |
-| W7 | T-022 | full suite vs documented baseline (the tail's single test gate) | pending |
+| W7 | T-022 | full suite vs documented baseline (the tail's single test gate) | GREEN (feature scope) — 7,746 executed / 7,708 passed / 28 failed / 10 skipped; every one of the 28 classified non-feature (4 documented baseline, 19 pre-existing on byte-identical code, 5 UI pre-existing-at-base); all 24 medication suites green; guards green ×3 |
 
 > **Speed directive (owner, mid-run 2026-10-15):** W5 and W6 are code + typecheck
 > only — their consolidated scoped passes are skipped, and per-unit
@@ -290,6 +290,47 @@ description: Implementation notes for the medication-schedules-reminders impleme
   after-food default for label-derived rows; the recorded pass covers its
   new pins. (5) NO `SettingsView` changes and NO new strings: the L10n pins
   were not re-measured (unchanged from the W6.5 close).
+- W7/T-022 recorded deviations + judgment calls (all disclosed): (1) the
+  tail's single test gate ran as a raw xcodebuild mirror of build.sh's
+  full-run flags (project xcodegen-regenerated first; guards green) WITH
+  `-test-timeouts-enabled YES -default-test-execution-time-allowance 2400`
+  added after two earlier attempts wedged 25+ minutes inside
+  `ASWebSpotifyAuthSessionTests.testAStartRefusalWithNoReportedReasonCodeCarriesTheUnreportedCode`
+  — root-caused to the 2026-10-14 iOS-27 browser-fallback workaround in
+  `ASWebSpotifyAuthSession.authorize(url:)` (a start refusal now falls through
+  to a real browser session; the pin expects the old throw; race-y — the test
+  PASSED on the third attempt under the guard). The guard converts any hang
+  into a recorded timeout failure and skips nothing; no scoping, ordering or
+  selection changed otherwise. Attempt logs: /tmp/msr-w7-gate.log,
+  /tmp/msr-w7-gate2.log (killed), /tmp/msr-w7-gate3.log (the gate). (2) TG-01
+  shared-sim hazard: the gate ran pinned to the private simulator MSR-Gate-UI
+  (B88FE9D2-…) after the first attempt collided with another worktree's
+  install on the shared default; bundle provenance re-checked (installed
+  bundle contains this feature's own new classes) before the run counted.
+  (3) `IOS_TEST_DESTINATION` in build.sh expects the FULL destination string;
+  a bare UDID exits 64 — operational note only. (4) The failure-classification
+  serial pass (`build.sh test:unit <16 classes>` — the wave's diagnostic
+  instrument, not a gate) proves four gate-3 failures are parallel-clone/load
+  artifacts: FrameAnchorEstimatorTests, LiveCameraCaptureGuaranteeTests,
+  QueryEndToEndRegressionTests, PointAskAutoAnalyzeOnAnchorTests — all green
+  serially. (5) Two non-owned pins updated with W7's own change (declared
+  additive pattern, coordinator-approved): LiveTranslateAllowListTests (+3
+  declared keys) and DialogueLogAndEgressTests (87→90); the allow-list
+  suite's residual failure is the three pre-existing [CORRECTION-REVIVE]
+  keys and is red on master identically (see verification). (6)
+  `check-release-log-safety.py` gained a 92-line precision fix (the
+  exactly-40 maximal-run rule + the medication FEATURE_ROOTS/EVENT_TYPES +
+  the `Texts?` pattern precision fix) inside W7's scope. (7) UI ×5: all five
+  UI failures are pre-existing at the branch base and state-sensitive, none
+  feature-caused — four (NepaliTalk :188, midnight :268, StartsListening,
+  ReturnsToIdle :389) fail byte-identically on the BASE worktree at the
+  branch point (fresh private sim, serial scoped), and the fifth (sky, the
+  same :268 assertion) failed on a BASE re-run with the identical
+  6.999999999999943 after passing once at base in the voice-unavailable
+  caption state (both outcomes on identical base code). The branch touches
+  no home-stage file (HomeView/HomeSubviews/HomePresentationState: zero
+  commits after the branch point). Full geometry and evidence in the W7
+  verification block.
 
 ## Verification
 
@@ -702,3 +743,96 @@ description: Implementation notes for the medication-schedules-reminders impleme
   line simply shifted as T-016's 9 tests were appended). T-018's
   spec-mandated surface test name is 42 characters — boundary-broken, it does
   not match the exactly-40 pattern; the name stays as spec-mandated.
+
+- **W7 (T-022 — the tail's single full-suite gate; owner-confirmed option 1:
+  full suite, no narrowing, no skip; warm test DerivedData, no test-clean;
+  parallel testing per build.sh default):**
+  - Command (raw mirror of `build.sh` full mode; project xcodegen-regenerated
+    first, release-log-safety + prompt-mirror guards green):
+    `xcodebuild test -project seniOS.xcodeproj -scheme ElderlyAssistant
+    -destination "platform=iOS Simulator,id=B88FE9D2-…"
+    -derivedDataPath build/DerivedDataTests -parallel-testing-enabled YES
+    -test-timeouts-enabled YES -default-test-execution-time-allowance 2400`.
+    The timeouts were added after two earlier attempts wedged 25+ minutes in
+    `ASWebSpotifyAuthSessionTests` (the 2026-10-14 iOS-27 browser-fallback
+    workaround races the old throw-pin; it PASSED under the guard) — the guard
+    converts hangs into recorded timeout failures and skips nothing.
+  - **Authoritative result: 7,746 tests / 7,708 passed / 28 failed / 10
+    skipped** — xcresult `Test-ElderlyAssistant-2026.10.16_03-29-06-+1100.xcresult`,
+    result "Failed".
+  - **All 24 medication suites green** (CommandRouterMedicationWalk,
+    LogSanitiser, MedicationAckClarification, MedicationAckResolver,
+    MedicationEditorDraft, MedicationEditorSurface, MedicationEntryMigration,
+    MedicationEntryVisualAid, MedicationEvidenceCapture, MedicationEvidenceStore,
+    MedicationLLMIndependence, MedicationLabelOCR, MedicationLabelScanner,
+    MedicationManageList, MedicationPurposeLookup, MedicationPurpose,
+    MedicationSavePlumbing, MedicationScheduler, MedicationSchedulesIntegration,
+    MedicationSlotClockSettings, MedicationSlotClock, MedicationVisualAidFireHandler,
+    MedicationVisualAidPresentation, ScannedSchedule).
+  - **Every one of the 28 failures classified non-feature:**
+    - **[Documented pre-existing baseline] 4:** InterpreterAvailabilityTests
+      ×2 + MultipartDownloadTests ×1 (both suites in the documented 11-suite
+      baseline, same assertions/same model-name drift), SpotifyLocalizationTests
+      ×1 (carry-forward pin: 1,482 vs 1,381 — red at the branch base, untouched
+      by this feature).
+    - **[Pre-existing mainline red — byte-identical to master] 19:**
+      SpotifyAccountSessionTests ×2 (the 2026-10-14 iOS-27 workaround drift:
+      `presentationFailed(7)` vs `presentationFailed`; test + both session
+      files verified identical to master); LiveTranslateAllowListTests ×1 (the
+      `added`-set difference is exactly the three [CORRECTION-REVIVE] keys —
+      `LogSanitiser.swift`'s whole delta vs master is this feature's three
+      additive keys, verified present on BOTH sides of the pin; red on master
+      identically); FamilyWizardPhotoSaveTests ×2 (every pinned marker
+      re-verified absent on both sides: `nicknameRow(_ entry: NicknameDraftEntry)`
+      at SettingsView :3502 in both, `nicknames: nicknames,` 0 occurrences in
+      both, the test file itself byte-identical); DialogueCacheBypassTests ×1
+      (the interception span is byte-equal on both sides and both contain
+      `pendingTranscript` — the only CommandRouter delta vs master is the
+      unrelated 2026-10-15 Spotify search-handoff fix); CloudChatResponderTests
+      ×1 (test file + `CloudChatResponder.swift` + `GeminiClient+Translate.swift`
+      byte-identical); LiveTranslateSessionModelTests ×5 (the :193
+      delivered-frame timeout mode), LiveTranslateEmptyOverlayTests ×1,
+      LiveTranslatePluginTests ×1, LiveTranslationPipelineTests ×1 — all four
+      files (and the whole `Services/LiveTranslate` tree they exercise)
+      byte-identical to master.
+    - **[Gate-3 parallel-clone/load artifacts — green in the serial re-run] 4:**
+      FrameAnchorEstimatorTests, LiveCameraCaptureGuaranteeTests,
+      QueryEndToEndRegressionTests, PointAskAutoAnalyzeOnAnchorTests.
+    - **[UI] 5 (ElderlyAssistantUITests) — pre-existing at the branch base
+      (state-sensitive), not feature-caused:** testHomeShowsNepaliTalkButton
+      (:188 "Idle status should be Nepali"), testHomeSpeechLayoutInDarkSkin
+      (:268), testTalkButtonStartsListening, and
+      testTalkButtonReturnsToIdleAfterListening (:389) fail byte-identically
+      on the BASE worktree at the branch point (private sim, serial scoped:
+      /tmp/msr-base-run.log, bundle Test-ElderlyAssistant-2026.10.16_04-26-50-+1100.xcresult).
+      The fifth — testHomeKeepsConfiguredAppsAndActionRowsVisible (the same
+      :268 assertion) — PASSED on the first base run (voice-unavailable state:
+      error caption "आवाज अहिले उपलब्ध छैन।" + retry button fill the sub-hero
+      slot above the carousel, holding home.hint.prompt clear of the 24pt
+      floor; passing-state screenshot 7204F641-0A58-40C3-A80A-C649D0102817.png)
+      then FAILED on the base re-run with the identical 6.999999999999943
+      (bundle Test-ElderlyAssistant-2026.10.16_04-55-19-+1100.xcresult under
+      /tmp/msr-base-check, log /tmp/msr-base-sky-rerun.log) — both outcomes on
+      identical base code. Failing geometry (branch hierarchy dump
+      48D62987-0E84-4C1D-91BE-64FC83D443A3.txt): healthy idle, no status
+      caption — home.talk a11y frame maxY 455.0, home.hint.prompt minY 462.0 →
+      7.0 < 24; the hero↔slot gap is a constant 16pt and the talk a11y frame
+      overhangs its layout frame, so the assertion can only pass while the
+      caption/retry chain occupies the slot (a voice-pipeline-boot state,
+      environmental). The branch changes no home-stage file (HomeView/
+      HomeSubviews/HomePresentationState: zero commits after the branch
+      point; the feature's App/ surface is the medication leaves + Settings/
+      Coordinator wiring). Master's not-on-branch medium-display series
+      (e3d624db…8c81de02) independently reworks this geometry; post-merge UI
+      behavior re-verifies there.
+  - **Serial classification pass (diagnostic instrument):** `build.sh
+    test:unit <the 16 suspect classes>` (serial, private sim, warm DD):
+    374 executed / 18 failed test cases / 1 skipped. The four artifacts above
+    green serially; LiveTranslateSessionModelTests re-failed with a DIFFERENT
+    case set (4 of 46 vs 5 of 46 in the gate) — unstable on identical code,
+    pre-existing; everything else failed identically in both runs
+    (deterministic, same messages).
+  - **Claim-audit:** no failure in any run traces to a W0–W7 file; every
+    family carries byte-identity-to-master, base-run, or documented-baseline
+    evidence; the feature's suites (24 medication + the two new W7 suites)
+    passed in every run.
