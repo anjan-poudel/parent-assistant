@@ -108,6 +108,12 @@ final class MockFamilyNotifier: FamilyNotifierProtocol {
     /// (missed dose, double dose) must keep riding the context-free
     /// form, and this is how a test proves the split.
     private(set) var contextFreeCallCount = 0
+    /// The alert type of each context-carrying call, PARALLEL to
+    /// `contexts` (T-016): the significant-event drives push several
+    /// kinds through one mock instance, and the assertion has to know
+    /// which kind each context belonged to. Additive — the shipped
+    /// assertions above are untouched.
+    private(set) var contextAlertTypes: [FamilyAlertType] = []
     /// Fired on EVERY notify, from whatever executor the production
     /// `Task` landed on — the schedulers notify asynchronously, so the
     /// only deterministic way to assert on it is to wait for the signal
@@ -128,6 +134,7 @@ final class MockFamilyNotifier: FamilyNotifierProtocol {
         lastAlertType = alertType
         if let context {
             contexts.append(context)
+            contextAlertTypes.append(alertType)
         } else {
             contextFreeCallCount += 1
         }
@@ -1148,6 +1155,405 @@ final class MedicationSchedulerTests: XCTestCase {
         XCTAssertEqual(observedAtCommit?.first?.scheduleTimes.first?.minute, 30)
         XCTAssertEqual(order.last, "arm",
                        "the observer is told after the local work is fully committed")
+    }
+
+    // MARK: - Significant-event triggers + retime refusal (T-016, C7.3-C7.5)
+
+    /// FR-MSR-015's intake half: when the write succeeded, the alert
+    /// follows it — the record is already in the store at notify time,
+    /// and the context carries the entry-id hash and the in-memory title.
+    /// The drive runs with the first-fire toggle OFF (the default): the
+    /// significant set is unconditional, so its alerts must not depend on
+    /// that opt-in.
+    func testIntakeRecordedAfterWrite() async {
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        scheduler.loadSchedule(entries: [entry])
+        guard let reminderId = scheduler.pendingReminders.first?.id else {
+            return XCTFail("expected a pending reminder")
+        }
+        scheduler.triggerReminder(for: reminderId)
+        XCTAssertFalse(caregiverNotifySettings.medicationReminders, "defaults are OFF, and this alert ignores the toggle")
+
+        let storage = mockStorage!
+        var logAtNotify: [MedicationAdherenceLog]?
+        let notified = expectation(description: "intake recorded alert")
+        mockFamilyNotifier.onNotify = {
+            if logAtNotify == nil,
+               case .success(let logs) = storage.read(key: "medication.adherence_log",
+                                                      type: [MedicationAdherenceLog].self) {
+                logAtNotify = logs
+            }
+            notified.fulfill()
+        }
+
+        let result = scheduler.acknowledge(entryId: entry.id, at: Date())
+        if case .failure = result {
+            return XCTFail("the acknowledgement must record")
+        }
+        await fulfillment(of: [notified], timeout: 2)
+
+        // The record the alert announced was already written, and it is
+        // the acknowledged one for this entry.
+        let recorded = logAtNotify?.filter { $0.medicationEntryId == entry.id }
+        XCTAssertEqual(recorded?.count, 1)
+        XCTAssertEqual(recorded?.first?.status, .acknowledged)
+
+        // The alert is the intakeRecorded significant event, with the
+        // hash-only context — and its fireAt is the SAME instant the
+        // record stamps: the dose occurrence, not the ack moment.
+        XCTAssertEqual(mockFamilyNotifier.lastAlertType, .intakeRecorded)
+        XCTAssertEqual(mockFamilyNotifier.contextAlertTypes, [.intakeRecorded])
+        let context = mockFamilyNotifier.contexts.first
+        XCTAssertEqual(context?.kind, .medicationReminder)
+        XCTAssertEqual(context?.eventIdHash, IdHashing.shortHash(of: entry.id))
+        XCTAssertEqual(context?.eventTitle, "Amlodipine",
+                       "the title is the medication name the elder knows")
+        XCTAssertEqual(context?.fireAt, recorded?.first?.scheduledAt)
+    }
+
+    /// The other half of the shipped order: a FAILED adherence write
+    /// records nothing, so nothing may be announced — and the typed
+    /// failure still comes back to the caller.
+    func testIntakeRecordedAbsentOnFailure() async {
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        scheduler.loadSchedule(entries: [entry])
+        guard let reminderId = scheduler.pendingReminders.first?.id else {
+            return XCTFail("expected a pending reminder")
+        }
+        scheduler.triggerReminder(for: reminderId)
+
+        mockStorage.failingWriteKeys = ["medication.adherence_log"]
+        let noAlert = expectation(description: "no intake alert")
+        noAlert.isInverted = true
+        mockFamilyNotifier.onNotify = { noAlert.fulfill() }
+
+        let result = scheduler.acknowledge(entryId: entry.id, at: Date())
+        guard case .failure = result else {
+            return XCTFail("a failed adherence write must be a typed failure")
+        }
+        await fulfillment(of: [noAlert], timeout: 0.3)
+
+        XCTAssertEqual(mockFamilyNotifier.notifyCallCount, 0,
+                       "a dose is never announced as recorded when the record did not land")
+        XCTAssertTrue(mockFamilyNotifier.contexts.isEmpty)
+        XCTAssertFalse(mockObservability.emittedEvents.contains { $0.eventType == "acknowledged" },
+                       "the shipped acknowledgement event follows the write too")
+    }
+
+    /// D10: the first re-fire decision (0 -> 1) is the escalationStarted
+    /// event; every later decision for the same reminder is silent —
+    /// the count is the state, and no per-event flag is stored.
+    func testEscalationStartedAtFirstRefireOnly() async {
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        scheduler.loadSchedule(entries: [entry])
+        guard let reminderId = scheduler.pendingReminders.first?.id else {
+            return XCTFail("expected a pending reminder")
+        }
+        var raisedKinds: [SignificantMedicationEvent.Kind] = []
+        scheduler.onSignificantEvent = { event, _ in raisedKinds.append(event.kind) }
+
+        let notified = expectation(description: "escalation started alert")
+        mockFamilyNotifier.onNotify = { notified.fulfill() }
+
+        // Decision 1: the ack window expired — refireCount 0 -> 1.
+        scheduler.triggerReminder(for: reminderId)
+        scheduler.handleAckDeadlineExpired(for: reminderId)
+        await fulfillment(of: [notified], timeout: 2)
+        XCTAssertEqual(scheduler.pendingReminders.first?.refireCount, 1)
+
+        // A later re-fire (the alarm nagging on) must not announce again.
+        mockFamilyNotifier.onNotify = nil
+        scheduler.triggerReminder(for: reminderId)
+        scheduler.handleAckDeadlineExpired(for: reminderId)
+
+        XCTAssertEqual(scheduler.pendingReminders.first?.refireCount, 2,
+                       "the later decision really happened — and stayed silent")
+        XCTAssertEqual(mockFamilyNotifier.contextAlertTypes, [.escalationStarted])
+        XCTAssertEqual(mockFamilyNotifier.lastAlertType, .escalationStarted)
+        XCTAssertEqual(raisedKinds, [.escalationStarted])
+    }
+
+    /// The missed-dose site now carries its context: the entry-id hash,
+    /// the name in memory, and the missed occurrence as `fireAt`. Driven
+    /// through the shipped recovery path (a fired reminder whose
+    /// escalation window is already over is recorded as missed).
+    func testMissedDoseCarriesContext() async {
+        let entry = makeMedicationEntry(name: "Metformin", timeHour: 8, timeMinute: 0)
+        let scheduledAt = Date().addingTimeInterval(-2 * 60 * 60)
+        let reminder = ScheduledReminder(
+            id: UUID(),
+            medicationEntryId: entry.id,
+            scheduledAt: scheduledAt,
+            refireCount: 2,
+            escalationDeadline: scheduledAt.addingTimeInterval(60 * 60),
+            state: .fired,
+            lastFiredAt: scheduledAt,
+            acknowledgedAt: nil
+        )
+        _ = mockStorage.write(key: "medication.pending_reminders",
+                              value: [reminder.id.uuidString: reminder])
+        _ = mockStorage.write(key: "medication.entries", value: [entry])
+
+        let notified = expectation(description: "missed dose alert")
+        mockFamilyNotifier.onNotify = { notified.fulfill() }
+
+        scheduler.scheduleAll()
+        await fulfillment(of: [notified], timeout: 2)
+
+        XCTAssertEqual(mockFamilyNotifier.lastAlertType, .missedMedication)
+        XCTAssertEqual(mockFamilyNotifier.contextAlertTypes, [.missedMedication])
+        let context = mockFamilyNotifier.contexts.first
+        XCTAssertEqual(context?.kind, .medicationReminder)
+        XCTAssertEqual(context?.eventIdHash, IdHashing.shortHash(of: entry.id))
+        XCTAssertEqual(context?.eventTitle, "Metformin")
+        XCTAssertEqual(context?.fireAt, scheduledAt,
+                       "the context's fireAt is the dose occurrence the miss is about")
+    }
+
+    /// The blocked double-dose branch carries its context too — the
+    /// attempt instant is the event, matching the blocked record the
+    /// branch itself stamps.
+    func testBlockedDoubleDoseCarriesContext() async {
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        scheduler.loadSchedule(entries: [entry])
+        var raisedEvents: [SignificantMedicationEvent] = []
+        scheduler.onSignificantEvent = { event, _ in raisedEvents.append(event) }
+
+        // First dose recorded — the drive's own notify (intakeRecorded)
+        // is awaited so the assertions below see the blocked alert alone.
+        let firstAlert = expectation(description: "first dose alert")
+        mockFamilyNotifier.onNotify = { firstAlert.fulfill() }
+        let firstAt = Date()
+        _ = scheduler.acknowledgeWithConfirmation(entryId: entry.id, at: firstAt,
+                                                  confirmationResponse: .yes)
+        await fulfillment(of: [firstAlert], timeout: 2)
+        XCTAssertEqual(mockFamilyNotifier.lastAlertType, .intakeRecorded)
+
+        // The second attempt inside the 4-hour window is blocked.
+        let attemptAt = firstAt.addingTimeInterval(60)
+        let blockedAlert = expectation(description: "double dose alert")
+        mockFamilyNotifier.onNotify = { blockedAlert.fulfill() }
+        _ = scheduler.acknowledgeWithConfirmation(entryId: entry.id, at: attemptAt,
+                                                  confirmationResponse: .yes)
+        await fulfillment(of: [blockedAlert], timeout: 2)
+
+        XCTAssertTrue(mockObservability.emittedEvents.contains {
+            $0.eventType == "double_dose_blocked"
+        }, "the drive really hit the blocked branch")
+        XCTAssertEqual(mockFamilyNotifier.contextAlertTypes,
+                       [.intakeRecorded, .possibleDoubleDose])
+        let context = mockFamilyNotifier.contexts.last
+        XCTAssertEqual(context?.kind, .medicationReminder)
+        XCTAssertEqual(context?.eventIdHash, IdHashing.shortHash(of: entry.id))
+        XCTAssertEqual(context?.eventTitle, "Amlodipine")
+        XCTAssertEqual(context?.fireAt, attemptAt, "the event is the attempt")
+        XCTAssertEqual(raisedEvents.map(\.kind), [.possibleDoubleDose])
+        XCTAssertEqual(raisedEvents.first?.occurredAt, attemptAt)
+    }
+
+    /// IF-20's trigger sites, one drive each, through one hook: the
+    /// missed dose, the blocked double dose and the first re-fire
+    /// decision all raise — once each, with the entry the event is
+    /// about. `intakeRecorded` deliberately raises nothing here.
+    func testOnSignificantEventInvokedAtAllThreeAtRiskSites() {
+        var raisedKinds: [SignificantMedicationEvent.Kind] = []
+        var raisedEntryIds: [UUID?] = []
+        let collector: (SignificantMedicationEvent, MedicationEntry?) -> Void = { event, entry in
+            raisedKinds.append(event.kind)
+            raisedEntryIds.append(entry?.id)
+        }
+        scheduler.onSignificantEvent = collector
+
+        // Site 1 — the missed dose (the recovery drive above).
+        let missedEntry = makeMedicationEntry(name: "Metformin", timeHour: 8, timeMinute: 0)
+        let missedAt = Date().addingTimeInterval(-2 * 60 * 60)
+        let staleReminder = ScheduledReminder(
+            id: UUID(),
+            medicationEntryId: missedEntry.id,
+            scheduledAt: missedAt,
+            refireCount: 1,
+            escalationDeadline: missedAt.addingTimeInterval(60 * 60),
+            state: .fired,
+            lastFiredAt: missedAt,
+            acknowledgedAt: nil
+        )
+        _ = mockStorage.write(key: "medication.pending_reminders",
+                              value: [staleReminder.id.uuidString: staleReminder])
+        _ = mockStorage.write(key: "medication.entries", value: [missedEntry])
+        scheduler.scheduleAll()
+
+        // Site 2 — the blocked double dose (record once, then again
+        // inside the window).
+        let doubledEntry = makeMedicationEntry(name: "Amlodipine", timeHour: 9, timeMinute: 0)
+        scheduler.loadSchedule(entries: [doubledEntry])
+        _ = scheduler.acknowledgeWithConfirmation(entryId: doubledEntry.id, at: Date(),
+                                                  confirmationResponse: .yes)
+        _ = scheduler.acknowledgeWithConfirmation(entryId: doubledEntry.id,
+                                                  at: Date().addingTimeInterval(60),
+                                                  confirmationResponse: .yes)
+
+        // Site 3 — the first re-fire decision.
+        let escalatedEntry = makeMedicationEntry(name: "Lisinopril", timeHour: 10, timeMinute: 0)
+        scheduler.loadSchedule(entries: [escalatedEntry])
+        guard let escalatedReminder = scheduler.pendingReminders.first?.id else {
+            return XCTFail("expected a pending reminder for the escalation drive")
+        }
+        scheduler.triggerReminder(for: escalatedReminder)
+        scheduler.handleAckDeadlineExpired(for: escalatedReminder)
+
+        XCTAssertEqual(raisedKinds,
+                       [.missedMedication, .possibleDoubleDose, .escalationStarted],
+                       "each at-risk site raises once, in drive order — and intake raises nothing")
+        XCTAssertEqual(raisedEntryIds,
+                       [missedEntry.id, doubledEntry.id, escalatedEntry.id],
+                       "each event carries the entry it is about")
+    }
+
+    /// The guard on the shipped first-fire gate: the opt-in still
+    /// governs the delivery-day `eventReminder` alert ONLY — toggle off
+    /// is silent, toggle on sends exactly the shipped context (the
+    /// REMINDER-id hash), and nothing about the significant set leaks
+    /// into or out of this gate.
+    func testFirstFireNotificationGateStaysOptIn() async {
+        let gated = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        let optedIn = makeMedicationEntry(name: "Metformin", timeHour: 9, timeMinute: 0)
+        scheduler.loadSchedule(entries: [gated, optedIn])
+        XCTAssertFalse(caregiverNotifySettings.medicationReminders, "defaults are OFF")
+        guard let gatedReminder = scheduler.pendingReminders.first(where: { $0.medicationEntryId == gated.id }),
+              let optedInReminder = scheduler.pendingReminders.first(where: { $0.medicationEntryId == optedIn.id }) else {
+            return XCTFail("both doses must be armed")
+        }
+
+        // Toggle OFF household: the first fire tells nobody.
+        let silent = expectation(description: "no first-fire alert")
+        silent.isInverted = true
+        mockFamilyNotifier.onNotify = { silent.fulfill() }
+        scheduler.triggerReminder(for: gatedReminder.id)
+        await fulfillment(of: [silent], timeout: 0.3)
+        XCTAssertTrue(mockObservability.emittedEvents.contains {
+            $0.eventType == "caregiver_event_skipped"
+        }, "the OFF household's first fire was skipped, as shipped")
+
+        // Toggle ON: exactly the shipped event alert — the reminder-id
+        // hash, the one context, one call.
+        caregiverNotifySettings.medicationReminders = true
+        let alerted = expectation(description: "first-fire alert")
+        mockFamilyNotifier.onNotify = { alerted.fulfill() }
+        scheduler.triggerReminder(for: optedInReminder.id)
+        await fulfillment(of: [alerted], timeout: 2)
+
+        XCTAssertEqual(mockFamilyNotifier.notifyCallCount, 1,
+                       "the gate is still opt-in — one alert, from the opted-in fire alone")
+        XCTAssertEqual(mockFamilyNotifier.lastAlertType, .eventReminder,
+                       "the first-fire alert still rides the shipped eventReminder type")
+        XCTAssertEqual(mockFamilyNotifier.contexts.count, 1)
+        XCTAssertEqual(mockFamilyNotifier.contexts.first?.kind, .medicationReminder)
+        XCTAssertEqual(mockFamilyNotifier.contexts.first?.eventIdHash,
+                       IdHashing.shortHash(of: optedInReminder.id),
+                       "the shipped first-fire hash — the REMINDER id, not the entry id")
+    }
+
+    /// m-5's refusal, whole: no change applied (mirror, armed set, store
+    /// and observer all untouched), the named PII-free event with the
+    /// hash and the slot and nothing else, and the settings-note hook.
+    func testRetimeRefusedForSlotEntry() {
+        installMapping(MedicationSlotClock.default, into: mockStorage)
+        let entry = makeSlotEntry(slot: .morning, mirrorHour: 8, mirrorMinute: 0)
+        scheduler.loadSchedule(entries: [entry])
+
+        var refused: [UUID] = []
+        scheduler.onSlotEntryRetimeRefused = { refused.append($0) }
+        var observed: [[MedicationEntry]] = []
+        scheduler.onScheduleChanged = { observed.append($0) }
+        let writesBefore = mockStorage.writeCallCount
+        let armsBefore = mockAlarm.scheduleCallCount
+        let reminderIdsBefore = Set(scheduler.pendingReminders.map(\.id))
+
+        var newTimes = DateComponents()
+        newTimes.hour = 7
+        newTimes.minute = 0
+        let applied = scheduler.setScheduleTimes([newTimes], entryId: entry.id)
+
+        XCTAssertFalse(applied, "a slot entry's retime is refused")
+        XCTAssertEqual(refused, [entry.id], "the settings-note hook fires with the entry id")
+
+        // The named PII-free event: hash + slot ONLY (NFR-MSR-002).
+        let refusals = mockObservability.emittedEvents.filter {
+            $0.eventType == "medication_retime_refused"
+        }
+        XCTAssertEqual(refusals.count, 1)
+        XCTAssertEqual(refusals.first?.metadata, [
+            "entry_id_hash": IdHashing.shortHash(of: entry.id),
+            "slot": "morning"
+        ], "the metadata carries the entry id hash and the slot and nothing else")
+        XCTAssertEqual(refusals.first?.outcome, "info")
+        XCTAssertEqual(refusals.first?.component, "medication_scheduler")
+
+        // No change was applied — not to the mirror, the armed set, the
+        // store, the alarms, or the share observer.
+        XCTAssertEqual(scheduler.medicationEntry(for: entry.id)?.scheduleTimes.first?.hour, 8)
+        XCTAssertEqual(scheduler.medicationEntry(for: entry.id)?.scheduleTimes.first?.minute, 0)
+        XCTAssertEqual(Set(scheduler.pendingReminders.map(\.id)), reminderIdsBefore)
+        XCTAssertEqual(mockStorage.writeCallCount, writesBefore, "a refusal never writes")
+        XCTAssertEqual(mockAlarm.scheduleCallCount, armsBefore, "and never re-arms")
+        XCTAssertTrue(mockAlarm.cancelledReminders.isEmpty)
+        XCTAssertTrue(observed.isEmpty)
+        for event in mockObservability.emittedEvents {
+            for value in event.metadata.values {
+                XCTAssertFalse(value.lowercased().contains("amlodipine"),
+                               "no medication name may reach metadata: \(value)")
+            }
+        }
+    }
+
+    /// The legacy path is untouched: a legacy entry's retime applies as
+    /// shipped — entry, mirror and armed reminder all follow the new
+    /// time, and nothing is refused.
+    func testRetimeStillAppliesForLegacyEntry() {
+        let entry = makeMedicationEntry(name: "Metformin", timeHour: 10, timeMinute: 30)
+        scheduler.loadSchedule(entries: [entry])
+        guard let initialReminder = scheduler.pendingReminders.first else {
+            return XCTFail("the legacy dose must be armed before the retime")
+        }
+
+        var refused: [UUID] = []
+        scheduler.onSlotEntryRetimeRefused = { refused.append($0) }
+        var observed: [[MedicationEntry]] = []
+        scheduler.onScheduleChanged = { observed.append($0) }
+
+        var newTimes = DateComponents()
+        newTimes.hour = 7
+        newTimes.minute = 15
+        let applied = scheduler.setScheduleTimes([newTimes], entryId: entry.id)
+
+        XCTAssertTrue(applied, "a legacy entry keeps the shipped behavior")
+        XCTAssertTrue(refused.isEmpty, "nothing was refused")
+        XCTAssertFalse(mockObservability.emittedEvents.contains {
+            $0.eventType == "medication_retime_refused"
+        })
+
+        XCTAssertEqual(scheduler.medicationEntry(for: entry.id)?.scheduleTimes.first?.hour, 7)
+        XCTAssertEqual(scheduler.medicationEntry(for: entry.id)?.scheduleTimes.first?.minute, 15)
+        if case .success(let stored) = mockStorage.read(key: "medication.entries",
+                                                        type: [MedicationEntry].self) {
+            XCTAssertEqual(stored.first?.scheduleTimes.first?.hour, 7,
+                           "the retimed entry is persisted")
+            XCTAssertEqual(stored.first?.scheduleTimes.first?.minute, 15)
+        } else {
+            XCTFail("the retimed entry must be persisted")
+        }
+
+        // The shipped reload semantics: the old reminder is replaced by a
+        // newly armed one at the new time, and the share layer is told.
+        guard let rearmed = scheduler.pendingReminders.first else {
+            return XCTFail("the retimed entry must have a pending reminder again")
+        }
+        XCTAssertNotEqual(rearmed.id, initialReminder.id)
+        XCTAssertEqual(Calendar.current.component(.hour, from: rearmed.scheduledAt), 7)
+        XCTAssertEqual(Calendar.current.component(.minute, from: rearmed.scheduledAt), 15)
+        XCTAssertEqual(mockAlarm.scheduledReminders[rearmed.id], rearmed.scheduledAt)
+        XCTAssertEqual(observed.count, 1)
+        XCTAssertEqual(observed.first?.first?.scheduleTimes.first?.hour, 7)
     }
 
     // MARK: - Helpers
