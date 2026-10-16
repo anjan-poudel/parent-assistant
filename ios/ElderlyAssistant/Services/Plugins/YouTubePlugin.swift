@@ -61,9 +61,23 @@ final class YouTubePlugin: AssistantPlugin {
     }
 
     func handle(_ command: PluginCommand, context: PluginExecutionContext) async -> PluginResult {
-        guard let query = command.entities["query"]?
+        guard let rawQuery = command.entities["query"]?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
-              !query.isEmpty else {
+              !rawQuery.isEmpty else {
+            context.observabilityBus.emit(Self.event("youtube_plugin_no_query", outcome: "failure"))
+            return .failed(spokenApology: L10n.str("youtube.unavailable",
+                                                   locale: context.locale))
+        }
+
+        // Device evidence 2026-10-11: the on-device STT (v6-q6) sometimes
+        // transcribes ROMANIZED Nepali, and the model then echoed it
+        // verbatim into the query entity — "maa nepali geet la" reached
+        // the search box with the particle मा and the verb लगाऊ intact.
+        // Run the model-filled query through the deterministic route's
+        // own extractor (lowercased first, exactly as `decide` does) so
+        // this path gets the same drop lists and normalization; when
+        // nothing survivable remains, keep the honest `.failed` line.
+        guard let query = YouTubeRoute.extractQuery(from: rawQuery.lowercased()) else {
             context.observabilityBus.emit(Self.event("youtube_plugin_no_query", outcome: "failure"))
             return .failed(spokenApology: L10n.str("youtube.unavailable",
                                                    locale: context.locale))
