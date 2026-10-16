@@ -42,7 +42,7 @@ Waves are the dependency-safe parallel groups, computed as longest-path layering
 | 6 | T-184 | The versioned, reversible catalog swap (promotion only behind green gates) |
 | 7 | T-186 | End-to-end acceptance, scoped sweep, the one full-suite run with the baseline named |
 | 8 | T-187 | The DV-1…DV-6 protocol and record (executed or BLOCKED) |
-| 9 | T-188, T-189, T-190, T-191 | The four owner-descopable P2 legs (each after the P1 swap is live and the DV protocol has run) — **DESCoped 2026-10-15** (amendment-6; each closed by an explicit owner-descope record) |
+| 9 | T-188, T-189, T-190, T-191 | The four owner-descopable P2 legs (each after the P1 swap is live and the DV protocol has run) — **DESCoped 2026-10-15** (amendment-6; each closed by an explicit owner-descope record). **T-190 re-opened by owner 2026-10-17 and executing in-run (amendment-7); T-188/T-189/T-191 remain descoped.** |
 | 10 | T-192 | The feasibility honesty statement for the sign-off package |
 
 Phase view: P0 = the runtime units (TG-34 ... TG-36) with the release gate T-185 (wave 4) and the runtime half of T-186 (wave 7); P1 = the training suite TG-37 (waves 1-6, ending in the gated swap at wave 6); P2 = the four P2 legs and the honesty statement (waves 9-10).
