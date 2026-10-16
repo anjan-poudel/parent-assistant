@@ -1599,16 +1599,14 @@ enum ModelCatalog {
         // class may hold it beside a warm STT) is `ModelBudgetPolicy`'s
         // and unchanged by this entry.
         //
-        // PUBLICATION PENDING: the release asset does not exist yet — the
-        // run is not promoted (see `chatVariantPromotionRecord` below;
-        // the chat judge has no funded API key and the latency gate is
-        // unmeasured until the Anzaan DV session). The downloadURL is
-        // therefore the RFC 2606 documentation placeholder: it never
-        // resolves and nothing can install from it. Only the URL is
-        // provisional — the digest is the REAL local artifact's identity,
-        // so the pin ships complete and the failure mode of an untimely
-        // tap is an honest failed download, never a silently wrong file.
-        // Replace the URL (and nothing else) when the asset publishes.
+        // PUBLISHED 2026-10-17: release v23 of the public models repo,
+        // titled "gates pending, test candidate" — the sha256 sidecar
+        // ships beside the asset. Publication is NOT promotion: the run
+        // remains unpromoted (see `chatVariantPromotionRecord` below —
+        // no gate report has landed and the latency gate is unmeasured
+        // until the Anzaan DV session), and the digest is the REAL
+        // artifact's identity, unchanged by publication. An untimely tap
+        // downloads the exact pinned bytes or fails honestly.
         ModelCatalogEntry(
             id: intentQwenS43ChatV17,
             kind: .llamaBase,
@@ -1620,7 +1618,7 @@ enum ModelCatalog {
             // (`isAutomaticPickEligible`). A green run edits the record,
             // not this row.
             filename: "intent-ne-qwen-s43-chat-v17-q4_k_m.gguf",
-            downloadURL: URL(string: "https://invalid.invalid/cnr-v17/intent-ne-qwen-s43-chat-v17-q4_k_m.gguf")!,
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v23/intent-ne-qwen-s43-chat-v17-q4_k_m.gguf")!,
             sizeBytes: 1_107_408_736,
             sha256: "e05cc8a266198336f508cef2f6d2a8887b3db1eee3f4a4159cdeb2ab3df59d71",
             // Same 3 GB floor as the seed-43 sibling: the floor is the

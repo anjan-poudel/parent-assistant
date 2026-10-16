@@ -63,15 +63,19 @@ final class ModelCatalogChatVariantTests: XCTestCase {
                        "e05cc8a266198336f508cef2f6d2a8887b3db1eee3f4a4159cdeb2ab3df59d71")
         XCTAssertEqual(entry.sha256.count, 64)
         XCTAssertNotEqual(entry.sha256, ModelCatalogEntry.pendingSHA256,
-                          "the digest IS pinned — only delivery is pending")
+                          "the digest IS pinned — never the placeholder")
         XCTAssertEqual(entry.minDeviceRAMBytes, 3_000_000_000)
         XCTAssertEqual(entry.languages, ["ne"])
         XCTAssertNil(entry.dependsOn)
-        // Publication pending: the release asset does not exist (the run is
-        // not promoted), so the URL is the RFC 2606 documentation
-        // placeholder — a tap fails honestly instead of installing a wrong
-        // file. The NAME quotes the gate state the same way.
-        XCTAssertEqual(entry.downloadURL.host, "invalid.invalid")
+        // Published 2026-10-17 as release v23 of the public models repo
+        // (labeled test candidate; the sha256 sidecar ships beside the
+        // asset). The run itself is still NOT promoted — the exact asset
+        // URL is pinned so publication and promotion stay
+        // distinguishable, and the NAME quotes the gate state the same
+        // way.
+        XCTAssertEqual(entry.downloadURL.absoluteString,
+                       "https://github.com/anjan-poudel/elderly-ai-assistant-models/"
+                       + "releases/download/v23/intent-ne-qwen-s43-chat-v17-q4_k_m.gguf")
         XCTAssertTrue(entry.displayName.contains("gates pending"),
                       "the row must quote the run's evidence posture: \(entry.displayName)")
     }
