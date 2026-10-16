@@ -1,0 +1,42 @@
+{
+  "schema": "cnr_chat_outputs_meta/v1",
+  "tag": "qwen-s43-chat-v17",
+  "generated_at": "2026-10-16T12:42:38.307217+00:00",
+  "fixture": {
+    "path": "eval/chat_golden.jsonl",
+    "sha256": "40bec05deb7f2cc57c38a2dab3130bd93fe4c007c45aabc9ec331864aa19da47",
+    "turns_used": 500
+  },
+  "model": {
+    "path": "models/intent-ne-qwen-s43-chat-v17-q4_k_m.gguf",
+    "sha256": "e05cc8a266198336f508cef2f6d2a8887b3db1eee3f4a4159cdeb2ab3df59d71"
+  },
+  "prompt": {
+    "template": "/mnt/nvme1/cnr-v17/repo/tools/train-intent/seeds/chat_prompt_template.txt",
+    "sha256": "abacefc60f559e8b0a901b6f7d6cc0a37d1805970a8654feedb432a1834a8721",
+    "language_hint": "ne",
+    "address_as_clause": "",
+    "context_turns_fed": false,
+    "context_note": "fixture `context` turns are NOT fed to the decode: IntentPrompt.buildChat has no history slot (it sends the single utterance); the app cannot send context and the model was not trained with it"
+  },
+  "extraction": "first complete JSON object carrying canonical string \"intent\" + non-empty string \"reply\" (stage-3 eval_golden contract)",
+  "decode": {
+    "grammar": "chatJSONSchema",
+    "fingerprint": "1a1b575f3a79f2cd",
+    "max_tokens": 256,
+    "temperature": 0.0,
+    "stop": [
+      "<|im_end|>",
+      "<|endoftext|>"
+    ],
+    "n_ctx": 2048,
+    "seed": 20260907
+  },
+  "counts": {
+    "turns": 500,
+    "no_json": 0,
+    "raw_fallback": 0
+  },
+  "wall_s": 1653.2,
+  "chat_grammar_sha256": "76cc2583c48a6063ce7f2636e7d9e0adb7d310976ff56148e6708b50792ac50c"
+}
