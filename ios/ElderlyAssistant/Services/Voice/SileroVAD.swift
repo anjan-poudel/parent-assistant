@@ -3,9 +3,9 @@ import AVFoundation
 
 /// Voice activity detector: decides whether a chunk of PCM audio contains
 /// speech, and reports when the user has stopped talking — after the
-/// trailing-silence hangover VoicePipeline configures (900 ms since
-/// 2026-09-07, 700 ms behind the flag since 2026-09-11 — see
-/// `VADHangoverPolicy`). Used to gate the
+/// trailing-silence hangover VoicePipeline configures (900 ms — the
+/// 700 ms trim is opt-in behind the flag since 2026-09-11; the default
+/// returned to 900 on 2026-10-14 — see `VADHangoverPolicy`). Used to gate the
 /// speech recognizer: VoicePipeline calls the recognizer's `finish()` on
 /// `onEndOfUtterance`, so a finished command flips to transcription
 /// within ~1.0-1.5 s of the user's last word instead of riding the
@@ -39,20 +39,118 @@ import AVFoundation
 //
 // The flag exists so the field can restore 900 ms without a release if
 // elderly users report mid-sentence cuts.
+// MARK: - Adaptive endpointing ([ADAPTIVE-ENDPOINT], 2026-10-14)
+//
+// The owner's verdict on the fixed-interval hangover: "fixed interval
+// based VAD is a fucking disaster." Correct — one millisecond value
+// cannot serve both a fast talker (turn should end the moment they
+// stop) and a deliberate elderly speaker (breathing pauses run
+// 0.7-1.5 s). The detector now SELF-CALIBRATES per capture:
+//
+//  - every quiet run that ends with speech resuming is recorded as a
+//    sample of THIS speaker's pause length;
+//  - the endpoint window is max(floorMs, scale x p75(observed pauses)),
+//    capped at the force-end window;
+//  - before the first pause is observed the window is initialMs —
+//    generous, so a speaker is never cut on their first breath;
+//  - a fast speaker's pauses stay short, so their window stays near the
+//    floor and a finished utterance still ends promptly; a slow
+//    speaker's pauses raise the window toward the cap, so a breath
+//    never ends the capture.
+//
+// The protections around it are unchanged: band-energy holds never
+// accrue quiet frames, clear speech resets the run, and the force end
+// (3 s) still bounds everything.
+struct AdaptiveEndpointPolicy: Equatable {
+    /// Silence below this never ends the capture, whatever the samples.
+    let floorMs: Int
+    /// Multiplier over the observed pause level.
+    let scale: Double
+    /// Hard ceiling — at most the detector's force-end window.
+    let capMs: Int
+    /// Window used before any pause has been observed this capture.
+    let initialMs: Int
+    /// Completed quiet runs (ms), oldest first — this speaker's pauses.
+    private(set) var pausesMs: [Int] = []
+    /// The window as of the last recorded pause, so the HOT PATH never
+    /// sorts: `effectiveWindowMs` is O(1) per frame and the p75 sort
+    /// runs only when a pause is recorded (once per resumed breath).
+    private var cachedWindowMs: Int?
+
+    /// The trailing-silence window this capture currently enforces.
+    var effectiveWindowMs: Int {
+        cachedWindowMs ?? initialMs
+    }
+
+    /// p75 of the observed pauses — robust to one anomalously long gap.
+    private var observedPauseLevelMs: Int? {
+        guard !pausesMs.isEmpty else { return nil }
+        let sorted = pausesMs.sorted()
+        let index = min(pausesMs.count - 1, (pausesMs.count * 3) / 4)
+        return sorted[index]
+    }
+
+    mutating func recordPause(_ ms: Int) {
+        guard ms > 0 else { return }
+        // [ADAPTIVE-ENDPOINT-PERF] Keep only the most recent 8 samples:
+        // a speaker's pause style is stable within a capture, eight
+        // samples are plenty for a p75, and the bound keeps the
+        // record-side sort O(8 log 8) instead of growing with every
+        // resumed breath (the perf gate caught the unbounded growth:
+        // 765 us/frame at 30k frames).
+        pausesMs.append(ms)
+        if pausesMs.count > 8 {
+            pausesMs.removeFirst(pausesMs.count - 8)
+        }
+        if let level = observedPauseLevelMs {
+            cachedWindowMs = min(capMs, max(floorMs,
+                                            Int((Double(level) * scale).rounded())))
+        }
+    }
+
+    mutating func resetForCapture() {
+        pausesMs = []
+        cachedWindowMs = nil
+    }
+
+    func shouldEnd(currentQuietMs: Int) -> Bool {
+        currentQuietMs >= effectiveWindowMs
+    }
+
+    /// The opt-in 700 ms trim, expressed as a degenerate policy
+    /// (floor == cap == 700): the old fixed behavior, only when the
+    /// flag is explicitly ON.
+    static func fixed(_ ms: Int) -> AdaptiveEndpointPolicy {
+        AdaptiveEndpointPolicy(floorMs: ms, scale: 1, capMs: ms, initialMs: ms)
+    }
+
+    /// The production default — recalibrated on 2026-10-14 field
+    /// evidence: this household's mid-sentence pauses exceed 1.2 s (the
+    /// owner's phrase still cut at "७ बजे" with the adaptive build, at
+    /// the FIRST pause, before any learning). STARTING RULE: the
+    /// speaker finishes their sentence, period — the initial window is
+    /// the full cap (2800 ms, just under the 3 s force end), so any
+    /// pause under ~2.8 s rides through and only a real stop ends the
+    /// capture. The adaptive learning stays armed to tighten later for
+    /// fast speakers once the field confirms sentences finish.
+    static let production = AdaptiveEndpointPolicy(
+        floorMs: 1800, scale: 1.6, capMs: 2800, initialMs: 2800)
+}
+
+/// Factory for the per-capture policy — the flag gate stays here so the
+/// 700 ms trim remains an explicit opt-in.
 enum VADHangoverPolicy {
-    /// UserDefaults key: the trim is ON unless this key is present AND
-    /// false (default ON per the plan).
+    /// UserDefaults key: the trim is OFF unless this key is present AND
+    /// true (the explicit opt-in).
     static let trim700DefaultsKey = "vadHangoverTrim700"
     static let trimmedMs = 700
-    static let legacyMs = 900
 
-    /// Default ON: 700 ms unless the key exists and is explicitly false.
-    static func hangoverMs(defaults: UserDefaults) -> Int {
-        guard defaults.object(forKey: trim700DefaultsKey) != nil,
-              !defaults.bool(forKey: trim700DefaultsKey) else {
-            return trimmedMs
+    static func hangoverPolicy(defaults: UserDefaults) -> AdaptiveEndpointPolicy {
+        if defaults.object(forKey: trim700DefaultsKey) != nil,
+           defaults.bool(forKey: trim700DefaultsKey) {
+            return .fixed(trimmedMs)
         }
-        return legacyMs
+        return .production
     }
 }
 
@@ -74,7 +172,7 @@ protocol VoiceActivityDetector: AnyObject {
     /// (`vad_force_end`) and tell a user-pause from a silence-detection.
     var onForcedEndOfUtterance: (() -> Void)? { get set }
 
-    func start(endOfUtteranceMs: Int)
+    func start(policy: AdaptiveEndpointPolicy)
     func stop()
     func reset()
     func process(_ pcm: [Int16])
@@ -103,7 +201,7 @@ final class NullVAD: VoiceActivityDetector {
 
     private var reportedSpeech = false
 
-    func start(endOfUtteranceMs: Int) {
+    func start(policy: AdaptiveEndpointPolicy) {
         if !reportedSpeech {
             reportedSpeech = true
             onSpeechStateChange?(true)
@@ -276,7 +374,12 @@ final class EnergyVAD: VoiceActivityDetector {
     private var running = false
     private var speechActive = false
     private var quietFrames = 0
-    private var requiredQuietFrames = 8
+    /// [ADAPTIVE-ENDPOINT] The per-capture self-calibrating policy.
+    private var policy = AdaptiveEndpointPolicy.production
+    /// One frame's duration in ms (512 samples at 16 kHz = 32 ms).
+    private var frameMs: Int {
+        Int(round((Double(frameLength) / requiredSampleRate) * 1000))
+    }
     private var hasReportedEnd = false
     /// [VAD-TUNE] Frames since the last clear-speech frame while
     /// `speechActive` — the force-end timer. Reset by any frame at or
@@ -315,10 +418,9 @@ final class EnergyVAD: VoiceActivityDetector {
         min(maxSpeechThreshold, max(minSpeechThreshold, noiseFloor * speechMultiplier))
     }
 
-    func start(endOfUtteranceMs: Int) {
+    func start(policy: AdaptiveEndpointPolicy) {
         lock.lock()
-        requiredQuietFrames = max(1, Int(ceil((Double(endOfUtteranceMs) / 1000.0) /
-                                            (Double(frameLength) / requiredSampleRate))))
+        self.policy = policy
         running = true
         resetLocked()
         lock.unlock()
@@ -342,6 +444,7 @@ final class EnergyVAD: VoiceActivityDetector {
     private func resetLocked() {
         speechActive = false
         speechLevel = 0
+        policy.resetForCapture()
         quietFrames = 0
         hasReportedEnd = false
         framesSinceClearSpeech = 0
@@ -402,6 +505,12 @@ final class EnergyVAD: VoiceActivityDetector {
         // the user still talking — still resets it, so a resumed utterance
         // after a pause restarts the hangover cleanly.
         if rms >= speechLevel {
+            // [ADAPTIVE-ENDPOINT] A quiet run just ended with speech
+            // resuming — record it as THIS speaker's pause sample so
+            // the next endpoint window is calibrated to them.
+            if quietFrames > 0 {
+                policy.recordPause(quietFrames * frameMs)
+            }
             quietFrames = 0
             framesSinceClearSpeech = 0
             speechLevel += speechLevelAlpha * (rms - speechLevel)
@@ -448,7 +557,7 @@ final class EnergyVAD: VoiceActivityDetector {
         // a sample of the room), but never the speechLevel reference.
         noiseFloor += floorAlpha * (rms - noiseFloor)
         quietFrames += 1
-        if quietFrames >= requiredQuietFrames {
+        if policy.shouldEnd(currentQuietMs: quietFrames * frameMs) {
             hasReportedEnd = true
             speechActive = false
             lock.unlock()
@@ -507,17 +616,40 @@ final class SileroONNXVAD: VoiceActivityDetector {
     private let silenceThreshold: Float = 0.35   // hysteresis
     private var lastSpeechAt: Date?
     private var speechActive = false
-    private var endOfUtteranceMs = 200
+    /// [ADAPTIVE-ENDPOINT] Held for API parity; this stub never runs
+    /// real inference (the shipped build wires EnergyVAD).
+    private var policy = AdaptiveEndpointPolicy.production
     private var running = false
 
-    init(modelPath: String) throws {
+    init(modelPath: String, lifecycle: ModelLifecycleManager = .shared) throws {
         self.env = try ORTEnv(loggingLevel: .warning)
         self.session = try ORTSession(env: env, modelPath: modelPath,
                                       sessionOptions: nil)
+        // [MODEL-WARDEN] Step 0 — the third invisible resident (proposal
+        // §1.2 / finding H5). ~0.9 MB of ONNX weights + session state that
+        // the ledger's `M(t)` did not contain.
+        //
+        // Registered HERE, at the object that allocates it, and only when
+        // it actually exists: the shipped build wires `EnergyVAD` (no model
+        // — pure energy thresholds), so there is nothing to declare in that
+        // configuration, and declaring Silero's 0.9 MB anyway would make
+        // the ledger's total uncheckable against `phys_footprint`.
+        //
+        // Non-evictable, with the reason written: this sits on the audio
+        // path of every capture, and freeing 0.9 MB would mean tearing down
+        // and rebuilding the ONNX session mid-turn — an audio-graph
+        // interruption for a rounding error's worth of memory.
+        lifecycle.register(
+            slot: .vad,
+            modelID: nil,
+            owner: self,
+            evictable: false
+        ) {}
+        lifecycle.didLoad(.vad, owner: self)
     }
 
-    func start(endOfUtteranceMs: Int) {
-        self.endOfUtteranceMs = endOfUtteranceMs
+    func start(policy: AdaptiveEndpointPolicy) {
+        self.policy = policy
         self.running = true
         reset()
     }

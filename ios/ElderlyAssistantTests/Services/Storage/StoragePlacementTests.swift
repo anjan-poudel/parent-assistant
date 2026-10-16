@@ -15,12 +15,25 @@ final class StoragePlacementTests: XCTestCase {
 
     func testProviderSecretsStayInTheKeychain() {
         for key in ["gemini.apiKey", "search.apiKey", "search.engineId",
-                    "youtube.apiKey", "gemini.model"] {
+                    "youtube.apiKey", "gemini.model", "spotify.session"] {
             XCTAssertEqual(StoragePlacementPolicy.placement(for: key),
                            .keychain,
                            "\(key) must keep the Keychain's protection")
             XCTAssertFalse(StoragePlacementPolicy.migratesToFile(key))
         }
+    }
+
+    func testSpotifySessionRecordStaysInTheKeychain() {
+        // [T-108 / FR-SP-009, NFR-SP-007] The one Spotify credential
+        // record (tokens, refresh, expiry, scopes) is a small secret: it
+        // keeps the Keychain item's per-item protection, not the
+        // encrypted-file store. The literal is deliberate — the store's
+        // own constant is pinned against it in
+        // `SpotifyCredentialStoreTests`, so either side drifting fails a
+        // test instead of moving a token across the split.
+        XCTAssertEqual(StoragePlacementPolicy.placement(for: "spotify.session"),
+                       .keychain)
+        XCTAssertFalse(StoragePlacementPolicy.migratesToFile("spotify.session"))
     }
 
     func testTheKeychainSetIsExactlyTheReviewedSecrets() {
@@ -30,7 +43,13 @@ final class StoragePlacementTests: XCTestCase {
         // conscious edit to this list.
         XCTAssertEqual(StoragePlacementPolicy.keychainResidentKeys,
                        ["gemini.apiKey", "search.apiKey", "search.engineId",
-                        "youtube.apiKey", "gemini.model"])
+                        "youtube.apiKey", "gemini.model", "spotify.session",
+                        // [SETTINGS-SURVIVAL] The interview profile survives
+                        // uninstalls; the scalar preferences live in
+                        // SettingsPersistence's own keychain service (the
+                        // snapshot-blob key was folded away — this list is
+                        // the placement surface only).
+                        "user.profile"])
     }
 
     // MARK: - What moves to encrypted files

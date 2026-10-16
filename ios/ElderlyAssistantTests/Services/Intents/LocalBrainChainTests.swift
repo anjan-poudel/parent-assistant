@@ -135,29 +135,21 @@ final class LocalBrainChainTests: XCTestCase {
         XCTAssertEqual(reasons, [.subBandConfidence])
     }
 
-    /// [CASCADE-RESIDENCY] The ordering the coordinator's residency policy
-    /// depends on: `onEscalated` fires BEFORE the stand-in brain is asked —
-    /// it is the pre-picker seam where the encoder's weights are released,
-    /// so the picker brain's handle is allocated with the encoder already
-    /// out of the way. The test observes the ordering directly: the
-    /// stand-in has not been called yet when the hook runs.
-    func testCascadeReportsTheEscalationBeforeTheStandInIsAsked() {
-        let preferred = StubCommandInterpreter(result: nil)
-        let standIn = StubCommandInterpreter(
-            result: makeCommand(action: .query, confidence: 0.9))
-        var standInCallsWhenEscalated: [Int] = []
-        var reasons: [LocalBrainChain.EscalationReason] = []
-        let chain = cascadeChain(preferred: preferred, standIn: standIn) { reason in
-            reasons.append(reason)
-            standInCallsWhenEscalated.append(standIn.callCount)
-        }
+    func testCascadeUnloadsThePreferredBrainBeforeTheStandInTakesTheTurn() {
+        // [TRUNCATION-FIX] One turn, one heavy brain: the escalation must
+        // drop the preferred brain's resident model BEFORE the stand-in
+        // loads its own — the 1B + 4B pair is what blew the device budget
+        // and got the app jetsam'd.
+        let subBand = makeCommand(action: .query, confidence: 0.55, reply: "encoder")
+        let answer = makeCommand(action: .query, confidence: 0.9, reply: "standin")
+        let preferred = StubCommandInterpreter(result: subBand)
+        let standIn = StubCommandInterpreter(result: answer)
+        let chain = cascadeChain(preferred: preferred, standIn: standIn) { _ in }
 
-        XCTAssertNotNil(interpret(chain, "केही प्रश्न"))
-        XCTAssertEqual(reasons, [.abstained])
-        XCTAssertEqual(standInCallsWhenEscalated, [0],
-                       "the hook runs BEFORE the stand-in is dispatched — that ordering is "
-                       + "the pre-picker window the encoder release uses")
-        XCTAssertEqual(standIn.callCount, 1, "…and the stand-in does run, on the same turn")
+        XCTAssertEqual(interpret(chain, "केही प्रश्न"), answer)
+        XCTAssertEqual(preferred.unloadCount, 1,
+                       "the preferred brain's resident handle must be dropped before escalation")
+        XCTAssertEqual(standIn.callCount, 1)
     }
 
     func testCascadeServesThePreferredAnswerAtTheBand() {

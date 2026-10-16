@@ -82,6 +82,21 @@ enum VoiceContactSearchRoute {
         // ran.
         if isYouTubeUtterance(text) { return .notSearch }
 
+        // [SPOTIFY] (2026-10-06) Music-marked utterances belong to the
+        // music stage, which runs LATER in the ladder — position parity
+        // with the YouTube veto above, exactly as design L2 §15 (the
+        // reviewed contract) places it: after that veto, before the
+        // search-marker check. A marker from the shared
+        // `KeywordIntentRule.musicMarkers` family ("गीत", "भजन",
+        // "गाना", "संगीत", "music", "song", …) means the utterance is
+        // a music request, never a contact lookup, even where a search
+        // marker co-occurs ("गीत खोज" belongs to the interpreter's
+        // music intent, not to a Phone screen prefilled "गीत"). The
+        // veto calls the rule's own predicate, so the two stages can
+        // never disagree about what a music utterance is; the
+        // direct-call veto above is untouched and still runs first.
+        if KeywordIntentRule.mentionsMusic(text) { return .notSearch }
+
         guard isSearchMarkerHit(text) else { return .notSearch }
         return .openPhone(extractQuery(from: text))
     }
@@ -102,7 +117,14 @@ enum VoiceContactSearchRoute {
     private static let directCallPhrases = [
         // फोन + verb (devanagari)
         "फोन गर", "फोनगर", "फोन गर्नुहोस्", "फोन गर्नुस्",
-        "फोन गर्नुभयो", "फोन गर्ने", "फोन गरेर", "फोन गरिदेउ", "फोन गरिदिनु",
+        "फोन गर्नुभयो", "फोन गर्ने", "फोन गरेर", "फोन गरिदेउ",
+        "फोन गरिदेऊ", "फोन गरिदिनु",
+        // [CALL-VOCAB] (2026-10-12) The गरु/गरू forms: the STT renders the
+        // elder's colloquial "गरूँ"-class verb with a fused उ/ऊ matra —
+        // the गरु cluster does not CONTAIN the bare "गर" (grapheme rule,
+        // same trap as the खोज-family enumeration above), so each form
+        // needs its own entry.
+        "फोन गरु", "फोन गरू", "फोनगरू",
         "फोन लगाऊ", "फोन लगाउ", "फोन लगाउनुहोस्", "फोन लगाउनुस्",
         "फोन लगाइदेऊ", "फोन लगाइदेउ", "फोन लगाइदिनु",
         // नम्बर + verb — "फोन नम्बर लगाऊ" (golden corpus: call)
@@ -110,6 +132,8 @@ enum VoiceContactSearchRoute {
         "नंबर लगाऊ", "नंबर लगाउ",
         // कल + verb
         "कल गर", "कल गर्नुहोस्", "कल गर्नुस्", "कल गर्ने", "कल गरिदेउ",
+        "कल गरिदेऊ",
+        "कल गरु", "कल गरू",
         "कल लगाऊ", "कल लगाउ",
         // Video-call / app surfaces
         "भिडियो कल", "भिडियोकल", "भिडियो गर",
@@ -117,9 +141,25 @@ enum VoiceContactSearchRoute {
         "phone gar", "phone gara", "phone garna", "phone lagau", "phone lagaa",
         "call gar", "call gara", "video call", "phone call"
     ]
-    private static let directCallTokens = ["call", "calls", "calling", "dial"]
+    /// Whole-word markers (Latin / romanized Nepali only — Devanagari
+    /// bare words are too ambiguous, see above). [CALL-VOCAB]
+    /// (2026-10-12) "कल" is the one Devanagari EXCEPTION: the field
+    /// shows the STT renders the elder's "call" as bare "कल" with no
+    /// verb ("कल स्यानु"), and whole-token matching keeps real names
+    /// safe ("कल" ⊄ "कल्याणी").
+    private static let directCallTokens = ["call", "calls", "calling", "dial", "कल"]
 
-    private static func isDirectCallUtterance(_ text: String) -> Bool {
+    /// [MTC L2-D2] (2026-10-10) `isDirectCallUtterance` `:137-140`:
+    /// widened `private` → `internal` for the dialogue barge-in
+    /// predicate's second call site (design-l2 §6 B3). One table, never
+    /// duplicated.
+    ///
+    /// Lower-case input contract — unchanged by the widening: the caller
+    /// passes canonical text. The shipped call site
+    /// `decide(transcript:)` `:67` (the `.openPhone` search decision)
+    /// lowercases at `:68` before its veto `:74`; the answer path
+    /// lowercases before evaluating B3. This tester folds no case itself.
+    static func isDirectCallUtterance(_ text: String) -> Bool {
         directCallPhrases.contains { text.contains($0) }
             || directCallTokens.contains { token($0, in: text) }
     }
@@ -181,6 +221,12 @@ enum VoiceContactSearchRoute {
         // verbs / politeness
         "गर्नुहोस्", "गर्नुस्", "गर्नुभयो", "गर्ने", "गर्न", "गर",
         "गरेर", "गरिदिनुहोस्", "गरिदेउ", "गरिदेऊ", "गरिदिनु",
+        // [CALL-VOCAB] (2026-10-12) STT garble forms of the गर-family:
+        // "गरु"/"गरू" are not words — Whisper decodes the elder's
+        // colloquial verb with a fused matra, and the fused cluster does
+        // not contain the bare "गर" (grapheme rule), so the drop table
+        // needs the forms verbatim.
+        "गरु", "गरू",
         // खोज-family — same enumeration rule as गर-family above: the
         // virama/matra fuses into the ज, so a containment entry cannot
         // catch the fused forms (and the bare "खोज" entry in the old

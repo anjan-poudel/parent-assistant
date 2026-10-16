@@ -24,6 +24,7 @@ import SwiftUI
 /// `@ObservedObject` makes the row re-render the moment it is written,
 /// with no forwarding hop in between.
 struct CaregiverNotifySettingsView: View {
+    @Environment(\.appAppearance) private var appearance
     @ObservedObject var settings: CaregiverNotifySettings
 
     var body: some View {
@@ -42,23 +43,23 @@ struct CaregiverNotifySettingsView: View {
             toggleRow("settings.notifyCaregivers.medication",
                       icon: "pills.fill",
                       isOn: $settings.medicationReminders)
-            Divider().background(DesignTokens.textSecondary.opacity(0.2))
+            Divider().background(appearance.colors.textSecondary.opacity(0.2))
             toggleRow("settings.notifyCaregivers.routine",
                       icon: "figure.walk",
                       isOn: $settings.routineReminders)
-            Divider().background(DesignTokens.textSecondary.opacity(0.2))
+            Divider().background(appearance.colors.textSecondary.opacity(0.2))
             toggleRow("settings.notifyCaregivers.calendar",
                       icon: "calendar",
                       isOn: $settings.calendarEvents)
 
             Text("settings.notifyCaregivers.channelHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             Text("settings.notifyCaregivers.hint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             // The second channel these same choices drive (calendar &
@@ -69,14 +70,13 @@ struct CaregiverNotifySettingsView: View {
             // the family long after the alert would have been — so the
             // screen says so instead of leaving it to be discovered.
             Text("caregiverNotify.shareHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// One switch row: localized label + SF Symbol, the label in the
@@ -88,10 +88,10 @@ struct CaregiverNotifySettingsView: View {
                            isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) {
             Label(LocalizedStringKey(key), systemImage: icon)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                .foregroundStyle(appearance.colors.textPrimary)
         }
-        .tint(DesignTokens.accent)
+        .tint(appearance.colors.accent)
         .frame(minHeight: DesignTokens.minTapTargetSize)
     }
 }

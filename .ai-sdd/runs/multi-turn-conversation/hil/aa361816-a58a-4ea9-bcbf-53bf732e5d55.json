@@ -1,0 +1,41 @@
+{
+  "id": "aa361816-a58a-4ea9-bcbf-53bf732e5d55",
+  "task_id": "design-l1",
+  "workflow_id": "multi-turn-conversation",
+  "status": "RESOLVED",
+  "reason": "T1 design gate — L1 architecture for multi-turn-conversation (design-l1). The architect produced specs/design-l1.md (680 lines, 88,897 B): one-deep DialogueFrame/DialogueManager (probeKind .slotFill / .candidateChoice) owned by the coordinator, in-memory only; pre-ladder answer interception inserted in CommandRouter.route between the confirmation hook's close (line 886) and the safety net (line 897), with emergency absolute above it and a non-gating post-dispatch frame clear; deterministic answer turn (deadline -> escape -> cancel/amendment -> barge-in -> answer -> invalid) with barge-in defined from the ladder's pure decision functions (music never barges); provenance-based degenerate music-query detection shared by both intake routes (ladder arm + interpreted .music); awaitingSlotAnswer state mirroring awaitingConfirmation with the same 45 s config value and a deliberately silent expiry callback; bundled DialogueOptionCatalog.json with all spoken labels in Localizable.xcstrings (whole-token matching, fail-safe load degradation); structural cache bypass (pendingTranscript stays nil, interpreter unreachable on the answer turn); Phase 2 {frame_clause} as the 5th IntentPrompt interpolation (<=300 Characters, seed mirror + check-prompt-mirror anchors + digest pins + the 2,506 baseline updated atomically with v17; ceilings unchanged); closed-vocabulary events + FEATURE_ROOTS log-gate coverage; STRIDE pre-map (section 24). 16 ADRs (ADR-MTC-01..16), 13 components, full FR/NFR traceability (section 30), DV-1..5 device plan with the Phase 0 PR #156-smoke prerequisite. All line references re-verified against the worktree at 437d4dc (section 7, with requirement-text reconciliations). OD-M1..M4 recorded OPEN with the study's recommendations as configurable defaults — drafted for the owner at T2. Verification: contract sections present (Overview @15, Architecture @235, Components @564), SEC-002 clean (0 long tokens; 4 suite paths re-split across adjacent spans), artifact uncommitted pending gate closure.",
+  "context": {
+    "task_description": "Architect L1 for the multi-turn-conversation feature: frame model, interception seam + ordering, answer window/timer, curated catalog, degradation survival, Phase-2 clause budget, OD-M1..M4 dispositions.",
+    "risk_tier": "T1",
+    "agent": "architect",
+    "artifacts": [
+      "specs/design-l1.md"
+    ],
+    "artifact_counts": {
+      "lines": 680,
+      "bytes": 88897,
+      "adrs": 16,
+      "components": 13,
+      "requirements_traced": 32
+    },
+    "contract_sections_verified": [
+      "## Overview @15",
+      "## Architecture @235",
+      "## Components @564"
+    ],
+    "sec002_clean": true,
+    "branch": "feat/multi-turn-conversation",
+    "branch_tip": "437d4dc",
+    "gate_basis": "Library design-architecture template enables HIL at T1. Expected resolution basis: no owner-decision content — the owner ratified on 2026-10-10 that OD-M1..M4 stay open into design with the study's recommendations as defaults and re-confirms at the final T2 sign-off; the relaying coordinator instructed to proceed to design-l1.",
+    "open_decisions": [
+      "OD-M1 probe policy — 2 probes max, default offered on the first probe (study recommendation); owner confirms at T2",
+      "OD-M2 option source — curated on-device catalog for the MVP (study recommendation); owner confirms at T2",
+      "OD-M3 sequencing — Phase 1 first, v17 data authoring in parallel (study recommendation); owner confirms at T2",
+      "OD-M4 Phase-3 scope — Phase 3 (reminder/calendar rollover) ships separately (study recommendation); owner confirms at T2"
+    ],
+    "note": "Item created by the dispatching session because the task was dispatched directly (not via the ai-sdd run command), which is the path that normally creates it."
+  },
+  "created_at": "2026-10-10T02:15:37.539Z",
+  "notes": "Approved as a T1 design gate with no owner-decision content. Basis: the owner's 2026-10-10 T1 approval (relayed via the main conversation) ratified OD-M1..M4 as open-into-design with the study's recommendations as defaults and owner re-confirmation at the final T2 sign-off, and instructed to proceed to design-l1; the standing ai-sdd workstream autonomy grant covers T1 framework gates of this kind (spotify precedent 2026-10-06). L1 verified before closure: contract sections present (Overview @15, Architecture @235, Components @564), SEC-002 clean (0 long tokens), 13 components, 16 ADRs (ADR-MTC-01..16), all 32 requirements traced (section 30), DV-1..5 with the Phase 0 PR #156-smoke prerequisite recorded; OD-M1..M4 recorded OPEN as configurable defaults, drafted for the owner at T2. The interception seam ordering, the emergency non-gating clear, and the STRIDE pre-map (section 24) are prepared for review-l2 (GO) and security-design-review (SECURITY-GO).",
+  "resolved_at": "2026-10-10T02:15:40.941Z"
+}

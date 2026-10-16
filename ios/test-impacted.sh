@@ -19,8 +19,10 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="ElderlyAssistant"
-SCHEME="${APP_NAME}"
+# The generated project is named seniOS (project.yml `name:`); the scheme is
+# still ElderlyAssistant. Build.sh uses the same pairing.
+APP_NAME="seniOS"
+SCHEME="ElderlyAssistant"
 BUILD_DIR="${PROJECT_DIR}/../build"
 TEST_DERIVED_DATA="${IOS_TEST_DERIVED_DATA:-${BUILD_DIR}/DerivedDataTests}"
 TEST_SRC="${PROJECT_DIR}/ElderlyAssistantTests"
@@ -81,7 +83,7 @@ else
                 ;;
             "ios/ElderlyAssistant/"*.swift)
                 stem="$(basename "$f" .swift)"
-                if [ -f "${TEST_SRC}" ] && \
+                if [ -d "${TEST_SRC}" ] && \
                    find "$TEST_SRC" -name "${stem}Tests.swift" -print -quit | grep -q .; then
                     SELECTED_CLASSES+=("${stem}Tests")
                 fi
@@ -98,7 +100,7 @@ fi
 
 UNIT_CLASSES=()
 UI_CLASSES=()
-for c in $(printf '%s\n' "${SELECTED_CLASSES[@]}" | sort -u); do
+for c in $(printf '%s\n' "${SELECTED_CLASSES[@]+"${SELECTED_CLASSES[@]}"}" | sort -u); do
     [[ "$c" == UI:* ]] && UI_CLASSES+=("${c#UI:}") || UNIT_CLASSES+=("$c")
 done
 
@@ -113,16 +115,29 @@ fi
 
 ONLY=()
 if ! $RUN_FULL; then
-    for c in "${UNIT_CLASSES[@]}"; do
+    # Guarded expansion: bash 3.2 (macOS default) treats an empty declared
+    # array under `set -u` as an unbound variable — the +alt form keeps
+    # a no-UI-class selection from aborting the script.
+    for c in "${UNIT_CLASSES[@]+"${UNIT_CLASSES[@]}"}"; do
         ONLY+=("-only-testing:ElderlyAssistantTests/${c}")
     done
-    for c in "${UI_CLASSES[@]}"; do
+    for c in "${UI_CLASSES[@]+"${UI_CLASSES[@]}"}"; do
         ONLY+=("-only-testing:ElderlyAssistantUITests/${c}")
     done
 fi
 
 echo "diff base: ${BASE} (${#UNIT_CLASSES[@]} unit + ${#UI_CLASSES[@]} ui classes selected)"
 $LIST_ONLY && { printf '%s\n' "${ONLY[@]:-<full unit target>}"; exit 0; }
+
+# The checked-in xcodeproj drifts from project.yml — master has shipped
+# source files its pbxproj never listed (#90's PointAsk), and build.sh
+# hides the drift by regenerating. The harness must generate exactly like
+# build.sh does, or it compiles a stale file list.
+if ! command -v xcodegen >/dev/null 2>&1; then
+    echo "ERROR: xcodegen not found. Install with: brew install xcodegen" >&2
+    exit 2
+fi
+(cd "${PROJECT_DIR}" && xcodegen generate --spec project.yml --project .)
 
 # Same invocation as build.sh run_tests() so caching/warmup applies.
 DESTINATION="${IOS_TEST_DESTINATION:-}"
@@ -141,5 +156,5 @@ xcodebuild test \
     -scheme "${SCHEME}" \
     -destination "${DESTINATION}" \
     -derivedDataPath "${TEST_DERIVED_DATA}" \
-    "${ONLY[@]}" \
+    "${ONLY[@]+"${ONLY[@]}"}" \
     | tail -30

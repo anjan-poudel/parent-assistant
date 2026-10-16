@@ -14,7 +14,7 @@ import SwiftUI
 /// with zero camera and zero Gemini. An honest empty state covers the
 /// interim where the catalog has not shipped.
 struct DefaultManualsBrowseView: View {
-
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject private var coordinator: AppCoordinator
     @Environment(\.locale) private var locale
     @State private var manuals: [BundledManual] = []
@@ -64,35 +64,31 @@ struct DefaultManualsBrowseView: View {
                     .foregroundStyle(.white)
                     .frame(width: DesignTokens.iconBadgeDiameter,
                            height: DesignTokens.iconBadgeDiameter)
-                    .background(DesignTokens.accent)
-                    .clipShape(Circle())
+                    .appSurface(role: .accent, cornerRadius: 999)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("settings.manuals.userManual")
-                        .font(.system(size: DesignTokens.minBodyPointSize,
+                        .font(.system(size: appearance.typography.bodyPointSize,
                                       weight: .semibold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .foregroundStyle(appearance.colors.textPrimary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Text("settings.manuals.userManualHint")
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .frame(minHeight: DesignTokens.minTapTargetSize)
         .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity, alignment: .leading).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var emptyState: some View {
@@ -101,10 +97,10 @@ struct DefaultManualsBrowseView: View {
         VStack(spacing: 20) {
             Image(systemName: "book.closed")
                 .font(.system(size: 56))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             Text("appliance.manual.bundledEmpty")
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }

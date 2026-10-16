@@ -102,6 +102,12 @@ final class AppLauncher {
         /// YouTube, WhatsApp). nil means no fallback exists, and the
         /// launcher says so honestly instead of opening Safari blind.
         let webFallback: URL?
+        /// [APP-PROMPT-MATRIX] (2026-10-14) The app's own https universal
+        /// link — the prompt-free launch URL (see `preferredLaunchURL`),
+        /// or nil when the domain publishes no app association the
+        /// launcher could rely on. The full per-app matrix lives on
+        /// `catalog`; each value there cites its evidence.
+        let universalLink: URL?
         /// Spoken aliases (English + Devanagari, lowercase Latin) the
         /// voice keyword rules match against — e.g. "camera" /
         /// "क्यामेरा". Kept minimal and separate from `nameKey`: the
@@ -113,6 +119,7 @@ final class AppLauncher {
         init(id: String, nameKey: String, systemImage: String, scheme: String?,
              imageName: String? = nil, kind: Kind = .url,
              urlOverride: String? = nil, webFallback: URL? = nil,
+             universalLink: URL? = nil,
              aliases: [String] = []) {
             self.id = id
             self.nameKey = nameKey
@@ -122,6 +129,7 @@ final class AppLauncher {
             self.kind = kind
             self.urlOverride = urlOverride
             self.webFallback = webFallback
+            self.universalLink = universalLink
             self.aliases = aliases
         }
 
@@ -162,14 +170,103 @@ final class AppLauncher {
         var isSettingsSurface: Bool {
             scheme?.lowercased() == "app-prefs"
         }
+
+        /// [APP-PROMPT-MATRIX] (2026-10-14) The URL a confirmed launch
+        /// actually opens: the universal link when the entry has one,
+        /// else the custom-scheme `rootURL`.
+        ///
+        /// Why the universal link wins (owner report 2026-10-14: a tile
+        /// launch "shows english dialog confirmation"): iOS presents its
+        /// own "Open in <App>?" confirmation — in the SYSTEM language,
+        /// not suppressible — for programmatic opens of third-party
+        /// custom schemes, while an https URL on a domain the target app
+        /// claims through its apple-app-site-association opens the app
+        /// directly, no dialog. Only `open` changes; the PROBE never
+        /// does: `canOpenURL` cannot tell an https URL's app from
+        /// Safari, so installed-ness stays the scheme probe on `rootURL`
+        /// (which is also why `open` is only ever reached after
+        /// `launchPlan` answered `.app` — opening a universal link blind
+        /// would land in Safari on a phone without the app, exactly the
+        /// silent substitution the web fallback's disclosure exists to
+        /// prevent).
+        var preferredLaunchURL: URL? { universalLink ?? rootURL }
+
+        /// [APP-PROMPT-MATRIX] Whether iOS's own confirmation can STILL
+        /// appear after the app's own yes. False only where the
+        /// prompt-free surface is established — the universal-link
+        /// entries and the in-process camera; every custom-scheme entry
+        /// (the list on `catalog`) is true, because no suppression is
+        /// possible for a third-party scheme. The Settings surface is
+        /// the honest in-between: its private App-Prefs pane is
+        /// unverified on 26.x and counts as "may prompt" here, while the
+        /// `settingsFallback` path
+        /// (`UIApplication.openSettingsURLString`) is the documented
+        /// public deep link and presents no confirmation.
+        var launchStillMayPrompt: Bool {
+            if kind == .camera { return false }
+            return universalLink == nil
+        }
     }
 
     /// The curated catalog, in display order: Apple built-ins first, then
     /// the commonly-installed third-party apps (schemes researched
     /// 2026-09 — each must be declared in LSApplicationQueriesSchemes for
     /// `canOpenURL` to answer honestly).
+    ///
+    /// [APP-PROMPT-MATRIX] (2026-10-14) The per-app launch matrix, and
+    /// the honest half of the owner's fix ("shows english dialog
+    /// confirmation" on a curated-bar tap). Every launch now runs through
+    /// the app's OWN localized confirmation first; what can still follow
+    /// is iOS's own "Open in <App>?" sheet, which is presented for
+    /// programmatic opens of third-party custom schemes and cannot be
+    /// suppressed from here. https universal links the target app claims
+    /// via its apple-app-site-association are NOT presented a sheet — so
+    /// each entry below carries the universal link where one exists
+    /// (opened when the scheme probe said the app is installed —
+    /// `preferredLaunchURL`), with the scheme root kept as the probe and
+    /// fallback. Evidence was read from each host's published
+    /// apple-app-site-association on 2026-10-14:
+    ///
+    ///   Prompt-free (universal link; scheme probe gates it):
+    ///     - whatsapp   https://wa.me/            (AASA lists the
+    ///                  WhatsApp appIDs under a terminal "*" catch-all;
+    ///                  house-device-verified for wa.me/<number> — the
+    ///                  bare root rides the same catch-all and is a DV
+    ///                  re-check item)
+    ///     - facebook   https://www.facebook.com/ (AASA: Facebook
+    ///                  appID, "allow all other paths" catch-all)
+    ///     - instagram  https://www.instagram.com/(AASA: Instagram
+    ///                  appIDs, "/*" catch-all)
+    ///     - youtube    https://www.youtube.com/  (AASA: the YouTube
+    ///                  appID, "*" catch-all)
+    ///     - googlemaps https://www.google.com/maps (AASA: com.google
+    ///                  .Maps explicitly lists "/maps")
+    ///     - maps       https://maps.apple.com/   (Apple's documented
+    ///                  Maps URL surface opens the Maps app)
+    ///
+    ///   No universal link — iOS's own confirmation may still appear
+    ///   AFTER ours (custom scheme; everything here should be re-checked
+    ///   on 26.x — tel: is the one DEVICE-OBSERVED dialog, the one the
+    ///   CallKit branch removed for calls): phone, messages, facetime,
+    ///   mail, calendar, photos, weather, magnifier, health, the five
+    ///   Settings panes (private App-Prefs), messenger (only
+    ///   messenger.com/t is app-captured — thread-only, no account-less
+    ///   root form), gmail, chrome, zoom, telegram, viber, imo.
+    ///
+    ///   Never prompts: camera (in-process picker).
     static let catalog: [App] = [
-        App(id: "phone", nameKey: "app.name.phone", systemImage: "phone.fill", scheme: "tel"),
+        App(id: "phone", nameKey: "app.name.phone", systemImage: "phone.fill",
+            // [PHONE-DEEPLINKS-REVERT] (2026-09-19) Back on the
+            // slashes-less `tel:` dialer — DEVICE-VERIFIED that
+            // `mobilephone-recents://` (and the sibling mobilephone-*
+            // schemes) are NOT registered by the Phone app on stock iOS:
+            // canOpenURL fails with OSStatus -10814 (application not
+            // found). Apple exposes no public deep link for the Phone
+            // app's Recents/Contacts/Favorites/Voicemail tabs; the bare
+            // `tel:` dialer is the only honest surface. The dead schemes
+            // were removed from LSApplicationQueriesSchemes with this
+            // revert (see docs/deeplink-schemes.md).
+            scheme: "tel"),
         App(id: "messages", nameKey: "app.name.messages", systemImage: "message.fill", scheme: "sms"),
         App(id: "facetime", nameKey: "app.name.facetime", systemImage: "video.fill", scheme: "facetime"),
         App(id: "mail", nameKey: "app.name.mail", systemImage: "envelope.fill", scheme: "message"),
@@ -179,7 +276,11 @@ final class AppLauncher {
         // both stacks.
         App(id: "calendar", nameKey: "app.name.calendar", systemImage: "calendar", scheme: "calshow",
             aliases: ["calendar", "पात्रो"]),
-        App(id: "maps", nameKey: "app.name.maps", systemImage: "map.fill", scheme: "maps"),
+        // [APP-PROMPT-MATRIX] universalLink: maps.apple.com is Apple's
+        // documented Maps URL surface — opening it launches the Maps app
+        // directly, with no "Open in Maps?" sheet (evidence on the
+        // matrix comment above).
+        App(id: "maps", nameKey: "app.name.maps", systemImage: "map.fill", scheme: "maps", universalLink: URL(string: "https://maps.apple.com/")),
         // Voice app-launcher additions (2026-09-16) — the launches an
         // elder asks for by name. The camera is the one entry with NO
         // URL (see `Kind.camera`): iOS exposes no workable camera scheme
@@ -238,17 +339,28 @@ final class AppLauncher {
         // The four third-party apps the spec gives a "web" fallback carry
         // it here; a launch offers it only when the probe says the app is
         // absent.
+        //
+        // [APP-PROMPT-MATRIX] These four (plus Google Maps below, plus
+        // Maps above) also carry a `universalLink` — each host's
+        // published apple-app-site-association claims its app for the
+        // URL (evidence cited per app on the matrix comment above), so
+        // the CONFIRMED launch opens the https form and iOS presents no
+        // scheme sheet. The scheme root stays the probe and the
+        // fallback for every one of them.
         // [APP-LAUNCHER F12] All three Devanagari spellings Whisper
         // produces for "WhatsApp" are catalog aliases — the keyword table
         // used to carry व्हाट्सएप/वाट्सएप privately, so a model that echoed
         // one of them got "I don't know an app called …".
-        App(id: "whatsapp", nameKey: "app.name.whatsapp", systemImage: "phone.arrow.down.left.fill", scheme: "whatsapp", imageName: "appIcon.whatsapp", webFallback: URL(string: "https://web.whatsapp.com/"), aliases: ["whatsapp", "ह्वाट्सएप", "व्हाट्सएप", "वाट्सएप"]),
+        App(id: "whatsapp", nameKey: "app.name.whatsapp", systemImage: "phone.arrow.down.left.fill", scheme: "whatsapp", imageName: "appIcon.whatsapp", webFallback: URL(string: "https://web.whatsapp.com/"), universalLink: URL(string: "https://wa.me/"), aliases: ["whatsapp", "ह्वाट्सएप", "व्हाट्सएप", "वाट्सएप"]),
         App(id: "messenger", nameKey: "app.name.messenger", systemImage: "bolt.fill", scheme: "fb-messenger", imageName: "appIcon.messenger"),
-        App(id: "facebook", nameKey: "app.name.facebook", systemImage: "person.2.fill", scheme: "fb", imageName: "appIcon.facebook", webFallback: URL(string: "https://www.facebook.com/"), aliases: ["facebook", "फेसबुक"]),
-        App(id: "instagram", nameKey: "app.name.instagram", systemImage: "camera.fill", scheme: "instagram", imageName: "appIcon.instagram", webFallback: URL(string: "https://www.instagram.com/"), aliases: ["instagram", "इन्स्टाग्राम"]),
-        App(id: "youtube", nameKey: "app.name.youtube", systemImage: "play.rectangle.fill", scheme: "youtube", imageName: "appIcon.youtube", webFallback: URL(string: "https://www.youtube.com/"), aliases: ["youtube", "युट्युब"]),
+        App(id: "facebook", nameKey: "app.name.facebook", systemImage: "person.2.fill", scheme: "fb", imageName: "appIcon.facebook", webFallback: URL(string: "https://www.facebook.com/"), universalLink: URL(string: "https://www.facebook.com/"), aliases: ["facebook", "फेसबुक"]),
+        App(id: "instagram", nameKey: "app.name.instagram", systemImage: "camera.fill", scheme: "instagram", imageName: "appIcon.instagram", webFallback: URL(string: "https://www.instagram.com/"), universalLink: URL(string: "https://www.instagram.com/"), aliases: ["instagram", "इन्स्टाग्राम"]),
+        App(id: "youtube", nameKey: "app.name.youtube", systemImage: "play.rectangle.fill", scheme: "youtube", imageName: "appIcon.youtube", webFallback: URL(string: "https://www.youtube.com/"), universalLink: URL(string: "https://www.youtube.com/"), aliases: ["youtube", "युट्युब"]),
         App(id: "gmail", nameKey: "app.name.gmail", systemImage: "envelope.circle.fill", scheme: "googlegmail", imageName: "appIcon.gmail"),
-        App(id: "googlemaps", nameKey: "app.name.googlemaps", systemImage: "location.fill", scheme: "comgooglemaps", imageName: "appIcon.googlemaps"),
+        // [APP-PROMPT-MATRIX] universalLink: google.com/maps — Google's
+        // AASA claims com.google.Maps for the explicit "/maps" path;
+        // `comgooglemaps://` stays the probe and fallback.
+        App(id: "googlemaps", nameKey: "app.name.googlemaps", systemImage: "location.fill", scheme: "comgooglemaps", imageName: "appIcon.googlemaps", universalLink: URL(string: "https://www.google.com/maps")),
         App(id: "chrome", nameKey: "app.name.chrome", systemImage: "globe", scheme: "googlechrome", imageName: "appIcon.googlechrome"),
         App(id: "zoom", nameKey: "app.name.zoom", systemImage: "videocam.fill", scheme: "zoomus", imageName: "appIcon.zoom"),
         App(id: "telegram", nameKey: "app.name.telegram", systemImage: "paperplane.fill", scheme: "tg", imageName: "appIcon.telegram"),
@@ -412,6 +524,18 @@ final class AppLauncher {
     /// (never a silent dead tap), exactly like the openers in
     /// `CallLinks`.
     ///
+    /// [APP-PROMPT-MATRIX] (2026-10-14) The URL opened is the entry's
+    /// `preferredLaunchURL` — its https universal link where one exists,
+    /// else the custom-scheme `rootURL`. Same probe, quieter launch: the
+    /// plan's `.app` verdict was decided on the scheme (`launchPlan`
+    /// keeps probing `rootURL`, since `canOpenURL` cannot tell an https
+    /// URL's app from Safari), and only the confirmed open swaps to the
+    /// universal link — the one surface iOS opens WITHOUT its own "Open
+    /// in <App>?" sheet (owner report 2026-10-14). An entry with no
+    /// universal link still opens its scheme here; iOS's sheet may
+    /// follow ours, which is the honest limit of this fix (see the
+    /// matrix on `catalog`).
+    ///
     /// A `.camera` entry opens nothing here: it has no URL, and its
     /// launch is the in-app picker the `launcher.open` plugin presents
     /// (T4 of the 2026-09-16 launcher plan). Callers that announce a
@@ -419,7 +543,7 @@ final class AppLauncher {
     /// plugin path owns that entry, and the Home quick-access tile is
     /// wired to it there.
     func open(_ app: App) {
-        guard let url = app.rootURL else { return }
+        guard let url = app.preferredLaunchURL else { return }
         opener.open(url)
     }
 

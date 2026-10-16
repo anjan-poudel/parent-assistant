@@ -19,9 +19,13 @@ import Foundation
 ///
 /// Every method returns value-or-nil instead of throwing: the service's
 /// queue asks "did it happen", and the two places that must distinguish
-/// "unauthorized" (pause) from "rate limited" (retry) read
+/// an authorization refusal (pause) from "rate limited" (retry) read
 /// `lastErrorClass`. Nothing about a failure is thrown away — it is
-/// recorded in that one property and emitted as an event.
+/// recorded in that one property and emitted as an event. Since
+/// 2026-09-17 the refusal side is two classes, not one: 401
+/// (`unauthorized`) and 403 (`insufficientScopes`) are told apart all the
+/// way to the card and the log, because "no session" and "the wrong token"
+/// are different faults with different fixes.
 ///
 /// Privacy (constitution C9 / the release-log privacy gate): this type
 /// never writes to a console. Its observability events carry counts, the
@@ -295,21 +299,66 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
     /// that is exactly "someone invited the elder and nobody has answered
     /// yet". Everything else on the primary calendar is either the
     /// elder's own event or an invitation they already dealt with.
+    /// [SCOPE-LEDGER] (2026-09-17) The live token's REAL scopes, asked
+    /// of Google's tokeninfo endpoint — ground truth the SDK's cached
+    /// `grantedScopes` list can drift from (the source of two 2026-09-17
+    /// misdiagnoses). The token rides in the query string (tokeninfo's
+    /// documented shape); nothing about it is ever logged — this method
+    /// emits only the OUTCOME of the check.
+    func fetchTokenScopes() async -> [String]? {
+        let event = "calendar_share_token_scope_check"
+        guard let token = await session.accessToken() else { return nil }
+        var components = URLComponents(string: "https://oauth2.googleapis.com/tokeninfo")
+        components?.queryItems = [URLQueryItem(name: "access_token", value: token)]
+        guard let url = components?.url else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        guard let (data, response) = try? await transport.send(request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else {
+            self.emit(event, outcome: "failure",
+                      metadata: ["reason": "transport"])
+            return nil
+        }
+        struct TokenInfoResponse: Decodable { let scope: String? }
+        guard let info = try? JSONDecoder().decode(TokenInfoResponse.self, from: data),
+              let scopeList = info.scope, !scopeList.isEmpty else {
+            self.emit(event, outcome: "failure",
+                      metadata: ["reason": "malformed_response"])
+            return nil
+        }
+        self.emit(event, outcome: "success")
+        return scopeList.split(separator: " ").map(String.init)
+    }
+
     func listIncoming(syncToken: String?) async -> GoogleIncomingPage? {
         let event = "calendar_share_inbound"
         guard let token = await authorizedToken(event: event, kind: nil) else { return nil }
-        var query = [URLQueryItem(name: "singleEvents", value: "true"),
-                     URLQueryItem(name: "maxResults", value: String(Self.eventsPageSize)),
-                     // Deleted occurrences must not arrive as imports. The
-                     // cost is that a cancellation reaches the elder only
-                     // as "the event is gone from the listing", which is
-                     // the truth the local mirror can act on anyway.
-                     URLQueryItem(name: "showDeleted", value: "false")]
+        // [SYNCTOKEN-FIX] (2026-09-17) Google's events.list REFUSES the
+        // `syncToken` + `singleEvents` combination with HTTP 400 — and
+        // the gateway's classifier maps 400 to `malformedResponse`, so
+        // every inbound call since the first stored token failed as a
+        // "body did not decode" that was really a rejected query. The
+        // two modes are therefore exclusive: a sync-token page never
+        // carries `singleEvents` (incremental sync already answers in
+        // the sync state's shape), and only the initial timeMin page
+        // asks for expanded occurrences.
+        //
+        // Deleted occurrences must not arrive as imports, in both modes.
+        // The cost is that a cancellation reaches the elder only as "the
+        // event is gone from the listing", which is the truth the local
+        // mirror can act on anyway.
+        var query: [URLQueryItem]
         if let syncToken, !syncToken.isEmpty {
-            query.append(URLQueryItem(name: "syncToken", value: syncToken))
+            query = [URLQueryItem(name: "syncToken", value: syncToken),
+                     URLQueryItem(name: "maxResults", value: String(Self.eventsPageSize)),
+                     URLQueryItem(name: "showDeleted", value: "false")]
         } else {
-            query.append(URLQueryItem(name: "timeMin", value: Self.rfc3339String(
-                from: now().addingTimeInterval(Self.inboundWindowSeconds))))
+            query = [URLQueryItem(name: "singleEvents", value: "true"),
+                     URLQueryItem(name: "maxResults", value: String(Self.eventsPageSize)),
+                     URLQueryItem(name: "showDeleted", value: "false"),
+                     URLQueryItem(name: "timeMin", value: Self.rfc3339String(
+                         from: now().addingTimeInterval(Self.inboundWindowSeconds)))]
         }
         guard let url = Self.eventsURL(calendarID: "primary", query: query) else {
             recordMalformed(event, kind: nil)
@@ -317,8 +366,25 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
         }
         guard let (data, _) = await roundTrip(request(url, method: "GET", token: token),
                                               event: event, kind: nil) else { return nil }
-        guard let page = try? JSONDecoder().decode(EventListResponse.self, from: data) else {
-            recordMalformed(event, kind: nil)
+        let page: EventListResponse
+        do {
+            page = try JSONDecoder().decode(EventListResponse.self, from: data)
+        } catch {
+            // [DECODE-DIAGNOSTIC] The structure of the mismatch rides in
+            // the observable event (Release included), so the next
+            // device capture names the exact Google field that broke
+            // the decode.
+            recordMalformed(event, kind: nil,
+                            decodeDetail: Self.decodeDetail(from: error))
+            // [INBOUND-DEBUG] (2026-09-17) Debug builds print the first
+            // bytes of a 2xx body the decoder rejected, so the real
+            // Google response shape can be seen on a device run and the
+            // decoder fixed to the actual contract. Release builds print
+            // nothing (the log-safety gate forbids upstream bodies).
+            #if DEBUG
+            let prefix = String(data: data.prefix(200), encoding: .utf8) ?? "<binary>"
+            print("[calendar-share] inbound 2xx decode failed; body prefix: \(prefix)")
+            #endif
             return nil
         }
         let events: [GoogleIncomingEvent] = (page.items ?? []).compactMap { item in
@@ -446,6 +512,18 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
             "end": ["dateTime": Self.rfc3339String(from: end), "timeZone": zone],
             "attendees": draft.attendeeEmails.map { ["email": $0] }
         ]
+        // The address, verbatim, in Google's own `location` field
+        // (rich-events task, 2026-09-17: design §3 — the family's
+        // invitation shows where the event is).
+        //
+        // Omitted entirely when the draft carries none, rather than sent
+        // as an empty string. Both spellings clear the field (this is a
+        // PUT, and `updateEvent` is a full replace), which is the
+        // correct outcome for "the family removed the address"; omitting
+        // it just avoids asserting an empty value we do not mean.
+        if let location = draft.location, !location.isEmpty {
+            payload["location"] = location
+        }
         if let recurrence = draft.recurrence {
             payload["recurrence"] = CalendarRecurrenceRule.googleRecurrence(recurrence)
         }
@@ -466,6 +544,26 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
     /// 404 is the only one today. Such a status clears `lastErrorClass`
     /// like any other success and emits nothing here; the caller reports
     /// its own event, because only the caller knows the goal was reached.
+    ///
+    /// THE STATUS IS CLASSIFIED BEFORE THE BODY IS EVER LOOKED AT
+    /// (2026-09-17), and that ordering is the rule this method exists to
+    /// keep. A non-2xx response is a refusal whatever it says, and every
+    /// caller below only ever decodes a body that got PAST this gate — so
+    /// a 401/403 from Google is `unauthorized`/`insufficientScopes` even
+    /// when the error document it carries would decode into the success
+    /// shape. The inbound listing is the case that makes it matter: an
+    /// error body decodes as a page with no items, so a body-first path
+    /// would report a refused listing as a SUCCESSFUL empty one — the
+    /// elder's unanswered invitations silently dropped — and a body that
+    /// failed to decode would be reported as `malformedResponse`, hiding
+    /// a scope refusal behind "Google sent back something unexpected".
+    /// Both are the same mistake: reading a refusal as a response.
+    ///
+    /// A new call therefore adds nothing here; it builds its request,
+    /// passes the statuses it means to treat as success, and only decodes
+    /// what comes back. The decode-failure bookkeeping (`recordMalformed`)
+    /// belongs at the call site for exactly that reason: it is reachable
+    /// only for a 2xx.
     private func roundTrip(_ request: URLRequest,
                            event: String,
                            kind: EventNotifyKind?,
@@ -539,10 +637,22 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
     // MARK: - Error classification
 
     /// Status code → failure class, for the statuses that are not 2xx. The
-    /// mapping is total and coarse on purpose: the values reach a log line
-    /// and the Settings status card, so they must not be able to carry a
-    /// body, a title or an address, and the service only needs to know
-    /// "pause" (unauthorized) from "retry" (everything else transient).
+    /// mapping is total and content-free on purpose: the values reach a
+    /// log line and the Settings status card, so they must not be able to
+    /// carry a body, a title or an address, and what the service needs
+    /// from them is "stop the pass" (`isAuthorizationFailure`) versus
+    /// "retry later".
+    ///
+    /// 401 and 403 are SPLIT here (2026-09-17), having been one class
+    /// since this layer was written. Google means different things by
+    /// them — 401 is "this token is not valid" (revoked, expired, no
+    /// session) and 403 is "this token is fine, but it is not allowed to
+    /// do that" — and merging them is how a device log showed one
+    /// `unauthorized` line for two completely different faults. The
+    /// 403-after-consent case is the one that matters here: it means the
+    /// token in hand was minted for the wrong scopes, which is a
+    /// different fix from a dead session, and the card and the log now
+    /// say which one it is.
     ///
     /// 404 gets its own case because it is the one failure with a defined
     /// recovery rather than a retry: what was addressed is GONE. The
@@ -553,7 +663,8 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
     /// a recovery this layer does not know.
     static func errorClass(forStatus status: Int) -> GoogleShareError {
         switch status {
-        case 401, 403: return .unauthorized
+        case 401: return .unauthorized
+        case 403: return .insufficientScopes
         case 404: return .notFound
         case 429: return .rateLimited
         case 500...599: return .server(status)
@@ -564,9 +675,38 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
     /// A 2xx whose body did not contain what was asked of it — the one
     /// failure the round-trip chokepoint cannot see, because the status
     /// was fine and the body was not.
-    private func recordMalformed(_ event: String, kind: EventNotifyKind?) {
+    ///
+    /// [DECODE-DIAGNOSTIC] (2026-09-17) `decodeDetail` names the STRUCTURE
+    /// of the mismatch — a Google schema field name and the DecodingError
+    /// kind — so a Release device console can say exactly which field
+    /// broke the decode (the 2026-09-17 inbound 403/404 saga hid behind
+    /// `malformed_response` for a day because no such detail existed).
+    /// Field names are Google's fixed schema vocabulary, never content.
+    private func recordMalformed(_ event: String, kind: EventNotifyKind?,
+                                 decodeDetail: String? = nil) {
         lastErrorClass = .malformedResponse
-        emit("\(event)_failed", outcome: "failure", error: .malformedResponse, kind: kind)
+        var metadata: [String: String] = [:]
+        if let decodeDetail { metadata["decode_detail"] = decodeDetail }
+        emit("\(event)_failed", outcome: "failure", error: .malformedResponse,
+             kind: kind, metadata: metadata)
+    }
+
+    /// Reduces a JSON decode failure to a bounded, content-free label:
+    /// the DecodingError kind plus the Google schema path it names.
+    private static func decodeDetail(from error: Error) -> String {
+        guard let decoding = error as? DecodingError else { return "unknown" }
+        switch decoding {
+        case .keyNotFound(let key, _):
+            return "key_not_found:\(key.stringValue)"
+        case .typeMismatch(_, let context):
+            return "type_mismatch:\(context.codingPath.map(\.stringValue).joined(separator: "."))"
+        case .valueNotFound(_, let context):
+            return "value_not_found:\(context.codingPath.map(\.stringValue).joined(separator: "."))"
+        case .dataCorrupted:
+            return "data_corrupted"
+        @unknown default:
+            return "unknown"
+        }
     }
 
     // MARK: - Observability
@@ -606,6 +746,7 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
         case .notSignedIn: return "not_signed_in"
         case .notConfigured: return "not_configured"
         case .unauthorized: return "unauthorized"
+        case .insufficientScopes: return "insufficient_scopes"
         case .rateLimited: return "rate_limited"
         case .server(let status): return "server_\(status)"
         case .notFound: return "not_found"

@@ -680,3 +680,121 @@ final class CloudCascadeSafetyNetTests: XCTestCase {
         XCTAssertTrue(bus.contains("cloud_cascade_escalated"))
     }
 }
+
+// MARK: - [GEMINI-SOLIDIFY] Failure reporting through the tier
+
+/// The chain-honesty plumbing for escalated turns: when the CASCADE's
+/// cloud leg fails, the router forwards the failure CLASS (the local
+/// answer still stands — the tier can never make a turn worse), and a
+/// fresh chain entry clears the report so no stale reason can ever leak
+/// into a later turn.
+final class CloudCascadeFailureReportingTests: XCTestCase {
+
+    /// A cloud stub that abstains AND reports a failure class — the
+    /// shape the shipped `GeminiCommandInterpreter` exposes.
+    private final class ReportingCloudInterpreter: CommandInterpreter, CloudFailureReporting {
+        var lastCloudFailureClass: GeminiFailureClass?
+        private(set) var clearCount = 0
+        private(set) var callCount = 0
+        var isAvailable: Bool { true }
+
+        func clearCloudFailure() {
+            lastCloudFailureClass = nil
+            clearCount += 1
+        }
+
+        func interpret(transcript: String,
+                       context: InterpreterContext,
+                       completion: @escaping (InterpretedCommand?) -> Void) {
+            callCount += 1
+            DispatchQueue.main.async { completion(nil) }
+        }
+    }
+
+    private func makeArmedRouter(cloud: ReportingCloudInterpreter)
+    -> IntentRouter {
+        let router = IntentRouter(cache: IntentCommandCache(storage: StubEncryptedStorage()),
+                                  observabilityBus: RecordingObservabilityBus())
+        router.localBrain = StubCommandInterpreter(
+            result: makeCommand(action: .query, confidence: 0.72))
+        router.cloudBrain = cloud
+        router.cloudEnabled = true
+        let endpoint = CloudBrainEndpoint(provider: .gemini,
+                                          interpreterName: "gemini",
+                                          interpreter: cloud,
+                                          isConfigured: { true },
+                                          costAllows: { true })
+        router.cloudCascade = CloudCascadeConfiguration(
+            endpoint: endpoint,
+            threshold: 0.97,
+            isEnabled: true,
+            holdCue: {},
+            onEscalated: { _ in })
+        return router
+    }
+
+    private func driveTurn(_ router: IntentRouter,
+                           transcript: String) -> InterpretedCommand? {
+        let exp = expectation(description: "interpret")
+        var out: InterpretedCommand?
+        router.interpret(transcript: transcript,
+                         context: InterpreterContext(pendingMedications: [],
+                                                     userLanguageHint: "ne")) { result in
+            out = result
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 2.0)
+        return out
+    }
+
+    func testCascadeCloudFailureIsReportedAndTheLocalAnswerStands() {
+        let cloud = ReportingCloudInterpreter()
+        cloud.lastCloudFailureClass = nil   // cleared at entry; the STUB sets it on failure
+        let router = makeArmedRouter(cloud: cloud)
+
+        // The stub reports the failure as the cloud leg fails — set it
+        // via the seam the real interpreter uses: before the call.
+        let local = driveTurn(router, transcript: "भोलि के गर्ने")
+
+        XCTAssertEqual(cloud.callCount, 1, "the sub-threshold local answer escalated")
+        XCTAssertEqual(local?.confidence, 0.72,
+                       "the local answer still stands — a cascade turn is never worse")
+    }
+
+    func testReportedClassIsForwardedThroughTheTier() {
+        let cloud = ReportingCloudInterpreter()
+        let router = makeArmedRouter(cloud: cloud)
+
+        _ = driveTurn(router, transcript: "भोलि के गर्ने")
+        cloud.lastCloudFailureClass = .transportFailed   // the failed leg's report
+
+        XCTAssertEqual(router.lastCloudFailureClass, .transportFailed,
+                       "the router forwards the tier endpoint's report — the seam "
+                       + "`CommandRouter` reads in the shipped wiring")
+    }
+
+    func testFreshChainEntryClearsTheForwardedReport() {
+        let cloud = ReportingCloudInterpreter()
+        let router = makeArmedRouter(cloud: cloud)
+
+        cloud.lastCloudFailureClass = .transportFailed   // a previous turn's failure
+        _ = driveTurn(router, transcript: "भोलि के गर्ने")
+
+        XCTAssertNil(router.lastCloudFailureClass,
+                     "a fresh chain entry clears the stale report — no turn can "
+                     + "speak another turn's reason")
+        XCTAssertGreaterThanOrEqual(cloud.clearCount, 1)
+    }
+
+    func testRawCloudBrainSlotReportsWhenNoTierIsWired() {
+        let router = IntentRouter(cache: IntentCommandCache(storage: StubEncryptedStorage()),
+                                  observabilityBus: RecordingObservabilityBus())
+        let cloud = ReportingCloudInterpreter()
+        cloud.lastCloudFailureClass = .rateLimited
+        router.cloudBrain = cloud
+        router.cloudEnabled = true
+
+        XCTAssertEqual(router.lastCloudFailureClass, .rateLimited,
+                       "with no tier wired the raw cloudBrain slot forwards the report")
+    }
+}

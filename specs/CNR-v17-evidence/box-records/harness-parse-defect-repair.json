@@ -1,0 +1,18 @@
+{
+  "schema": "cnr_harness_defect_repair/v1",
+  "date": "2026-10-16",
+  "defect": "eval_golden._first_complete_json (the gguf backend's parse) required the legacy wire key \"action\", while seeds/prompt_template.txt, eval/golden_corpus.jsonl, the CNR training corpus and the app's LlamaCommandInterpreter grammar all use the canonical \"intent\" key. Every correct model completion was discarded as NO-JSON and scored as an abstention (predict_gguf returned {\"action\": \"none\"}), so a live gguf run could not measure any working model.",
+  "why_now": "exposed by the first real gguf run on this branch (T-183 phase B): the stdgate-qwen-s43-chat-v17 run logged NO-JSON on valid intent-shaped JSON; the live probe reproduced it deterministically (raw output {\"intent\": \"call\", ...} -> parsed {\"action\": \"none\", \"confidence\": 0.0}). results.csv has zero recorded gguf rows, so the path had never been exercised in this repo.",
+  "repro": "v17-dial: .venv/bin/python -c \"import eval_golden; eval_golden.predict_gguf('माइयालाई फोन गर', cfg, gguf)\" -> [gguf] NO-JSON output for ...: '{\"intent\": \"call\", ...}' -> {'action': 'none', 'confidence': 0.0}",
+  "fix": "minimal canonical-key bridge inside _first_complete_json only (its single caller is predict_gguf): accept a complete object carrying the canonical string \"intent\" and normalize it onto the metric layer's historic \"action\" name (value passed through untouched); legacy action-shaped completions are accepted exactly as before and win when both keys are present. No metric, threshold, fixture or corpus was touched.",
+  "files": {
+    "src/eval_golden.py": {"sha256_before": "357962ae6cd2a7771b05924054319fcb2c8a63d5898a23ca6e424bc589e3a938",
+                            "sha256_after":  "9a1e7484adef7463345790f922665453e256888f83ecd6cb2c8235e77c9209e9"},
+    "tests/test_eval_golden_gates.py": {"sha256_after": "ce774054036d7672795d71e618dd0349a238bdd7003111d35f461e7a41593b08",
+                                         "added": "CanonicalIntentKeyBridgeTests (3 tests: canonical parse+normalize; legacy unchanged + both-keys precedence; preamble/refusal cases)"}
+  },
+  "tests_run": "python3 -m unittest tests.test_eval_golden_gates -> 38 tests OK (35 pre-existing + 3 new); py_compile OK",
+  "live_verification": "repaired harness on the box: predict_gguf('माइयालाई फोन गर', candidate gguf) -> action == 'call' (was 'none')",
+  "scope": "the box copy of src/eval_golden.py is byte-identical to the branch file (sha 9a1e7484...) before the full-gates run; the branch commit rides the next unit close",
+  "discipline": "instrumentation repair, not a gate move: no threshold, fixture, corpus, corpus byte or measurement was adjusted; the repaired harness reports whatever the candidate actually scores"
+}

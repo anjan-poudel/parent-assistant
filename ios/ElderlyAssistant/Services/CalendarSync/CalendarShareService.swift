@@ -21,7 +21,7 @@ final class CalendarShareConsent {
 
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = SettingsPersistence.shared) {
         self.defaults = defaults
     }
 
@@ -46,8 +46,20 @@ struct CalendarShareStatus: Equatable {
         case notConfigured
         /// Configured, but nobody has connected an account yet.
         case signedOut
-        /// Connected.
+        /// Connected, and holding every scope the share path needs.
         case connected(email: String?)
+        /// SIGNED IN but without the Calendar/contacts grant — the elder
+        /// declined the consent sheet, revoked the grant at Google, or
+        /// the account was connected by a build that asked for identity
+        /// alone (2026-09-17).
+        ///
+        /// Its own case rather than a flag on `connected`, because the
+        /// two need different SCREENS, not a different sentence: this
+        /// one can only offer the re-connect, while `connected` offers
+        /// the disclosure. And folding it into `signedOut` would be a
+        /// lie of a different kind — the app would be telling the elder
+        /// they had no account when they can see it in Settings.
+        case connectedWithoutScopes(email: String?)
     }
 
     var connection: Connection = .signedOut
@@ -60,14 +72,127 @@ struct CalendarShareStatus: Equatable {
     /// The most recent failure class, for the honest status line.
     var lastError: GoogleShareError?
 
-    /// Whether sharing is actually acting: connected AND consented.
-    /// Pending work with this false is exactly the state the card has to
-    /// surface ("3 events waiting to share" + why they are waiting).
+    /// [SCOPE-LEDGER] (2026-09-17) What Google's tokeninfo says the live
+    /// token actually carries, per required scope (URL-form keys). nil =
+    /// never checked (or the check could not run). This is the ground
+    /// truth the card's scope rows render — the SDK's own grantedScopes
+    /// list has drifted twice on real devices.
+    var scopeStatus: [String: Bool]?
+
+    /// Whether sharing is actually acting: connected, SCOPED and
+    /// consented. Pending work with this false is exactly the state the
+    /// card has to surface ("3 events waiting to share" + why they are
+    /// waiting).
+    ///
+    /// `connectedWithoutScopes` is not active however loudly consent was
+    /// given: the token cannot write to Calendar, so calling that state
+    /// "sharing" would be exactly the silent stub the constitution
+    /// forbids.
     var isActive: Bool {
         if case .connected = connection, isConsented, lastError == nil { return true }
         return false
     }
 }
+
+// MARK: - Significant medication events (C11)
+
+/// One at-risk medication event that ADDITIONALLY surfaces as a one-off
+/// entry on the shared family calendar (design §9.3 / OD-7; FR-MSR-016).
+///
+/// A plain value, not a side effect: the scheduler raises it at the three
+/// at-risk sites (missed dose, blocked double dose, escalation started —
+/// T-016), and `CalendarShareService.writeSignificantEvent` is the only
+/// consumer that acts on it. So "which events surface" is decided at the
+/// raise sites, not by a second rule here — and the set is deliberately
+/// exactly those three: an intake that was RECORDED is not an alert.
+struct SignificantMedicationEvent: Equatable {
+
+    /// The three at-risk events of §9.3, and deliberately nothing else.
+    /// A kind added here without revisiting that decision would put a new
+    /// class of entry on the family's calendar, so the enum is the
+    /// decision's single point of truth.
+    enum Kind: String, Equatable {
+        case missedMedication
+        case possibleDoubleDose
+        case escalationStarted
+
+        /// The string-catalog key of the phrase this event's calendar
+        /// entry opens with (C13 keys, present in both locales). Kept
+        /// beside the cases so a new kind cannot compile without a
+        /// phrase to say.
+        var alertKey: String {
+            switch self {
+            case .missedMedication: return "calendarShare.alert.missed"
+            case .possibleDoubleDose: return "calendarShare.alert.doubleDose"
+            case .escalationStarted: return "calendarShare.alert.escalation"
+            }
+        }
+    }
+
+    let kind: Kind
+    let entryId: UUID
+    /// The trigger instant — the dose occurrence the event is about. It
+    /// is the one-off twin's anchor AND part of the identity below.
+    let occurredAt: Date
+    /// The deterministic identity (D7): derived from the three fields
+    /// above, so a re-trigger of the same logical event composes the same
+    /// calendar key and `LocalGoogleEventMappingStore.enqueue` REPLACES
+    /// the queued entry rather than duplicating it.
+    ///
+    /// Shape: `<kind>_<entry uuid>_<yyyyMMddHHmm UTC>`. The stamp is
+    /// truncated to the minute on purpose — the occurrence identity is
+    /// the dose slot, not the second the escalation engine happened to
+    /// decide — and it carries no colon, so the composed
+    /// `CalendarShareKey.oneOff` form stays a valid 2-component key
+    /// (§4.3 grammar; see the grammar test).
+    let id: String
+
+    init(kind: Kind, entryId: UUID, occurredAt: Date, id: String? = nil) {
+        self.kind = kind
+        self.entryId = entryId
+        self.occurredAt = occurredAt
+        self.id = id ?? Self.identity(kind: kind, entryId: entryId,
+                                      occurredAt: occurredAt)
+    }
+
+    /// The deterministic identity behind `id` — one implementation, so
+    /// the raise site and this value cannot disagree about what "the same
+    /// event" means.
+    static func identity(kind: Kind, entryId: UUID, occurredAt: Date) -> String {
+        "\(kind.rawValue)_\(entryId.uuidString)_\(occurrenceStamp(occurredAt))"
+    }
+
+    /// `yyyyMMddHHmm` in UTC: fixed locale and zone, so the stamp is the
+    /// same on every device and in every timezone the household travels
+    /// to (D7 pins both).
+    private static func occurrenceStamp(_ instant: Date) -> String {
+        occurrenceStampFormatter.string(from: instant)
+    }
+
+    private static let occurrenceStampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMddHHmm"
+        return formatter
+    }()
+}
+
+/// What one significant-event calendar write actually did (design §5.1).
+/// Never a "delivered" claim: `.enqueued` is exactly that — the shipped
+/// flush/backoff path owns the Google write, and the Settings status
+/// card's pending count is the delivery surface.
+enum CalendarShareWriteResult: Equatable {
+    case enqueued
+    case skippedNotActive
+    case skippedNoInvitees
+    case failed(reason: String)
+}
+
+/// The unit spec (T-015) spells this result `SignificantEventWriteResult`;
+/// the frozen design pins `CalendarShareWriteResult` (design-l2 C11 /
+/// IF-17). One type, both names, so either document's spelling resolves.
+typealias SignificantEventWriteResult = CalendarShareWriteResult
 
 // MARK: - Service
 
@@ -128,7 +253,7 @@ final class CalendarShareService: ObservableObject {
         observabilityBus: ObservabilityBus,
         eventKit: EventKitCalendarGateway = EKCalendarGateway(),
         contactsProvider: @escaping () -> [FamilyContact],
-        defaults: UserDefaults = .standard,
+        defaults: UserDefaults = SettingsPersistence.shared,
         now: @escaping () -> Date = Date.init
     ) {
         self.session = session
@@ -213,13 +338,20 @@ final class CalendarShareService: ObservableObject {
         if !session.isConfigured {
             next.connection = .notConfigured
         } else if session.isSignedIn {
-            next.connection = .connected(email: session.accountEmail)
+            // Signed in is not the same as able to share: the account
+            // can lack the Calendar/contacts grant, and the card has to
+            // say which of the two it is holding (2026-09-17).
+            next.connection = session.hasRequiredScopes
+                ? .connected(email: session.accountEmail)
+                : .connectedWithoutScopes(email: session.accountEmail)
         } else {
             next.connection = .signedOut
         }
-        // A revoked token is reported by the gateway as `.unauthorized`;
-        // the connection is still nominally signed in, so the card says
-        // "connected" and the error line says what is wrong with it.
+        // A refusal is reported by the gateway as `.unauthorized` (401:
+        // the session is gone) or `.insufficientScopes` (403: the token
+        // in hand was minted for the wrong scopes); the connection is
+        // still nominally signed in, so the card says "connected" and the
+        // error line says what is wrong with it.
         if status != next {
             status = next
         }
@@ -248,25 +380,131 @@ final class CalendarShareService: ObservableObject {
 
     // MARK: - Account
 
-    /// Presents Google sign-in. Returns whether a usable session exists
-    /// afterwards; on success the pending queue is flushed immediately
-    /// (anything the family queued while signed out lands now).
+    /// Presents Google sign-in. Returns whether a fully-connected session
+    /// exists afterwards; on success the pending queue is flushed
+    /// immediately (anything the family queued while signed out lands
+    /// now).
+    ///
+    /// A sign-in that ends WITHOUT the Calendar/contacts grant returns
+    /// false and flushes nothing: the queue would fail item by item with
+    /// a 401, and the next pass (this card's "try again", or the
+    /// foreground flush) would repeat it. The status tells the card
+    /// which of the two "false" states the household is in.
     @discardableResult
     func signIn() async -> Bool {
-        let ok = await session.signIn()
+        let outcome = await session.signIn()
         refreshStatus()
-        if ok { await flushPending() }
-        return ok
+        if outcome.isConnected { await flushPending() }
+        return outcome.isConnected
     }
 
     /// Presents Google's account-creation flow, then signs in — for the
     /// household that has no Google account at all (design §2 decision 3).
     @discardableResult
     func createAccount() async -> Bool {
-        let ok = await session.createAccount()
+        let outcome = await session.createAccount()
         refreshStatus()
-        if ok { await flushPending() }
-        return ok
+        if outcome.isConnected { await flushPending() }
+        return outcome.isConnected
+    }
+
+    /// Brings back the Google account a previous launch connected, then
+    /// republishes the status so the Settings card shows the restored
+    /// "signed in as" state (2026-09-17).
+    ///
+    /// The republish is the point of doing this HERE rather than at the
+    /// call site: `status` is published state the card observes, and the
+    /// restore completes asynchronously — after launch has already
+    /// rendered. A card that read the session directly would be right by
+    /// accident; a card driven by `status` is only right if something
+    /// recomputes it when the restore lands, which is this line.
+    ///
+    /// A restore that brings nothing back changes nothing here: the
+    /// status recomputes to the same `signedOut` (or `notConfigured`)
+    /// it already showed, and the queue stays exactly as it was. That is
+    /// the honest degradation — a failed restore must not look like a
+    /// connection, and it must not look like a fresh problem either.
+    ///
+    /// Flushing on success is what makes the restore worth doing at
+    /// launch rather than only on the next foreground: anything the
+    /// family queued before the process restarted drains now, instead of
+    /// waiting behind a sign-in the elder has no reason to perform again.
+    @discardableResult
+    func restoreSession() async -> Bool {
+        let outcome = await session.restorePreviousSession()
+        refreshStatus()
+        if outcome.isConnected {
+            await refreshScopeStatus()
+            await flushPending()
+        }
+        return outcome.isConnected
+    }
+
+    // MARK: - Scope ledger (2026-09-17)
+
+    /// Asks Google's tokeninfo what the live token REALLY carries and
+    /// publishes the per-scope truth on `status.scopeStatus` — the
+    /// ground truth the card renders. Names only ever leave this method
+    /// (scope URL forms), never the token.
+    func refreshScopeStatus() async {
+        guard let granted = await gateway.fetchTokenScopes() else {
+            onMain { [weak self] in
+                guard let self else { return }
+                var next = self.status
+                next.scopeStatus = nil
+                self.status = next
+            }
+            return
+        }
+        let normalized = Set(granted.map { Self.normalizeScopeName($0) })
+        let required = session.requiredScopes
+        onMain { [weak self] in
+            guard let self else { return }
+            var ledger: [String: Bool] = [:]
+            for scope in required {
+                ledger[scope] = normalized.contains(Self.normalizeScopeName(scope))
+            }
+            var next = self.status
+            next.scopeStatus = ledger
+            self.status = next
+            var metadata: [String: String] = [:]
+            for (scope, grantedFlag) in ledger {
+                metadata[Self.normalizeScopeName(scope)] = grantedFlag ? "granted" : "missing"
+            }
+            self.emit("calendar_share_scope_check", outcome: "success",
+                      metadata: metadata)
+        }
+    }
+
+    /// The card's Grant button: asks Google for exactly the scopes the
+    /// last check found missing, then re-checks the truth and drains the
+    /// queue when the grant completes the set. The answer comes from the
+    /// DIRECT re-check (tokeninfo), not the published status — the
+    /// publish is a main-queue hop that lands after this returns, and a
+    /// caller must never read a stale ledger for its decision.
+    @discardableResult
+    func grantMissingScopes() async -> Bool {
+        let missing = status.scopeStatus?
+            .filter { !$0.value }.map(\.key) ?? []
+        guard !missing.isEmpty else { return true }
+        guard await session.grantScopes(missing) else { return false }
+        let grantedNow = await gateway.fetchTokenScopes() ?? []
+        let normalized = Set(grantedNow.map { Self.normalizeScopeName($0) })
+        let allGranted = session.requiredScopes.allSatisfy {
+            normalized.contains(Self.normalizeScopeName($0))
+        }
+        await refreshScopeStatus()
+        if status.isActive { await flushPending() }
+        return allGranted
+    }
+
+    /// The URL-form / short-form scope-name reconciliation the ledger
+    /// shares with the session's own comparison: tokeninfo answers in
+    /// URL form, the catalog request uses the same, and the SDK's short
+    /// forms must never read as "missing" because the spelling differs.
+    private static func normalizeScopeName(_ scope: String) -> String {
+        let prefix = "https://www.googleapis.com/auth/"
+        return scope.hasPrefix(prefix) ? String(scope.dropFirst(prefix.count)) : scope
     }
 
     /// Drops the session and PAUSES sharing. The local calendar, the
@@ -342,22 +580,50 @@ final class CalendarShareService: ObservableObject {
 
     // MARK: - Reconcile: calendar events
 
-    /// A one-off event was created locally (voice or import). Shares it,
-    /// when the policy says anyone wants it.
+    /// A one-off event was created locally (voice, import, or the Events
+    /// form). Shares it, when the policy says anyone wants it.
+    ///
+    /// `location` is the address the elder typed (rich-events task,
+    /// 2026-09-17): it rides into the twin's Google `location` row, which
+    /// is what makes the family's invitation open in their own maps.
+    /// Defaulted to nil so the voice-created path, which has no address
+    /// field, is unchanged.
     func eventCreated(localEventId: String, title: String, startDate: Date,
-                      durationMinutes: Int) {
+                      durationMinutes: Int, location: String? = nil) {
         onMain { [weak self] in
-            guard let self, self.canShare else { return }
+            guard let self else { return }
+            // [CALENDAR-POLICY] (2026-09-17) The first gate must never be
+            // silent either: two 2026-09-17 device runs created events
+            // with zero share activity in the console — not signed in /
+            // no consent / no scopes is a real reason, and the console
+            // has to say it instead of saying nothing.
+            guard self.canShare else {
+                self.emit("calendar_share_skipped_not_active",
+                          outcome: "info",
+                          metadata: ["kind": EventNotifyKind.calendarEvent.rawValue])
+                return
+            }
             let key = CalendarShareKey.oneOff(kind: .calendarEvent,
                                              eventIdentifier: localEventId)
             guard let draft = CalendarShareMapper.calendarEventDraft(
                 title: title, startDate: startDate, durationMinutes: durationMinutes,
-                contacts: self.contactsProvider(), notifySettings: self.notifySettings
+                contacts: self.contactsProvider(), notifySettings: self.notifySettings,
+                location: location
             ) else {
                 // Nobody is eligible — including the case where the only
                 // candidate has no email. Nothing is queued, and no twin is
                 // left behind, so a LATER edit that makes someone eligible
                 // starts from a clean slate.
+                //
+                // [CALENDAR-POLICY] (2026-09-17) But never SILENTLY: the
+                // 2026-09-17 field reports read as "no invitation was
+                // sent" with zero observability — sharing was on and
+                // connected, and the policy had simply invited nobody.
+                // The event records the skip with its kind so the console
+                // can finally say WHY no invite left the device.
+                self.emit("calendar_share_skipped_no_invitees",
+                          outcome: "info",
+                          metadata: ["kind": EventNotifyKind.calendarEvent.rawValue])
                 return
             }
             // Marked as OURS before the request goes out, and marked as
@@ -417,21 +683,188 @@ final class CalendarShareService: ObservableObject {
         }
     }
 
+    /// Carries the free-form events' CURRENT native state over to their
+    /// twins (rich-events task, 2026-09-17; design §3: "edits/deletes via
+    /// a foreground reconcile of side-index-tracked events").
+    ///
+    /// A free-form event is native by construction, so the Calendar app's
+    /// copy — which the elder, the family and the Events form all edit —
+    /// is the source of truth, and this pass is the bridge to Google. It
+    /// reads each tracked event, builds the draft its current title /
+    /// start / duration / address imply, and lets the ordinary reconcile
+    /// diff decide: a changed fingerprint re-queues the twin, and an
+    /// event that no longer exists queues its tombstone. Nothing here
+    /// decides WHAT changed — the fingerprint (`CalendarShareMapper`)
+    /// already does, over exactly the fields the gateway sends.
+    ///
+    /// `trackedEventIds` is the side index's key set, and it is the
+    /// SNAPSHOT of the diff rather than every `calendarEvent:` key in the
+    /// ledger. That distinction is load-bearing: the ledger also holds
+    /// invitations this device IMPORTED (`importLocally`), where "the
+    /// twin" is the organizer's own event — treating those as gone would
+    /// delete the family's event from their own calendar. Only the ids the
+    /// caller says are the app's own are ever considered.
+    ///
+    /// Full calendar access is required, and for the same reason the
+    /// sweep requires it: without read permission every lookup answers
+    /// nil, which this pass would read as "every event is gone" and answer
+    /// with a mass delete.
+    func reconcileFreeFormEvents(trackedEventIds: Set<String>) {
+        onMain { [weak self] in
+            guard let self, self.canShare else { return }
+            guard self.eventKit.eventsAccess == .fullAccess else {
+                self.emit("calendar_share_events_skipped", outcome: "failure",
+                          metadata: ["reason": "no_calendar_access"])
+                return
+            }
+            let contacts = self.contactsProvider()
+            var desired: [String: CalendarTwinDraft] = [:]
+            var snapshot: Set<String> = []
+            for eventId in trackedEventIds {
+                let key = CalendarShareKey.oneOff(kind: .calendarEvent,
+                                                  eventIdentifier: eventId)
+                snapshot.insert(key)
+                guard let record = self.eventKit.fetchEvent(identifier: eventId),
+                      !record.isCanceled,
+                      let draft = CalendarShareMapper.calendarEventDraft(
+                        title: record.title,
+                        startDate: record.startDate,
+                        durationMinutes: record.durationMinutes,
+                        contacts: contacts,
+                        notifySettings: self.notifySettings,
+                        location: record.location
+                      )
+                else {
+                    // Either gone (the tombstone below is the honest
+                    // answer) or momentarily unshareable because nobody
+                    // is eligible right now — in which case the diff
+                    // withdraws the twin, which is the same thing the
+                    // policy says for the other kinds.
+                    continue
+                }
+                desired[key] = draft
+            }
+            self.reconcile(kind: .calendarEvent, desired: desired,
+                           ownedKeyPrefix: nil, knownKeySnapshot: snapshot)
+        }
+    }
+
     /// A one-off event was deleted locally — queue its tombstone.
     ///
-    /// No caller today: the app itself never deletes a calendar event, so
-    /// the only way one disappears is the elder deleting it in the
-    /// Calendar app — which is `cleanupVanishedEvents()`'s case, and it
-    /// goes through this same tombstone. Kept as the seam's other half so
-    /// the pair stays symmetric and an in-app delete (should one ever
-    /// exist) has the honest place to report itself.
+    /// Now has a caller (rich-events task, 2026-09-17): the Events form's
+    /// delete, the first in-app calendar-event deletion the app has ever
+    /// had. The pair with `eventCreated` is what keeps the family's copy
+    /// honest — an appointment the elder removed locally must not stay on
+    /// the shared calendar.
+    ///
+    /// Gated on `canShare` exactly like `eventCreated`, and for the same
+    /// reason: with sharing off, a queued tombstone would be a row waiting
+    /// on a decision the family has not made, and the Settings card's
+    /// pending count must never mean that. Nothing is lost by it — an
+    /// event deleted while signed out leaves its key in the ledger, and
+    /// `cleanupVanishedEvents()` queues this same tombstone on the first
+    /// pass after sharing is switched on.
     func eventDeleted(localEventId: String) {
         onMain { [weak self] in
-            guard let self else { return }
+            guard let self, self.canShare else { return }
             let key = CalendarShareKey.oneOff(kind: .calendarEvent,
                                              eventIdentifier: localEventId)
             self.enqueueTombstone(key: key, kind: .calendarEvent)
         }
+    }
+
+    // MARK: - Significant-event write (IF-17, D7)
+
+    /// Writes one significant medication event to the shared family
+    /// calendar as a ONE-OFF entry (§9.3 / OD-7, FR-MSR-016). The
+    /// consent-gated calendar channel the three at-risk events
+    /// additionally surface on.
+    ///
+    /// Rules, in the order they run:
+    ///  1. `canShare` first — the shipped gate (signed in + disclosure
+    ///     accepted), no new consent surface. A closed gate is
+    ///     `.skippedNotActive` plus the shipped honest event, and NOTHING
+    ///     is queued: the family has not made the decision yet, and the
+    ///     Settings pending count must only ever mean "waiting on
+    ///     Google".
+    ///  2. The mapper composes the draft with the FAMILY-NOTIFICATION
+    ///     audience (every contact with an email — the M-1-resolved
+    ///     disclosure landed at T-012); nobody eligible →
+    ///     `.skippedNoInvitees`, again reported, never silent.
+    ///  3. `enqueue` only — deliberately NO `markOutbound` (D7): the
+    ///     stale-twin sweep only ever considers outbound keys, and these
+    ///     one-offs have no local EventKit event, so marking them would
+    ///     queue tombstones for live alerts. A failed store write is
+    ///     `.failed(reason:)` — a per-item honest result, nothing claimed
+    ///     delivered.
+    ///
+    /// The Google write itself is the shipped async `flushPending` path
+    /// (launch/foreground/interval passes); `.enqueued` claims exactly
+    /// that and nothing more. Write-once, no re-assert: once created, the
+    /// entry is the family's to curate in Google (documented follow-up).
+    ///
+    /// Main-thread discipline: a call from off-main hops SYNCHRONOUSLY so
+    /// the result stays per-item and immediate; the scheduler's trigger
+    /// sites are main. (The async hop `onMain` would make the result
+    /// unreturnable — this is the one deliberate difference.)
+    @discardableResult
+    func writeSignificantEvent(_ event: SignificantMedicationEvent,
+                               entry: MedicationEntry?) -> CalendarShareWriteResult {
+        if Thread.isMainThread {
+            return performSignificantEventWrite(event, entry: entry)
+        }
+        return DispatchQueue.main.sync {
+            performSignificantEventWrite(event, entry: entry)
+        }
+    }
+
+    private func performSignificantEventWrite(
+        _ event: SignificantMedicationEvent,
+        entry: MedicationEntry?
+    ) -> CalendarShareWriteResult {
+        guard canShare else {
+            emit("calendar_share_skipped_not_active", outcome: "info",
+                 metadata: ["kind": EventNotifyKind.medicationReminder.rawValue])
+            return .skippedNotActive
+        }
+        // No entry, no NAME: the title names the medicine, and inventing
+        // one — or writing an anonymous alert — would put a claim on the
+        // family's calendar that the local truth cannot back. The trigger
+        // sites always hold the entry; this branch is honest, not silent.
+        guard let entry else {
+            emit("calendar_share_write_failed", outcome: "failure",
+                 metadata: ["kind": EventNotifyKind.medicationReminder.rawValue,
+                            "reason": "entry_missing"])
+            return .failed(reason: "entry_missing")
+        }
+        guard let draft = CalendarShareMapper.significantEventDraft(
+            event: event,
+            medicationName: entry.medicationName,
+            contacts: contactsProvider(),
+            timeZone: .current,
+            locale: locale
+        ) else {
+            emit("calendar_share_skipped_no_invitees", outcome: "info",
+                 metadata: ["kind": EventNotifyKind.medicationReminder.rawValue])
+            return .skippedNoInvitees
+        }
+        let key = CalendarShareKey.oneOff(kind: .medicationReminder,
+                                          eventIdentifier: event.id)
+        // D7: the omission of `store.markOutbound(key)` here is the
+        // bookkeeping decision, not an oversight — the sweep's only input
+        // is the outbound set, and these keys must never reach it (see
+        // the method doc and `reconcileSnapshotKeys`).
+        guard store.enqueue(.upsert(key: key, draft: draft,
+                                    googleEventID: store.googleEventID(for: key))) else {
+            emit("calendar_share_write_failed", outcome: "failure",
+                 metadata: ["kind": EventNotifyKind.medicationReminder.rawValue,
+                            "reason": "store_write_failed"])
+            return .failed(reason: "store_write_failed")
+        }
+        emit("calendar_share_significant_event_enqueued", outcome: "success",
+             metadata: ["kind": EventNotifyKind.medicationReminder.rawValue])
+        refreshStatus()
+        return .enqueued
     }
 
     // MARK: - Reconcile core
@@ -449,11 +882,26 @@ final class CalendarShareService: ObservableObject {
     /// the twins whose CONTENT changed, queue tombstones for what
     /// vanished — and nothing at all for the twins that are already
     /// right, which is the common case on every launch.
+    ///
+    /// `knownKeySnapshot` overrides "last-known" for the callers whose
+    /// knowledge is NARROWER than the ledger. Medication and routine
+    /// passes leave it nil (every key of their kind is theirs to judge);
+    /// the free-form reconcile passes the tracked key set, because the
+    /// ledger also holds imported invitations that it must not delete —
+    /// see `reconcileFreeFormEvents`.
     private func reconcile(kind: EventNotifyKind, desired: [String: CalendarTwinDraft],
-                           ownedKeyPrefix: String?) {
+                           ownedKeyPrefix: String?,
+                           knownKeySnapshot: Set<String>? = nil) {
         guard canShare else { refreshStatus(); return }
         let prefix = ownedKeyPrefix ?? "\(kind.rawValue):"
-        let known = store.knownKeys.filter { $0.hasPrefix(prefix) }
+        // D7: only the SLOT-shaped keys of this kind are the schedule
+        // mirror's to judge. The ledger also holds significant-event
+        // ONE-OFF keys (written via `writeSignificantEvent`), and a
+        // prefix-only snapshot would read a written one-off as "removed
+        // by this schedule edit" and queue a tombstone that deletes a
+        // live alert from the family's calendar.
+        let known = knownKeySnapshot ?? CalendarShareMapper.reconcileSnapshotKeys(
+            from: store.knownKeys, prefix: prefix)
         let plan = CalendarShareMapper.plan(currentKeys: Array(desired.keys),
                                             snapshotKeys: known)
 
@@ -573,6 +1021,11 @@ final class CalendarShareService: ObservableObject {
         /// limit or a dead network stays an ordinary retry.
         var pausedKeys: Set<String> = []
         var pausedForAuth = false
+        /// WHICH refusal stopped the pass, for the event below. Kept as
+        /// the class rather than a Bool because 401 and 403 are no longer
+        /// one thing (2026-09-17) and a log line that called a 403
+        /// "unauthorized" is exactly the merge this split removes.
+        var pausedClass: GoogleShareError = .unauthorized
 
         for operation in due {
             // Stop at the first failure: whatever caused it (rate limit,
@@ -601,11 +1054,18 @@ final class CalendarShareService: ObservableObject {
                 // failed, rather than before the pass: the class is not
                 // sticky (any later success clears it), so a pre-pass read
                 // can only ever be another operation's leftovers — and
-                // since nothing would clear it, a stale `.unauthorized`
-                // would skip every later pass including the one right
-                // after the family reconnects.
-                if gateway.lastErrorClass == .unauthorized {
+                // since nothing would clear it, a stale refusal would
+                // skip every later pass including the one right after the
+                // family reconnects.
+                //
+                // BOTH refusal classes pause (401 and 403): they are two
+                // causes of one state — nothing queued can land until the
+                // family reconnects — and the class itself is kept so the
+                // event below names the one that actually happened
+                // instead of labelling every pause "unauthorized".
+                if let refusal = gateway.lastErrorClass, refusal.isAuthorizationFailure {
                     pausedForAuth = true
+                    pausedClass = refusal
                     pausedKeys.insert(operation.key)
                 } else {
                     failedKeys.insert(operation.key)
@@ -668,7 +1128,7 @@ final class CalendarShareService: ObservableObject {
                                  "remaining": "\(next.count)"])
             if pausedForAuth {
                 self.emit("calendar_share_flush_paused", outcome: "failure",
-                          metadata: ["reason": self.errorClassLabel(.unauthorized)])
+                          metadata: ["reason": self.errorClassLabel(pausedClass)])
             }
             self.refreshStatus()
         }
@@ -778,7 +1238,8 @@ final class CalendarShareService: ObservableObject {
         }
     }
 
-    private func draft(from operation: PendingShareOperation) -> CalendarTwinDraft? {        guard let title = operation.title,
+    private func draft(from operation: PendingShareOperation) -> CalendarTwinDraft? {
+        guard let title = operation.title,
               let start = operation.startDate,
               let duration = operation.durationMinutes,
               let zone = operation.timeZoneIdentifier else { return nil }
@@ -786,7 +1247,14 @@ final class CalendarShareService: ObservableObject {
             title: title, startDate: start, durationMinutes: duration,
             timeZoneIdentifier: zone, recurrence: operation.recurrence,
             attendeeEmails: operation.attendeeEmails ?? [],
-            kind: operation.kind)
+            kind: operation.kind,
+            // Carried through, not dropped: the flush pass records the
+            // fingerprint of what it just WROTE, and the reconcile
+            // compares that against the fingerprint of the current
+            // draft. A field that survives one reconstruction but not
+            // the other makes every item look permanently changed — one
+            // PUT per pass, forever (rich-events task, 2026-09-17).
+            location: operation.location)
     }
 
     // MARK: - Inbound
@@ -905,6 +1373,7 @@ final class CalendarShareService: ObservableObject {
         case .notSignedIn: return "not_signed_in"
         case .notConfigured: return "not_configured"
         case .unauthorized: return "unauthorized"
+        case .insufficientScopes: return "insufficient_scopes"
         case .rateLimited: return "rate_limited"
         case .notFound: return "not_found"
         case .server: return "server"

@@ -135,6 +135,63 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
         XCTAssertEqual(events.first?.metadata["state"], ModelCatalog.whisperLargeV3Nepali.rawValue)
     }
 
+    // MARK: - CPU fallback order (PR 3, 2026-09-16)
+    //
+    // After a reinstall wiped the WhisperKit ANE artifact, the automatic
+    // path sank to the app-BUNDLED medium: a ~1 GB CPU cold load that
+    // SIGKILLed the app on the first attempt and hung ~2 minutes on the
+    // ones after it. The resolution below is the safety net — the bundled
+    // medium is reachable from the UI picker only.
+
+    func testAutomaticSelectionNeverRunsTheBundledMedium() throws {
+        try stageFakeModel(ModelCatalog.whisperMediumFinetunedNepali)
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        XCTAssertNil(stt.currentModelID(),
+            "The bundled medium must not be what a device with no pick runs "
+                + "on CPU — it is the SIGKILL cold load of 2026-09-16.")
+    }
+
+    func testBundledMediumAloneDoesNotClaimAvailability() throws {
+        try stageFakeModel(ModelCatalog.whisperMediumFinetunedNepali)
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        // The pre-fix `isAvailable` listed cached files, so this device
+        // claimed whisper.cpp was usable and then failed EVERY utterance
+        // with .localeUnsupported — a dead end `OnDeviceSTTSelection`
+        // could not see. Reporting unavailable sends the turn to
+        // SFSpeechRecognizer instead.
+        XCTAssertFalse(stt.isAvailable,
+            "A cached-but-unrunnable model must not make whisper available.")
+    }
+
+    func testAutomaticSelectionPrefersASmallOverTheCachedBundledMedium() throws {
+        try stageFakeModel(ModelCatalog.whisperMediumFinetunedNepali)
+        try stageFakeModel(ModelCatalog.whisperFinetunedNepaliQ8)
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        XCTAssertEqual(stt.currentModelID(), ModelCatalog.whisperFinetunedNepaliQ8,
+            "A small transcribes in seconds where the medium takes minutes.")
+    }
+
+    func testExplicitPickOfTheBundledMediumStillRuns() throws {
+        try stageFakeModel(ModelCatalog.whisperMediumFinetunedNepali)
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        stt.setPreferredModel(ModelCatalog.whisperMediumFinetunedNepali)
+        XCTAssertEqual(stt.currentModelID(), ModelCatalog.whisperMediumFinetunedNepali,
+            "The picker's medium is an explicit statement — the automatic "
+                + "order's refusal must not override it.")
+
+        stt.setPreferredModel(nil)
+        XCTAssertNil(stt.currentModelID(),
+            "And clearing the pick returns to automatic (which refuses it).")
+    }
+
+    func testBaseEnStaysAutoRunnable() throws {
+        // base-en (the English small) stays auto-runnable: the downshift
+        // path and English households depend on it.
+        try stageFakeModel(ModelCatalog.whisperBaseEn)
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        XCTAssertEqual(stt.currentModelID(), ModelCatalog.whisperBaseEn)
+    }
+
     // MARK: - LoRA skeleton
 
     func testApplyLoRALogsButChangesNothingObservable() {

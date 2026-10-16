@@ -1,0 +1,15 @@
+T-183 Phase B — GGUF export invocation record (2026-10-16T22:59:53+11:00)
+tool: src/export_gguf.py copied from the stage-3 checkout
+  from: /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/src/export_gguf.py  sha256 040e3faf619513a5ee12cf3a98cbaa81660d915047a9f0a0de50ff0fe0e1c2ca
+  to:   /mnt/nvme1/cnr-v17/repo/tools/train-intent/src/export_gguf.py   sha256 040e3faf619513a5ee12cf3a98cbaa81660d915047a9f0a0de50ff0fe0e1c2ca
+command (cwd /mnt/nvme1/cnr-v17/repo/tools/train-intent):
+  .venv/bin/python src/export_gguf.py \
+    --model checkpoints/cnr-cnr-v17-20261015-0209-final \
+    --tag qwen-s43-chat-v17 \
+    --base-id checkpoints/qwen-s43-merged
+--base-id rationale: BASE_TAGS["qwen"] maps to the RAW hub id Qwen/Qwen3-1.7B;
+the v17 adapter was trained on top of the local shipped-brain checkpoint
+checkpoints/qwen-s43-merged (the -final adapter_config.json records the same
+base_model_name_or_path). Using --base qwen would merge into the wrong base.
+target artifact: models/intent-ne-qwen-s43-chat-v17-q4_k_m.gguf (+ .sha256 sidecar)
+CPU-only by design (export_gguf.py clears CUDA_VISIBLE_DEVICES).

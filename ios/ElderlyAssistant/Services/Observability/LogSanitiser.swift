@@ -63,6 +63,38 @@ struct LogSanitiser {
         "state",
         "duration_ms",
         "error_code",
+        // [SCOPE-LEDGER] (2026-09-17) Google scope NAMES, normalized —
+        // "calendar" / "contacts". Fixed vocabulary, no account data, no
+        // token material; the console must be able to show which scope
+        // is granted or missing (the ledger's whole diagnostic value).
+        "calendar",
+        "contacts",
+        // [DECODE-DIAGNOSTIC] (2026-09-17) The Google SCHEMA field an
+        // inbound decode failed on — e.g. "key_not_found:nextSyncToken".
+        // Fixed schema vocabulary (field names + DecodingError kinds),
+        // never content: the value is built by
+        // `GoogleCalendarGateway.decodeDetail(from:)`, whose only inputs
+        // are the error kind and the coding path.
+        "decode_detail",
+        // [DEAD-TAP-RECOVERY] (2026-09-17) The count of audio chunks a
+        // capture received — count-shaped, the discriminator between a
+        // silent capture and a dead tap.
+        "chunks",
+        // [ANALYSIS-DIAGNOSTIC] (2026-09-19) The pre-pipeline failure's
+        // geometry — "1920x1080" frame size and "x,y,w,h" rect. Count-
+        // and coordinate-shaped; the numbers that name why a crop was
+        // refused. Never text, never pixels' content.
+        "frame",
+        "rect",
+        // The analysis launch's cloud switch state — "on"/"off", a closed
+        // two-token vocabulary.
+        "cloud",
+        // [YOLO-OBSERVABILITY] (2026-09-19) The detector pass's evidence —
+        // COCO class names with confidences ("bottle:0.87,person:0.45")
+        // and normalized boxes ("0.1,0.2,0.5,0.6;…"). Closed vocabulary
+        // and coordinates; never pixels, never scene text.
+        "labels",
+        "boxes",
         // [TURN-TIMING] The serialized per-turn stage list
         // (`[{stage, ms}, …]`) — stage names and integer durations only,
         // never transcript or reply text (see VoiceTurnLatencyTracer).
@@ -104,6 +136,107 @@ struct LogSanitiser {
         "correction_class_origins",
         "correction_best_bucket",
         "correction_margin_bucket",
+        // [CORRECTION-REVIVE] The banded gate's count-only keys: a count of
+        // judge-eligible tokens and the band state of the turn ("active" /
+        // "legacy") — fixed vocabulary and integers by construction, never
+        // a surface, never a score.
+        "correction_judge_eligible",
+        "correction_band",
+        // [CORRECTION-REVIVE] The clarification's reason — the closed
+        // `ClarifyReason` vocabulary (margin_too_small / judge_unavailable /
+        // judge_rejected), never a surface.
+        "correction_clarify_reason",
+        // [LIVE-CAMERA-TRANSLATION] The feature's event metadata
+        // (`Services/LiveTranslate/` `LiveTranslateEvents.swift`, T-003).
+        // ADDITIVE ONLY: nothing above is removed, renamed or reordered.
+        // Count-shaped, duration-shaped and closed-vocabulary values only, by
+        // construction of the emitter API — `LiveTranslateEvents.MetadataKey`
+        // is the only way one of these keys is spelled, and every one of its
+        // cases is mirrored here (a test pins the two sets against each
+        // other). No key here may ever carry recognized text, a translation,
+        // an image or a scene identifier; the feature's catalogue and its
+        // tests enforce that, and the values that land are integers, closed
+        // tokens and the disclosure version stamp.
+        "regionCount",
+        // [LIVE-CAMERA-TRANSLATION] (2026-09-18) The one addition the owner's
+        // identity-churn report asked for: `regionSetHash`, a 32-bit digest of
+        // the *set* of normalized strings on screen, rendered `xxxx:xxxx` by
+        // `LiveTranslateEvents.regionSetHashHex` from a `UInt32` — the emitter
+        // takes no string, so no recognized text can reach this key. It is a
+        // discriminator and nothing more: it is derived from the scene, not from
+        // the device, the session or the user, it is never stored, and it is
+        // stable only within one session's own log (where the owner compares two
+        // lines). It carries no string, no substring and no per-region value;
+        // being truncated to 32 bits it is not a commitment about the content
+        // either. The colon in the rendering is deliberate: it is outside the
+        // phone-number guard's character class below, which would otherwise
+        // redact an all-digit digest intermittently and silently.
+        "regionSetHash",
+        "stringCount",
+        "batchIndex",
+        "batchCount",
+        "resolvedCount",
+        "unresolvedCount",
+        "durationMs",
+        "keyCount",
+        "count",
+        "origin",
+        "mode",
+        "reason",
+        // [CASCADE-PROVENANCE] (2026-09-19) Which tier answered a settle —
+        // `TranslationTier`, a closed token set (dictionary / onDeviceBrain
+        // / cloud). The owner asked to log the cascade; no string rides in it.
+        "tier",
+        // [LLAMADEBUG] (2026-09-17) Where an on-device brain attempt stopped
+        // — `BrainFailureStage`, a closed token set (availability / load /
+        // prompt_budget / decode / deadline / cancelled / stage_deadline).
+        // The device report behind it: every live-translate cycle logged
+        // `brain_translation_unavailable` and the `reason` token could not
+        // say which of four different failures it was.
+        "failureStage",
+        // [EMPTY-DECODE] (2026-09-19) The three keys the owner's
+        // answered-nothing capture needed. Every brain batch ran 7–20 seconds
+        // and resolved nothing, and `resolvedCount`/`unresolvedCount`/
+        // `durationMs` could not say whether the decode emitted anything at
+        // all or emitted a well-formed answer that every rule refused — two
+        // different bugs with two different fixes.
+        //
+        //  - `generationLength` is a character COUNT of the raw answer. The
+        //    characters themselves are never passed to the emitter, which
+        //    takes a `BrainGenerationReading` and renders only its integer.
+        //  - `generationShape` is `BrainGenerationShape`, a closed token set
+        //    (empty / unparsable / no_array / array).
+        //  - `rejections` is a histogram keyed by `BrainAnswerRejection`,
+        //    another closed set, rendered `token:count,…` (or `none`). A
+        //    closed enum is the only key type, so a recognized string has no
+        //    way to be expressed in this value.
+        "generationLength",
+        "generationShape",
+        "rejections",
+        "disclosureVersion",
+        // [LIVE-CAMERA-TRANSLATION] AM-2 decision, recorded rather than
+        // widened silently: `cap`. The shipped `GeminiCostGovernor` emits
+        // `daily_cap_warning` / `daily_cap_reached` with metadata `count` and
+        // `cap` on component `gemini_cost`. Until this extension both keys
+        // were dropped by this allow-list, so the family-visible cap signal
+        // arrived with no count and no cap — the cap doing its job looked
+        // like a cap doing nothing. `cap` is count-shaped and additive, and
+        // the feature does not touch the shipped payloads: a test drives the
+        // real governor over its cap and asserts both keys survive.
+        "cap",
+        // [LIVE-CAMERA-TRANSLATION] AM-2 decision, recorded rather than
+        // widened silently: the code key. A code normally travels on the
+        // event's top-level `errorCode` field, which `boundErrorCode`
+        // (T-050/B2) already bounds — and the feature's own emitters use
+        // exactly that field. Allow-listing the metadata spelling keeps the
+        // design's catalogue convention ("content-free code" for the failure
+        // events) inside the allow-list instead of silently dropping the
+        // code, which is CL-5's failure mode. **It is not left unbounded**:
+        // `codeShapedMetadataKeys` routes this one key through the same
+        // `boundErrorCode` the top-level field gets, so it cannot become the
+        // unbounded twin that the B2 defect was. Tests pin both halves: a
+        // real code survives, a description does not.
+        "errorCode",
         // [CLOUD-CASCADE] The cascade tier's `cloud_cascade_escalated`
         // payload (2026-09-16): which online provider took the turn and the
         // two scores that decided it. NUMBERS AND AN ID ONLY —
@@ -115,8 +248,363 @@ struct LogSanitiser {
         // emits.
         "provider",
         "threshold",
-        "confidence"
+        "confidence",
+        // [MODEL-WARDEN] Step 0 (2026-09-18) — the memory ledger's own
+        // vocabulary. The `model_lifecycle` component has been emitting
+        // `slot` / `liveBytes` / `evicted` / `budgetBytes` since the ledger
+        // shipped and every one of them was being DROPPED here, so the
+        // family-visible memory story arrived as an event with no bytes in
+        // it. These additions close that and cover the reservation layer
+        // (`reserved` / `reservation_denied` / `reservation_committed` /
+        // `reservation_abandoned` / `footprint_sample`).
+        //
+        // VALUES ARE BYTE COUNTS, MILLISECONDS, CLOSED TOKENS OR SLOT NAMES
+        // BY CONSTRUCTION — `slot` / `evicted` are `ModelSlot` raw values,
+        // `purpose` is a `ReservationPurpose` raw value, `reason` is a
+        // closed denial/abandon token, `liveBytes` / `budgetBytes` /
+        // `freed_bytes` / `phys_footprint` / `ceiling_bytes` /
+        // `working_set_bytes` / `projected_peak_bytes` are integers,
+        // `load_ms` and `heldSeconds` are durations, `priority` and
+        // `isLargeLoad` are a closed token and a boolean. No key here may
+        // ever carry a transcript, a prompt, a file path or a model URL —
+        // the ledger deals in positions and bytes only, and a test pins
+        // that claim against the bridge.
+        "slot",
+        "liveBytes",
+        "budgetBytes",
+        "evicted",
+        "purpose",
+        "isLargeLoad",
+        "heldSeconds",
+        // `T(t)` — the reserved-but-not-yet-loaded byte count. Named after
+        // the ledger's own `liveBytes` rather than the proposal's `T` so a
+        // capture reads as one vocabulary.
+        "transientLiveBytes",
+        // The cost-model keys §5.5 of the proposal names. `phys_footprint`
+        // is the kernel's own number for us (`task_info(TASK_VM_INFO)`),
+        // `ceiling_bytes` the app's jetsam limit, `working_set_bytes` the
+        // non-model estimate W(t), `projected_peak_bytes` the M+T+W
+        // projection, `freed_bytes` what an eviction actually returned, and
+        // `load_ms` how long a load took — the quantity the thrash guard
+        // and the Step 3 load-rate limit are built on. `priority` is
+        // reserved for Step 2's ladder so its first field capture does not
+        // require a sanitiser change to be readable.
+        "phys_footprint",
+        "ceiling_bytes",
+        "working_set_bytes",
+        "projected_peak_bytes",
+        "freed_bytes",
+        "load_ms",
+        "priority",
+        // [SANITISED-DEBUG-LANE] (owner decision, 2026-09-20) The debug
+        // lane's three keys, declared here so the invariant this list exists
+        // for — *every key that can appear on a bus event is declared in one
+        // place* — stays true of the lane, rather than the lane becoming the
+        // one undeclared corner of the log surface. Declaring them here is
+        // NOT what makes them safe to carry: `redactedKeys` below replaces
+        // every one of their values with `redactionToken` on the way in, and
+        // it does so before this list is consulted. The value never survives
+        // the choke point in any configuration; what survives is the fact
+        // that a pair existed, in what order, with what timing. A test pins
+        // both halves (the key is declared, the value is redacted) and
+        // `LiveTranslateSourceHygieneTests` pins that the feature's own
+        // emitters cannot produce these keys at all.
+        "recognized_text",
+        "source_text",
+        "translated_text",
+        // [MULTI-TURN-CONVERSATION T-137] (2026-10-10) The dialogue feature's
+        // four observability events carry metadata only from closed
+        // vocabularies and bounded counts (design-l2 §26). Their vocabulary
+        // keys are exactly SIX NEW additions — `intake`, `probe_kind`,
+        // `attempt`, `option_count`, `capture_form`, `merge_source`. The
+        // seventh dialogue key the design names is `reason`, and it is
+        // deliberately NOT re-declared in this block: it has been in this
+        // list since [LIVE-CAMERA-TRANSLATION] (line ~175), so the dialogue
+        // feature REUSES it — no allow-list change for it (M-4; a test pins
+        // the diff as exactly these six keys, with `reason` in the
+        // pre-change snapshot). Its dialogue values are the
+        // `InvalidAnswerReason` tokens, closed at the construction site
+        // because the key is generic and shipped non-dialogue emitters keep
+        // their own meanings under it.
+        //
+        //  - `intake` — `DialogueDegenerateIntake` raw values (ladder /
+        //    interpreted / candidate): which trigger site ran the degenerate
+        //    music query.
+        //  - `probe_kind` — `ProbeKind` raw values (slotFill /
+        //    candidateChoice): which probe shape was spoken.
+        //  - `attempt` — the probe ordinal, `1|2` (`DialogueConfig.maxProbes`
+        //    = 2): how many probes the frame has spoken.
+        //  - `option_count` — the probe's option/candidate count, `0..4`
+        //    (`DialogueConfig.maxSlotOptions` = 4; `0` is the degraded,
+        //    catalog-unavailable free-text-only probe).
+        //  - `capture_form` — `CaptureForm` raw values (indexWord /
+        //    optionName / repetition / freeText): how the answer was
+        //    captured.
+        //  - `merge_source` — `MergeSource` raw values (catalog / freeText /
+        //    candidate / defaultQuery): where the merged value came from.
+        //
+        // Every value is an enum raw value or a bounded count BY
+        // CONSTRUCTION; no key here may ever carry the utterance, an answer,
+        // a probe string, a candidate label or a transcript fragment
+        // (NFR-MTC-004). `closedVocabularyMetadataKeys` below re-checks that
+        // claim at the choke point: an out-of-vocabulary value is redacted
+        // rather than logged (the fail-closed direction). This task is the
+        // E5 producer; T-140 carries the end-to-end capture assertions.
+        "intake",
+        "probe_kind",
+        "attempt",
+        "option_count",
+        "capture_form",
+        "merge_source",
+        // [MEDICATION-SCHEDULES-REMINDERS T-022] (2026-10-15) The medication
+        // slot-model feature's THREE additive keys (FR-MSR-018, NFR-MSR-002).
+        // The feature's own event types reuse keys this list already
+        // declares — `medication_slot_unresolved` carries `slot`;
+        // `medication_retime_refused` carries `entry_id_hash` and `slot`;
+        // the `medication_ack_*` / `medication_ack_clarify_ended` /
+        // `medication_evidence_captured` observations carry `entry_id_hash`
+        // or nothing; and the honest push status rides the bounded
+        // top-level `errorCode` (`transport_unimplemented`) — never
+        // metadata. The three below are the keys the feature's emitters ADD
+        // to SHARED event families, each verified against the shipped call
+        // sites:
+        //
+        //  - `kind` — `EventNotifyKind` raw values (medicationReminder /
+        //    routineReminder / calendarEvent): which alert kind an event
+        //    belongs to. Emitters: `MedicationScheduler
+        //    .notifyCaregiversOfFirstFire` (both the `caregiver_event_skipped`
+        //    and `caregiver_event_fired` legs), `CaregiverEventFireHandler`
+        //    (same two legs), `RoutineScheduler` (same two legs),
+        //    `FamilyNotifier.emitEventAlerted` (`family_event_alerted`, the
+        //    context's own kind), `CalendarShareService` (the significant-
+        //    event path's skipped/enqueued/write-failed events, and
+        //    `calendar_share_reconciled`), and `CalendarSyncService`
+        //    (`calendar_sync_native_changes`).
+        //  - `channel` — `NotifyChannel` raw values (sms / whatsApp /
+        //    messenger): the channel a delivery attempt rode. Emitter:
+        //    `FamilyNotifier.emitEventAlerted` ONLY.
+        //  - `event_id_hash` — the EVENT's own id, already hashed at the
+        //    producer: an `IdHashing.shortHash` digest (24 hex chars; the
+        //    external-calendar path reuses its own stable-key digest), never
+        //    a raw identifier. Emitters:
+        //    `MedicationScheduler.notifyCaregiversOfFirstFire`,
+        //    `CaregiverEventFireHandler`, `RoutineScheduler` and
+        //    `FamilyNotifier.emitEventAlerted`.
+        //
+        // All three are bounded BY CONSTRUCTION (enum raw values and
+        // one-way short hashes), which is why they are plain allowed keys
+        // rather than redacted ones: unlike the transcript lane above, no
+        // value here can carry a medication name, a dose, free text or a
+        // raw id. A test pins the declaration and the admission
+        // (`LogSanitiserTests.testNewMedicationMetadataKeysAreAdmittedAndDeclared`),
+        // and the allow-list diff test counts these three among the
+        // declared extensions.
+        "kind",
+        "channel",
+        "event_id_hash"
     ]
+
+    /// Metadata keys that carry **content by declaration**: the value is
+    /// replaced by `redactionToken` and can never reach a sink, in any
+    /// configuration.
+    ///
+    /// [SANITISED-DEBUG-LANE] (owner decision, 2026-09-20) The live-camera
+    /// translation debug lane has to show what the recogniser read and what
+    /// each leg answered, and the owner's answer is that the lane stays —
+    /// sanitised. Scene text therefore travels the bus under these keys and
+    /// dies at this choke point: `source_text` / `translated_text` /
+    /// `recognized_text` are redacted to the token here, so the console line
+    /// still carries the pair's *existence*, its order and its timing while
+    /// the text itself is never logged.
+    ///
+    /// **Why this set, and not an `allowedKeys` entry that merely gets
+    /// scrubbed.** The three keys *are* declared in `allowedKeys` — so the
+    /// log surface still has exactly one declaration — but the PII scrub is
+    /// not what protects them: it would leave a sentence intact (a sentence
+    /// holds no phone number), and the feature's whole log rule is that no
+    /// recognized string reaches a log surface in any build (NFR-LCT-006).
+    /// The redaction here is wholesale, and it runs **before** the allow-list
+    /// filter — the fail-closed direction: no future edit to `allowedKeys`
+    /// can turn one of these keys back into a pass-through.
+    ///
+    /// [PROFILE-INTERVIEW T-104] The five profile field-name keys join the
+    /// set (design-l2 §7.4): their values are the profile record's own
+    /// content, and no shipped event carries them — so they are
+    /// deliberately NOT declared in `allowedKeys`. The redacted token is
+    /// kept only for keys the allow-list also carries; for these five the
+    /// pair is dropped whole (see `sanitise`). Redaction still runs first,
+    /// so no future edit to `allowedKeys` can turn one into a pass-through
+    /// either way.
+    /// Declared internal (not private) so the tests can pin membership
+    /// directly — the same visibility the sibling `allowedKeys` and
+    /// `redactionToken` already have; the set is read-only either way.
+    static let redactedKeys: Set<String> = [
+        "recognized_text",
+        "source_text",
+        "translated_text",
+        "profile_name",
+        "address_as",
+        "date_of_birth",
+        "emergency_doctor",
+        "local_hospital"
+    ]
+
+    /// What a redacted value is replaced by. The same token the PII scrub
+    /// writes, so a reader cannot tell — and does not need to tell — which
+    /// rule removed the text.
+    static let redactionToken = "[redacted]"
+
+    /// [MULTI-TURN-CONVERSATION T-137] (2026-10-10, M-4/E5) The dialogue
+    /// metadata keys whose value is a **closed vocabulary** — each key's
+    /// exact token set is pinned here, and a value outside it is replaced by
+    /// `redactionToken` rather than logged.
+    ///
+    /// The vocabulary per key is the raw-value set of the emitting type
+    /// (design-l2 §26 over the §9/§12.5 enums):
+    ///
+    ///  - `intake`      — `DialogueDegenerateIntake` (ladder, interpreted,
+    ///                    candidate).
+    ///  - `probe_kind`  — `ProbeKind` (slotFill, candidateChoice).
+    ///  - `attempt`     — the probe ordinal, bounded at `1|2`
+    ///                    (`DialogueConfig.maxProbes` = 2).
+    ///  - `option_count`— the probe's option/candidate count, bounded at
+    ///                    `0..4` (`DialogueConfig.maxSlotOptions` = 4).
+    ///  - `capture_form`— `CaptureForm` (indexWord, optionName, repetition,
+    ///                    freeText).
+    ///  - `merge_source`— `MergeSource` (catalog, freeText, candidate,
+    ///                    defaultQuery).
+    ///
+    /// **Why bound the value at the bus, when values on allowed keys are
+    /// normally only PII-scrubbed.** These six keys are new in this feature,
+    /// and their contract is stronger than "not PII": the whole key may only
+    /// ever hold an enum token or a bounded count (NFR-MTC-004 — probe,
+    /// answer and candidate text must never reach a log, and R3's residual
+    /// "values are not value-constrained" is exactly the hole this closes
+    /// for the dialogue surface). An out-of-vocabulary value is by
+    /// definition not one the emitter API can produce — which is the shape
+    /// a content leak or an emitter bug arrives in — so it fails closed
+    /// (the scenario "out-of-vocabulary token values fail closed"). Bounding
+    /// keys that did not exist before the feature is additive; no shipped
+    /// emitter writes any of the six (the `codeShapedMetadataKeys`
+    /// precedent).
+    ///
+    /// **`reason` is deliberately absent.** It pre-exists this feature as a
+    /// generic key (shipped emitters: `ModelBudgetPolicy`'s denial/abandon
+    /// tokens, the live-translate cost reasons), so narrowing it here would
+    /// re-mean a shipped key. M-4's discipline is the other way: the
+    /// dialogue values under `reason` (`InvalidAnswerReason` raw values)
+    /// are closed at the construction site, the emission point the feature
+    /// owns. A test pins both halves — the dialogue tokens survive under
+    /// the reused key, and the bus does not constrain it.
+    ///
+    /// Declared internal (not private) so the tests pin the vocabularies
+    /// exactly — the same visibility rationale as the sibling `redactedKeys`
+    /// and `allowedKeys`; the table is read-only either way.
+    static let closedVocabularyMetadataKeys: [String: Set<String>] = [
+        "intake": ["ladder", "interpreted", "candidate"],
+        "probe_kind": ["slotFill", "candidateChoice", "correctionChoice"],
+        "attempt": ["1", "2"],
+        "option_count": ["0", "1", "2", "3", "4"],
+        "capture_form": ["indexWord", "optionName", "repetition", "freeText"],
+        "merge_source": ["catalog", "freeText", "candidate", "defaultQuery"]
+    ]
+
+    /// Metadata keys whose value must satisfy the *code* bound rather than a
+    /// PII scrub alone. Deliberately a separate set from `allowedKeys`: the
+    /// shipped snake_case `error_code` is **not** listed here, because
+    /// shipped emitters already write it and re-bounding it would change
+    /// their behaviour (NFR-LCT-012). Bounding a key that did not exist
+    /// before this feature is additive; changing one that did is not.
+    private static let codeShapedMetadataKeys: Set<String> = ["errorCode"]
+
+    /// The allow-listed metadata keys whose value is a **bare count** — a byte
+    /// total, a millisecond duration, a boolean — rather than text.
+    ///
+    /// They need naming because the phone-number pattern is a 7-digit run with
+    /// optional separators, which is exactly what a byte budget looks like:
+    /// `budgetBytes: "268435456"` reached the capture as `[redacted]`, and the
+    /// memory-pressure evidence was unreadable for the very quantities the
+    /// ledger exists to report (review). The exemption is **value-shaped, not
+    /// key-shaped**: a key listed here is scrubbed in full the moment its value
+    /// is not a bare number, because a key name is a promise and a value is a
+    /// fact. It deliberately does not route through `codeShapedMetadataKeys`:
+    /// `boundErrorCode` scrubs before it bounds, so an already-`[redacted]`
+    /// value fails its charset check and would have been replaced by an empty
+    /// string — one mangling traded for another.
+    private static let numericMetadataKeys: Set<String> = [
+        "liveBytes",
+        "budgetBytes",
+        "transientLiveBytes",
+        "phys_footprint",
+        "ceiling_bytes",
+        "working_set_bytes",
+        "projected_peak_bytes",
+        "freed_bytes",
+        "load_ms",
+        "heldSeconds"
+    ]
+
+    /// The longest **bare** digit run each numeric key may legitimately carry —
+    /// the bound that keeps the exemption from being a bypass (review finding
+    /// 10).
+    ///
+    /// The exemption above exists because a byte total *is* a 9-or-10-digit run,
+    /// which is exactly the phone pattern; the fix for that cannot be to
+    /// re-redact the ledger (finding B2), so the count shape is bounded by what
+    /// each key's unit can honestly hold. A run past its key's bound is not a
+    /// count for that key and takes the full scrub — which is where an
+    /// unformatted phone number written into one of these keys is caught.
+    ///
+    /// The bounds are the units', not the values': a byte total on a phone is
+    /// under 1e12 (12 digits), and a load or a hold is under 1e9 ms/seconds
+    /// (`load_ms: "86400000"` — a day — is a real reading and is well inside
+    /// it). A key named in `numericMetadataKeys` with no bound here gets `0`, so
+    /// a key added without a stated unit is scrubbed rather than trusted: the
+    /// fail-closed direction. The residual is stated rather than implied: a bare
+    /// phone number *inside* a byte key's bound is indistinguishable from a byte
+    /// total by shape, and the ledger's readability is the requirement that wins
+    /// (see the B2 tests).
+    private static let numericMetadataDigitLimits: [String: Int] = [
+        "liveBytes": 12,
+        "budgetBytes": 12,
+        "transientLiveBytes": 12,
+        "phys_footprint": 12,
+        "ceiling_bytes": 12,
+        "working_set_bytes": 12,
+        "projected_peak_bytes": 12,
+        "freed_bytes": 12,
+        "load_ms": 9,
+        "heldSeconds": 9
+    ]
+
+    /// Whether a metadata value is a bare count **for its key**: ASCII digits
+    /// with at most one decimal point and no more digits than the key's unit can
+    /// carry, or one of the two boolean words.
+    ///
+    /// Anything else is not a number — a leading `+`, a space, a dash, a
+    /// parenthesis run, a run longer than the bound — and keeps the full PII
+    /// scrub, because that is a phone number's shape. A lone `.` is not a count
+    /// either: the digit is what makes it one.
+    private static func isBareCount(_ value: String, forKey key: String) -> Bool {
+        if value == "true" || value == "false" { return true }
+        let limit = numericMetadataDigitLimits[key] ?? 0
+        var seenDigit = false
+        var seenPoint = false
+        var digits = 0
+        for character in value {
+            if character.isASCII, character.isNumber {
+                seenDigit = true
+                digits += 1
+                continue
+            }
+            if character == ".", !seenPoint, seenDigit {
+                seenPoint = true
+                continue
+            }
+            return false
+        }
+        return seenDigit && digits <= limit
+    }
 
     private static let piiPatterns: [NSRegularExpression] = {
         let patterns = [
@@ -132,8 +620,56 @@ struct LogSanitiser {
 
     func sanitise(_ event: ObservabilityEvent) -> ObservabilityEvent {
         var cleanMetadata: [String: String] = [:]
-        for (key, value) in event.metadata where Self.allowedKeys.contains(key) {
-            cleanMetadata[key] = scrubValue(value)
+        for (key, value) in event.metadata {
+            // [SANITISED-DEBUG-LANE] Content-bearing by declaration: the value
+            // is dropped in favour of the token before anything else looks at
+            // the key, so the redaction cannot depend on the allow-list.
+            // [PROFILE-INTERVIEW T-104] The redacted token is KEPT only for
+            // keys the allow-list also declares (the live-camera trio — the
+            // pair's existence stays visible). A key that is redacted and
+            // NOT allow-listed (the five profile field names) is dropped
+            // whole: the design's fail-closed direction (§7.4).
+            if Self.redactedKeys.contains(key) {
+                if Self.allowedKeys.contains(key) {
+                    cleanMetadata[key] = Self.redactionToken
+                }
+                continue
+            }
+            guard Self.allowedKeys.contains(key) else { continue }
+            // [MULTI-TURN-CONVERSATION T-137] A dialogue metadata key
+            // carries its documented token or nothing: a value outside its
+            // key's closed vocabulary/bound is replaced by the redaction
+            // token, never logged. The check sits before the shape branches
+            // below because these keys carry neither codes nor
+            // counts-with-units nor free text — their contract is the exact
+            // token set, not a shape. The pair is kept (as with a
+            // non-code-shaped `errorCode`) so the event skeleton survives
+            // and a broken emitter is visible as a redacted legal key
+            // rather than a silently vanished one.
+            if let vocabulary = Self.closedVocabularyMetadataKeys[key] {
+                cleanMetadata[key] = vocabulary.contains(value)
+                    ? value
+                    : Self.redactionToken
+                continue
+            }
+            // A code-shaped key gets the same bound as the top-level field,
+            // so allow-listing it cannot become a PII-scrubbed bypass of
+            // that bound (T-050/B2). Every other allowed key is unchanged.
+            if Self.codeShapedMetadataKeys.contains(key) {
+                cleanMetadata[key] = boundErrorCode(value) ?? ""
+            } else if Self.numericMetadataKeys.contains(key),
+                      Self.isBareCount(value, forKey: key) {
+                // A count is not a phone number. The allow-list's own contract
+                // says these keys carry numbers, so the scrub's work here is to
+                // catch a value that is *not* one for its key: text, separators,
+                // a sign, or a digit run longer than the unit can carry — each
+                // of which takes the full scrub below (review finding 10: the
+                // unlimited digit run was the unformatted phone number's way
+                // through).
+                cleanMetadata[key] = value
+            } else {
+                cleanMetadata[key] = scrubValue(value)
+            }
         }
         return ObservabilityEvent(
             component: event.component,

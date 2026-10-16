@@ -2,18 +2,10 @@ import SwiftUI
 import XCTest
 @testable import ElderlyAssistant
 
-/// Accessibility floors are enforced at the token level (spec §8): any
-/// view consuming `DesignTokens` inherits them, and this test makes sure
-/// nobody quietly lowers a floor.
+/// Operational layout and colour invariants. UI typography is exercised by
+/// AppTypographyTests against the selected size and readable floor.
 final class DesignTokensTests: XCTestCase {
 
-    func testBodyTextFloor() {
-        XCTAssertGreaterThanOrEqual(DesignTokens.minBodyPointSize, 18)
-    }
-
-    func testCaptionTextFloor() {
-        XCTAssertGreaterThanOrEqual(DesignTokens.minCaptionPointSize, 15)
-    }
 
     func testTapTargetFloor() {
         XCTAssertGreaterThanOrEqual(DesignTokens.minTapTargetSize, 44)
@@ -87,17 +79,22 @@ private extension DesignTokensTests {
                                     "\(message): measured \(String(format: "%.2f", ratio)):1", file: file, line: line)
     }
 
-    /// Asserts a token still equals its pinned sRGB value (per-channel
-    /// tolerance 0.004 ≈ 1/255 — the token's own storage precision).
-    func assertPinned(_ color: Color, r: Double, g: Double, b: Double,
-                      file: StaticString = #filePath, line: UInt = #line) {
-        guard let c = sRGB(color) else {
-            XCTFail("could not read sRGB components", file: file, line: line)
-            return
+    func composite(_ foreground: Color, opacity: Double, over background: Color) -> Color {
+        guard let front = sRGB(foreground), let back = sRGB(background) else {
+            XCTFail("Could not read composited surface components")
+            return background
         }
-        XCTAssertEqual(c.r, r, accuracy: 0.004, "red channel", file: file, line: line)
-        XCTAssertEqual(c.g, g, accuracy: 0.004, "green channel", file: file, line: line)
-        XCTAssertEqual(c.b, b, accuracy: 0.004, "blue channel", file: file, line: line)
+        return Color(.sRGB, red: front.r * opacity + back.r * (1 - opacity),
+                     green: front.g * opacity + back.g * (1 - opacity),
+                     blue: front.b * opacity + back.b * (1 - opacity), opacity: 1)
+    }
+
+    func isStopRed(_ color: Color) -> Bool {
+        guard let c = sRGB(color) else { return false }
+        let maximum = max(c.r, c.g, c.b), minimum = min(c.r, c.g, c.b)
+        guard maximum == c.r, maximum > minimum else { return false }
+        let hue = 60 * (c.g - c.b) / (maximum - minimum)
+        return abs(hue) < 10
     }
 }
 
@@ -119,104 +116,115 @@ extension DesignTokensTests {
         }
     }
 
-    /// Every state fill stays separable from the warm-white background.
-    func testVoiceStateFillsSeparateFromCreamBackground() {
-        for color in [DesignTokens.stateIdle, DesignTokens.stateStopped,
-                      DesignTokens.stateListening, DesignTokens.stateTranscribing,
-                      DesignTokens.stateUnderstanding, DesignTokens.stateSpeaking,
-                      DesignTokens.stateError] {
-            assertContrast(color, DesignTokens.background, atLeast: 3.0,
-                           "state fill vs cream background")
-        }
-    }
-
-    /// Exact semantic pins. The idle navy aligns with VoiceBridge; the
-    /// amber/green/red traffic states retain their established meanings.
-    func testVoiceStatePaletteIsPinned() {
-        assertPinned(DesignTokens.stateIdle, r: 0.086, g: 0.239, b: 0.451)
-        assertPinned(DesignTokens.stateStopped, r: 0.306, g: 0.384, b: 0.478)
-        assertPinned(DesignTokens.stateListening, r: 0.659, g: 0.384, b: 0.047)
-        assertPinned(DesignTokens.stateTranscribing, r: 0.561, g: 0.322, b: 0.031)
-        assertPinned(DesignTokens.stateUnderstanding, r: 0.478, g: 0.290, b: 0.059)
-        assertPinned(DesignTokens.stateSpeaking, r: 0.180, g: 0.478, b: 0.094)
-        assertPinned(DesignTokens.stateError, r: 0.753, g: 0.184, b: 0.165)
-    }
-
-    /// Every badge category, for the sweeps below.
-    private static let allBadgeTints: [DesignTokens.BadgeTint] = [
-        .meds, .reminders, .call, .appliance, .settings, .apps, .feeds, .emergency, .directions,
-    ]
-
-    /// The consolidation contract (design review 2026-09-10): nine
-    /// categories resolve onto exactly FOUR semantic roles. A fifth role
-    /// reappearing is the noise the review asked us to remove.
-    func testBadgePaletteHasExactlyFourRoles() {
-        XCTAssertEqual(DesignTokens.BadgeTint.Role.allCases.count, 4,
-                       "the badge palette is brand/action, voice state, emergency, neutral")
-        let used = Set(Self.allBadgeTints.map(\.role))
-        XCTAssertEqual(used.count, DesignTokens.BadgeTint.Role.allCases.count,
-                       "every declared role is worn by at least one category")
-    }
-
-    /// Categories that share a role share its colours exactly — that is
-    /// what "consolidated" means: `.feeds` and `.directions` must not
-    /// quietly grow distinct hues again.
-    func testCategoriesSharingARoleShareTheirColors() {
-        let byRole = Dictionary(grouping: Self.allBadgeTints, by: \.role)
-        for (role, tints) in byRole {
-            guard let first = tints.first else { continue }
-            for other in tints.dropFirst() {
-                XCTAssertEqual(sRGB(first.tint), sRGB(other.tint),
-                               "\(role): tint drifted between categories")
-                XCTAssertEqual(sRGB(first.background), sRGB(other.background),
-                               "\(role): background drifted between categories")
+    /// Light canvases separate the fill itself; dark canvases use an outline and readable state ink.
+    func testVoiceStateFillsSeparateFromLightSkinBackgrounds() {
+        for skin in AppTheme.allCases where !skin.isDark {
+            for color in [DesignTokens.stateIdle, DesignTokens.stateStopped,
+                          DesignTokens.stateListening, DesignTokens.stateTranscribing,
+                          DesignTokens.stateUnderstanding, DesignTokens.stateSpeaking,
+                          DesignTokens.stateError] {
+                assertContrast(color, AppColors.palette(for: skin).background, atLeast: 3.0,
+                               "state fill vs \(skin) background")
             }
         }
     }
 
-    /// The role mapping itself is pinned, so a future edit that moves a
-    /// category between roles has to say so here.
-    func testBadgeRoleMapping() {
-        let expected: [(DesignTokens.BadgeTint, DesignTokens.BadgeTint.Role)] = [
-            (.meds, .brandAction), (.reminders, .brandAction), (.call, .brandAction),
-            (.apps, .voiceState),
-            (.emergency, .emergency),
-            (.appliance, .neutralCategory), (.settings, .neutralCategory),
-            (.feeds, .neutralCategory), (.directions, .neutralCategory),
-        ]
-        for (badge, role) in expected {
-            XCTAssertEqual(badge.role, role, "\(badge) role")
-        }
-    }
 
-    /// Every badge icon is a graphical object: its fill must hold ≥3:1
-    /// against the circle it sits on (WCAG 1.4.11).
+    /// Every badge category, for the sweeps below.
+    private static let allBadgeTints: [DesignTokens.BadgeTint] = [
+        .meds, .reminders, .call, .appliance, .settings, .apps, .feeds, .emergency, .directions,
+        .profile,
+    ]
+
+
+    /// Opaque badges also carry labels; IconBadge's translucent wash carries a graphical glyph.
     func testEveryBadgeIconContrastsItsBackground() {
-        for badge in Self.allBadgeTints {
-            assertContrast(badge.tint, badge.background, atLeast: 3.0,
-                           "\(badge) (\(badge.role)) tint vs badge background")
+        for skin in AppTheme.allCases {
+            let appearance = AppAppearance(skin: skin, style: .soft)
+            for badge in Self.allBadgeTints {
+                let foreground = appearance.badgeTint(badge)
+                let background = appearance.badgeBackground(badge)
+                assertContrast(foreground, background,
+                               atLeast: 4.5, "\(skin) \(badge) badge contrast")
+                for surface in [appearance.colors.background, appearance.colors.card,
+                                appearance.colors.brandCanvasBottom] {
+                    let wash = composite(background, opacity: 0.55, over: surface)
+                    assertContrast(foreground, wash, atLeast: skin.isDark ? 4.5 : 3.0,
+                                   "\(skin) \(badge) composited badge contrast")
+                }
+            }
         }
     }
 
-    /// Urgency stays unique: the emergency badge is the ONLY one wearing
-    /// `stateError`. Brand/action is the accent, the voice role is the
-    /// hero's rest blue, and the neutral role is the secondary text tone.
+    /// The profile badge sits directly beside Settings on the home hub
+    /// (home-profile-icon, 2026-10-06) — its tone must read as its own
+    /// place in every skin, never a copy of the settings glyph's ink.
+    func testProfileBadgeToneStaysDistinctFromSettings() {
+        for skin in AppTheme.allCases {
+            let appearance = AppAppearance(skin: skin, style: .soft)
+            XCTAssertNotEqual(appearance.badgeTint(.profile),
+                              appearance.badgeTint(.settings),
+                              "\(skin): profile must not borrow the settings tint")
+            XCTAssertNotEqual(appearance.badgeBackground(.profile),
+                              appearance.badgeBackground(.settings),
+                              "\(skin): profile must not borrow the settings wash")
+        }
+    }
+
+    /// Emergency red remains unique among task indicators for every skin.
     func testEmergencyIsTheOnlyStopRedBadge() {
-        let emergency = DesignTokens.BadgeTint.emergency
-        assertPinned(emergency.tint, r: 0.753, g: 0.184, b: 0.165)   // stateError
-        assertContrast(emergency.tint, emergency.background, atLeast: 4.5,
-                       "emergency glyph on its white circle")
-        for badge in Self.allBadgeTints where badge != .emergency {
-            XCTAssertNotEqual(sRGB(badge.tint), sRGB(DesignTokens.stateError),
-                              "\(badge) must not wear the emergency red")
+        for skin in AppTheme.allCases {
+            let appearance = AppAppearance(skin: skin, style: .glass)
+            XCTAssertTrue(isStopRed(appearance.badgeTint(.emergency)),
+                          "Emergency must retain a recognisably red hue")
+            for badge in Self.allBadgeTints where badge != .emergency {
+                XCTAssertFalse(isStopRed(appearance.badgeTint(badge)),
+                               "\(skin) \(badge) must not look like an emergency")
+            }
         }
     }
 
-    /// Persistent daily actions wear VoiceBridge maroon; neutral category
-    /// icons use brand navy and voice actions use the rest-state blue.
-    func testBrandActionAndNeutralRolesArePinned() {
-        assertPinned(DesignTokens.BadgeTint.meds.tint, r: 0.733, g: 0.118, b: 0.302)
-        assertPinned(DesignTokens.BadgeTint.settings.tint, r: 0.043, g: 0.122, b: 0.267)
-        assertPinned(DesignTokens.BadgeTint.apps.tint, r: 0.086, g: 0.239, b: 0.451)
+    func testSkinTextAndPrimaryControlsHaveAccessibleContrast() {
+        for skin in AppTheme.allCases {
+            let colors = AppColors.palette(for: skin)
+            for surface in [colors.background, colors.card, colors.userBubble, colors.brandCanvasBottom] {
+                assertContrast(colors.textPrimary, surface, atLeast: 4.5, "\(skin) primary text")
+                assertContrast(colors.textSecondary, surface, atLeast: 4.5, "\(skin) secondary text")
+            }
+            let fills = [colors.accent, colors.talkHighlight, colors.talkMid, colors.talkDeep]
+            for start in fills {
+                for end in fills {
+                    for step in 0...20 {
+                        let fill = composite(start, opacity: Double(step) / 20, over: end)
+                        assertContrast(colors.onAccent, fill, atLeast: 4.5,
+                                       "\(skin) white ink across action gradient")
+                    }
+                }
+            }
+            if !skin.isDark {
+                assertContrast(colors.onAccent, colors.textPrimary, atLeast: 4.5,
+                               "\(skin) white ink on light skin's dark neutral action")
+            }
+        }
+    }
+
+    func testDarkAccentAndStatusForegroundsRemainReadableOnEverySurface() {
+        let states = [DesignTokens.stateIdle, DesignTokens.stateStopped,
+                      DesignTokens.stateListening, DesignTokens.stateTranscribing,
+                      DesignTokens.stateUnderstanding, DesignTokens.stateSpeaking,
+                      DesignTokens.stateError]
+        for skin in AppTheme.allCases where skin.isDark {
+            let appearance = AppAppearance(skin: skin, style: .soft)
+            let colors = appearance.colors
+            for surface in [colors.background, colors.card, colors.userBubble,
+                            colors.brandCanvasBottom] {
+                assertContrast(colors.accentForeground, surface, atLeast: 4.5,
+                               "\(skin) accent label")
+                for state in states {
+                    assertContrast(appearance.statusForeground(state), surface, atLeast: 4.5,
+                                   "\(skin) state label")
+                }
+            }
+        }
     }
 }

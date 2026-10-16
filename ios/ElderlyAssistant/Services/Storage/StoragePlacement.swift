@@ -51,6 +51,21 @@ enum StoragePlacementPolicy {
         // The chosen Gemini model name: a small scalar kept beside the key
         // it is used with, so one store is not split across two channels.
         "gemini.model",
+        // [T-108 / FR-SP-009] The single Spotify session record
+        // (access/refresh tokens, expiry, product, scope, linkedAt):
+        // a small secret that keeps the Keychain item's per-item
+        // protection, and one key so the unlink wipe is a single delete.
+        "spotify.session",
+        // [SETTINGS-SURVIVAL] (2026-10-14, owner invariant: "settings
+        // should be invariants of all updates — even if you uninstall,
+        // still keep the settings") The user profile (the interview data
+        // — name, address-as, language, relationship). Keychain-resident
+        // because the Keychain is the ONE store the OS keeps after an
+        // app uninstall; the container is not. The user-set scalar
+        // preferences live in `SettingsPersistence` (its own keychain
+        // service) — the snapshot-blob follow-up was folded into that
+        // single mechanism and removed.
+        "user.profile",
     ]
 
     static func placement(for key: String) -> StoragePlacement {

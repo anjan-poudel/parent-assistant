@@ -34,6 +34,12 @@ final class VoiceCalendarEventWriterTests: XCTestCase {
 
         func fetchEvents(from start: Date, to end: Date) -> [CalendarEventRecord] { [] }
 
+        /// Nothing was ever written to a real store here, so nothing can be
+        /// found by identifier — the honest answer for this double
+        /// (rich-events task, 2026-09-17: the protocol requires it with no
+        /// default, because "gone" is what queues a twin's tombstone).
+        func fetchEvent(identifier: String) -> CalendarEventRecord? { nil }
+
         func createEvent(_ draft: CalendarEventDraft,
                          in calendarIdentifier: String?) -> String? {
             created.append((draft, calendarIdentifier))

@@ -11,6 +11,7 @@ import Speech
 /// persists on every screen because it's a safety invariant, not
 /// conversational voice chrome.
 struct LeafScreen<Content: View>: View {
+    @Environment(\.appAppearance) private var appearance
     @Environment(\.dismiss) private var dismiss
     /// Background theme (skinnable home, 2026-09-07): this is the shared
     /// chrome nearly every full-screen leaf draws its background through,
@@ -34,14 +35,14 @@ struct LeafScreen<Content: View>: View {
                     Button(action: { dismiss() }) {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(DesignTokens.textPrimary)
+                            .foregroundStyle(appearance.colors.textPrimary)
                             .frame(minWidth: DesignTokens.minTapTargetSize,
                                    minHeight: DesignTokens.minTapTargetSize)
-                            .background(DesignTokens.card)
-                            .clipShape(Circle())
+                            .appSurface(role: .card, cornerRadius: 999)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("common.back"))
+                    .accessibilityIdentifier(titleKey.hasPrefix("settings.") ? "settings.back" : "leaf.back")
                     Spacer(minLength: 8)
                     EmergencyIconButton()
                 }
@@ -49,9 +50,10 @@ struct LeafScreen<Content: View>: View {
                 .padding(.top, 8)
 
                 Text(LocalizedStringKey(titleKey))
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier(titleKey)
                     .padding(.horizontal, 20)
                     .padding(.top, 8)
                     .padding(.bottom, 12)
@@ -61,6 +63,7 @@ struct LeafScreen<Content: View>: View {
                         .padding(.horizontal, 20)
                         .padding(.bottom, 32)
                 }
+                .accessibilityIdentifier("leaf.content")
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -84,6 +87,7 @@ struct LeafScreen<Content: View>: View {
 /// entry that drafts from `MedicalAppointmentParser` and asks for
 /// confirmation before saving.
 struct MedicalView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
     @EnvironmentObject var session: VoiceSessionStateMachine
     @Environment(\.dismiss) private var dismiss
@@ -108,11 +112,27 @@ struct MedicalView: View {
     /// 2026-09-16). Snapshot taken at TAP time: the viewer shows the dose
     /// line the row showed, even if the entry is edited while it is up.
     @State private var viewingDoseAids: MedicationVisualAidsPresentation?
+    /// The last evidence capture's outcome caption, pinned to the taken
+    /// row it happened on ([MED-EVIDENCE], T-021). Cleared by the row's
+    /// next capture (a cancelled capture clears it — nil maps to no
+    /// caption, never a stale one).
+    @State private var takenEvidenceNotice: TakenEvidenceNotice?
 
     private var todaysReminders: [ScheduledReminder] {
         coordinator.pendingReminders
             .filter { Calendar.current.isDateInToday($0.scheduledAt) }
             .sorted { $0.scheduledAt < $1.scheduledAt }
+    }
+
+    /// Today's CONFIRMED intakes, read through the coordinator's IF-24
+    /// seam. A pure read: this leaf shows the day's records, it never
+    /// writes one, and a photo can never make a row appear.
+    private var takenTodayRows: [TakenDoseRow] { coordinator.takenDosesToday() }
+
+    /// One capture's caption on the row it belongs to.
+    private struct TakenEvidenceNotice: Equatable {
+        let rowId: UUID
+        let key: String
     }
 
     private var canAddAppointment: Bool {
@@ -122,14 +142,22 @@ struct MedicalView: View {
     var body: some View {
         LeafScreen(titleKey: "meds.title") {
             VStack(spacing: 12) {
-                if todaysReminders.isEmpty {
-                    emptyState(key: "meds.empty")
-                } else {
+                // "No medication today" may only say that when it is true
+                // of the WHOLE day: with doses already taken and recorded
+                // below, the empty state would contradict the very rows
+                // under it.
+                if todaysReminders.isEmpty && takenTodayRows.isEmpty {
+                    emptyState(key: "meds.empty", appearance: appearance)
+                } else if !todaysReminders.isEmpty {
                     VStack(spacing: 12) {
                         ForEach(todaysReminders) { reminder in
                             doseRow(reminder)
                         }
                     }
+                }
+
+                if !takenTodayRows.isEmpty {
+                    takenTodaySection
                 }
 
                 appointmentSection
@@ -155,6 +183,8 @@ struct MedicalView: View {
             MedicationDoseFireScreen(
                 medicationName: dose.medicationName,
                 doseDescription: dose.doseDescription,
+                purpose: dose.purpose,
+                mode: dose.mode,
                 aids: dose.aids,
                 entryId: dose.entryId,
                 store: coordinator.medicationVisualAidStore,
@@ -162,6 +192,15 @@ struct MedicalView: View {
                 onAcknowledge: {
                     coordinator.confirmMedicationDose(entryId: dose.entryId)
                     viewingDoseAids = nil
+                },
+                // The same entry the screen is showing: the capture is held
+                // for the record this dose's acknowledgement chain writes.
+                onCaptureEvidence: { completion in
+                    coordinator.captureMedicationEvidence(
+                        medicationName: dose.medicationName,
+                        context: .pendingDose(entryId: dose.entryId),
+                        onOutcome: completion
+                    )
                 },
                 onClose: { viewingDoseAids = nil }
             )
@@ -175,7 +214,7 @@ struct MedicalView: View {
             sectionHeader(key: "medical.appointments.title")
 
             if coordinator.appointments.isEmpty {
-                emptyState(key: "medical.appointments.empty")
+                emptyState(key: "medical.appointments.empty", appearance: appearance)
             } else {
                 VStack(spacing: 12) {
                     ForEach(coordinator.appointments) { appointment in
@@ -192,12 +231,11 @@ struct MedicalView: View {
                 smsNoteCard
             }
 
-            // Calendar auto-add toggle (medical task, 2026-09-07):
-            // default ON; the store's calendarWritesEnabled gate mirrors
-            // this and decides whether the MedicalAppointmentCalendarWriting
-            // seam is invoked at all (the calendar-2way task ships the
-            // EventKit writer).
-            calendarToggleCard
+            // The calendar auto-add toggle (medical task, 2026-09-07)
+            // moved to the Settings hub's Medication schedule leaf
+            // (menu-audit task, 2026-09-17) — settings live under
+            // Settings; this leaf shows and edits appointments, it does
+            // not configure them.
 
             pasteRow
 
@@ -209,20 +247,20 @@ struct MedicalView: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(appointment.doctorOrPlace)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                 if let place = appointment.place {
                     Text(place)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                 }
                 Text(appointment.date.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
                 if let note = appointment.note {
                     Text(note)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                 }
             }
             Spacer()
@@ -230,8 +268,7 @@ struct MedicalView: View {
                 coordinator.removeAppointment(id: appointment.id)
             } label: {
                 Image(systemName: "trash.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: 22)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -239,10 +276,7 @@ struct MedicalView: View {
             .accessibilityLabel(Text("medical.appointments.remove"))
         }
         .padding(16)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// The smsNote card: what the iPhone can and cannot do with
@@ -252,11 +286,11 @@ struct MedicalView: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "info.circle.fill")
                 .font(.system(size: 18))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
                 .padding(.top, 2)
             Text("medical.smsNote")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button {
@@ -264,7 +298,7 @@ struct MedicalView: View {
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -273,26 +307,7 @@ struct MedicalView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-    }
-
-    /// Calendar auto-add toggle — mirrors `appointmentsToCalendar` on
-    /// the coordinator, which persists it and re-syncs the store gate.
-    private var calendarToggleCard: some View {
-        Toggle(isOn: Binding(
-            get: { coordinator.appointmentsToCalendar },
-            set: { coordinator.appointmentsToCalendar = $0 }
-        )) {
-            Label("medical.calendarToggle", systemImage: "calendar.badge.plus")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textPrimary)
-        }
-        .tint(DesignTokens.accent)
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// "Paste appointment message" (2026-09-07): drafts from whatever
@@ -305,8 +320,7 @@ struct MedicalView: View {
                 handlePasteTap()
             } label: {
                 Label("medical.pasteAppointment", systemImage: "doc.text.fill")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.chipHeight)
                     .fixedSize(horizontal: false, vertical: true)
@@ -315,34 +329,30 @@ struct MedicalView: View {
 
             if showPasteFailed {
                 Text("medical.pasteFailed")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var addFormCard: some View {
         VStack(spacing: 10) {
             TextField(LocalizedStringKey("medical.appointments.doctor"), text: $doctor)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .padding(14)
                 .frame(minHeight: 56)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
             TextField(LocalizedStringKey("medical.appointments.place"), text: $clinic)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .padding(14)
                 .frame(minHeight: 56)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
 
             pickerRow(key: "medical.appointments.date",
                       components: .date,
@@ -352,23 +362,22 @@ struct MedicalView: View {
                       selection: $appointmentDate)
 
             TextField(LocalizedStringKey("medical.appointments.note"), text: $note)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .padding(14)
                 .frame(minHeight: 56)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
 
             Button {
                 addFromForm()
             } label: {
                 Text("medical.appointments.add")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.chipHeight)
                     .fixedSize(horizontal: false, vertical: true)
-                    .background(canAddAppointment ? DesignTokens.accent : DesignTokens.textSecondary.opacity(0.4))
+                    .background(canAddAppointment ? appearance.colors.accent : appearance.colors.textSecondary.opacity(0.4))
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
             .buttonStyle(.plain)
@@ -376,8 +385,7 @@ struct MedicalView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Date/time picker row in the same shape as the medication
@@ -386,8 +394,8 @@ struct MedicalView: View {
                            selection: Binding<Date>) -> some View {
         HStack(spacing: 12) {
             Text(LocalizedStringKey(key))
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
             Spacer()
             DatePicker("", selection: selection, displayedComponents: components)
                 .labelsHidden()
@@ -396,8 +404,7 @@ struct MedicalView: View {
         .padding(14)
         .frame(minHeight: 56)
         .fixedSize(horizontal: false, vertical: true)
-        .background(DesignTokens.background)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
     }
 
     private func addFromForm() {
@@ -475,8 +482,8 @@ struct MedicalView: View {
 
     private func sectionHeader(key: String) -> some View {
         Text(LocalizedStringKey(key))
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-            .foregroundStyle(DesignTokens.textSecondary)
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+            .foregroundStyle(appearance.colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 8)
     }
@@ -493,11 +500,11 @@ struct MedicalView: View {
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(coordinator.medicationName(for: reminder.medicationEntryId))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Text(reminder.scheduledAt.formatted(date: .omitted, time: .shortened))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
             Spacer()
             if let aids {
@@ -505,8 +512,7 @@ struct MedicalView: View {
                     viewingDoseAids = aids
                 } label: {
                     Image(systemName: "photo.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(DesignTokens.accent)
+                        .font(.system(size: 22, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                         .frame(minWidth: DesignTokens.minTapTargetSize,
                                minHeight: DesignTokens.minTapTargetSize)
                 }
@@ -517,20 +523,16 @@ struct MedicalView: View {
                 takeDose(reminder)
             } label: {
                 Text("meds.iTookIt")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
             }
             .buttonStyle(.plain)
         }
         .padding(16)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Baseline ack or challenge → Home for the yes/no chips. The
@@ -546,6 +548,103 @@ struct MedicalView: View {
             dismiss()
         }
     }
+
+    // MARK: - Taken today ([MED-EVIDENCE], T-021; C8 record surface, IF-24)
+
+    /// Today's confirmed intakes — the day's durable records, drawn under
+    /// the pending rows. Hidden entirely when there is nothing to show
+    /// (the caller's `takenTodayRows.isEmpty` gate), so a household that
+    /// records nothing sees exactly the leaf it saw before this feature.
+    private var takenTodaySection: some View {
+        VStack(spacing: 12) {
+            sectionHeader(key: "meds.takenToday.title")
+            VStack(spacing: 12) {
+                ForEach(takenTodayRows) { row in
+                    takenRow(row)
+                }
+            }
+        }
+    }
+
+    /// One taken record: the medication and the time it was due, the
+    /// "Taken" mark, and the row-level add-photo action. The capture
+    /// targets THIS record (`.recordedDose(logId:)` — the row's own log
+    /// id); it can attach evidence to the record and can never create one
+    /// (IF-14/IF-15's misuse guard).
+    private func takenRow(_ row: TakenDoseRow) -> some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(row.medicationName)
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                        .foregroundStyle(appearance.colors.textPrimary)
+                    Text(row.scheduledAt.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
+                }
+                Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(appearance.colors.accentForeground)
+                    Text("meds.taken")
+                        .font(.system(size: appearance.typography.captionPointSize,
+                                      weight: .semibold))
+                        .foregroundStyle(appearance.colors.textSecondary)
+                }
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    captureTakenEvidence(row)
+                } label: {
+                    Label("meds.evidence.capture", systemImage: "camera.fill")
+                        .font(.system(size: appearance.typography.captionPointSize,
+                                      weight: .semibold))
+                        .foregroundStyle(appearance.colors.accentForeground)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .appSurface(role: .control,
+                                    cornerRadius: DesignTokens.bubbleCornerRadius)
+                }
+                .buttonStyle(.plain)
+
+                if row.hasEvidence {
+                    Image(systemName: "photo.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(appearance.colors.accentForeground)
+                        .accessibilityLabel(Text("visualAid.title"))
+                }
+                Spacer()
+            }
+
+            if let notice = takenEvidenceNotice, notice.rowId == row.id {
+                Text(LocalizedStringKey(notice.key))
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity).appSurface(role: .card,
+                                                cornerRadius: DesignTokens.cardCornerRadius)
+    }
+
+    /// One capture attached to this row's own record. The outcome caption
+    /// under the button is the same mapping the dose screen's caption
+    /// uses, so the two surfaces can never disagree about what happened.
+    private func captureTakenEvidence(_ row: TakenDoseRow) {
+        coordinator.captureMedicationEvidence(
+            medicationName: row.medicationName,
+            context: .recordedDose(logId: row.id),
+            onOutcome: { outcome in
+                let key = MedicationVisualAidsPresentation.evidenceOutcomeKey(for: outcome)
+                takenEvidenceNotice = key.map { TakenEvidenceNotice(rowId: row.id, key: $0) }
+            })
+    }
 }
 
 // MARK: - Reminders (सम्झना) — spec §4.3 + v2 pivot Phase 1
@@ -553,42 +652,36 @@ struct MedicalView: View {
 /// Today's reminders from ALL THREE reminder systems — medication doses
 /// (`MedicationScheduler`), routine occurrences (walk, exercise, meals, …
 /// from `RoutineScheduler`), and items imported from the native
-/// Calendar/Reminders apps (`ExternalCalendarService`, read-only bridge)
-/// — plus a manage list where the family enables/disables the seeded
-/// routine categories. Native Calendar events from the days ahead sit
-/// under an "Upcoming events" section (upcoming-events task, 2026-09-07).
-/// Medication management stays on the Medical leaf
-/// (the renamed Meds leaf, medical task 2026-09-07) / Settings editor;
-/// this screen never mutates medication data.
+/// Calendar/Reminders apps (`ExternalCalendarService`, read-only bridge).
+/// Native Calendar events from the days ahead sit under an "Upcoming
+/// events" section (upcoming-events task, 2026-09-07). Medication
+/// management stays on the Medical leaf (the renamed Meds leaf, medical
+/// task 2026-09-07) / Settings editor; this screen never mutates
+/// medication data.
+///
+/// The manage list that used to live here — the family's enable/disable
+/// toggles and per-routine photo management — moved to the Settings hub's
+/// Reminders tab (`RoutineSettingsView`, routine-settings move,
+/// 2026-09-17). This leaf shows the day; Settings configures it.
 struct RemindersView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
-    /// Bumped after a toggle so the cached lists re-read fresh data —
-    /// the coordinator exposes reminders as computed vars, not @Published.
-    @State private var entriesVersion = 0
 
     /// DESIGN-REVIEW (P2 — "keep encrypted storage reads out of `body`",
     /// "build row presentation values when source data changes"): every
     /// `coordinator.routineEntries` access is a Keychain read plus a JSON
     /// decode (`RoutineStore.loadEntries` → `EncryptedLocalStorage`), and
-    /// this screen used to make that read TWICE per body evaluation —
-    /// once building `todayRows`, once in the `ForEach` below — plus one
-    /// more for the occurrences. A body evaluation happens on any
-    /// coordinator publish, so merely having this leaf open used to mean
-    /// a steady stream of securityd round-trips.
+    /// this screen used to make that read once per body evaluation just
+    /// building `todayRows`, plus one more for the occurrences. A body
+    /// evaluation happens on any coordinator publish, so merely having
+    /// this leaf open used to mean a steady stream of securityd
+    /// round-trips.
     ///
     /// The roster and the finished rows now live in state, rebuilt by the
     /// `.task` below when the underlying data actually changes; the body
     /// only reads them.
     @State private var routineEntries: [RoutineEntry] = []
     @State private var todayRows: [TodayRow] = []
-    /// Each manage row's subtitle ("Sun, Tue · 9:00 AM"), built with the
-    /// rows so no formatter work runs while drawing.
-    @State private var routineSummaries: [UUID: String] = [:]
-    /// The routine whose photos are being managed (photo-visual-aids task,
-    /// 2026-09-16) — the photo half of a reminder editor, reached from the
-    /// manage row. Held as the full entry so the sheet renders without a
-    /// store read of its own.
-    @State private var photoEditorEntry: RoutineEntry?
     /// A today row whose photos the elder tapped. Only rows that actually
     /// carry photos can set this, so the full-screen viewer never appears
     /// for a reminder without one. Medication dose rows are included
@@ -599,12 +692,12 @@ struct RemindersView: View {
     /// the notification, which is where a dose actually fires.
     @State private var viewingAidRow: TodayRow?
 
-    /// Everything the cached rows depend on: an in-screen toggle, a voice
-    /// turn (a routine can be added by asking), a dose completed
-    /// elsewhere, and the app's language (the rows carry localized
-    /// titles). Counting these is cheap; re-reading the stores is not.
+    /// Everything the cached rows depend on: a voice turn (a routine can
+    /// be added by asking), a dose completed elsewhere, and the app's
+    /// language (the rows carry localized titles). Counting these is
+    /// cheap; re-reading the stores is not.
     private var refreshKey: String {
-        "\(entriesVersion)|\(coordinator.conversationHistory.count)"
+        "\(coordinator.conversationHistory.count)"
             + "|\(coordinator.pendingReminders.count)"
             + "|\(coordinator.activeLocale.identifier)"
     }
@@ -665,7 +758,7 @@ struct RemindersView: View {
         LeafScreen(titleKey: "reminders.title") {
             VStack(spacing: 12) {
                 if todayRows.isEmpty {
-                    emptyState(key: "reminders.empty")
+                    emptyState(key: "reminders.empty", appearance: appearance)
                 } else {
                     sectionHeader(key: "reminders.todaySection")
                     ForEach(todayRows) { row in
@@ -676,44 +769,11 @@ struct RemindersView: View {
                 // Native events from the days ahead (upcoming-events
                 // task, 2026-09-07) — see `upcomingEventsSection`.
                 upcomingEventsSection
-
-                if !routineEntries.isEmpty {
-                    sectionHeader(key: "reminders.routinesSection")
-                    ForEach(routineEntries) { entry in
-                        routineManageRow(entry)
-                    }
-                }
             }
         }
         .task(id: refreshKey) {
-            let roster = coordinator.routineEntries
-            routineEntries = roster
-            routineSummaries = Dictionary(
-                uniqueKeysWithValues: roster.map { ($0.id, scheduleSummary($0)) }
-            )
+            routineEntries = coordinator.routineEntries
             todayRows = buildTodayRows()
-        }
-        // Manage one routine's photos (photo-visual-aids task,
-        // 2026-09-16). Edits persist as they happen, so the only thing
-        // dismissal has to do is refresh the cached rows.
-        .sheet(item: $photoEditorEntry) { entry in
-            ReminderVisualAidEditorView(
-                entryId: entry.id,
-                title: entry.displayTitle(locale: coordinator.activeLocale),
-                aids: entry.visualAids,
-                store: coordinator.visualAidStore,
-                locale: coordinator.activeLocale,
-                // The editor owns its draft; this only persists. The
-                // captured `entry` is the one the sheet opened with —
-                // its id is all this needs.
-                onSave: { aids in
-                    coordinator.setRoutineVisualAids(entry.id, aids: aids)
-                },
-                onClose: {
-                    photoEditorEntry = nil
-                    entriesVersion += 1
-                }
-            )
         }
         // The elder's own view of a row's photos: the same large-image
         // screen the firing notification presents, reading through the
@@ -766,8 +826,8 @@ struct RemindersView: View {
 
     private func sectionHeader(key: String) -> some View {
         Text(LocalizedStringKey(key))
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-            .foregroundStyle(DesignTokens.textSecondary)
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+            .foregroundStyle(appearance.colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 8)
     }
@@ -775,21 +835,19 @@ struct RemindersView: View {
     private func todayRowView(_ row: TodayRow) -> some View {
         HStack(spacing: 12) {
             Image(systemName: row.systemImage)
-                .font(.system(size: 24))
-                .foregroundStyle(row.isDimmed || row.external != nil
-                                 ? DesignTokens.textSecondary : DesignTokens.accent)
+                .font(.system(size: 24)).foregroundStyle(row.isDimmed || row.external != nil ? appearance.colors.textSecondary : appearance.colors.accentForeground)
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.title)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(row.isDimmed ? DesignTokens.textSecondary : DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(row.isDimmed ? appearance.colors.textSecondary : appearance.colors.textPrimary)
                 Text(rowCaption(row))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
                 // Which native calendar/reminder list the item came from.
                 if let external = row.external {
                     Text(external.calendarName)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                 }
             }
             Spacer()
@@ -800,8 +858,7 @@ struct RemindersView: View {
             // body runs, which this screen never does.
             if !row.visualAids.isEmpty {
                 Image(systemName: "photo.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.accent)
+                    .font(.system(size: 22)).foregroundStyle(appearance.colors.accentForeground)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
                     .accessibilityHidden(true)
@@ -809,8 +866,7 @@ struct RemindersView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
         .contentShape(Rectangle())
         // External rows open their item in the native app (read-only
         // bridge); a row WITH photos — routine OR medication dose — opens
@@ -833,76 +889,6 @@ struct RemindersView: View {
             return L10n.str("externalReminders.allDay", locale: coordinator.activeLocale)
         }
         return row.scheduledAt.formatted(date: .omitted, time: .shortened)
-    }
-
-    private func routineManageRow(_ entry: RoutineEntry) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: entry.category.systemImage)
-                .font(.system(size: 24))
-                .foregroundStyle(DesignTokens.accent)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(entry.displayTitle(locale: coordinator.activeLocale))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Text(routineSummaries[entry.id] ?? "")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
-            }
-            Spacer()
-            // Photos live behind this row rather than in the row itself:
-            // the manage list is where the family configures a routine,
-            // and this is the only configuration surface routines have
-            // (photo-visual-aids task, 2026-09-16).
-            Button {
-                photoEditorEntry = entry
-            } label: {
-                Image(systemName: entry.visualAids.isEmpty ? "photo.badge.plus" : "photo.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.accent)
-                    .frame(minWidth: DesignTokens.minTapTargetSize,
-                           minHeight: DesignTokens.minTapTargetSize)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("visualAid.add"))
-            Toggle("", isOn: Binding(
-                get: { entry.isEnabled },
-                set: { enabled in
-                    coordinator.setRoutineEntryEnabled(entry.id, enabled: enabled)
-                    entriesVersion += 1
-                }
-            ))
-            .labelsHidden()
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-    }
-
-    /// "7:00 AM, 4:00 PM" for daily entries; weekly entries prefix the
-    /// localized weekday names ("Sun, Tue · 9:00 AM").
-    ///
-    /// DESIGN-REVIEW (P2): this ran per routine row, per body evaluation,
-    /// and built a `DateFormatter` on every pass just to read its
-    /// weekday-symbol table — plus a `Date.formatted` per scheduled time.
-    /// Both now come from the locale-keyed cache in `ViewCaches.swift`,
-    /// and the times format in the app's ACTIVE language rather than the
-    /// device locale, matching how the rest of the app renders time.
-    private func scheduleSummary(_ entry: RoutineEntry) -> String {
-        let locale = coordinator.activeLocale
-        let calendar = Calendar.current
-        let timeFormatter = LocaleFormatters.shortTime(locale: locale)
-        let times = entry.scheduleTimes.compactMap { components -> String? in
-            calendar.date(from: components).map { timeFormatter.string(from: $0) }
-        }
-        let timesText = times.joined(separator: ", ")
-        guard entry.frequency == .weekly, !entry.weekdays.isEmpty else { return timesText }
-        let symbols = LocaleFormatters.shortWeekdaySymbols(locale: locale)
-        guard !symbols.isEmpty else { return timesText }
-        let days = entry.weekdays.sorted().compactMap { weekday -> String? in
-            weekday >= 1 && weekday <= symbols.count ? symbols[weekday - 1] : nil
-        }
-        return days.joined(separator: ", ") + " · " + timesText
     }
 
     // MARK: - Upcoming native Calendar events (upcoming-events task, 2026-09-07)
@@ -941,9 +927,9 @@ struct RemindersView: View {
             sectionHeader(key: "reminders.upcoming.title")
             switch coordinator.externalCalendar.status {
             case .denied:
-                emptyState(key: "externalReminders.statusDenied")
+                emptyState(key: "externalReminders.statusDenied", appearance: appearance)
             case .error:
-                emptyState(key: "externalReminders.statusError")
+                emptyState(key: "externalReminders.statusError", appearance: appearance)
             default:
                 upcomingEventsContent
             }
@@ -954,7 +940,7 @@ struct RemindersView: View {
     private var upcomingEventsContent: some View {
         let events = upcomingEvents
         if events.isEmpty {
-            emptyState(key: "reminders.upcoming.empty")
+            emptyState(key: "reminders.upcoming.empty", appearance: appearance)
         } else {
             ForEach(events.prefix(Self.upcomingEventsLimit)) { event in
                 upcomingEventRow(event)
@@ -973,24 +959,23 @@ struct RemindersView: View {
         HStack(spacing: 12) {
             Image(systemName: event.source.systemImage)
                 .font(.system(size: 24))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             VStack(alignment: .leading, spacing: 4) {
                 Text(event.title)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Text(upcomingEventTimeText(event))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
                 Text(event.calendarName)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
             Spacer()
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// When the event happens: the relative day via `HistoryTimeFormat`
@@ -1015,20 +1000,17 @@ struct RemindersView: View {
     private var showMoreUpcomingLink: some View {
         NavigationLink(value: LeafDestination.calendar) {
             Text("history.showMore")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.accent)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
-                .clipShape(Capsule())
+                .appSurface(role: .card, cornerRadius: 999)
                 .overlay(
-                    Capsule().stroke(DesignTokens.accent.opacity(0.35),
+                    Capsule().stroke(appearance.colors.accentForeground.opacity(0.35),
                                      lineWidth: 1.5)
                 )
         }
         .buttonStyle(.plain)
     }
-
 }
 
 // MARK: - Call (फोन) — redesign spec §3.2 + system-contacts search (2026-09-06)
@@ -1060,13 +1042,17 @@ struct RemindersView: View {
 /// search surface as before (field, voice search, access cards, ranked
 /// rows) as an explicit mode; clearing the field to empty, or tapping
 /// the mode's back button, returns to the curated list. The photos come
-/// from the coordinator's `contactPhoto(for:)` contract
-/// (contact-photos task, 2026-09-07): a photo resolves when the
-/// contact has a `photoFilename`, otherwise the initials avatar stays.
+/// from the coordinator's face resolver
+/// (`faceThumbnail(for:diameter:displayScale:)`; contact-photos task,
+/// 2026-09-07; unified precedence T-157): a photo resolves when the
+/// contact has a readable linked system photo or an app-local
+/// `photoFilename`, otherwise the initials avatar stays.
 struct CallView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private let directory = AddressBookDirectory()
 
@@ -1109,7 +1095,7 @@ struct CallView: View {
     /// Bumped after a chooser pick or a saved Messenger handle so the
     /// per-outcome row-state dictionary re-resolves (the coordinator
     /// stores are plain reads, not @Published — same bump pattern as
-    /// RemindersView's `entriesVersion`).
+    /// RoutineSettingsView's `entriesVersion`).
     @State private var channelStateVersion = 0
     /// The result row the Messenger-handle sheet is editing (nil =
     /// closed). The sheet is item-driven so a swipe-dismiss also clears
@@ -1120,11 +1106,11 @@ struct CallView: View {
 
     /// Faces for the current search's family rows, resolved OFF the body
     /// (design review P2 — "keep image-file reads out of `body`"). The
-    /// results pass used to call `coordinator.contactPhoto(for:)` — a
-    /// file read plus a full-size decode — once per family row, inside
-    /// `body`, so every keystroke re-read every face. One keyed pass
-    /// fills this instead and the rows only index it; each face is also
-    /// downsampled to the 52pt circle it is drawn in.
+    /// results pass used to resolve each face inside `body` — a file
+    /// read plus a full-size decode per family row per keystroke. One
+    /// keyed pass through the coordinator's async face path fills this
+    /// instead and the rows only index it; each face is also downsampled
+    /// to the 52pt circle it is drawn in.
     @State private var resultPhotos: [String: UIImage] = [:]
 
     var body: some View {
@@ -1155,11 +1141,21 @@ struct CallView: View {
             // request and prefill; a fresh publish while the leaf was
             // already open is picked up by the onChange below.
             consumePendingVoiceRequestIfPresent()
+            // The missed-call list lives on this leaf too: the
+            // correlation's point of use (missed-calls fix, 2026-09-18)
+            // — a numbered missed row the family list cannot name may
+            // ask the native address book here, including the one-time
+            // permission request; denial stays quiet and the raw number
+            // keeps showing.
+            coordinator.refreshMissedCallCorrelations(promptIfNeeded: true)
         }
-        // Re-resolve the search rows' faces when the query or the roster
-        // changes — never during body evaluation (see `resultPhotos`).
-        .task(id: resultPhotoKey) {
-            resultPhotos = resolveResultPhotos()
+        // Re-resolve the search rows' faces when the query or any face
+        // identity changes — never during body evaluation (see
+        // `resultPhotos`). T-157: the resolver is the coordinator's
+        // async face path, so a linked contact's SYSTEM photo wins where
+        // available (design-l1 §10.1).
+        .task(id: resultFaceKey) {
+            resultPhotos = await resolveResultPhotos()
         }
         .onChange(of: coordinator.pendingContactSearchRequest?.id) { _ in
             consumePendingVoiceRequestIfPresent()
@@ -1225,7 +1221,10 @@ struct CallView: View {
     /// openers probe first and announce an absent app aloud (never a
     /// silent dead tap), mirroring the quick-access honesty rules.
     private var launchRow: some View {
-        HStack(spacing: 10) {
+        let layout = dynamicTypeSize > .large
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 10))
+        return layout {
             contactListButton(titleKey: "call.openWhatsAppContacts",
                               systemImage: "bubble.left.and.bubble.right.fill") {
                 coordinator.openWhatsAppContacts()
@@ -1237,12 +1236,8 @@ struct CallView: View {
         }
     }
 
-    /// One half-width capsule of `launchRow` (horizontal 16 padding,
-    /// card background, Capsule clip, caption-size semibold label over a
-    /// ≥44pt target), stretched with `.frame(maxWidth: .infinity)` so
-    /// the two share the row. The old top history capsule left the leaf
-    /// (Phone review, 2026-09-07) — recent activity now sits at the
-    /// bottom; the launch capsules keep this look.
+    /// The launcher buttons share a row at standard text sizes and stack
+    /// at larger sizes, so translated labels never have to split mid-word.
     private func contactListButton(titleKey: String, systemImage: String,
                                    action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -1250,17 +1245,16 @@ struct CallView: View {
                 Image(systemName: systemImage)
                     // Caption-token glyph (DESIGN-REVIEW) beside the
                     // button's 18pt title — scales with Dynamic Type.
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 Text(LocalizedStringKey(titleKey))
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                    .foregroundStyle(appearance.colors.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)
             .frame(minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
+            .appSurface(role: .card, cornerRadius: 999)
         }
         .frame(maxWidth: .infinity)
         .buttonStyle(.plain)
@@ -1272,34 +1266,45 @@ struct CallView: View {
     private var isSearching: Bool { !trimmedQuery.isEmpty }
 
     /// What the resolved faces depend on: the query the rows matched and
-    /// each family contact's stored file (a photo edit keeps the contact
-    /// id, so the file name has to be part of the identity).
+    /// the ARRAY of per-contact face identities (design-l2 §4.4 — the
+    /// batch passes key on the array; a photo or link edit keeps the
+    /// contact id, so the identity's other components carry the change).
     /// `recency` deliberately stays out — re-ranking a row never changes
     /// its face.
-    private var resultPhotoKey: String {
-        let family = coordinator.familyContacts
-            .map { "\($0.id.uuidString):\($0.photoFilename ?? "-")" }
-            .joined(separator: ",")
-        return "\(trimmedQuery)|\(family)"
+    private var resultFaceKey: [String] {
+        [trimmedQuery] + coordinator.familyContacts.map { coordinator.faceIdentity(for: $0) }
     }
 
-    /// One pass over the current search outcome's `.family` rows,
-    /// through the shared downsampling cache — a face already decoded at
-    /// this size (this screen, the family list, a tile) is a memory hit.
-    private func resolveResultPhotos() -> [String: UIImage] {
+    /// One pass over the current search outcome's `.family` rows through
+    /// the coordinator's async face path (shared downsampling cache
+    /// underneath: a face already decoded at this size — this screen,
+    /// the family list, a tile — is a memory hit).
+    private func resolveResultPhotos() async -> [String: UIImage] {
         guard isSearching, let entries else { return [:] }
+        // The coordinator's PUBLISHED index and verified-link snapshot
+        // (T-156; design-l2 §3.6) — the same pair `resultsArea` renders
+        // from, so the faces resolved here can never come from a roster
+        // or a link set the rows do not see.
         let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                   family: coordinator.familyContacts,
+                                                  index: coordinator.familyIndex,
                                                   in: entries,
+                                                  verifiedLinks: coordinator.verifiedLinks,
                                                   recency: recency)
         var resolved: [String: UIImage] = [:]
         for row in outcome.entries {
             guard case .family(let contact) = row else { continue }
-            resolved[row.id] = DownsampledImageCache.shared.contactFace(
+            let identity = coordinator.faceIdentity(for: contact)
+            let face = await coordinator.faceThumbnail(
                 for: contact,
                 diameter: UnifiedContactResultRow.avatarDiameter,
-                displayScale: displayScale
-            ) { coordinator.contactPhoto(for: contact) }
+                displayScale: displayScale)
+            // Post-await identity re-check (design-l2 §4.4):
+            // `.task` cancellation is best-effort, so the guard is the
+            // guarantee — a face resolved for a superseded identity is
+            // dropped, never assigned.
+            guard coordinator.faceIdentity(for: contact) == identity else { continue }
+            if let face { resolved[row.id] = face }
         }
         return resolved
     }
@@ -1308,10 +1313,13 @@ struct CallView: View {
     /// INTO WhatsApp, so with the app absent the whole card hides
     /// (there is nothing to guide to). Probed live on the main thread
     /// (body evaluation); the `whatsapp` scheme sits in
-    /// LSApplicationQueriesSchemes so the probe is honest.
+    /// LSApplicationQueriesSchemes so the probe is honest. The probe
+    /// itself delegates to the ONE chain implementation (T-151,
+    /// NFR-CDP-002): `CallChannelChain.whatsAppInstalled(canOpen:)` over
+    /// the shipped `canOpenURL` — the row adds no second probe, no new
+    /// URL literal and no coordinator dependency.
     private var whatsAppInstalled: Bool {
-        guard let url = URL(string: "whatsapp://") else { return false }
-        return UIApplication.shared.canOpenURL(url)
+        CallChannelChain.whatsAppInstalled(canOpen: { UIApplication.shared.canOpenURL($0) })
     }
 
     /// Big search pill (≥44pt, body-size text, warm card). Search runs as
@@ -1320,10 +1328,10 @@ struct CallView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             TextField("call.search.placeholder", text: $searchText)
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             if micButtonVisible {
@@ -1332,8 +1340,7 @@ struct CallView: View {
         }
         .padding(.horizontal, 16)
         .frame(minHeight: DesignTokens.minTapTargetSize)
-        .background(DesignTokens.card)
-        .clipShape(Capsule())
+        .appSurface(role: .card, cornerRadius: 999)
     }
 
     /// In-pill voice-search button (voice-contact-search, 2026-09-07):
@@ -1348,10 +1355,12 @@ struct CallView: View {
                 // Caption token (DESIGN-REVIEW): 18pt floor, Dynamic Type
                 // aware — the circle below uses minWidth/minHeight so the
                 // glyph can never clip at Accessibility XXXL.
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(listening ? .white : DesignTokens.accent)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                .foregroundStyle(listening
+                    ? (appearance.skin.isDark ? appearance.colors.onAccent : DesignTokens.overlayText)
+                    : appearance.colors.accentForeground)
                 .frame(minWidth: 30, minHeight: 30)
-                .background(listening ? DesignTokens.accent : DesignTokens.background)
+                .background(listening ? DesignTokens.stateListening : appearance.colors.background)
                 .clipShape(Circle())
         }
         .frame(minWidth: DesignTokens.minTapTargetSize,
@@ -1368,14 +1377,13 @@ struct CallView: View {
         switch micPhase {
         case .listening:
             Text(L10n.str("call.search.micListening", locale: coordinator.activeLocale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.accent)
+                .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.colors.accentForeground)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
         case .failed:
             Text(L10n.str("call.search.micFailed", locale: coordinator.activeLocale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
         case .idle:
@@ -1402,8 +1410,8 @@ struct CallView: View {
     private var curatedHeaderRow: some View {
         HStack(spacing: 12) {
             Text(LocalizedStringKey("settings.family.title"))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textPrimary)
             Spacer(minLength: 8)
             searchOpenButton
         }
@@ -1417,12 +1425,10 @@ struct CallView: View {
     private var searchOpenButton: some View {
         Button(action: openSearch) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(DesignTokens.accent)
+                .font(.system(size: 20, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 .frame(minWidth: DesignTokens.minTapTargetSize,
                        minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
-                .clipShape(Circle())
+                .appSurface(role: .card, cornerRadius: 999)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text("call.search.openLabel"))
@@ -1438,11 +1444,10 @@ struct CallView: View {
         Button(action: exitSearch) {
             Image(systemName: "chevron.backward")
                 .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .frame(minWidth: DesignTokens.minTapTargetSize,
                        minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
-                .clipShape(Circle())
+                .appSurface(role: .card, cornerRadius: 999)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text("common.back"))
@@ -1484,11 +1489,32 @@ struct CallView: View {
     private var searchArea: some View {
         HStack(spacing: 10) {
             searchExitButton
-            if access == .allowed {
+            if access?.allowsReading == true {
                 searchField
             }
         }
-        if access == .allowed {
+        if access?.allowsReading == true {
+            // `.limited` (iOS 18 "Select Contacts") is a granted,
+            // READABLE subset — it takes today's `.allowed` display
+            // path, led by the honest caption (design-l2 §3.5): the
+            // FIRST line of the readable block, directly under the
+            // field row and above the mic caption, so a search over a
+            // partial book never silently pretends to search
+            // everything. `.denied` stays the only blocked arm;
+            // `.limited` never re-prompts (it can never render the
+            // empty dead area `allowsReading` exists to prevent).
+            if access == .limited {
+                Text(L10n.str("call.search.accessLimited", locale: coordinator.activeLocale))
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
+                    // [AX-VIEWPORT] Essential consent text ("searching only
+                    // a part of your contacts") — wraps at accessibility
+                    // sizes instead of truncating. Standard sizes keep the
+                    // one-line caption.
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 6)
+            }
             micCaption
             if entries == nil {
                 if loadFailed {
@@ -1511,7 +1537,7 @@ struct CallView: View {
     private func refreshDirectory() {
         let status = AddressBookDirectory.access()
         access = status
-        guard status == .allowed else { return }
+        guard status.allowsReading else { return }
         recency = coordinator.contactCallRecency
         if entries == nil || loadFailed {
             loadEntries()
@@ -1519,12 +1545,16 @@ struct CallView: View {
     }
 
     /// The user tapped Allow on the access card — the ONE place the
-    /// permission prompt may fire (point of use, constitution).
+    /// permission prompt may fire (point of use, constitution). The
+    /// system sheet may yield `.limited` (iOS 18 Select Contacts), so
+    /// the load decision reads the RE-READ status, never the binary
+    /// request result (design-l2 §3.5): a limited selection still
+    /// loads its granted set.
     private func grantAccess() {
         Task {
-            let granted = await directory.requestAccess()
+            _ = await directory.requestAccess()
             access = AddressBookDirectory.access()
-            if granted {
+            if access?.allowsReading == true {
                 recency = coordinator.contactCallRecency
                 loadEntries()
             }
@@ -1554,7 +1584,7 @@ struct CallView: View {
     /// as visible — the ask happens at the tap (point of use); a denial
     /// flips `micHidden` for the rest of this visit.
     private var micButtonVisible: Bool {
-        guard !micHidden, access == .allowed else { return false }
+        guard !micHidden, access?.allowsReading == true else { return false }
         switch SFSpeechRecognizer.authorizationStatus() {
         case .authorized, .notDetermined: break
         case .denied, .restricted: return false
@@ -1660,14 +1690,19 @@ struct CallView: View {
     private func announceVoiceResultIfReady() {
         guard let voice = voiceRequest,
               announcedVoiceSearchID != voice.id,
-              access == .allowed,
+              access?.allowsReading == true,
               let entries,
               !loadFailed,
               trimmedQuery == voice.query else { return }
         announcedVoiceSearchID = voice.id
+        // The coordinator's published index + verified-link snapshot
+        // (T-156; design-l2 §3.6) — the announced first row is the
+        // rendered first row by construction.
         let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                   family: coordinator.familyContacts,
+                                                  index: coordinator.familyIndex,
                                                   in: entries,
+                                                  verifiedLinks: coordinator.verifiedLinks,
                                                   recency: recency)
         let locale = coordinator.activeLocale
         if let name = outcome.entries.first?.name {
@@ -1686,9 +1721,15 @@ struct CallView: View {
     }
 
     /// The row's WhatsApp pill — a chat surface, not a call, so no
-    /// recency entry (channel opens are not dials).
-    private func whatsApp(_ result: UnifiedContactSearch.Result) {
-        coordinator.performSystemContactWhatsApp(name: result.name, phone: result.phone)
+    /// recency entry (channel opens are not dials). The `hop` parameter
+    /// (call-dialer-primary-secondary, T-151) is the launch-failure
+    /// recovery the dial zone's `.whatsApp` route threads in; the pill's
+    /// own tap passes none — the pill is a chat surface, not a
+    /// chain-routed dial.
+    private func whatsApp(_ result: UnifiedContactSearch.Result,
+                          hop: AppCoordinator.LaunchHop? = nil) {
+        coordinator.performSystemContactWhatsApp(name: result.name, phone: result.phone,
+                                                 hop: hop)
     }
 
     /// Primary-circle dial of a search row (channel-chooser task,
@@ -1705,14 +1746,41 @@ struct CallView: View {
     /// family tiles dial with, so every open — and every honest
     /// fallback — is announced exactly as it is. GSM keeps the local
     /// recency bump the old dial gave it.
+    ///
+    /// The chain announcement and the hop (call-dialer-primary-secondary,
+    /// T-151; FR-CDP-016/015): when the resolution skipped a channel, the
+    /// tap names the routed channel at resolution, BEFORE the opener runs
+    /// (ADR-CDP-07 — a successful open may background the app before
+    /// post-open speech could be heard). Every routed opener carries the
+    /// row's pre-built `LaunchHop` so a failed open recovers through the
+    /// remaining candidates; the `.phone` floor does not hop (RES-10) and
+    /// the WhatsApp pill's own tap stays hop-less (a chat surface, not a
+    /// chain-routed dial).
     private func dialChannel(_ result: UnifiedContactSearch.Result) {
-        switch rowChannelState(for: result).resolvedChannel {
+        let state = rowChannelState(for: result)
+        let locale = coordinator.activeLocale
+        if let skipped = state.fellBackFrom.first {
+            // ADR-CDP-07: at resolution, BEFORE the open — a successful
+            // open may background the app before post-open speech could
+            // be heard. Nothing is spoken when nothing fell back.
+            coordinator.speak(text: L10n.fmt("call.announce.fallbackRouted",
+                                             locale: locale,
+                                             CallChannelChain.label(skipped, locale: locale),
+                                             result.name,
+                                             CallChannelChain.label(state.resolvedChannel,
+                                                                    locale: locale)))
+        }
+        let hop = AppCoordinator.LaunchHop(candidates: state.hopCandidates,
+                                           handle: resolvedMessengerHandle(for: result),
+                                           phone: result.phone)
+        switch state.resolvedChannel {
         case .phone:
-            dial(result)
+            dial(result)                                   // floor: no hop
         case .faceTime:
-            coordinator.performFaceTimeCall(name: result.name, phone: result.phone, video: false)
+            coordinator.performFaceTimeCall(name: result.name, phone: result.phone,
+                                            video: false, hop: hop)
         case .whatsApp:
-            whatsApp(result)
+            whatsApp(result, hop: hop)
         case .messenger:
             guard let handle = resolvedMessengerHandle(for: result) else {
                 // Stale state only — resolution forces a handle-less row
@@ -1723,7 +1791,8 @@ struct CallView: View {
                                                  locale: locale, result.name))
                 return
             }
-            coordinator.performSystemContactMessenger(name: result.name, handle: handle)
+            coordinator.performSystemContactMessenger(name: result.name, handle: handle,
+                                                      hop: hop)
         }
     }
 
@@ -1741,11 +1810,17 @@ struct CallView: View {
     }
 
     /// One result row's channel truth for the CURRENT outcome
-    /// (channel-chooser task, 2026-09-07): stored preference, resolved
-    /// dial channel, handle availability, and the store key they live
-    /// under. Computed once per outcome in the results area — never per
-    /// row body evaluation — and re-computed there after a chooser pick
-    /// or a saved handle (the `channelStateVersion` bump above).
+    /// (channel-chooser task, 2026-09-07; chain-routed by T-151): stored
+    /// preference, the RESOLVED dial channel plus the provenance that
+    /// routed it (the skipped channels) and the launch-failure candidates
+    /// for the routed channel — all from one snapshot, so the circle, the
+    /// announcement and the hop can never disagree (L2-D10). The probe
+    /// input is the ONE shipped WhatsApp probe (`whatsAppInstalledNow` →
+    /// the chain static); the vocabulary argument takes its default
+    /// (`.anyChannel`, the row surface). Computed once per outcome in the
+    /// results area — never per row body evaluation — and re-computed
+    /// there after a chooser pick or a saved handle (the
+    /// `channelStateVersion` bump above).
     private func rowChannelState(for result: UnifiedContactSearch.Result) -> RowChannelState {
         _ = channelStateVersion
         let storeKey = ContactNumberKey.normalized(result.phone)
@@ -1753,14 +1828,22 @@ struct CallView: View {
             ? nil
             : coordinator.storedChannelPreference(forNormalizedPhone: storeKey)
         let hasHandle = resolvedMessengerHandle(for: result) != nil
-        let resolvedChannel = AppCoordinator.resolvedCallChannel(
+        let preferred = storedPreference ?? coordinator.defaultCallApp
+        let route = AppCoordinator.resolvedCallChannel(
             explicit: storedPreference,
             defaultApp: coordinator.defaultCallApp,
-            messengerHandleAvailable: hasHandle)
+            secondaryApp: coordinator.secondaryCallApp,
+            messengerHandleAvailable: hasHandle,
+            whatsAppInstalled: coordinator.whatsAppInstalledNow)
         return RowChannelState(storedPreference: storedPreference,
-                               resolvedChannel: resolvedChannel,
+                               resolvedChannel: route.channel,
                                hasHandle: hasHandle,
-                               storeKey: storeKey)
+                               storeKey: storeKey,
+                               fellBackFrom: route.fellBackFrom,
+                               hopCandidates: CallChannelChain.hopCandidates(
+                                   preferred: preferred,
+                                   secondary: coordinator.secondaryCallApp,
+                                   routed: route.channel))
     }
 
     /// The usable Messenger handle behind a row's messenger channel —
@@ -1823,14 +1906,20 @@ struct CallView: View {
     @ViewBuilder
     private var resultsArea: some View {
         if let entries {
+            // The coordinator's published index + verified-link
+            // snapshot (T-156; design-l2 §3.6) — one consistent
+            // snapshot per pass, never an inline rebuild that could
+            // disagree with the link state the faces resolved under.
             let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                       family: coordinator.familyContacts,
+                                                      index: coordinator.familyIndex,
                                                       in: entries,
+                                                      verifiedLinks: coordinator.verifiedLinks,
                                                       recency: recency)
             if outcome.moreAvailable {
                 Text("call.search.moreAvailable")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
             }
@@ -1839,9 +1928,9 @@ struct CallView: View {
                 // simply matched nobody, are different truths — say
                 // which one it is.
                 if entries.isEmpty && coordinator.familyContacts.isEmpty {
-                    emptyState(key: "call.search.bookEmpty")
+                    emptyState(key: "call.search.bookEmpty", appearance: appearance)
                 } else {
-                    emptyState(key: "call.search.noResults")
+                    emptyState(key: "call.search.noResults", appearance: appearance)
                 }
             } else {
                 // Per-row photo thumbnails come from `resultPhotos`,
@@ -1866,6 +1955,9 @@ struct CallView: View {
                     ForEach(outcome.entries) { result in
                         UnifiedContactResultRow(result: result,
                                                 photo: resultPhotos[result.id],
+                                                caption: CallResultRowText.linkedBookCaption(
+                                                    for: result, in: outcome,
+                                                    locale: coordinator.activeLocale),
                                                 channelState: channelStates[result.id]
                                                     ?? rowChannelState(for: result),
                                                 dial: { dialChannel(result) },
@@ -1885,7 +1977,7 @@ struct CallView: View {
     @ViewBuilder
     private var familyArea: some View {
         if coordinator.familyContacts.isEmpty {
-            emptyState(key: "call.contactsEmpty")
+            emptyState(key: "call.contactsEmpty", appearance: appearance)
         } else {
             VStack(spacing: 12) {
                 ForEach(coordinator.familyContacts) { contact in
@@ -1924,8 +2016,8 @@ struct CallView: View {
             let shown = Array(activity.prefix(Self.recentActivityLimit))
             VStack(alignment: .leading, spacing: 12) {
                 Text(LocalizedStringKey("history.title"))
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 8)
                 ForEach(shown) { entry in
@@ -1934,14 +2026,12 @@ struct CallView: View {
                 if activity.count > Self.recentActivityLimit {
                     NavigationLink(value: LeafDestination.history) {
                         Text(LocalizedStringKey("history.showMore"))
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                            .foregroundStyle(DesignTokens.accent)
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                             .frame(maxWidth: .infinity)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
-                            .background(DesignTokens.card)
-                            .clipShape(Capsule())
+                            .appSurface(role: .card, cornerRadius: 999)
                             .overlay(
-                                Capsule().stroke(DesignTokens.accent.opacity(0.35),
+                                Capsule().stroke(appearance.colors.accentForeground.opacity(0.35),
                                                  lineWidth: 1.5)
                             )
                     }
@@ -1990,12 +2080,14 @@ struct CallView: View {
                       tint: recentChannelTint(for: entry.channel),
                       diameter: 40)
             VStack(alignment: .leading, spacing: 4) {
-                Text(ActivityRowText.name(for: entry, locale: coordinator.activeLocale))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                Text(ActivityRowText.name(for: entry,
+                                          locale: coordinator.activeLocale,
+                                          correlatedName: coordinator.missedCallDisplayNames[entry.id]))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Text(recentActivityTimeText(entry))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .lineLimit(2)
             }
             Spacer(minLength: 8)
@@ -2005,25 +2097,24 @@ struct CallView: View {
                     .foregroundStyle(.white)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Circle())
+                    .appSurface(role: .accent, cornerRadius: 999)
                     .accessibilityHidden(true)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Screen-reader label of the row above — HistoryView's split: call
     /// rows say "call <name> back", message rows say "message <name>"
     /// (history.callbackLabel / history.messageLabel), so one gesture
     /// reads the row's action. An UNANSWERED row (missed-calls task,
-    /// 2026-09-07; attribution, call-tracking task 2026-09-13) announces
-    /// what the row is and what its tap does — "Unanswered call, Open
-    /// Phone app" for the anonymous row, "Missed call: बुबा, Open Phone
-    /// app" when the app placed the call itself — mirror of
+    /// 2026-09-07; attribution, call-tracking task 2026-09-13;
+    /// missed-calls fix, 2026-09-18) announces what the row is and what
+    /// its tap does — "Call <identity> back" when the row carries a
+    /// number (the tap DIALS BACK now), "Unanswered call, Open Phone
+    /// app" when it carries none — mirror of
     /// HistoryView.rowAccessibilityLabel; keep in step. A cloud-cascade
     /// row ([CLOUD-CASCADE], 2026-09-16) also mirrors the leaf there: it
     /// is informational and announces only what it is — no action verb,
@@ -2034,10 +2125,13 @@ struct CallView: View {
             return ActivityRowText.name(for: entry, locale: locale)
         }
         if entry.channel == .unanswered {
-            let described = entry.contactName.isEmpty
-                ? L10n.str("history.unanswered", locale: locale)
-                : MissedCallPresentation.title(for: entry, locale: locale)
-            return "\(described), " + L10n.str("history.openPhone", locale: locale)
+            if let identity = ActivityRowText.unansweredIdentity(
+                for: entry,
+                correlatedName: coordinator.missedCallDisplayNames[entry.id]) {
+                return L10n.fmt("history.callbackLabel", locale: locale, identity)
+            }
+            return "\(L10n.str("history.unanswered", locale: locale)), "
+                + L10n.str("history.openPhone", locale: locale)
         }
         if entry.kind == .call {
             return L10n.fmt("history.callbackLabel", locale: locale, entry.contactName)
@@ -2096,11 +2190,12 @@ struct CallView: View {
     /// rows re-present the compose sheet, and rows whose stored identity
     /// (number for phone/WhatsApp, handle for Messenger) normalized to
     /// nothing speak the honest line instead of a silent dead tap.
-    /// UNANSWERED rows (missed-calls task, 2026-09-07) have no stored
-    /// identity at all by design — iOS masks the caller — so their tap
-    /// opens the Phone app (Recents is one tab away) rather than
-    /// speaking a dead-row line: the dialer open resolves the row
-    /// honestly.
+    /// UNANSWERED rows (missed-calls task, 2026-09-07; missed-calls fix,
+    /// 2026-09-18) DIAL BACK through the house deep-link resolution when
+    /// they carry a number (captured at the dial for the app's own
+    /// calls), and open the Phone app (Recents is one tab away) when
+    /// they carry none — iOS masks the caller there, and the dialer open
+    /// resolves the row honestly.
     private func initiateRecentActivity(_ entry: AppActivityEntry) {
         let name = entry.contactName
         let phone = entry.phone
@@ -2135,12 +2230,16 @@ struct CallView: View {
         case .sms:
             coordinator.presentMessageDraft(phone: phone, name: name, body: "")
         case .unanswered:
-            // No number exists to dial — the caller is anonymous by
-            // platform design (iOS masks identity AND number) — so the
-            // row opens the Phone app, where the call genuinely lives in
-            // Recents, one tab away (missed-calls task, 2026-09-07).
-            // Mirror of HistoryView's `.unanswered` case; keep in step.
-            PhoneAppOpener.openDialer()
+            // Missed-calls fix (2026-09-18): a row WITH a number dials
+            // it back through the house deep-link resolution (matched
+            // family contact's preferred app, else the global default,
+            // `tel:` always in the chain — see `dialBackMissedCall`).
+            // A numberless row (an old anonymous entry, or a caller iOS
+            // masked) opens the Phone app, where the call genuinely
+            // lives in Recents, one tab away (missed-calls task,
+            // 2026-09-07). Mirror of HistoryView's `.unanswered` case;
+            // keep in step.
+            coordinator.dialBackMissedCall(entry)
         case .cloud:
             // [CLOUD-CASCADE] (2026-09-16) Mirror of HistoryView's
             // `.cloud` case; keep in step. The row is INFORMATIONAL and
@@ -2177,37 +2276,35 @@ struct CallView: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text(L10n.fmt("messenger.handlePrompt.title", locale: locale, result.name))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Text(L10n.str("messenger.handleHints.title", locale: locale))
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                    .foregroundStyle(appearance.colors.textSecondary)
                 ForEach(1...3, id: \.self) { index in
                     HStack(alignment: .top, spacing: 10) {
                         Text("\(index)")
-                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                             .foregroundStyle(.white)
                             // DESIGN-REVIEW: minWidth/minHeight (was a
                             // fixed 22pt circle) so the scaled digit can
                             // never clip at Accessibility XXXL.
                             .frame(minWidth: 22, minHeight: 22)
-                            .background(DesignTokens.accent)
-                            .clipShape(Circle())
+                            .appSurface(role: .accent, cornerRadius: 999)
                         Text(L10n.str("messenger.handleHints.line\(index)", locale: locale))
-                            .font(.system(size: DesignTokens.minBodyPointSize))
-                            .foregroundStyle(DesignTokens.textPrimary)
+                            .font(.system(size: appearance.typography.bodyPointSize))
+                            .foregroundStyle(appearance.colors.textPrimary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 TextField(L10n.str("messenger.handlePrompt.placeholder", locale: locale),
                           text: $handleText)
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .padding(.horizontal, 14)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.background)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
                 HStack(spacing: 10) {
                     Button(L10n.str("messenger.handlePrompt.cancel", locale: locale)) {
                         handleCaptureTarget = nil
@@ -2216,8 +2313,7 @@ struct CallView: View {
                     .buttonStyle(.plain)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.background)
-                    .clipShape(Capsule())
+                    .appSurface(role: .control, cornerRadius: 999)
                     Spacer()
                     Button(L10n.str("messenger.handlePrompt.save", locale: locale)) {
                         saveCapturedHandle()
@@ -2227,7 +2323,7 @@ struct CallView: View {
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
                     .foregroundStyle(.white)
-                    .background(canSave ? DesignTokens.accent : DesignTokens.textSecondary.opacity(0.5))
+                    .background(canSave ? appearance.colors.accent : appearance.colors.textSecondary.opacity(0.5))
                     .clipShape(Capsule())
                 }
             }
@@ -2251,6 +2347,7 @@ private enum AddressBookAccessMode {
 }
 
 private struct AddressBookAccessCard: View {
+    @Environment(\.appAppearance) private var appearance
     let mode: AddressBookAccessMode
     /// Fires the one-time permission request; used only by `.ask`.
     var onAllow: (() -> Void)?
@@ -2258,28 +2355,26 @@ private struct AddressBookAccessCard: View {
     var body: some View {
         VStack(spacing: 14) {
             Text(titleKey)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
             Text(bodyKey)
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Button(action: action) {
                 Text(buttonKey)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
             }
             .buttonStyle(.plain)
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var titleKey: LocalizedStringKey {
@@ -2314,75 +2409,72 @@ private struct AddressBookAccessCard: View {
 /// the loaded book is small; the coordinator re-probes at the tap and
 /// announces honestly either way.
 private struct WhatsAppSyncHintCard: View {
+    @Environment(\.appAppearance) private var appearance
     /// Opens WhatsApp (the coordinator probes and announces).
     var openWhatsApp: () -> Void
 
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "person.2.badge.gearshape")
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.accent)
+                .font(.system(size: appearance.typography.bodyPointSize)).foregroundStyle(appearance.colors.accentForeground)
             Text(LocalizedStringKey("call.waSyncHint"))
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
             Button(action: openWhatsApp) {
                 Text(LocalizedStringKey("call.openWhatsApp"))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Capsule())
+                    .appSurface(role: .accent, cornerRadius: 999)
             }
             .buttonStyle(.plain)
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 }
 
 private struct AddressBookLoadingCard: View {
+    @Environment(\.appAppearance) private var appearance
     var body: some View {
         HStack(spacing: 10) {
             ProgressView()
             Text("call.search.loading")
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 }
 
 private struct AddressBookLoadFailedCard: View {
+    @Environment(\.appAppearance) private var appearance
     let retry: () -> Void
 
     var body: some View {
         VStack(spacing: 12) {
             Text("call.search.loadFailed")
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Button(action: retry) {
                 Text("call.search.retry")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
             }
             .buttonStyle(.plain)
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 }
 
@@ -2407,6 +2499,17 @@ private struct RowChannelState {
     /// family contact may be configured loosely) — then nothing can be
     /// stored for the row, and the add-handle button is hidden.
     let storeKey: String
+    /// The channels the resolution skipped on the way to
+    /// `resolvedChannel`, in attempt order (empty when the preferred
+    /// channel routed). The tap's announcement names its first entry
+    /// (`call.announce.fallbackRouted`; L2-D10). `var … = []` so the
+    /// synthesized memberwise initializer keeps a DEFAULTED parameter
+    /// (L2-D3) — the construction site above passes both explicitly.
+    var fellBackFrom: [CallApp] = []
+    /// The launch-failure candidates for `resolvedChannel` (L2-D1/D2) —
+    /// the hop the tap threads into the opener it opens, so a failed
+    /// open recovers through the remaining channels.
+    var hopCandidates: [CallApp] = []
 }
 
 /// One unified search result — a family member or a system address-book
@@ -2430,14 +2533,25 @@ private struct RowChannelState {
 /// the leaf's add-handle sheet. All of it is driven by the caller — the
 /// row never guesses availability or resolves anything itself.
 private struct UnifiedContactResultRow: View {
+    @Environment(\.appAppearance) private var appearance
     let result: UnifiedContactSearch.Result
     /// The row's leading photo thumbnail (contact-photos task,
     /// 2026-09-07): ONLY `.family` rows carry one — the leaf resolves
-    /// it once per search outcome from
-    /// `AppCoordinator.contactPhoto(for:)` — book rows pass nil and
-    /// keep the initials avatar. Caller-driven like everything else in
-    /// the row; the row never touches the photo resolver itself.
+    /// it once per search outcome through
+    /// `AppCoordinator.faceThumbnail(for:diameter:displayScale:)` —
+    /// book rows pass nil and keep the initials avatar. Caller-driven
+    /// like everything else in the row; the row never touches the photo
+    /// resolver itself.
     let photo: UIImage?
+    /// The synthesized-row alt caption — "Also in your phone book as …"
+    /// (design-l1 §7.2; family-contacts-unify T-161): composed by
+    /// `CallView` through `CallResultRowText` from the outcome's
+    /// `linkedBookNames` map, which holds SYNTHESIZED rows only. nil
+    /// for every other row — no extra line, today's layout exactly.
+    /// `var` with a default so the memberwise initializer keeps every
+    /// existing construction compiling (the house defaulted-field
+    /// pattern, e.g. `RowChannelState.fellBackFrom`).
+    var caption: String? = nil
     /// The leaf-resolved channel truth for this row (see `RowChannelState`).
     let channelState: RowChannelState
     /// Dial the RESOLVED channel (`CallView.dialChannel`) — the circle
@@ -2452,6 +2566,8 @@ private struct UnifiedContactResultRow: View {
     /// Open the Messenger-handle capture sheet (`CallView.presentHandleCapture`).
     let addHandle: () -> Void
     @Environment(\.locale) private var locale
+    /// [AX-VIEWPORT] Gates the channel-controls stacking below.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Channel brand colors — kept here, not in DesignTokens: they are
     /// the apps' own identities, not Warm & Soft palette tokens.
@@ -2471,10 +2587,7 @@ private struct UnifiedContactResultRow: View {
             channelControls
         }
         .padding(16)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// The wide dial button — tapping anywhere on the face/name zone
@@ -2487,17 +2600,29 @@ private struct UnifiedContactResultRow: View {
                 avatar
                 VStack(alignment: .leading, spacing: 2) {
                     Text(result.name)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                        .foregroundStyle(appearance.colors.textPrimary)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 6) {
                         if isFamily {
                             familyChip
                         }
                         Text(result.caption)
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
                             .lineLimit(2)
+                    }
+                    if let caption {
+                        // The synthesized-row explanation (design-l1
+                        // §7.2): why a name the user did not type into
+                        // the family record surfaces this row — its
+                        // own caption line under the number line, same
+                        // caption token.
+                        Text(caption)
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
                     }
                 }
                 Spacer(minLength: 8)
@@ -2505,7 +2630,7 @@ private struct UnifiedContactResultRow: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
-                    .background(Self.circleColor(for: channelState.resolvedChannel))
+                    .background(circleColor(for: channelState.resolvedChannel))
                     .clipShape(Circle())
                     .accessibilityHidden(true)
             }
@@ -2556,11 +2681,10 @@ private struct UnifiedContactResultRow: View {
     /// the caption already says who this person is.
     private var familyChip: some View {
         Text(L10n.str("call.search.familyChip", locale: locale))
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-            .foregroundStyle(DesignTokens.accent)
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
             .padding(.horizontal, 10)
             .padding(.vertical, 3)
-            .background(DesignTokens.accent.opacity(0.12))
+            .background(appearance.colors.accent.opacity(0.12))
             .clipShape(Capsule())
             .accessibilityHidden(true)
     }
@@ -2570,17 +2694,39 @@ private struct UnifiedContactResultRow: View {
     /// controls — the add-handle button on handle-less rows, then the
     /// channel chooser.
     private var channelControls: some View {
-        HStack(spacing: 8) {
-            if result.whatsAppAvailable {
-                whatsAppPill
+        // [AX-VIEWPORT] At accessibility text sizes the WhatsApp pill and
+        // the two ≥44pt channel buttons cannot share one line without
+        // overflowing the card: the pill takes its own line, the two
+        // buttons keep theirs under it. Standard sizes keep today's
+        // single-line strip exactly.
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    if result.whatsAppAvailable {
+                        whatsAppPill
+                    }
+                    HStack(spacing: 8) {
+                        if !channelState.hasHandle, !channelState.storeKey.isEmpty {
+                            addHandleButton
+                        }
+                        channelChooser
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(spacing: 8) {
+                    if result.whatsAppAvailable {
+                        whatsAppPill
+                    }
+                    Spacer(minLength: 0)
+                    if !channelState.hasHandle, !channelState.storeKey.isEmpty {
+                        addHandleButton
+                    }
+                    channelChooser
+                }
+                .frame(maxWidth: .infinity)
             }
-            Spacer(minLength: 0)
-            if !channelState.hasHandle, !channelState.storeKey.isEmpty {
-                addHandleButton
-            }
-            channelChooser
         }
-        .frame(maxWidth: .infinity)
     }
 
     /// The WhatsApp pill, byte-for-byte the messenger-gate row's: white
@@ -2589,7 +2735,7 @@ private struct UnifiedContactResultRow: View {
     private var whatsAppPill: some View {
         Button(action: whatsApp) {
             Text(L10n.str("call.channel.whatsapp", locale: locale))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -2623,10 +2769,9 @@ private struct UnifiedContactResultRow: View {
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
                 .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.background)
-                .clipShape(Circle())
+                .appSurface(role: .control, cornerRadius: 999)
         }
         .accessibilityLabel(Text(L10n.str(Self.appNameKey(for: channelState.resolvedChannel),
                                            locale: locale)))
@@ -2657,11 +2802,9 @@ private struct UnifiedContactResultRow: View {
     private var addHandleButton: some View {
         Button(action: addHandle) {
             Image(systemName: "person.crop.circle.badge.plus")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(DesignTokens.accent)
+                .font(.system(size: 20, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.background)
-                .clipShape(Circle())
+                .appSurface(role: .control, cornerRadius: 999)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(L10n.fmt("messenger.handlePrompt.title", locale: locale, result.name)))
@@ -2684,12 +2827,12 @@ private struct UnifiedContactResultRow: View {
     /// phone.fill / video.fill glyph, per the 2026-09-10 badge-tint
     /// consolidation), and each chat app's own brand color so the glyph
     /// reads like the app it opens.
-    private static func circleColor(for app: CallApp) -> Color {
+    private func circleColor(for app: CallApp) -> Color {
         switch app {
-        case .phone: return DesignTokens.accent
-        case .faceTime: return DesignTokens.BadgeTint.call.tint
-        case .whatsApp: return whatsAppGreen
-        case .messenger: return messengerBlue
+        case .phone: return appearance.colors.accent
+        case .faceTime: return DesignTokens.callActionFill
+        case .whatsApp: return Self.whatsAppGreen
+        case .messenger: return Self.messengerBlue
         }
     }
 
@@ -2706,6 +2849,30 @@ private struct UnifiedContactResultRow: View {
     }
 }
 
+/// The call-surface search rows' composed text (family-contacts-unify
+/// T-161; the house `<Surface>RowText` seam — mirror of
+/// `ActivityRowText` in HistoryView.swift): the synthesized family
+/// row's alt caption composed OUTSIDE the view, so the caption-parity
+/// claim (one frozen key, one wording, on every search surface) is
+/// pinnable without a view instance.
+enum CallResultRowText {
+    /// The extra caption line for a row the link merge SYNTHESIZED
+    /// (design-l1 §7.2): the person is also stored in the phone book
+    /// under `linkedBookNames[result.id]`, so the row explains why a
+    /// name the user did not type into the family record appears.
+    /// nil for every other row — the map holds synthesized rows only —
+    /// and an empty stored name is suppressed rather than rendered as
+    /// a dangling "…as " (never a fabricated identity).
+    static func linkedBookCaption(for result: UnifiedContactSearch.Result,
+                                  in outcome: UnifiedContactSearch.Outcome,
+                                  locale: Locale) -> String? {
+        guard let bookName = outcome.linkedBookNames[result.id], !bookName.isEmpty else {
+            return nil
+        }
+        return L10n.fmt("call.search.linkedBookName", locale: locale, bookName)
+    }
+}
+
 /// Face/photo avatar + name, with per-contact VIDEO and AUDIO call
 /// buttons — no list picker in between (redesign spec §3.1 "one face,
 /// one tap"; contact-call-buttons task 2026-09-06). Each button opens
@@ -2714,24 +2881,27 @@ private struct UnifiedContactResultRow: View {
 /// deferred follow-up) through `AppCoordinator.performContactCall`,
 /// which also announces the opened surface aloud.
 ///
-/// The leading face (contact-photos task, 2026-09-07) is the contact's
-/// own photo thumbnail when the coordinator resolves one from the
-/// contact's `photoFilename` (`AppCoordinator.contactPhoto(for:)`),
+/// The leading face (contact-photos task, 2026-09-07; unified resolver
+/// T-157) is the contact's own photo thumbnail when the coordinator
+/// resolves one — the SYSTEM photo where the contact is verified-linked
+/// and one is readable, the app-local file otherwise
+/// (`AppCoordinator.faceThumbnail(for:diameter:displayScale:)`) —
 /// otherwise the initials FaceAvatar — same 52pt circle either way, so
 /// a curated row of tiles keeps a uniform face column.
 struct ContactTile: View {
+    @Environment(\.appAppearance) private var appearance
     let contact: FamilyContact
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.locale) private var locale
     @Environment(\.displayScale) private var displayScale
 
-    /// DESIGN-REVIEW (P2): the tile used to call
-    /// `coordinator.contactPhoto(for:)` — a file read plus a full-size
-    /// decode — while composing the row, i.e. once per contact per body
+    /// DESIGN-REVIEW (P2): the tile used to read and decode the photo
+    /// file while composing the row, i.e. once per contact per body
     /// evaluation. The face is now resolved in `.task` (off the body)
-    /// through the shared downsampling cache, so a re-render costs a
-    /// dictionary lookup and the bitmap it holds is sized for a 52pt
-    /// circle rather than the 512pt file on disk.
+    /// through the coordinator's async precedence path and the shared
+    /// downsampling cache, so a re-render costs a dictionary lookup and
+    /// the bitmap it holds is sized for a 52pt circle rather than the
+    /// 512pt file on disk.
     @State private var photo: UIImage?
 
     /// The tile's face circle — photo or initials (see the struct doc).
@@ -2759,11 +2929,11 @@ struct ContactTile: View {
             avatar(for: contact)
             VStack(alignment: .leading, spacing: 2) {
                 Text(contact.name)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Text(contact.relationship)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
             Spacer()
             Button(action: videoCall) {
@@ -2771,7 +2941,7 @@ struct ContactTile: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.BadgeTint.call.tint)
+                    .background(DesignTokens.callActionFill)
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
@@ -2781,26 +2951,28 @@ struct ContactTile: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Circle())
+                    .appSurface(role: .accent, cornerRadius: 999)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text(L10n.fmt("call.callButtonLabel", locale: locale, contact.name)))
         }
         .padding(16)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
-        // Keyed by the stored file name, so replacing a contact's photo
-        // (or clearing it) re-resolves the face; an unchanged contact
-        // costs one cached lookup per appearance.
-        .task(id: contact.photoFilename ?? "") {
-            photo = DownsampledImageCache.shared.contactFace(
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
+        // Keyed by the face identity (design-l2 §4.4), so replacing a
+        // contact's photo, linking/unlinking the record or an epoch bump
+        // re-resolves the face; an unchanged contact costs one cached
+        // lookup per appearance.
+        .task(id: coordinator.faceIdentity(for: contact)) {
+            let identity = coordinator.faceIdentity(for: contact)
+            let face = await coordinator.faceThumbnail(
                 for: contact,
                 diameter: Self.avatarDiameter,
-                displayScale: displayScale
-            ) { coordinator.contactPhoto(for: contact) }
+                displayScale: displayScale)
+            // Post-await identity re-check (design-l2 §4.4): abandon the
+            // assignment when the identity moved while awaiting — the
+            // re-keyed task resolves the fresh face anyway.
+            guard coordinator.faceIdentity(for: contact) == identity else { return }
+            photo = face
         }
     }
 
@@ -2820,6 +2992,7 @@ struct ContactTile: View {
 /// when the NepaliCalendarPlugin applies and can answer. No mock data
 /// anywhere: sections that have no real content are simply omitted.
 struct CalendarView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
 
     /// DESIGN-REVIEW (P2 — repeated work in view evaluation): this leaf
@@ -2865,29 +3038,27 @@ struct CalendarView: View {
         return VStack(spacing: 8) {
             if let overlay {
                 Text(overlay.weekdayNepali)
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                    .foregroundStyle(appearance.colors.textSecondary)
                 Text(BikramSambat.nepaliString(overlay.bsDate))
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                 // Tithi overlay — every day, per product requirement.
                 Text(overlay.tithi.displayNepali)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 Text(Date().formatted(.dateTime.day().month(.wide).year().locale(coordinator.activeLocale)))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
             } else {
                 Text("calendar.bsUnavailable")
-                    .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.bodyPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
         }
         .padding(18)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Festival(s) falling today, with their tithi labels.
@@ -2895,28 +3066,26 @@ struct CalendarView: View {
         let festivals = todayOverlay?.festivals ?? []
         return VStack(alignment: .leading, spacing: 8) {
             Text("calendar.festivalToday")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textSecondary)
             ForEach(festivals, id: \.id) { festival in
                 HStack(spacing: 10) {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(DesignTokens.accent)
+                    Image(systemName: "sparkles").foregroundStyle(appearance.colors.accentForeground)
                     Text(festival.nameNepali)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                        .foregroundStyle(appearance.colors.textPrimary)
                     Spacer()
                     if let tithi = festival.tithiNepali {
                         Text(tithi)
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
                     }
                 }
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Upcoming festivals (next 5) with BS dates and days-away.
@@ -2924,34 +3093,32 @@ struct CalendarView: View {
         let upcoming = coordinator.festivalCalendar.upcoming(limit: 5)
         return VStack(alignment: .leading, spacing: 10) {
             Text("calendar.upcomingFestivals")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textSecondary)
             ForEach(upcoming, id: \.festival.id) { item in
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.festival.nameNepali)
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                            .foregroundStyle(DesignTokens.textPrimary)
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                            .foregroundStyle(appearance.colors.textPrimary)
                         // Years outside the verified panchang table are
                         // resolved by tithi astronomy (±1 day) and say so
                         // rather than presenting an estimate as fact.
                         Text(item.isApproximate
                              ? "\(BikramSambat.nepaliString(item.bsDate)) · \(L10n.str("calendar.approximateDate", locale: coordinator.activeLocale))"
                              : BikramSambat.nepaliString(item.bsDate))
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
                     }
                     Spacer()
                     Text(daysAwayText(item.daysAway))
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.accent)
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 }
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private func daysAwayText(_ days: Int) -> String {
@@ -3000,8 +3167,8 @@ struct CalendarView: View {
         if !scheduleRows.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 Text("calendar.todaySchedule")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textSecondary)
                 ForEach(scheduleRows) { row in
                     scheduleRowView(row)
                 }
@@ -3014,25 +3181,24 @@ struct CalendarView: View {
             IconBadge(systemImage: row.systemImage, tint: .reminders)
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.title)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Text(row.isAllDay
                      ? L10n.str("externalReminders.allDay", locale: coordinator.activeLocale)
                      : row.scheduledAt.formatted(date: .omitted, time: .shortened))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
                 if let calendarName = row.calendarName {
                     Text(calendarName)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                 }
             }
             Spacer()
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private struct ScheduleRow: Identifiable {
@@ -3065,6 +3231,7 @@ struct CalendarView: View {
 /// `todayBriefing` is nil and the leaf says so instead of showing
 /// yesterday's text as if it were today's.
 struct BriefingView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
 
     var body: some View {
@@ -3074,7 +3241,7 @@ struct BriefingView: View {
                     briefingCard(stored)
                     speakAgainButton(stored)
                 } else {
-                    emptyState(key: "briefing.view.empty")
+                    emptyState(key: "briefing.view.empty", appearance: appearance)
                 }
             }
         }
@@ -3084,12 +3251,11 @@ struct BriefingView: View {
     /// medications, calendar events, weather, one line each.
     private func briefingCard(_ stored: StoredBriefing) -> some View {
         Text(stored.text)
-            .font(.system(size: DesignTokens.minBodyPointSize))
-            .foregroundStyle(DesignTokens.textPrimary)
+            .font(.system(size: appearance.typography.bodyPointSize))
+            .foregroundStyle(appearance.colors.textPrimary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(18)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Replays the stored text through the existing speak path
@@ -3101,17 +3267,16 @@ struct BriefingView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "speaker.wave.2.fill")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 Text(L10n.str("briefing.view.speakAgain", locale: coordinator.activeLocale))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 18)
             .frame(maxWidth: .infinity)
             .frame(minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.accent)
-            .clipShape(Capsule())
+            .appSurface(role: .accent, cornerRadius: 999)
         }
         .buttonStyle(.plain)
     }
@@ -3119,13 +3284,16 @@ struct BriefingView: View {
 
 // MARK: - Shared
 
-private func emptyState(key: String) -> some View {
+/// The house "nothing here yet" card. Shared by every leaf that has an
+/// empty list state — internal rather than private to this file so the
+/// Events leaf (`EventsView`) draws the identical card instead of a
+/// look-alike.
+func emptyState(key: String, appearance: AppAppearance) -> some View {
     Text(LocalizedStringKey(key))
-        .font(.system(size: DesignTokens.minBodyPointSize))
-        .foregroundStyle(DesignTokens.textSecondary)
+        .font(.system(size: appearance.typography.bodyPointSize))
+        .foregroundStyle(appearance.colors.textSecondary)
         .multilineTextAlignment(.center)
         .padding(32)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
 }

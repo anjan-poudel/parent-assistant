@@ -62,6 +62,11 @@ final class IntentEncoderSpikeInstaller: IntentEncoderArtifactInstalling {
     private let observabilityBus: ObservabilityBus
     private let modelId: ModelID
     private let fileManager: FileManager
+    /// [ENCODER-REPROVISION] (2026-09-17) The standard downloader — the
+    /// self-healing path when the tester's local zip is gone (container
+    /// replaced by an app update). Nil in tests that only exercise the
+    /// local handshake.
+    private let downloadService: ModelDownloadService?
     private let queue = DispatchQueue(label: "intent.encoder.install", qos: .utility)
     private let lock = NSLock()
     private var installing = false
@@ -69,16 +74,18 @@ final class IntentEncoderSpikeInstaller: IntentEncoderArtifactInstalling {
     init(modelStore: ModelStore,
          observabilityBus: ObservabilityBus,
          modelId: ModelID = ModelCatalog.intentEncoderSpike,
-         fileManager: FileManager = .default) {
+         fileManager: FileManager = .default,
+         downloadService: ModelDownloadService? = nil) {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.modelId = modelId
         self.fileManager = fileManager
+        self.downloadService = downloadService
     }
 
     @discardableResult
     func installIfConfigured(environment: [String: String]) -> IntentEncoderInstallDecision {
-        guard let zipURL = ModelCatalog.configuredIntentEncoderSpikeZipURL(
+        guard let configured = ModelCatalog.configuredIntentEncoderSpikeZipURL(
                 environment: environment) else {
             return .notConfigured
         }
@@ -87,6 +94,35 @@ final class IntentEncoderSpikeInstaller: IntentEncoderArtifactInstalling {
                  extra: ["reason": "already_installed"])
             return .alreadyInstalled
         }
+
+        // [ENCODER-REPROVISION] (2026-09-17) Zip source resolution:
+        //  1. the tester's local copy (env override / Documents),
+        //  2. a zip the standard downloader already fetched into the
+        //     model directory (the self-healed case — the next readiness
+        //     check installs it),
+        //  3. else kick the download itself (the standard downloader
+        //     verifies the catalog's strict sha256 before anything is
+        //     unpacked), and report the honest in-flight state.
+        let zipURL: URL
+        if fileManager.fileExists(atPath: configured.path) {
+            zipURL = configured
+        } else if let downloaded = downloadedZipInModelDirectory() {
+            zipURL = downloaded
+        } else {
+            guard let entry = ModelCatalog.entry(for: modelId),
+                  let downloadService else {
+                // No local zip and no downloader: the honest failure the
+                // old path reported (zip_missing).
+                emit("encoder_spike_install_failed", outcome: "failure",
+                     errorCode: "zip_missing")
+                return .started
+            }
+            emit("encoder_spike_download_started", outcome: "info", errorCode: nil,
+                 extra: ["reason": "zip_missing_remote_fallback"])
+            downloadService.start(entry)
+            return .started
+        }
+
         lock.lock()
         let busy = installing
         if !busy { installing = true }
@@ -102,6 +138,17 @@ final class IntentEncoderSpikeInstaller: IntentEncoderArtifactInstalling {
             self.lock.unlock()
         }
         return .started
+    }
+
+    /// The first `.zip` file in the model directory — the downloader's
+    /// final placement, whatever the exact filename it chose. Listing
+    /// instead of guessing a name keeps the self-healed install robust
+    /// to the downloader's naming internals.
+    private func downloadedZipInModelDirectory() -> URL? {
+        guard let directory = modelStore.directoryURL(for: modelId) else { return nil }
+        let contents = (try? fileManager.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil)) ?? []
+        return contents.first { $0.pathExtension.lowercased() == "zip" }
     }
 
     /// Runs on `queue`. The only failure detail that leaves this method is

@@ -1,0 +1,31 @@
+{
+  "schema": "cnr_corpus_repair_record/v1",
+  "run_id": "cnr-v17-20261015-0209",
+  "ts": "20261015-214048",
+  "context": "convert_rows.py gate exit=3 'empty user_turn or reply' after the parallel-speed corpus build; drop recorded per hygiene rules (no silent changes)",
+  "action": "drop_row",
+  "turn_id": "taskmaster:tm1_self_dialogs:dlg-054c8e35-7f86-4ae1-80bb-7272dd577689:9",
+  "reason": "user_turn is empty ('') in the admitted ship row; source dialogue taskmaster.jsonl line 159 turn 8; the tier cache holds an EMPTY translation for this source text (key match recorded below) - a pre-existing translation-stage empty (model returned empty text, plausibly a safety/refusal behavior on the profanity source turn) that was cached and is re-served to every build; the L2 ingestion has no non-empty guard on the translated user_turn, so the empty was admitted. Not caused by the parallel teacher patch: all build translations were 100% cache hits (tier.log).",
+  "producer_evidence": {
+    "source_text": "Fuck this shit.",
+    "cache_key_match": [
+      "raw",
+      "Fuck this shit.",
+      "e5f5320c5dbe7af1324b465e62466f4075e842af4e9bcc36d2ceb92f09ddccac"
+    ],
+    "cache_entries": 6624,
+    "cache_empty_text_keys": 4
+  },
+  "rows_before": 17736,
+  "rows_after": 17735,
+  "sha_before": "5fd4262d69c2b0d87cf66376bc46884df807a0d22123066f230de7f4a510017f",
+  "sha_after": "ec2eee2fc24c35f75cd81c6d26816dfb180282204acb8805a3b1956ed796ea4d",
+  "backup_file": "/mnt/nvme1/cnr-v17/corpus/cnr-v17-20261015-0209/ship/chat-corpus-ship.jsonl.prerepair-20261015-214048.bak",
+  "manifest_note": "provenance-manifest.json corpus.sha256=5fd4262d... and content_hash=b07df16c... are the builder's pre-repair records and were not edited; the post-repair corpus identity is sha_after above.",
+  "scope": "exactly one row removed by exact turn_id match; no other row touched; no regeneration; no re-translation",
+  "followup_reemission": {
+    "date": "2026-10-16",
+    "what": "provenance-manifest.json was re-emitted to describe the post-repair corpus (see manifest-reemission-record.json); the pre-repair manifest bytes are preserved at provenance-manifest.json.prereemission-20261016-230845.bak",
+    "why": "a stale manifest corpus.sha256 would mark every subsequent gate report as 'evidence files were altered'"
+  }
+}

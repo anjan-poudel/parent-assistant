@@ -20,7 +20,11 @@ enum ConfirmationTier {
             return .neverGated
         case .call, .sendMessage, .setReminder, .createCalendarEvent:
             return .confirm
-        case .music, .suggestVideo, .guide, .healthQuery, .query, .none:
+        case .music, .suggestVideo, .guide, .healthQuery, .query, .none,
+             // [CHAT] (2026-09-23) A conversational reply runs nothing and
+             // changes nothing outside the spoken answer, so there is
+             // never anything to confirm: free, exactly like `query`.
+             .chat:
             return .free
         case .plugin:
             // Plugin actions own their own confirmation policy inside

@@ -254,7 +254,9 @@ final class VoiceSettingsModelTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: VoiceOutputVolume.defaultsKey),
                      "nothing is written until the user steps the control")
         XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 100,
-                       "the shipped loudness is the default — no silent boost")
+                       "the shipped default is the loud baseline — "
+                       + "[VOLUME-BASELINE] folds the owner-validated "
+                       + "loudness into 100 % (2026-10-14)")
         XCTAssertEqual(VoiceOutputVolume.defaultsKey, "voice.outputVolumePercent",
                        "the persisted key is part of the contract — a rename "
                        + "silently resets every user's setting")
@@ -271,12 +273,15 @@ final class VoiceSettingsModelTests: XCTestCase {
         XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 50)
         VoiceOutputVolume.set(150, defaults: defaults)
         XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 150)
+        VoiceOutputVolume.set(300, defaults: defaults)
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 300,
+                       "the top of the range persists")
     }
 
     func testVolumeClampsOutOfRangeValuesOnWrite() {
         VoiceOutputVolume.set(500, defaults: defaults)
-        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 150,
-                       "above the range clamps to the 150 % boost ceiling")
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 300,
+                       "above the range clamps to the 300 % boost ceiling")
         VoiceOutputVolume.set(10, defaults: defaults)
         XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 50,
                        "below the range clamps to the 50 % floor")
@@ -284,10 +289,10 @@ final class VoiceSettingsModelTests: XCTestCase {
 
     func testVolumeClampsOutOfRangeValuesOnRead() {
         // A value already on disk (an older range, a hand-edited plist)
-        // must clamp on READ too — the limiter can never see it, and the
+        // must clamp on READ too — the transfer can never see it, and the
         // UI can never show an impossible number.
         defaults.set(9_999, forKey: VoiceOutputVolume.defaultsKey)
-        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 150)
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 300)
         defaults.set(-40, forKey: VoiceOutputVolume.defaultsKey)
         XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 50)
     }
@@ -295,18 +300,18 @@ final class VoiceSettingsModelTests: XCTestCase {
     func testVolumeStepsInTensAndSaturatesAtTheRangeEnds() {
         XCTAssertEqual(VoiceOutputVolume.stepped(100, bySteps: 1), 110)
         XCTAssertEqual(VoiceOutputVolume.stepped(100, bySteps: -1), 90)
-        XCTAssertEqual(VoiceOutputVolume.stepped(150, bySteps: 1), 150,
+        XCTAssertEqual(VoiceOutputVolume.stepped(300, bySteps: 1), 300,
                        "the top of the range is a hard stop, not a wrap")
         XCTAssertEqual(VoiceOutputVolume.stepped(50, bySteps: -1), 50)
         // Every value the control can reach is on the 10 % grid inside
-        // 50–150 — the range the copy promises.
+        // 50–200 — the range the copy promises.
         for percent in stride(from: VoiceOutputVolume.minimumPercent,
                               through: VoiceOutputVolume.maximumPercent,
                               by: VoiceOutputVolume.stepPercent) {
             XCTAssertEqual(VoiceOutputVolume.clamp(percent), percent)
         }
         XCTAssertEqual(VoiceOutputVolume.minimumPercent, 50)
-        XCTAssertEqual(VoiceOutputVolume.maximumPercent, 150)
+        XCTAssertEqual(VoiceOutputVolume.maximumPercent, 300)
         XCTAssertEqual(VoiceOutputVolume.stepPercent, 10)
     }
 

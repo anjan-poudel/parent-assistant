@@ -91,7 +91,8 @@ final class ModelStore {
         // [T-037-a] CoreML-only encoder: a DIRECTORY artifact with no ggml
         // sibling, so the single-file `path(for:)` check below is not the
         // right shape (it would also report a half-written staging file).
-        if let entry = entry(for: id), entry.kind == .intentEncoder {
+        // [YOLO] The point-ask detector is the same shape.
+        if let entry = entry(for: id), entry.kind.isDirectoryArtifact {
             return isCoreMLCached(id)
         }
         return path(for: id) != nil
@@ -220,7 +221,8 @@ final class ModelStore {
         // [T-037-a] A CoreML-only encoder (kind .intentEncoder) has no ggml
         // sibling to derive a Whisper-style `<stem>-encoder.mlmodelc` name
         // from — the entry's own filename IS the installed directory name.
-        if entry.kind == .intentEncoder {
+        // [YOLO] Same shape for the point-ask detector.
+        if entry.kind.isDirectoryArtifact {
             return finalURL(for: entry)
         }
         guard entry.coreMLEncoderBundledName != nil
@@ -232,8 +234,8 @@ final class ModelStore {
 
     /// Unpacks a downloaded encoder zip (M2 delivery) into the
     /// whisper.cpp-derived `<stem>-encoder.mlmodelc` location next to the
-    /// model — or, for a CoreML-only entry (`kind == .intentEncoder`), into
-    /// the entry's own final directory.
+    /// model — or, for a CoreML-only entry (`kind == .intentEncoder` /
+    /// `.yoloDetector`), into the entry's own final directory.
     ///
     /// [T-037-a] Checksum policy: a CoreML-only entry's catalog sha256 is
     /// the ZIP's own hash, so it is verified here BEFORE anything is
@@ -246,7 +248,7 @@ final class ModelStore {
     func installCoreMLEncoder(fromZip zipURL: URL, for id: ModelID) throws -> URL? {
         guard let entry = entry(for: id),
               let dest = coreMLBundleFinalURL(for: id) else { return nil }
-        if entry.kind == .intentEncoder,
+        if entry.kind.isDirectoryArtifact,
            !(try verifyChecksum(at: zipURL, expected: entry.sha256)) {
             emit("coreml_encoder_checksum_mismatch", outcome: "failure",
                  modelId: id, errorCode: "checksum")
@@ -268,15 +270,16 @@ final class ModelStore {
                                      "encoder zip did not contain an .mlmodelc directory"])
         }
         try? fileManager.removeItem(at: dest)
-        // A CoreML-only entry (`.intentEncoder`) has no ggml file to have
-        // created its parent directory (the kind's own ModelStore folder),
-        // so ensure it exists before the move. Deliberately scoped to that
-        // kind: on the Whisper-companion path the parent is the ggml
-        // model's own directory, and creating it early would let an
-        // encoder install succeed in the anomalous "encoder before its
-        // Whisper model" ordering, leaving an orphan encoder dir — the
-        // pre-existing failure is the safer behaviour there.
-        if entry.kind == .intentEncoder {
+        // A CoreML-only entry (`.intentEncoder` / `.yoloDetector`) has no
+        // ggml file to have created its parent directory (the kind's own
+        // ModelStore folder), so ensure it exists before the move.
+        // Deliberately scoped to those kinds: on the Whisper-companion
+        // path the parent is the ggml model's own directory, and creating
+        // it early would let an encoder install succeed in the anomalous
+        // "encoder before its Whisper model" ordering, leaving an orphan
+        // encoder dir — the pre-existing failure is the safer behaviour
+        // there.
+        if entry.kind.isDirectoryArtifact {
             try ensureDirectory(dest.deletingLastPathComponent())
         }
         try fileManager.moveItem(at: extracted, to: dest)

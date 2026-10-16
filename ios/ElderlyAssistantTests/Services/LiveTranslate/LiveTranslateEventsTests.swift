@@ -1,0 +1,453 @@
+import XCTest
+@testable import ElderlyAssistant
+
+/// T-003 — the feature's events are content-free by schema, every key the
+/// emitters use is declared, and the pinned key set cannot drift from the
+/// shipped log allow-list (AM-2, CL-5, NFR-LCT-006/007).
+final class LiveTranslateEventsTests: XCTestCase {
+
+    /// One bus and one emitter per test: XCTest builds a fresh instance for
+    /// every test method, so captured events never leak between tests.
+    private lazy var bus = LiveTranslateSanitisingBus()
+    private lazy var events = LiveTranslateEvents(bus: bus)
+
+    // MARK: Driving every emitter
+
+    /// Exercises every emitter once, with small fixture values. Every key in
+    /// the catalogue is produced by at least one of these calls.
+    @discardableResult
+    private func driveEveryEmitter() -> LiveTranslateSanitisingBus {
+        events.sessionStarted()
+        events.sessionEnded()
+        events.cameraDenied()
+        events.cameraUnavailable(.noCaptureDevice)
+        events.cameraInterrupted(.thermal)
+        events.cameraResumed(recoveringFrom: .backgrounded)
+        events.ocrPass(regionCount: 3)
+        events.ocrPass(regionCount: 0)
+        events.ocrPassReused(regionCount: 3)
+        events.ocrPassReused(regionCount: 0)
+        events.ocrPassFailed(.ocrPassFailed(.requestFailed))
+        events.trackingUnsupported()
+        events.objectPass(objectCount: 2)
+        events.objectPass(objectCount: 0)
+        events.objectPassFailed(.ocrPassFailed(.requestFailed))
+        events.objectDetectionUnsupported()
+        events.regionAppeared()
+        events.regionRemoved()
+        events.textChange(regionCount: 2, regionSetHash: 0x1a2b_3c4d)
+        events.translationBatchRequested(stringCount: 5, batchIndex: 0, batchCount: 1)
+        events.translationBatchResolved(resolvedCount: 4, unresolvedCount: 1, durationMs: 812)
+        events.brainTranslationBatch(resolvedCount: 3, unresolvedCount: 1, durationMs: 4200)
+        // …and once with the reason the tier declined a batch, so the sparse
+        // `reason` key is produced by an emitter and the union below still
+        // equals the pinned set ([PRESSURE-SAFE LOAD], 2026-09-19).
+        events.brainTranslationBatch(resolvedCount: 0, unresolvedCount: 2, durationMs: 0,
+                                     deferral: .memoryPressure)
+        // …and once with the generation's own self-portrait ([EMPTY-DECODE],
+        // 2026-09-19), which is the other sparse group on this event: the
+        // three keys a batch that ran carries. The fixture has a non-empty
+        // histogram and a shape, so every value the vocabulary can produce —
+        // including a multi-entry `token:count,…` rendering — is exercised.
+        events.brainTranslationBatch(
+            resolvedCount: 0, unresolvedCount: 3, durationMs: 4120,
+            generation: BrainGenerationReading(
+                length: 96,
+                shape: .array,
+                rejections: [.noNepaliEvidence: 2, .wrongScript: 1]))
+        events.brainTranslationUnavailable(.modelNotInstalled, stage: .availability)
+        // The warden's two user-visible moments (2026-09-19).
+        events.brainTranslationLoadAnnounced(count: 3)
+        events.brainTranslationPreempted(count: 0)
+        events.translationDegraded(reason: .noNetwork, regionCount: 1)
+        events.translationResolved(tier: .cloud, origin: .fresh, count: 2)
+        events.translationResolved(tier: .dictionary, origin: .cache, count: 1)
+        events.translationDedupeHit(keyCount: 2)
+        events.textQuarantined(count: 1)
+        events.consentPromptShown()
+        events.consentRecorded()
+        events.consentDenied()
+        events.consentRevoked()
+        events.consentUnreadable()
+        events.consentWriteFailed()
+        events.cloudIndicatorShown()
+        events.cloudIndicatorHidden()
+        events.costExhaustedLatched()
+        events.cacheHit(origin: .persisted, count: 1)
+        events.cacheMiss(origin: .curatedDictionary, count: 1)
+        events.cacheEvicted(origin: .persisted, count: 2)
+        events.cachePayloadReset(.cacheReadFailed(.payloadUnreadable))
+        events.cacheWriteFailed(.cacheWriteFailed(.storageUnavailable))
+        events.speakRequested(mode: .readAll)
+        events.speakFailed(mode: .tap)
+        return bus
+    }
+
+    // MARK: Scenario: every key the feature emits survives sanitisation
+
+    func testEveryCatalogueMetadataKeySurvivesTheShippedSanitisingBus() {
+        let bus = driveEveryEmitter()
+
+        // Every declared key was produced by an emitter…
+        for key in LiveTranslateEventCatalogue.allMetadataKeys {
+            XCTAssertTrue(bus.events.contains { $0.metadata[key] != nil },
+                          "no emitter produced the declared key \(key)")
+        }
+        // …and every key an instance carried survived with a value.
+        //
+        // The subset half is the sanitising half: a declared key the sanitiser
+        // dropped would be missing from the event that produced it.
+        //
+        // The strict half — every instance carries *every* declared key — held
+        // for every event until `brain_translation_batch.reason`, the file's
+        // first declared-but-conditional key: a batch that ran has no reason
+        // to give, so the key is present exactly when the tier declined (see
+        // `LiveTranslateBrainDeferralReason` and the sparse-key test below).
+        // What survives the sparse key is the guarantee the catalogue actually
+        // makes — an event carries no undeclared key, no declared key is lost
+        // in transit, and every declared key is produced by *some* instance
+        // (the loop above) — and the keys that may be absent are the ones the
+        // schema names as such.
+        for event in bus.events {
+            let declared = LiveTranslateEventCatalogue.entries[event.eventType]?.metadataKeys ?? []
+            XCTAssertTrue(Set(event.metadata.keys).isSubset(of: declared),
+                          "\(event.eventType) carries an undeclared key: \(event.metadata.keys)")
+            let optional = LiveTranslateEventCatalogue.optionalMetadataKeys[event.eventType] ?? []
+            for key in declared.subtracting(optional) {
+                XCTAssertNotNil(event.metadata[key],
+                                "\(event.eventType): key \(key) was dropped by the sanitiser")
+            }
+            for (key, value) in event.metadata {
+                XCTAssertNotEqual(value, "[redacted]",
+                                  "\(event.eventType): value of \(key) was redacted")
+            }
+        }
+    }
+
+    /// The declared-but-conditional keys are a deliberate decision, not a
+    /// loophole: each one must be a real key of a real event (or the mapping
+    /// has gone stale and silently relaxed the completeness loop above).
+    func testEveryOptionalMetadataKeyIsDeclaredOnItsEvent() {
+        for (eventType, keys) in LiveTranslateEventCatalogue.optionalMetadataKeys {
+            guard let entry = LiveTranslateEventCatalogue.entries[eventType] else {
+                XCTFail("\(eventType) has optional keys but is not a catalogued event")
+                continue
+            }
+            XCTAssertTrue(keys.isSubset(of: entry.metadataKeys),
+                          "\(eventType): optional keys \(keys) are not declared on the entry")
+        }
+    }
+
+    /// `reason` on the batch event is sparse in both directions, and this is
+    /// where that is pinned: the completeness loop above can only say that a
+    /// declared key is produced somewhere, not that an emitter leaves it out
+    /// when there is nothing to say.
+    func testTheBatchReasonKeyAppearsExactlyWhenTheTierDeclined() {
+        let bus = LiveTranslateSanitisingBus()
+        let events = LiveTranslateEvents(bus: bus)
+
+        events.brainTranslationBatch(resolvedCount: 3, unresolvedCount: 0, durationMs: 120)
+        events.brainTranslationBatch(resolvedCount: 0, unresolvedCount: 2, durationMs: 0,
+                                     deferral: .memoryPressure)
+
+        let batch = bus.events(named: "brain_translation_batch")
+        XCTAssertEqual(batch.count, 2)
+        XCTAssertNil(batch.first?.metadata[LiveTranslateEvents.MetadataKey.reason.rawValue],
+                     "a batch that ran has no reason to give, and no placeholder either")
+        XCTAssertEqual(batch.last?.metadata[LiveTranslateEvents.MetadataKey.reason.rawValue],
+                       "memory_pressure",
+                       "a batch the tier declined says why, in the tier's own closed token")
+    }
+
+    func testObservedMetadataKeysMatchThePinnedCatalogueExactly() {
+        let bus = driveEveryEmitter()
+        for eventType in bus.eventTypes {
+            guard let entry = LiveTranslateEventCatalogue.entries[eventType] else {
+                XCTFail("\(eventType) is not declared in the catalogue")
+                continue
+            }
+            XCTAssertEqual(bus.observedMetadataKeys(named: eventType), entry.metadataKeys,
+                           "\(eventType): the pinned key set no longer matches the emitter")
+        }
+    }
+
+    func testEveryObservedOutcomeIsInTheCataloguesOutcomeVocabulary() {
+        let bus = driveEveryEmitter()
+        for event in bus.events {
+            guard let entry = LiveTranslateEventCatalogue.entries[event.eventType] else { continue }
+            XCTAssertTrue(entry.outcomes.contains(event.outcome),
+                          "\(event.eventType) emitted an undeclared outcome \(event.outcome)")
+        }
+    }
+
+    func testEveryCatalogueEntryIsActuallyEmitted() {
+        let bus = driveEveryEmitter()
+        let declared = LiveTranslateEventCatalogue.allEventTypes
+        XCTAssertEqual(bus.eventTypes, declared,
+                       "a catalogued event with no emitter (or vice versa) is a schema drift")
+    }
+
+    // MARK: Scenario: a new key cannot be added without a deliberate decision
+
+    func testTheEmitterKeySetIsPinnedToTheShippedAllowList() {
+        for key in LiveTranslateEvents.MetadataKey.allCases {
+            XCTAssertTrue(LogSanitiser.allowedKeys.contains(key.rawValue),
+                          "\(key.rawValue) is not in the shipped allow-list — it would be dropped silently")
+        }
+        XCTAssertEqual(LiveTranslateEventCatalogue.allMetadataKeys,
+                       Set(LiveTranslateEvents.MetadataKey.allCases.map(\.rawValue)),
+                       "the catalogue and the emitter's key vocabulary must be the same set")
+    }
+
+    func testEveryEmittedEventUsesTheFeatureComponent() {
+        let bus = driveEveryEmitter()
+        for event in bus.events {
+            XCTAssertEqual(event.component, "livetranslate")
+        }
+    }
+
+    // MARK: Scenario: content cannot travel in a metadata value or an error code
+
+    /// Every value the emitters produce is an integer, a closed token or the
+    /// version stamp. This is the guard the whole file rests on: the shipped
+    /// sanitiser scrubs PII shapes but does **not** drop free text in an
+    /// allowed key (asserted separately in `LiveTranslateAllowListTests`), so
+    /// the schema here is what keeps recognized and translated text out of
+    /// the log surface.
+    func testEveryEmittedMetadataValueIsCountTokenOrVersion() {
+        let allowedTokens = Set(TranslationUnavailableReason.allCases.map(\.rawValue))
+            .union(Set(TranslationTier.allCases.map(\.rawValue)))
+            // The on-device translation tier's own closed reason vocabulary:
+            // the tokens its `brain_translation_unavailable` event may carry.
+            .union(Set(LiveTranslateBrainUnavailableReason.allCases.map(\.rawValue)))
+            // …and the stage that says where the attempt stopped — the second
+            // closed token on the same event (2026-09-17).
+            .union(Set(BrainFailureStage.allCases.map(\.rawValue)))
+            // [PRESSURE-SAFE LOAD] …and why the tier declined to attempt a
+            // batch at all (`brain_translation_batch.reason`, 2026-09-19):
+            // another owner's brain, the app's own headroom, the kernel's
+            // pressure level, or a warden's ask during the load.
+            .union(Set(LiveTranslateBrainDeferralReason.allCases.map(\.rawValue)))
+            // [EMPTY-DECODE] …and the generation's own two closed vocabularies
+            // (`brain_translation_batch`'s shape and rejection histogram,
+            // 2026-09-19): what a decode structurally returned, and which rule
+            // refused each answer it did return.
+            .union(Set(BrainGenerationShape.allCases.map(\.rawValue)))
+            .union(Set(BrainAnswerRejection.allCases.map(\.rawValue)))
+            .union([
+                "no_capture_device", "configuration_failed", "resource_in_use",
+                "backgrounded", "system_interruption", "thermal",
+                "curated_dictionary", "persisted",
+                // [CASCADE-PROVENANCE] translation_resolved.origin tokens.
+                "fresh", "cache",
+                "tap", "read_all", "repeat_last",
+                // T-026 added the command handler's re-prompt to the speech
+                // modes; the token joins the closed vocabulary here rather
+                // than being spelled at a call site.
+                "reprompt"
+            ])
+            .union([LiveTranslateConfig.default.disclosureVersion])
+
+        let bus = driveEveryEmitter()
+        for event in bus.events {
+            for (key, value) in event.metadata {
+                if Int(value) != nil { continue }
+                // The one value that is neither a count nor a closed token: the
+                // scene digest (owner device report, 2026-09-18). It is pinned
+                // to a *shape* here rather than waved through — eight hex
+                // digits around a colon, nine characters in all, built by
+                // `regionSetHashHex` from a `UInt32` with no string in reach.
+                // Prose, a path, a URL, a key or a recognized string cannot
+                // satisfy that pattern.
+                if key == LiveTranslateEvents.MetadataKey.regionSetHash.rawValue,
+                   value.range(of: "^[0-9a-f]{4}:[0-9a-f]{4}$",
+                               options: .regularExpression) != nil { continue }
+                // The other shape-bounded value: the rejection histogram
+                // ([EMPTY-DECODE], 2026-09-19), which is a comma-joined list of
+                // `token:count` pairs — or `none` when nothing was refused. It
+                // cannot be a single closed token (it is a histogram) and it
+                // must not be waved through, so it is pinned to a shape: every
+                // element is a lower_snake token from the vocabulary above
+                // followed by a count, and the rendering is built from a
+                // dictionary keyed by a closed enum, so prose, a path, a
+                // sentence or a recognized string cannot satisfy this pattern.
+                if key == LiveTranslateEvents.MetadataKey.rejections.rawValue {
+                    let histogram = "^none$|^[a-z_]+:[0-9]+(,[a-z_]+:[0-9]+)*$"
+                    XCTAssertNotNil(value.range(of: histogram, options: .regularExpression),
+                                    "the rejection histogram left its shape: \(value)")
+                    let names = value == "none"
+                        ? []
+                        : value.split(separator: ",").compactMap { $0.split(separator: ":").first }
+                    for name in names {
+                        XCTAssertTrue(allowedTokens.contains(String(name)),
+                                      "the histogram names a rule outside the closed vocabulary: \(name)")
+                    }
+                    continue
+                }
+                XCTAssertTrue(allowedTokens.contains(value),
+                              "\(event.eventType).\(key) carries a value outside the closed vocabulary: \(value)")
+                XCTAssertFalse(value.contains(" "),
+                               "\(event.eventType).\(key) contains whitespace — the shape of prose: \(value)")
+                XCTAssertFalse(value.unicodeScalars.contains { (0x0900...0x097F).contains($0.value) },
+                               "\(event.eventType).\(key) contains Devanagari — content cannot reach metadata")
+            }
+        }
+    }
+
+    func testEveryErrorCodeIsAClosedTokenOrAnIntegerSuffix() {
+        let bus = driveEveryEmitter()
+        for event in bus.events {
+            guard let code = event.errorCode else { continue }
+            XCTAssertNotNil(code.range(of: "^[a-z_]+(_[0-9]+)?$", options: .regularExpression),
+                            "\(event.eventType) carries a non-token error code: \(code)")
+        }
+    }
+
+    /// The disclosure version is read from the emitter's own config, so no
+    /// call site can pass anything else into that key.
+    func testTheDisclosureVersionMetadataComesFromTheConfig() {
+        var config = LiveTranslateConfig.default
+        config.disclosureVersion = "livetranslate.disclosure.test.r7"
+        let customBus = LiveTranslateSanitisingBus()
+        let custom = LiveTranslateEvents(bus: customBus, config: config)
+
+        custom.consentPromptShown()
+        custom.consentRecorded()
+        custom.consentDenied()
+        custom.consentRevoked()
+
+        for eventType in ["consent_prompt_shown", "consent_recorded", "consent_denied", "consent_revoked"] {
+            let event = customBus.events(named: eventType).first
+            XCTAssertEqual(event?.metadata["disclosureVersion"], "livetranslate.disclosure.test.r7",
+                           "\(eventType) must carry the config's stamp")
+        }
+    }
+
+    // MARK: Scenario: the shipped cap events keep their meaning
+
+    /// The family-visible cap signal stays the shipped governor's own events
+    /// on component `gemini_cost`; the feature's latch is additional. This
+    /// asserts the feature's side of that contract (the governor's payloads
+    /// are exercised against the real governor in
+    /// `LiveTranslateAllowListTests`).
+    func testTheFeatureAddsALatchEventAndNeverReEmitsTheShippedCapEvents() {
+        let bus = driveEveryEmitter()
+        XCTAssertEqual(bus.events(named: "cost_exhausted_latched").count, 1)
+        for shipped in ["daily_cap_warning", "daily_cap_reached"] {
+            XCTAssertTrue(bus.events(named: shipped).isEmpty,
+                          "the feature must not re-emit the shipped \(shipped) event")
+            XCTAssertFalse(LiveTranslateEventCatalogue.allEventTypes.contains(shipped))
+        }
+    }
+
+    // MARK: Per-event details the catalogue promises
+
+    func testAnEmptyOCRPASSReportsTheEmptyOutcomeRatherThanAFailure() {
+        events.ocrPass(regionCount: 0)
+        XCTAssertEqual(bus.events(named: "ocr_pass").first?.outcome, "empty")
+        XCTAssertNil(bus.events(named: "ocr_pass").first?.errorCode)
+    }
+
+    func testAPartiallyResolvedBatchReportsPartial() {
+        events.translationBatchResolved(resolvedCount: 4, unresolvedCount: 1, durationMs: 900)
+        let event = bus.events(named: "translation_batch_resolved").first
+        XCTAssertEqual(event?.outcome, "partial")
+        XCTAssertEqual(event?.metadata["durationMs"], "900")
+        XCTAssertEqual(event?.durationMs, 900,
+                       "the top-level duration and the metadata key come from one parameter")
+    }
+
+    func testAFullyResolvedBatchReportsSuccess() {
+        events.translationBatchResolved(resolvedCount: 5, unresolvedCount: 0, durationMs: 900)
+        XCTAssertEqual(bus.events(named: "translation_batch_resolved").first?.outcome, "success")
+    }
+
+    func testQuarantineIsRecordedWithACountAndNothingElse() {
+        events.textQuarantined(count: 2)
+        let event = bus.events(named: "text_quarantined").first
+        XCTAssertEqual(event?.metadata, ["count": "2"])
+        XCTAssertNil(event?.errorCode)
+    }
+
+    /// The honest event C02's prose requires: an unsupported tracking
+    /// request degrades to OCR-only and says so, with the taxonomy's code.
+    func testUnsupportedTrackingIsRecordedHonestly() {
+        events.trackingUnsupported()
+        let event = bus.events(named: "tracking_unsupported").first
+        XCTAssertEqual(event?.outcome, "degraded")
+        XCTAssertEqual(event?.errorCode, "tracking_unsupported")
+        XCTAssertEqual(event?.metadata, [:])
+    }
+
+    func testTheDegradedEventCarriesOnlyTheReasonTokenAndARegionCount() {
+        events.translationDegraded(reason: .costBudgetExhausted, regionCount: 3)
+        let event = bus.events(named: "translation_degraded").first
+        XCTAssertEqual(event?.outcome, "degraded")
+        XCTAssertEqual(event?.metadata["reason"], "cost_budget_exhausted")
+        XCTAssertEqual(event?.metadata["regionCount"], "3")
+    }
+
+    // MARK: Scenario: the scene digest is a discriminator, not a content channel
+
+    /// What the owner reads off the next device capture: two four-digit halves,
+    /// lowercase hex, one colon, always nine characters — so two lines of a log
+    /// can be compared at a glance and neither can be mistaken for prose.
+    func testTheSceneDigestRendersAsAFixedWidthHexPair() {
+        XCTAssertEqual(LiveTranslateEvents.regionSetHashHex(0x1a2b_3c4d), "1a2b:3c4d")
+        XCTAssertEqual(LiveTranslateEvents.regionSetHashHex(0), "0000:0000")
+        XCTAssertEqual(LiveTranslateEvents.regionSetHashHex(0xabcd), "0000:abcd")
+        XCTAssertEqual(LiveTranslateEvents.regionSetHashHex(0xffff_ffff), "ffff:ffff")
+        XCTAssertEqual(LiveTranslateEvents.regionSetHashHex(0x1234_5678).count, 9)
+    }
+
+    /// The colon is load-bearing. A digest is a `UInt32` and can be all digits;
+    /// the sanitiser's phone-number guard matches a run of seven or more digits
+    /// and would redact the whole value, silently turning "the scene is the
+    /// same" into "[redacted]" and making a stable scene look like a changing
+    /// one. The colon takes the value out of that guard's character class.
+    func testAnAllDigitDigestSurvivesTheSanitiserVerbatim() {
+        events.textChange(regionCount: 4, regionSetHash: 0x1234_5678)
+        let event = bus.events(named: "text_change").first
+        XCTAssertEqual(event?.metadata["regionSetHash"], "1234:5678")
+        XCTAssertNotEqual(event?.metadata["regionSetHash"], "[redacted]")
+        XCTAssertEqual(event?.metadata["regionCount"], "4")
+    }
+
+    // MARK: The warden's two moments (owner directive, 2026-09-19)
+
+    /// The "hold on a sec" moment: the elder is waiting for a handle to page
+    /// in, and the count is the batch riding on that load.
+    func testTheLoadAnnouncementCarriesTheBatchCountAndNothingElse() {
+        events.brainTranslationLoadAnnounced(count: 7)
+        let event = bus.events(named: "brain_translation_load_announced").first
+        XCTAssertEqual(event?.outcome, "pending")
+        XCTAssertEqual(event?.metadata, ["count": "7"],
+                       "a wait is a count of strings, never a string")
+        XCTAssertNil(event?.errorCode)
+    }
+
+    /// The hand-off to the voice stack. Zero is the honest count for an idle
+    /// handle — nothing was decoding, so the voice turn cost no answer.
+    func testThePreemptionEventCarriesWhatTheHandOffCost() {
+        events.brainTranslationPreempted(count: 4)
+        events.brainTranslationPreempted(count: 0)
+        let emitted = bus.events(named: "brain_translation_preempted")
+        XCTAssertEqual(emitted.count, 2)
+        XCTAssertEqual(emitted.map(\.outcome), ["preempted", "preempted"])
+        XCTAssertEqual(emitted.map { $0.metadata["count"] }, ["4", "0"])
+        XCTAssertEqual(emitted.first?.errorCode, nil)
+    }
+
+    func testCameraEventsCarryOnlyClosedReasonTokens() {
+        events.cameraDenied()
+        events.cameraUnavailable(.configurationFailed)
+        events.cameraInterrupted(.systemInterruption)
+        events.cameraResumed(recoveringFrom: .thermal)
+        XCTAssertEqual(bus.events(named: "camera_denied").first?.metadata, [:])
+        XCTAssertEqual(bus.events(named: "camera_denied").first?.errorCode, "camera_permission_denied")
+        XCTAssertEqual(bus.events(named: "camera_unavailable").first?.metadata["reason"], "configuration_failed")
+        XCTAssertEqual(bus.events(named: "camera_interrupted").first?.metadata["reason"], "system_interruption")
+        XCTAssertEqual(bus.events(named: "camera_resumed").first?.metadata["reason"], "thermal")
+        XCTAssertEqual(bus.events(named: "camera_resumed").first?.outcome, "success")
+    }
+}

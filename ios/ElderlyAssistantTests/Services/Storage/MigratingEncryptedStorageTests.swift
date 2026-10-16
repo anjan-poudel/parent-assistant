@@ -60,13 +60,17 @@ final class MigratingEncryptedStorageTests: XCTestCase {
     /// In-memory stand-in for the file store, with the two failure
     /// injections the migration must survive: writes that fail (store
     /// unavailable) and a read-back that does not return what was written
-    /// (a copy that cannot be trusted).
-    private final class FakeFileStore: MigratableFileStorage {
+    /// (a copy that cannot be trusted). Also exposes the
+    /// `ProfilePayloadStorage` probe (T-090) so the migrating store's
+    /// probe routing is testable.
+    private final class FakeFileStore: MigratableFileStorage, ProfilePayloadStorage {
         var raw: [String: Data] = [:]
         var failWrites = false
         /// When true, `readRawData` never returns the stored bytes — the
         /// "written but not verifiable" case.
         var breakReadBack = false
+        /// When true, the presence probe reports "unknowable".
+        var probeUnknowable = false
         private(set) var readCount = 0
         private(set) var snapshotCount = 0
         private let encoder = JSONEncoder()
@@ -110,6 +114,39 @@ final class MigratingEncryptedStorageTests: XCTestCase {
             return keys.reduce(into: [:]) { result, key in
                 result[key] = raw[key]
             }
+        }
+
+        func hasPayload(key: String) -> Bool? {
+            probeUnknowable ? nil : raw[key] != nil
+        }
+    }
+
+    /// A file channel that deliberately does NOT expose the presence
+    /// probe: the migrating store must then answer what it cannot know
+    /// with `nil` — never with "absent".
+    private final class NonProbeableFileStore: MigratableFileStorage {
+        let base = FakeFileStore()
+
+        func write<T: Encodable>(key: String, value: T) -> Result<Void, StorageError> {
+            base.write(key: key, value: value)
+        }
+
+        func read<T: Decodable>(key: String, type: T.Type) -> Result<T, StorageError> {
+            base.read(key: key, type: type)
+        }
+
+        func delete(key: String) -> Result<Void, StorageError> {
+            base.delete(key: key)
+        }
+
+        func readRawData(key: String) -> Data? { base.readRawData(key: key) }
+
+        func writeRawData(_ data: Data, key: String) -> Result<Void, StorageError> {
+            base.writeRawData(data, key: key)
+        }
+
+        func snapshotPayloads(keys: [String]) -> [String: Data] {
+            base.snapshotPayloads(keys: keys)
         }
     }
 
@@ -373,5 +410,87 @@ final class MigratingEncryptedStorageTests: XCTestCase {
         _ = storage.read(key: structuredKey, type: [String].self)
         XCTAssertEqual(files.readCount, before + 1,
                        "the snapshot must not outlive its batch")
+    }
+
+    // MARK: - ProfilePayloadStorage probe (profile-interview, T-090)
+
+    func testProbeAnswersFromTheFileChannelFirst() {
+        let (storage, _, files) = makeStorage()
+        XCTAssertEqual(storage.hasPayload(key: structuredKey), false,
+                       "nothing stored anywhere is a knowable absence")
+        _ = files.write(key: structuredKey, value: ["Maya"])
+        XCTAssertEqual(storage.hasPayload(key: structuredKey), true)
+    }
+
+    func testProbeCountsALegacyKeychainCopyAsPresent() {
+        // The write fallback can leave the only copy on the Keychain: a
+        // file probe of false must then still report presence, honestly.
+        let (storage, keychain, _) = makeStorage()
+        _ = keychain.write(key: structuredKey, value: ["Maya"])
+        XCTAssertEqual(storage.hasPayload(key: structuredKey), true,
+                       "a legacy Keychain copy still counts as present")
+    }
+
+    func testProbeIsNilWhenTheFileChannelCannotProbe() {
+        let keychain = FakeKeychain()
+        let files = NonProbeableFileStore()
+        _ = files.base.write(key: structuredKey, value: ["Maya"])
+        let storage = MigratingEncryptedStorage(keychain: keychain, files: files)
+        XCTAssertNil(storage.hasPayload(key: structuredKey),
+                     "a channel that cannot probe must answer nil, never "
+                     + "absent or present")
+    }
+
+    func testProbeIsNilWhenTheFileChannelReportsUnknowable() {
+        let (storage, _, files) = makeStorage()
+        _ = files.write(key: structuredKey, value: ["Maya"])
+        files.probeUnknowable = true
+        XCTAssertNil(storage.hasPayload(key: structuredKey))
+    }
+
+    func testProbeForAKeychainResidentKeyAnswersFromTheKeychain() {
+        let (storage, keychain, _) = makeStorage()
+        XCTAssertEqual(storage.hasPayload(key: secretKey), false)
+        _ = keychain.write(key: secretKey, value: "AIza-secret")
+        XCTAssertEqual(storage.hasPayload(key: secretKey), true)
+    }
+
+    func testRawReadMirrorsTheReadPrecedence() {
+        let (storage, keychain, files) = makeStorage()
+        // Files first...
+        keychain.raw[structuredKey] = Data(#"["stale"]"#.utf8)
+        files.raw[structuredKey] = Data(#"["current"]"#.utf8)
+        XCTAssertEqual(storage.readRawData(key: structuredKey),
+                       Data(#"["current"]"#.utf8),
+                       "the file copy is authoritative — and verbatim")
+
+        // ...then the legacy Keychain, migrated on the way out.
+        let legacyKey = "places.saved"
+        let legacyBytes = Data("[ \"Home\" ]".utf8)
+        keychain.raw[legacyKey] = legacyBytes
+        XCTAssertEqual(storage.readRawData(key: legacyKey), legacyBytes)
+        XCTAssertEqual(files.raw[legacyKey], legacyBytes,
+                       "the raw read must migrate the legacy copy verbatim, "
+                       + "exactly like read() does")
+        XCTAssertNil(keychain.raw[legacyKey])
+
+        // Keychain-resident keys never touch the file channel.
+        _ = keychain.write(key: secretKey, value: "AIza-secret")
+        XCTAssertEqual(storage.readRawData(key: secretKey),
+                       keychain.raw[secretKey])
+        XCTAssertNil(files.raw[secretKey])
+    }
+
+    func testRawReadServesFromAnInstalledSnapshot() {
+        let (storage, _, files) = makeStorage()
+        files.raw[structuredKey] = Data(#"["snapshotted"]"#.utf8)
+
+        storage.withReadSnapshot(keys: [structuredKey]) {
+            files.raw[structuredKey] = Data(#"["changed"]"#.utf8)
+            XCTAssertEqual(storage.readRawData(key: structuredKey),
+                           Data(#"["snapshotted"]"#.utf8),
+                           "inside the batch the payload is already in "
+                           + "memory — the snapshot leads")
+        }
     }
 }

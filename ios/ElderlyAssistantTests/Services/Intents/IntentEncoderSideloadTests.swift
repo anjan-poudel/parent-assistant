@@ -86,12 +86,15 @@ final class IntentEncoderSideloadTests: XCTestCase {
         XCTAssertEqual(entry.dependsOn, nil)
         XCTAssertTrue(ModelKind.intentEncoder.isDirectoryArtifact)
 
-        // A DIFFERENT artifact from the T-036 v0 baseline the shipped
-        // catalog still pins — different id, digest and install directory,
-        // so neither can masquerade as the other on disk.
+        // Different id and install directory from the shipped spike pin —
+        // so neither can masquerade as the other on disk — while the
+        // ARCHIVE itself is deliberately shared: the re-provision pinned
+        // the shipped spike to the exact T-036 zip this sideload carries,
+        // so the digests match on purpose.
         let spike = try XCTUnwrap(ModelCatalog.entry(for: ModelCatalog.intentEncoderSpike))
         XCTAssertNotEqual(entry.id, spike.id)
-        XCTAssertNotEqual(entry.sha256, spike.sha256)
+        XCTAssertEqual(entry.sha256, spike.sha256,
+                       "the sideload deliberately shares the shipped archive since the re-provision")
         XCTAssertNotEqual(entry.filename, spike.filename)
 
         // Not offered to a household, whatever picker asks.

@@ -8,6 +8,9 @@ import SwiftUI
 /// same rule the digest fetch uses, so what this editor shows is exactly
 /// what the voice digest reads.
 struct NewsSourcesSettingsView: View {
+    @Environment(\.appAppearance) private var appearance
+    /// [AX-VIEWPORT] Gates the source-URL caption's line cap below.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject var store: NewsSourceStore
 
     @State private var nameDraft = ""
@@ -19,23 +22,26 @@ struct NewsSourcesSettingsView: View {
             VStack(spacing: 12) {
                 if store.configuredSources.isEmpty {
                     Text("settings.feeds.sourcesEmpty")
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(16)
-                        .background(DesignTokens.card)
-                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
                 } else {
                     ForEach(store.configuredSources) { source in
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(source.name)
-                                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                                    .foregroundStyle(DesignTokens.textPrimary)
+                                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                                    .foregroundStyle(appearance.colors.textPrimary)
                                 Text(source.urlString)
-                                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                                    .foregroundStyle(DesignTokens.textSecondary)
-                                    .lineLimit(2)
+                                    .font(.system(size: appearance.typography.captionPointSize))
+                                    .foregroundStyle(appearance.colors.textSecondary)
+                                    // [AX-VIEWPORT] The source URL wraps
+                                    // at accessibility sizes instead of
+                                    // truncating mid-host. Standard sizes
+                                    // keep the 2-line cap.
+                                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                             }
                             Spacer()
                             Button(role: .destructive) {
@@ -48,8 +54,7 @@ struct NewsSourcesSettingsView: View {
                             .accessibilityLabel(Text("settings.feeds.removeSource"))
                         }
                         .padding(14)
-                        .background(DesignTokens.card)
-                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
                     }
                 }
 
@@ -57,8 +62,8 @@ struct NewsSourcesSettingsView: View {
                 // the name is derived from the host when left blank.
                 VStack(alignment: .leading, spacing: 8) {
                     Text("settings.feeds.sourcesHint")
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                     TextField("settings.feeds.sourcePlaceholder", text: $urlDraft)
                         .keyboardType(.URL)
                         .autocapitalization(.none)
@@ -84,24 +89,21 @@ struct NewsSourcesSettingsView: View {
                             }
                         } label: {
                             Text("settings.feeds.addSource")
-                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                                 .foregroundStyle(.white)
                                 .frame(minHeight: DesignTokens.minTapTargetSize)
                                 .frame(maxWidth: .infinity)
-                                .background(DesignTokens.accent)
-                                .clipShape(Capsule())
+                                .appSurface(role: .accent, cornerRadius: 999)
                         }
                         .buttonStyle(.plain)
                     }
                     if addFailed {
                         Text("settings.feeds.addSourceFailed")
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundStyle(DesignTokens.stateError)
+                            .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                     }
                 }
                 .padding(16)
-                .background(DesignTokens.card)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
             }
         }
     }

@@ -12,7 +12,12 @@ struct ContentView: View {
             if coordinator.onboardingState.hasSeenOnboarding {
                 HomeView()
             } else {
-                OnboardingWizardView()
+                // [PROFILE-INTERVIEW T-102] The cold-start route (C13):
+                // .language for an untouched fresh install (identical to
+                // today), the first pending step for a quit-mid-wizard
+                // relaunch, and .aboutYou when the record is missing
+                // (edge table, design-l2 §4 C13).
+                OnboardingWizardView(startingAt: coordinator.coldStartInterviewRoute())
             }
         }
         .onAppear {
@@ -93,6 +98,15 @@ struct ContentView: View {
         // published item; the view stops its session on disappear.
         .sheet(item: $coordinator.pendingNavigationPresentation) { presentation in
             InAppNavigationView(session: presentation.session)
+        }
+        // [RICH-EVENTS] (2026-09-17) One free-form event, full screen —
+        // the reminder notification's Open action lands here, and the
+        // Events list opens the same screen for an edit, so an event has
+        // one face and not two. Presented app-wide because the
+        // notification can be tapped from any screen.
+        .sheet(item: $coordinator.pendingEventDetail) { presentation in
+            EventDetailView(eventId: presentation.eventId,
+                            onClose: coordinator.dismissEventDetail)
         }
         // [STARTUP-PERF] The progressive-boot spinner (a small capsule
         // listing what is loading) now lives INSIDE HomeView, anchored

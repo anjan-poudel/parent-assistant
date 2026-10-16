@@ -15,7 +15,10 @@ import SwiftUI
 /// (favourites, with removal) and the full catalog with installed badges
 /// and add buttons.
 struct QuickAccessAppsView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
+    /// [AX-VIEWPORT] Gates the control-below-name stacking in the rows.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var searchText = ""
     /// app.id → installed snapshot from the scheme probe, filled once per
@@ -54,17 +57,15 @@ struct QuickAccessAppsView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             TextField("quickApps.search.placeholder", text: $searchText)
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
         }
         .padding(.horizontal, 16)
-        .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-        .background(DesignTokens.card)
-        .clipShape(Capsule())
+        .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize).appSurface(role: .card, cornerRadius: 999)
     }
 
     private var searchResults: some View {
@@ -108,8 +109,8 @@ struct QuickAccessAppsView: View {
             }
             Text("apps.probeNote")
         }
-        .font(.system(size: DesignTokens.minCaptionPointSize))
-        .foregroundStyle(DesignTokens.textSecondary)
+        .font(.system(size: appearance.typography.captionPointSize))
+        .foregroundStyle(appearance.colors.textSecondary)
     }
 
     private var atCap: Bool {
@@ -118,8 +119,8 @@ struct QuickAccessAppsView: View {
 
     private func sectionHeader(_ key: String) -> some View {
         Text(LocalizedStringKey(key))
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-            .foregroundStyle(DesignTokens.textSecondary)
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+            .foregroundStyle(appearance.colors.textSecondary)
     }
 
     // MARK: - Rows
@@ -129,13 +130,31 @@ struct QuickAccessAppsView: View {
     /// (removal is still offered — the tile on Home launches through the
     /// coordinator, which re-probes and speaks honestly on tap).
     private func favouriteRow(_ app: AppLauncher.App) -> some View {
-        HStack(spacing: 14) {
-            AppGlyph(app: app, diameter: 48)
-            // `== false` (not `!= true`) so a not-yet-probed row shows no
-            // caption for the one frame before `.task` fills `installed`.
-            rowLabel(app, captionKey: installed[app.id] == false ? "apps.notInstalled" : nil)
-            Spacer(minLength: 0)
-            removeButton(app)
+        // [AX-VIEWPORT] The "Remove <app>" pill is a full localized
+        // sentence; at accessibility text sizes it cannot share a line
+        // with the app name without crushing the name to slivers. The
+        // control drops to its own row under the name. Standard sizes
+        // keep today's one-line row exactly.
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 14) {
+                        AppGlyph(app: app, diameter: 48)
+                        rowLabel(app, captionKey: installed[app.id] == false ? "apps.notInstalled" : nil)
+                        Spacer(minLength: 0)
+                    }
+                    removeButton(app)
+                }
+            } else {
+                HStack(spacing: 14) {
+                    AppGlyph(app: app, diameter: 48)
+                    // `== false` (not `!= true`) so a not-yet-probed row shows no
+                    // caption for the one frame before `.task` fills `installed`.
+                    rowLabel(app, captionKey: installed[app.id] == false ? "apps.notInstalled" : nil)
+                    Spacer(minLength: 0)
+                    removeButton(app)
+                }
+            }
         }
         .rowCard()
     }
@@ -147,31 +166,53 @@ struct QuickAccessAppsView: View {
     private func catalogRow(_ app: AppLauncher.App) -> some View {
         let isFavourite = coordinator.favoriteAppIDs.contains(app.id)
         let isInstalledHere = installed[app.id] == true
-        return HStack(spacing: 14) {
-            AppGlyph(app: app, diameter: 48)
-            rowLabel(app, captionKey: isInstalledHere ? "quickApps.installed" : nil)
-            Spacer(minLength: 0)
-            if isFavourite {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 26))
-                    .foregroundStyle(DesignTokens.accent)
-                    .accessibilityLabel(Text("quickApps.added"))
-            } else if isInstalledHere && !atCap {
-                addButton(app)
+        // [AX-VIEWPORT] The Add pill drops to its own row under the name
+        // at accessibility text sizes — beside the name it crushed the
+        // name to zero width. The checkmark is a fixed-size glyph and
+        // stays inline. Standard sizes keep today's one-line row exactly.
+        return Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 14) {
+                        AppGlyph(app: app, diameter: 48)
+                        rowLabel(app, captionKey: isInstalledHere ? "quickApps.installed" : nil)
+                        Spacer(minLength: 0)
+                        if isFavourite { checkmark }
+                    }
+                    if !isFavourite, isInstalledHere, !atCap {
+                        addButton(app)
+                    }
+                }
+            } else {
+                HStack(spacing: 14) {
+                    AppGlyph(app: app, diameter: 48)
+                    rowLabel(app, captionKey: isInstalledHere ? "quickApps.installed" : nil)
+                    Spacer(minLength: 0)
+                    if isFavourite { checkmark } else if isInstalledHere && !atCap {
+                        addButton(app)
+                    }
+                }
             }
         }
         .rowCard()
     }
 
+    /// The "already added" glyph — one implementation for both row arms.
+    private var checkmark: some View {
+        Image(systemName: "checkmark.circle.fill")
+            .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
+            .accessibilityLabel(Text("quickApps.added"))
+    }
+
     private func rowLabel(_ app: AppLauncher.App, captionKey: String?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(LocalizedStringKey(app.nameKey))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                .foregroundStyle(appearance.colors.textPrimary)
             if let captionKey {
                 Text(LocalizedStringKey(captionKey))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
         }
     }
@@ -190,12 +231,10 @@ struct QuickAccessAppsView: View {
                 Image(systemName: "plus")
                 Text("quickApps.add")
             }
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
             .foregroundStyle(.white)
             .padding(.horizontal, 14)
-            .frame(minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.accent)
-            .clipShape(Capsule())
+            .frame(minHeight: DesignTokens.minTapTargetSize).appSurface(role: .accent, cornerRadius: 999)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(L10n.fmt("quickApps.addFor",
@@ -215,8 +254,7 @@ struct QuickAccessAppsView: View {
             Text(L10n.fmt("quickApps.remove",
                           locale: coordinator.activeLocale,
                           appDisplayName(app)))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.accent)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 .padding(.horizontal, 14)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
         }
@@ -248,9 +286,6 @@ private extension View {
     func rowCard() -> some View {
         self
             .padding(14)
-            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 }

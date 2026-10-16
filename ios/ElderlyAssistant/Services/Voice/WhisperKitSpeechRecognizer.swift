@@ -16,7 +16,9 @@ import WhisperKit
 // while the user speaks — off the turn path. NON-GATING: the transcribe
 // never waits on it; when it is still running at `finish()`, `loadKit`
 // joins the in-flight load instead of constructing a second instance
-// (a duplicate would double the ~1.5 GB footprint).
+// (a duplicate would double the resident cost — the shipping v6 q8 medium
+// is ~1.00 GB live, and `ModelLifecycleInventory.footprint(for: .speechToText)`
+// is the only copy of that number).
 //
 /// The pure first-use prewarm decision.
 enum WhisperFirstUsePrewarmPolicy {
@@ -138,12 +140,51 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     /// state reads).
     var isModelLoaded: Bool { kitInstance != nil }
 
+    /// [MODEL-LIFECYCLE] The process-wide residency owner. Every ANE
+    /// construction goes through `prepareLoad` — the manager decides
+    /// whether the brain (or anything else heavy) has to leave first, and
+    /// how much headroom is actually left. Injected only so tests can hand
+    /// in a manager with a scripted probe.
+    private let lifecycle: ModelLifecycleManager
+
     init(observabilityBus: ObservabilityBus,
          modelStore: ModelStore? = nil,
-         preferredModelID: ModelID = ModelCatalog.whisperKitNepaliMedium) {
+         // [VOICE-OOM] The default is the LANGUAGE default
+         // (`whisperKitMediumV6`, ~1.0 GB live), NOT the superseded fp16
+         // v3 (`whisperKitNepaliMedium`, ~2.0 GB live — the same 2×
+         // mis-sizing the post-turn policy was corrected away from). A
+         // construction site that does not name an artifact — a
+         // never-picked device — must not load the bigger one by
+         // default; that pairing is the trap this repoint closes.
+         preferredModelID: ModelID = ModelCatalog.whisperKitMediumV6,
+         lifecycle: ModelLifecycleManager = .shared) {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.preferredModelID = preferredModelID
+        self.lifecycle = lifecycle
+    }
+
+    /// [MODEL-LIFECYCLE] (Re)declare the STT slot against the artifact this
+    /// recognizer is about to load, and hand the manager the release path
+    /// that undoes it.
+    ///
+    /// Deliberately NOT done in `init`: the coordinator constructs BOTH
+    /// recognizers, and `.speechToText` is one slot — whichever recognizer
+    /// is about to actually load must be the one that owns it. Declaring it
+    /// at the load site means the slot can never describe an engine that
+    /// is not the one running.
+    ///
+    /// `[weak self]` is load-bearing: the manager retains this closure, and
+    /// a strong capture would keep every recognizer ever constructed alive
+    /// for the process lifetime.
+    private func registerWithLifecycle() {
+        lifecycle.register(
+            slot: .speechToText,
+            modelID: preferredModelID,
+            owner: self
+        ) { [weak self] in
+            self?.releaseModel()
+        }
     }
 
     // MARK: - Model preference (UI selection)  [STT-SWITCHER]
@@ -170,20 +211,25 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     ///    (unlike `WhisperSpeechRecognizer.currentModelID()`, which walks
     ///    the cached-model preference list). It loads exactly one catalog
     ///    directory artifact and its documented default is
-    ///    `ModelCatalog.whisperKitNepaliMedium` (the init default). An
+    ///    `ModelCatalog.whisperKitMediumV6` (the init default). An
     ///    unset would leave `loadDescriptor()` with nothing to resolve —
     ///    `isAvailable` false — on a pick the user reads as "the app
     ///    decides", so keeping the current artifact IS the automatic
     ///    behavior for this engine.
     ///
     /// A real change releases a resident kit so the next turn reloads from
-    /// the new artifact instead of holding the old one's ~1.5 GB until the
+    /// the new artifact instead of holding the old one's live footprint
     /// post-turn policy releases it.
     func setPreferredModel(_ id: ModelID?) {
         guard let id,
               Self.isWhisperKitArtifact(id),
               id != preferredModelID else { return }
         preferredModelID = id
+        // [MODEL-LIFECYCLE] Re-declare the slot against the new artifact:
+        // the ane footprint of a q8 medium and a full medium differ by
+        // ~1 GB, and the budget must move with the pick rather than keep
+        // budgeting the old model's bytes.
+        registerWithLifecycle()
         // `released_model` states whether a resident kit was present when
         // the pick landed (the release itself is asynchronous) — the
         // content-free signal a dashboard needs to tell a cold switch
@@ -367,7 +413,7 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         }
     }
 
-    /// Drops the loaded model so its RAM (~1.5 GB for medium-class
+    /// Drops the loaded model so its RAM (~1.00 GB for the shipping
     /// CoreML) is available to the LLM interpreter — same contract as
     /// `WhisperSpeechRecognizer.releaseModel()`, called from
     /// `AppCoordinator.recordTranscript`. The next utterance reloads on
@@ -375,6 +421,26 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     func releaseModel() {
         kitInstance = nil
         loadedDescriptor = nil
+        // [MODEL-LIFECYCLE] The manager's ledger is a *view*: it records
+        // what it admitted. A release that ran outside `evict` (the
+        // post-turn policy, a preference change) has to say so, or the
+        // manager keeps budgeting for bytes that are already back.
+        lifecycle.didUnload(.speechToText, owner: self)
+    }
+
+    /// [MODEL-LIFECYCLE] A load the residency budget refused. Carried
+    /// inside `RecognitionError.recognitionFailed` so every existing
+    /// failure path (pipeline watchdog, fallback selection, the cloud
+    /// engine) behaves exactly as it does for any other load failure —
+    /// the lifecycle layer adds no new failure taxonomy to the pipeline.
+    private struct LifecycleDenied: Error {
+        /// [MODEL-WARDEN] Step 1 — the reservation vocabulary, not the
+        /// admission one. The gate below is two-phase now, so the refusal
+        /// it produces is a `ReservationDenial`; carrying the superset and
+        /// mapping it down would be a second, lossier answer to a question
+        /// nobody asks (`loadDenialReason(for:)` exists for the callers
+        /// that still speak the old taxonomy).
+        let reason: ReservationDenial
     }
 
     // MARK: - Inference (guarded)
@@ -462,7 +528,7 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     /// Loads (or reuses) the WhisperKit instance for a descriptor.
     /// [LAT-EVIDENCE] Concurrent loaders JOIN one in-flight load: the
     /// non-gating first-use prewarm and the first transcribe may race to
-    /// the load — a second construction would double the ~1.5 GB
+    /// the load — a second construction would double the resident
     /// footprint. A failed load clears the pending slot so a later
     /// attempt starts fresh (a stale failure can never poison every
     /// future load).
@@ -506,11 +572,77 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     /// caches it, and reports the load.
     private func createKit(descriptor: String,
                            config: WhisperKitConfig) async throws -> WhisperKit {
+        // [MODEL-LIFECYCLE] The gate, at the ONE real construction site.
+        // `createKit` is reached from both entry points (`warm` and
+        // `runInference`) and behind the in-flight dedupe, so gating here
+        // means no path can build an ANE instance the manager did not
+        // approve of — including the post-turn re-warm, which previously
+        // re-loaded ~1.0 GB of non-pageable ANE weights on a raw probe
+        // reading with no idea that the brain had grown in the meantime.
+        registerWithLifecycle()
+        // [MODEL-WARDEN] Step 1 — the reservation is held ACROSS the load,
+        // which is the whole point: this is the ANE construction (~1.0 GB
+        // live, none of it pageable, 77 s cold on device) and the bytes
+        // were unaccounted for between an admission decision and `didLoad`.
+        // Holding it here also puts the load on the serial queue, so a 4B
+        // brain page-in cannot be admitted on top of it.
+        //
+        // The deadline and cancellation contracts are untouched: the
+        // reservation adds no await, no timeout and no cancellation path
+        // of its own. If the task awaiting this load stops waiting, the
+        // throw below abandons the reservation as `.cancelled` (or
+        // `.loadFailed`) and the reaper covers the rest; `WhisperKit(config)`
+        // sees exactly the cancellation it saw before.
+        let reservation: ModelReservation
+        switch lifecycle.reserve(ModelLoadRequest(slot: .speechToText,
+                                                  modelID: preferredModelID,
+                                                  owner: self,
+                                                  purpose: .voiceTurn)) {
+        case .success(let granted):
+            reservation = granted
+        case .failure(let reason):
+            // Honest, content-free refusal: the pipeline's existing
+            // failure handling takes it from here (whisper.cpp or the
+            // cloud engine may still serve the turn).
+            emit("model_load_denied", errorCode: reason.token)
+            throw RecognitionError.recognitionFailed(LifecycleDenied(reason: reason))
+        }
         let loadStart = CFAbsoluteTimeGetCurrent()
-        let created = try await WhisperKit(config)
+        let created: WhisperKit
+        do {
+            created = try await WhisperKit(config)
+        } catch {
+            lifecycle.abandon(reservation,
+                              reason: error is CancellationError
+                                  ? .cancelled : .loadFailed)
+            throw error
+        }
+        // [LOAD-SERIALIZATION] (2026-09-19) The load completed, but the
+        // permit may have been preempted while it ran: the translation tier
+        // abandons an in-flight `.speechToText` reservation before its own
+        // load starts, so a warm and a live-translate load can never both
+        // commit residency. Standing down here drops the construct (the
+        // throw lands before `kitInstance` is assigned, so the bytes return
+        // to the kernel) and routes a live turn to the next engine exactly
+        // as a cancellation would; the warm reports its failure and the
+        // recognizer re-loads on demand.
+        if !lifecycle.isReservationHeld(reservation.id) {
+            lifecycle.abandon(reservation, reason: .preempted)
+            throw CancellationError()
+        }
         let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
         kitInstance = created
         loadedDescriptor = descriptor
+        lifecycle.commit(reservation)
+        lifecycle.didLoad(.speechToText, owner: self)
+        // [MODEL-WARDEN] Step 3 — the load this slot just paid for is what
+        // the warden prices its eviction at. 77 s cold on a device, 135 s
+        // after an ANE recompile; the ledger's prior is the first of those
+        // and this measurement is what replaces it once the device has
+        // spoken. Fire-and-forget on purpose — see `noteLoadCost`.
+        lifecycle.noteLoadCost(loadMs: Double(loadMs),
+                               slot: .speechToText,
+                               modelID: preferredModelID)
         emit("model_loaded", errorCode: nil)
         // [TURN-TIMING] Model ready — the load ms rides as a point entry
         // when this load happened inside a live turn.
@@ -539,6 +671,11 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
             guard let self else { return }
             do {
                 let kit = try await self.loadKit(descriptor: descriptor, config: config)
+                // [MODEL-LIFECYCLE] A transcription is a real use: idle
+                // eviction must measure idleness from here, not from the
+                // moment the weights were admitted (a long conversation
+                // must never have its STT pulled between turns).
+                self.lifecycle.noteUse(of: .speechToText)
 
                 let start = CFAbsoluteTimeGetCurrent()
                 print("[whisperkit_stt] transcribing samples=\(audio.count)")
@@ -591,8 +728,19 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
                 let results = try await kit.transcribe(audioArrays: [audio],
                                                        decodeOptions: options)
                 let ms = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
-                let joined = results.first??.map(\.text).joined(separator: " ")
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let joinedRaw = results.first??.map(\.text).joined(separator: " ") ?? ""
+                // [SPECIAL-TOKEN-LEAK 2026-10-10] Strip any `<...>`-shaped
+                // token the decoder emitted — a tag like `<unintelligible>`
+                // is a dataset convention, never something the user said.
+                // Safe on Devanagari text, which never carries angle
+                // brackets. `skipSpecialTokens` deliberately stays OFF:
+                // enabling it stripped real words on device with this
+                // fine-tuned tokenizer's broad added-token set (2026-10-10
+                // regression) — this strip is the whole fix.
+                let joined = joinedRaw
+                    .replacingOccurrences(of: "<[^>]*>", with: "",
+                                          options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 if joined.isEmpty {
                     print("[whisperkit_stt] empty_transcript duration_ms=\(ms)")
                     completion(.failure(.recognitionFailed(

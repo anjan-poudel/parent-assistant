@@ -30,7 +30,9 @@ final class OnboardingStateTests: XCTestCase {
         let state = OnboardingState(defaults: defaults)
         state.markCompleted(.language)
         XCTAssertFalse(state.pendingSteps.contains(.language))
-        XCTAssertEqual(state.pendingSteps.count, 3)
+        // 7 steps total (profile-interview T-102 inserted aboutYou /
+        // emergencyContacts / voiceFingerprint after permissions).
+        XCTAssertEqual(state.pendingSteps.count, 6)
     }
 
     /// Spec §4.2: EVERY step is skippable — including family contact —
@@ -55,6 +57,11 @@ final class OnboardingStateTests: XCTestCase {
         let state = OnboardingState(defaults: defaults)
         state.markCompleted(.language)
         state.markCompleted(.permissions)
+        // [PROFILE-INTERVIEW T-102] The interview steps sit between
+        // permissions and the pre-existing steps; About-you is next.
+        XCTAssertEqual(state.firstPendingStep, .aboutYou)
+
+        state.markCompleted(.aboutYou)
         XCTAssertEqual(state.firstPendingStep, .familyContact)
     }
 
@@ -70,5 +77,27 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertEqual(restored.status(of: .language), .completed)
         XCTAssertEqual(restored.status(of: .models), .skipped)
         XCTAssertTrue(restored.pendingSteps.contains(.models))
+    }
+
+    /// [PROFILE-INTERVIEW T-102] A status map persisted before this
+    /// feature (only the original step ids, seeded under the storage key
+    /// the shipping format uses) must leave the three interview steps
+    /// pending BY CONSTRUCTION — an absent id reads as pending — and
+    /// `firstPendingStep` must reflect the updated order immediately.
+    @MainActor
+    func testLegacyStatusMapLeavesTheNewStepsPending() {
+        defaults.set(["language": "completed",
+                      "permissions": "completed",
+                      "familyContact": "skipped",
+                      "models": "completed"],
+                     forKey: "onboarding.stepStatuses")
+        let state = OnboardingState(defaults: defaults)
+        XCTAssertNil(state.status(of: .aboutYou))
+        XCTAssertNil(state.status(of: .emergencyContacts))
+        XCTAssertNil(state.status(of: .voiceFingerprint))
+        XCTAssertEqual(state.pendingSteps,
+                       [.aboutYou, .familyContact, .emergencyContacts,
+                        .voiceFingerprint])
+        XCTAssertEqual(state.firstPendingStep, .aboutYou)
     }
 }

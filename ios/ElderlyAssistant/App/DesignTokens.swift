@@ -1,24 +1,10 @@
 import SwiftUI
 import UIKit
 
-/// Shared design tokens for the VoiceBridge visual language.
-///
-/// The supplied identity uses deep navy, burgundy, coral and pale blush
-/// on spacious white surfaces. Functional voice states keep their distinct
-/// semantic colours so listening, speaking and failure never rely on the
-/// brand gradient alone. All views consume these constants so the ≥18pt
-/// body floor, ≥44pt targets and contrast guarantees remain centralized.
+/// Shared accessibility, layout and invariant operational colours.
+/// Skin colours belong to the environment's AppAppearance palette.
 enum DesignTokens {
 
-    // MARK: Palette (VoiceBridge)
-
-    static let background = Color.white                                      // #FFFFFF
-    static let card = Color(red: 0.973, green: 0.980, blue: 0.988)            // #F8FAFC
-    static let accent = Color(red: 0.733, green: 0.118, blue: 0.302)          // #BB1E4D
-    static let textPrimary = Color(red: 0.043, green: 0.122, blue: 0.267)     // #0B1F44
-    static let textSecondary = Color(red: 0.420, green: 0.447, blue: 0.502)   // #6B7280
-    static let userBubble = Color(red: 1.000, green: 0.941, blue: 0.957)      // #FFF0F4
-    static let setupReminder = Color(red: 1.000, green: 0.941, blue: 0.957)   // #FFF0F4
 
     // Voice-session state colors preserve the manual's traffic-light model:
     //   REST (.idle, .stopped) → navy/blue
@@ -28,22 +14,6 @@ enum DesignTokens {
     // Brand magenta is deliberately absent from this table. Every fill keeps
     // ≥4.5:1 white-glyph contrast and ≥3:1 against the warm-white background.
     static let stateIdle = Color(red: 0.086, green: 0.239, blue: 0.451)      // #163D73 — rest blue
-    /// Deep VoiceBridge magenta used for branded loading surfaces. It is
-    /// intentionally separate from `stateError`: brand never means failure.
-    static let brandPink = Color(red: 0.733, green: 0.118, blue: 0.302)      // #BB1E4D
-    static let brandWine = Color(red: 0.722, green: 0.118, blue: 0.302)      // #B81E4D
-    static let brandCoral = Color(red: 1.000, green: 0.302, blue: 0.478)     // #FF4D7A
-    static let brandBlush = Color(red: 1.000, green: 0.839, blue: 0.882)     // #FFD6E1
-    // Reference Home background: warm white with broad dusty-rose ribbons.
-    static let brandCanvasTop = Color(red: 0.988, green: 0.969, blue: 0.961) // #FCF7F5
-    static let brandCanvasBottom = Color(red: 0.973, green: 0.918, blue: 0.929) // #F8EAED
-    static let brandDustyRose = Color(red: 0.863, green: 0.647, blue: 0.706) // #DCA5B4
-    static let brandDeepRose = Color(red: 0.678, green: 0.325, blue: 0.435) // #AD536F
-
-    // Glossy idle/loading Talk face from the supplied Home design.
-    static let talkHighlight = Color(red: 0.945, green: 0.455, blue: 0.518) // #F17484
-    static let talkMid = Color(red: 0.659, green: 0.071, blue: 0.278) // #A81247
-    static let talkDeep = Color(red: 0.396, green: 0.012, blue: 0.161) // #650329
     /// "Voice is off" (visual-polish 2026-09-08): the honest dimmed-blue
     /// sibling of `stateIdle` — same hue family, clearly darker, so an
     /// off/stopped hero never reads as an alarm (red is reserved for
@@ -72,96 +42,53 @@ enum DesignTokens {
     /// that read this token gets the better contrast for free.
     static let stateError = Color(red: 0.753, green: 0.184, blue: 0.165)     // #C02F2A
 
-    // MARK: - Brand glow
-    //
-    // The reference artwork layers coral, crimson and burgundy ribbons.
-    // These colors are reserved for identity, primary actions and the
-    // assistant's glow; semantic status fills above remain unambiguous.
-    static let warmGlowStart = brandCoral
-    static let warmGlowEnd = brandWine
+    /// Opaque call actions keep white glyph contrast in every skin.
+    static let callActionFill = Color(red: 0.075, green: 0.365, blue: 0.235)
 
-    static let brandGradient = LinearGradient(
-        colors: [brandWine, brandCoral],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing)
+    // MARK: - Live camera translation highlight
 
-    /// Icon-badge tints collapse app categories onto four semantic roles:
+    /// The green the live overlay's boxes are washed with — the owner's own
+    /// description of the look they asked for (2026-09-18): "the bounding box
+    /// can be TRANSPARENT GREEN with DARK COLORED TEXT — text plus the
+    /// transparent green overlay".
     ///
-    ///   • `brandAction` — medication, phone and reminders use VoiceBridge
-    ///                     magenta on blush.
-    ///   • `voiceState` — launchers use the hero's calm rest blue.
-    ///   • `emergency` — stop red is reserved for urgency.
-    ///   • `neutralCategory` — supporting destinations use brand navy.
+    /// A **new** token rather than `stateSpeaking`, which is the only other
+    /// green in this table. The state fills above are a vocabulary the elder
+    /// learns about the *voice* (listening, speaking, failed), and reusing one
+    /// would make a translation box say something about the microphone. It is
+    /// also the wrong green for the job: the state greens are tuned to hold
+    /// white glyphs at ≥4.5:1 on an opaque fill, and this one is tuned to do
+    /// the opposite — stay light enough under a wash that near-black type
+    /// inside it clears the contrast floor, while still reading as green over
+    /// the photograph behind it.
     ///
-    /// Case names remain semantic at call sites even where categories share
-    /// one color role; strong color communicates priority, not decoration.
+    /// The wash's opacity is not here: it is an operational value with a
+    /// config key (`LiveTranslateConfig.overlayHighlightOpacity`), because a
+    /// device check may want a heavier or lighter wash without touching the
+    /// token table.
+    static let overlayHighlight = Color(red: 0.204, green: 0.659, blue: 0.325) // #34A853
+    /// Fixed ink for text drawn over camera/photograph highlight washes.
+    static let overlayText = Color(red: 0.043, green: 0.122, blue: 0.267)
+
     enum BadgeTint {
         case meds, reminders, call, appliance, settings, apps, feeds, emergency, directions
+        /// "About me" on the home hub (home-profile-icon, 2026-10-06) —
+        /// a soft indigo of its own so the hub's two leading icons read
+        /// as two different places (see `AppAppearance.badgeTint`).
+        case profile
 
-        /// The four semantic colour roles. `CaseIterable` so
-        /// `DesignTokensTests` can pin that no fifth role creeps back in.
-        enum Role: CaseIterable {
-            case brandAction, voiceState, emergency, neutralCategory
-        }
-
-        /// Which role this category's badge wears. This mapping IS the
-        /// consolidation — the colour tables below switch on it, so a
-        /// category can never drift to its own hue again.
-        var role: Role {
-            switch self {
-            case .meds, .reminders, .call:
-                return .brandAction
-            case .apps:
-                return .voiceState
-            case .emergency:
-                return .emergency
-            case .appliance, .settings, .feeds, .directions:
-                return .neutralCategory
-            }
-        }
-
-        var background: Color {
-            switch role {
-            case .brandAction: return DesignTokens.brandBlush
-            case .voiceState: return DesignTokens.stateVoiceRestWash
-            case .emergency: return DesignTokens.card
-            case .neutralCategory: return DesignTokens.brandBlush.opacity(0.72)
-            }
-        }
-
-        var tint: Color {
-            switch role {
-            case .brandAction: return DesignTokens.accent
-            case .voiceState: return DesignTokens.stateIdle
-            case .emergency: return DesignTokens.stateError
-            case .neutralCategory: return DesignTokens.textPrimary
-            }
-        }
     }
 
     /// Pale blue-white wash behind the voice-state badge role.
     static let stateVoiceRestWash = Color(red: 0.910, green: 0.941, blue: 0.980) // #E8F0FA
 
-    // MARK: Type scale (spec §3.1, redesign spec §7)
+    // MARK: Operational camera typography
     //
-    // These are computed, not stored: `UIFontMetrics` scales the base value
-    // against the user's current Dynamic Type setting, so 18pt/15pt become
-    // the floor at the *default* content size category, not a hard ceiling
-    // that ignores a user who's turned their system text size up. Every
-    // existing call site (`DesignTokens.minBodyPointSize`, etc.) picks this
-    // up automatically — no per-view changes needed.
-
-    /// Minimum body size — accessibility floor, not a suggestion.
+    // These system-scaled floors are ONLY for camera/evidence annotation geometry
+    // and headless rendering fixtures. They do not represent the app's UI preference:
+    // readable UI text must use the environment's AppAppearance.typography.
     static var minBodyPointSize: CGFloat { scaled(21) }
-    /// Minimum caption/label size — captions are "secondary" text, still ≥15pt.
     static var minCaptionPointSize: CGFloat { scaled(18) }
-    static var titlePointSize: CGFloat { scaled(32) }
-    static var greetingPointSize: CGFloat { scaled(33) }
-    /// [HOME-TIMER-CHIP] The ticking digits of the home timer chip — a
-    /// step above the body floor (elderly legibility: the remaining time
-    /// is the ONE number on Home that must be readable at a glance),
-    /// below the title sizes so the chip stays a chip.
-    static var homeTimerDigitPointSize: CGFloat { scaled(28) }
 
     private static func scaled(_ base: CGFloat) -> CGFloat {
         UIFontMetrics.default.scaledValue(for: base)
@@ -171,8 +98,8 @@ enum DesignTokens {
     /// serif ("New York") display face gave way to rounded SF — friendlier
     /// and warmer for short human-facing words ("Good morning", leaf
     /// titles). Body/list text stays on the regular sans design for dense
-    /// reading. Same scale behavior as before: callers pass a token size.
-    static func greetingFont(size: CGFloat = DesignTokens.greetingPointSize) -> Font {
+    /// reading. Callers pass the environment-resolved point size explicitly.
+    static func greetingFont(size: CGFloat) -> Font {
         .system(size: size, weight: .bold, design: .rounded)
     }
 
@@ -211,8 +138,58 @@ enum DesignTokens {
     /// ever changes, the progress ring animates over this same value, so
     /// ring completion and the reset stay in sync automatically.
     static let talkResetHoldSeconds: TimeInterval = 2.0
+    /// [HERO-LAYOUT] (2026-10-13) The sub-hero region's FIXED height —
+    /// the hint carousel, the settings-recovery button, the steady-state
+    /// status line and (at accessibility sizes) the state caption all
+    /// share one constant slot so the hero never moves or resizes
+    /// between states (owner: "the button size and positions are
+    /// different for different states"). [HERO-SIZE] (2026-10-14) this
+    /// is now the ACCESSIBILITY-size value — the slot also hosts the
+    /// state caption there. Fits the carousel's two caption lines +
+    /// pill + page dots with headroom for wrapped Nepali copy.
+    static let talkSubHeroSlotHeight: CGFloat = 128
+    /// [HERO-SIZE] (2026-10-14) The slot's ordinary-type height. The
+    /// carousel is ~81–99pt at default type, so 104 keeps its headroom
+    /// while returning 24pt to the viewport — the point budget that
+    /// keeps the dock visible without scrolling at normal size.
+    static let talkSubHeroSlotHeightCompact: CGFloat = 104
     static let chipHeight: CGFloat = 60
-    /// Two-row Home dock: two 56pt rows, divider and vertical padding.
-    static let dockHeight: CGFloat = 152
+    /// [DOCK-FIT] (2026-10-15) Two-row Home dock budget at Medium/Large
+    /// display sizes (owner: "too much space at the bottom"): ~48pt
+    /// action row (28pt glyphs) + 8pt gap + ~70pt rail (44pt glyphs;
+    /// the HomeView shift puts the tiles ~12pt above the physical
+    /// bottom and the surface bleeds to the screen edge). The Default
+    /// display size keeps the original 134pt budget — documented for
+    /// the DesignTokens pin test, the dock itself is intrinsic-height.
+    static let dockHeight: CGFloat = 126
     static let iconBadgeDiameter: CGFloat = 44
+}
+
+// MARK: - Display size zoom (Medium/Large display options)
+
+extension UIScreen {
+    /// [MEDIUM-FIT] (2026-10-15) True when the iPhone's display size
+    /// option is Medium or Large (Settings → Display & Brightness →
+    /// Display Size: Default/Medium/Large — not Dynamic Type).
+    ///
+    /// Detection: a zoomed display mode renders a SMALLER pixel grid
+    /// than the panel's native mode, so `currentMode` (the mode in
+    /// use) differs from the largest entry in `availableModes` (the
+    /// panel). `nativeBounds` is deliberately NOT used — on zoomed
+    /// devices it reports the zoomed render size, not the panel, so
+    /// the area-ratio check reads 1.0 (that bug shipped one round as
+    /// "nothing changed on the 17 Pro Max").
+    var isDisplayZoomed: Bool {
+        // Device-verified (17 Pro Max, Medium display option, 2026-10-15):
+        //   currentMode = (1125, 2436)  — the zoomed render grid
+        //   nativeBounds = (1320, 2868) — the panel, reported correctly
+        //   availableModes = [current only] — useless on iOS 26
+        // On Default display size the current mode IS the native panel
+        // (Anzaan: 1290x2796 == 1290x2796), so the area comparison is
+        // 1.0; on Medium/Large it is ~1.38.
+        guard let current = currentMode else { return false }
+        let nativeArea = nativeBounds.width * nativeBounds.height
+        let currentArea = current.size.width * current.size.height
+        return nativeArea > currentArea * 1.001
+    }
 }

@@ -11,18 +11,46 @@ final class BrainModelSelectionTests: XCTestCase {
     /// gate-passing slot-canonical Qwen 4B (the v16 retrain, the default
     /// brain since 2026-09-14), the v14 slim-template seed-43 Nepali 1.7B
     /// intent fine-tune (its own id so cached v12 seed-42 devices
-    /// re-download), the Nepali-specialized Qwen 4B (added 2026-09-12 for
-    /// LAN testing), plus the two stock Qwen 3 sizes — biggest first. The
-    /// pre-Qwen LLaMA brains, the superseded seed-43 4B and the v12
-    /// seed-42 fine-tune are legacy and the Gemma fine-tune fails the
-    /// emergency hard gate — none may read as a choice.
+    /// re-download), its [CNR T-184] v17 chat-aware retrain (a NEW id
+    /// BESIDE the seed-43 entry — the versioned, reversible swap's entry;
+    /// second only because the 4B remains the list leader), the
+    /// Nepali-specialized Qwen 4B (added 2026-09-12 for LAN testing),
+    /// plus the two stock Qwen 3 sizes — biggest first. The pre-Qwen
+    /// LLaMA brains, the superseded seed-43 4B and the v12 seed-42
+    /// fine-tune are legacy and the Gemma fine-tune fails the emergency
+    /// hard gate — none may read as a choice.
     func testAvailableBrainEntriesIsTheCuratedList() {
         XCTAssertEqual(ModelCatalog.availableBrainEntries.map(\.id),
                        [ModelCatalog.intentQwen4BSlotCanon,
+                        ModelCatalog.intentQwenS43ChatV17,
                         ModelCatalog.intentQwenS43,
                         ModelCatalog.qwen4BNepali,
                         ModelCatalog.qwen3_4BInstruct,
                         ModelCatalog.qwen3_1_7BInstruct])
+    }
+
+    /// [CNR T-184] The rollback target: the seed-43 1.7B the v17 retrain
+    /// supersedes is still offered BESIDE it — versioned and reversible
+    /// means the previous entry stays present and selectable, carrying
+    /// its own unchanged evidence.
+    func testThePreviousBrainEntryStaysSelectableBesideTheChatVariant() {
+        let offered = ModelCatalog.availableBrainEntries.map(\.id)
+        XCTAssertTrue(offered.contains(ModelCatalog.intentQwenS43),
+                      "the pre-promotion 1.7B is the rollback target — it "
+                      + "must stay offered while the v17 entry ships")
+        XCTAssertTrue(offered.contains(ModelCatalog.intentQwenS43ChatV17))
+        guard let previous = ModelCatalog.entry(for: ModelCatalog.intentQwenS43) else {
+            XCTFail("the previous entry must stay in the catalog")
+            return
+        }
+        // Its own green evidence, unchanged: the entry still pins the
+        // shipped v14 artifact byte-for-byte — the rollback needs no gate
+        // re-run because THIS evidence already carried the gates.
+        XCTAssertEqual(previous.filename, "intent-ne-qwen-s43-q4_k_m.gguf")
+        XCTAssertEqual(previous.sizeBytes, 1_107_408_576)
+        XCTAssertEqual(previous.sha256,
+                       "c2135f786ace9c1020a27bb115600d90f9e3c4d788c995730b379b67e1ae74ef")
+        XCTAssertEqual(previous.kind, .llamaBase)
     }
 
     /// The superseded seed-43 4B brain: still in the catalog (a cached
@@ -145,6 +173,11 @@ final class BrainModelSelectionTests: XCTestCase {
         // training contract) — re-run the framing check on the v16
         // artifact when it publishes.
         (ModelCatalog.intentQwen4BSlotCanon, .raw),
+        // [CNR T-184] The v17 chat-aware retrain: INHERITED from the
+        // seed-43 measurement below (same base lineage, same training
+        // pipeline) — re-run the framing check on the v17 artifact when
+        // it publishes.
+        (ModelCatalog.intentQwenS43ChatV17, .qwen3),
         (ModelCatalog.intentQwenS43, .qwen3),        // offered, measured wrap
         (ModelCatalog.qwen4BNepali, .raw),           // offered
         (ModelCatalog.qwen3_4BInstruct, .qwen3),     // offered (stock Qwen3)

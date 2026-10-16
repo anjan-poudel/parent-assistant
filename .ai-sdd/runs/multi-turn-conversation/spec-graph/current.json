@@ -1,0 +1,567 @@
+{
+  "version": "1",
+  "workflow_name": "multi-turn-conversation",
+  "built_at": "1970-01-01T00:00:00.000Z",
+  "nodes": [
+    {
+      "id": "define-requirements",
+      "type": "task",
+      "label": "Elicit and document project requirements. Produce a structured folder of\nrequirements: one file per FR, one file per NFR, with Gherkin acceptance\ncriteria embedded in each file, and index files at each folder level.\nAfter stakeholder HIL sign-off, produce a requirements lock file that\ncaptures a stable snapshot for downstream drift detection.\n",
+      "hash": "sha256:f629d47aebb26467ca6ac2354521007578e6de26d722875083d5db06f32862b2",
+      "metadata": {
+        "agent": "ba",
+        "phase": "requirements",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "design-l1",
+      "type": "task",
+      "label": "Produce the L1 system architecture document. Define system components,\ntechnology stack, integration points, and key architectural decisions.\nConsult the requirements lock file (specs/<requirements-task-id>.lock.yaml)\nto ensure the architecture covers all locked FRs and NFRs.\n",
+      "hash": "sha256:a089f4eac72293f1562ea6d09994887d74c1b5489a802598b12710ddb3535eaf",
+      "metadata": {
+        "agent": "architect",
+        "phase": "design",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "design-l2",
+      "type": "task",
+      "label": "Produce L2 component design documents. Define component interfaces,\ndata models, error handling strategy, and observability approach.\nConsult the requirements lock file (specs/<requirements-task-id>.lock.yaml)\nand the L1 architecture document to ensure component designs stay within scope.\n",
+      "hash": "sha256:bf5d4420c185b048f81719a4d7f389103ddd708ffa9c80c473bf7aa31d6432fa",
+      "metadata": {
+        "agent": "pe",
+        "phase": "design",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "review-l2",
+      "type": "task",
+      "label": "Review the L2 component design. Verify component interfaces are correct,\ndata models are complete, and the design aligns with L1 architecture.\nIssue GO/NO_GO decision.\n",
+      "hash": "sha256:7621f054b471e34bda2d07f8d5b7229aeb5b291fe4937339f9e01c2510702565",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "security-design-review",
+      "type": "task",
+      "label": "Security-focused design review. Check: STRIDE threat model completeness,\nall data flows encrypted in transit, PII identified with handling specified,\ninput validation specified for all external inputs, audit logging covers\nsecurity-relevant events, secrets management sound, least-privilege auth,\ncompliance requirements traceable to design decisions.\nIssue SECURITY-GO or SECURITY-NO_GO.\n",
+      "hash": "sha256:71e5120c67134d2fa5085059a8c0d679294cf5aa64f9bfbcbac47c6daa47446b",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "plan-tasks",
+      "type": "task",
+      "label": "Break down the component designs into concrete implementation tasks.\nDefine acceptance criteria (including Gherkin tests) per task, identify\ndependencies, and estimate effort. Output is a folder of one file per task\nplus an index.\n",
+      "hash": "sha256:a8c50f6435f7bffef83aa4ab4794eee69e9055c3bc1ddb403622e67b0a739eff",
+      "metadata": {
+        "agent": "le",
+        "phase": "planning",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "implement",
+      "type": "task",
+      "label": "Implement the feature per the task specification. Write unit tests,\nensure all acceptance criteria pass, fix lint and type errors.\n",
+      "hash": "sha256:9e845529f804e7936633b031c16b824dfa9f18d607b1af899f998c45039650be",
+      "metadata": {
+        "agent": "dev",
+        "phase": "implement",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "review-implementation",
+      "type": "task",
+      "label": "Review the implementation. Check code quality, test coverage, security,\nand conformance to the design. Issue GO/NO_GO decision.\n",
+      "hash": "sha256:e604de503319b459e3ff2ce2f685a18d651f0752641e02149509e9892aac4c3b",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "security-test",
+      "type": "task",
+      "label": "Security testing pass on the implementation. Test:\n- SQL injection: parameterised queries used everywhere, no string concat\n- Input validation: malformed/oversized/special-char inputs return 400\n- Auth bypass: unauthenticated requests return 401/403\n- PII in logs: confirm PII is masked in all log entries\n- Secrets in output: scan all output files for secret patterns\n- Audit log completeness: each auditable event produces a log entry\n- Error leakage: errors don't expose stack traces or internals\nIssue SECURITY-GO or SECURITY-NO_GO per category.\n",
+      "hash": "sha256:1c0a246628c159582d0b1b1f078f875d697f931fc1b00b1ad947b2fb01d20514",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "final-sign-off",
+      "type": "task",
+      "label": "Produce change summary document for human sign-off. Include:\n- Change summary: what was built and what changed\n- Requirements traceability: FR/NFR → implementation → test evidence\n- Security posture: summary of security design review + security test results\n- Open items: known issues, deferred items, post-deploy monitoring\n- Rollback plan: how to revert if the change causes production issues\n- Compliance checklist: confirm each applicable compliance item is satisfied\n",
+      "hash": "sha256:c02257caf7133e47e9fc718241db04570abdd910a05ca619d6e4ad888a029487",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "sign-off",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "define-requirements:output:specs/define-requirements.md",
+      "type": "output",
+      "label": "specs/define-requirements.md",
+      "hash": "sha256:75f555959adb405761e57ddefad9e79535a2e357758094a5f2c37a60ae934b55",
+      "metadata": {
+        "task_id": "define-requirements",
+        "contract": "requirements_doc"
+      }
+    },
+    {
+      "id": "define-requirements:output:specs/define-requirements.lock.yaml",
+      "type": "output",
+      "label": "specs/define-requirements.lock.yaml",
+      "hash": "sha256:ff55fba50f383d0f4040aa231552345cff57dc6ed227ff06c795a8374692ccf3",
+      "metadata": {
+        "task_id": "define-requirements",
+        "contract": "requirements_lock"
+      }
+    },
+    {
+      "id": "design-l1:output:specs/design-l1.md",
+      "type": "output",
+      "label": "specs/design-l1.md",
+      "hash": "sha256:cf8cb3c7df0a669a41ca006dc7c247669998f9e6e9bb5cbd6a56540928b44e28",
+      "metadata": {
+        "task_id": "design-l1",
+        "contract": "architecture_l1"
+      }
+    },
+    {
+      "id": "design-l2:output:specs/design-l2.md",
+      "type": "output",
+      "label": "specs/design-l2.md",
+      "hash": "sha256:8cc30ccf2496102d889a5598e5d58b0dac9fdf9c1517e8b474f69634b19a91d8",
+      "metadata": {
+        "task_id": "design-l2",
+        "contract": "component_design_l2"
+      }
+    },
+    {
+      "id": "review-l2:output:specs/review-l2.md",
+      "type": "output",
+      "label": "specs/review-l2.md",
+      "hash": "sha256:13a5057e96f8878d8c74c89e933f88b0135c821973dea85f7e3f3f203d2d6f7c",
+      "metadata": {
+        "task_id": "review-l2",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "security-design-review:output:specs/security-design-review.md",
+      "type": "output",
+      "label": "specs/security-design-review.md",
+      "hash": "sha256:b70ba3cc3aaaf68196526d554a7988e13dcbcc8dac8507566c0e993e2a9c32b6",
+      "metadata": {
+        "task_id": "security-design-review",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "plan-tasks:output:specs/plan-tasks/plan.md",
+      "type": "output",
+      "label": "specs/plan-tasks/plan.md",
+      "hash": "sha256:ed7639b75f7530a91c81ae5509015c6a8b6b259185a0c6cffb89656d2837578d",
+      "metadata": {
+        "task_id": "plan-tasks",
+        "contract": "task_breakdown_l3"
+      }
+    },
+    {
+      "id": "plan-tasks:output:specs/plan-tasks/tasks/",
+      "type": "output",
+      "label": "specs/plan-tasks/tasks/",
+      "hash": "sha256:d9706c3405fa6930ed6e105a4fdddff050eefc61a8437ebb6aedf7eb1e1e76a2",
+      "metadata": {
+        "task_id": "plan-tasks"
+      }
+    },
+    {
+      "id": "implement:output:specs/implement-notes.md",
+      "type": "output",
+      "label": "specs/implement-notes.md",
+      "hash": "sha256:23f3b8cc53fe17d9bbd1673a382681ed1c7e6e12616a0984515b3f42e40b0114",
+      "metadata": {
+        "task_id": "implement",
+        "contract": "implementation"
+      }
+    },
+    {
+      "id": "review-implementation:output:specs/review-implementation.md",
+      "type": "output",
+      "label": "specs/review-implementation.md",
+      "hash": "sha256:2d03760237e8bf38e363556077047b79c5085e4d0c77c004db4d98024a9ce943",
+      "metadata": {
+        "task_id": "review-implementation",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "security-test:output:specs/security-test.md",
+      "type": "output",
+      "label": "specs/security-test.md",
+      "hash": "sha256:111a666788bf4ca10b8df025815106f0f11b3d08ebd375ab6b088258a6c3c9d0",
+      "metadata": {
+        "task_id": "security-test",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "final-sign-off:output:specs/final-sign-off.md",
+      "type": "output",
+      "label": "specs/final-sign-off.md",
+      "hash": "sha256:9f59ea338bf799fed3b33c8e1bd28965821cf89e11ac313f61a7fba1c40aea03",
+      "metadata": {
+        "task_id": "final-sign-off",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "FR-SP-001",
+      "type": "requirement",
+      "label": "Music requests start real playback (stub replacement)",
+      "hash": "sha256:8e95540c4c60204b06e157dc4343a480917c4bb57ba93fc00e178fc1cddc416f",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-002",
+      "type": "requirement",
+      "label": "Both-provider search for music requests",
+      "hash": "sha256:c4ec4392c392703d8b84b766b2224f8095cb7e45af8161926e19280ec4d3d350",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-003",
+      "type": "requirement",
+      "label": "Spotify preferred whenever linked and capable",
+      "hash": "sha256:7b1c04a1810fc4935fe8c57a8d12e72244726ed29992ea3292a063250bb7f9d6",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-004",
+      "type": "requirement",
+      "label": "YouTube fallback when Spotify cannot serve",
+      "hash": "sha256:3e8c9ebd4a4bf0462df49d908d42e7f7662f9f350cf60967c3ee4d20f4224a72",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-005",
+      "type": "requirement",
+      "label": "Explicit YouTube requests unchanged",
+      "hash": "sha256:e85243f4bec195c2083f404b5ed270041817d037c03bc6f3b23ef831c21ec9d9",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-006",
+      "type": "requirement",
+      "label": "SpotifyPlugin as an AssistantPlugin (YouTubePlugin twin)",
+      "hash": "sha256:c5b283de59fa32b38ab5cd0725f3ef26e96230e31a42daf741a48406ab5b93bf",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-007",
+      "type": "requirement",
+      "label": "SpotifyTool search and spotify: deep-link construction",
+      "hash": "sha256:8ccd478c2ed2c08940e530f7f73d3a6012e8b6e414bc9fd9d4d455f5706334ca",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-008",
+      "type": "requirement",
+      "label": "Spotify account linking by the caregiver (OAuth)",
+      "hash": "sha256:8596b1a7a332bd9f5162c95abe9d6879de7760b7a10d758b459c241ded9b3942",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-009",
+      "type": "requirement",
+      "label": "Encrypted Spotify credential and account store",
+      "hash": "sha256:aec305268d18dcc36eb165375283ae34ed633c408a2458b4905990f987e7f1d2",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-010",
+      "type": "requirement",
+      "label": "Unlink wipes credentials and revokes access",
+      "hash": "sha256:caff2c5a4a476fb3827b93393ee790063444584e39c3c43a6b034c1cf5d0217f",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-011",
+      "type": "requirement",
+      "label": "Free-tier degradation to the spotify: deep-link fallback",
+      "hash": "sha256:cbdee2ecb7de9f349fc6cbfa15a32548c5cf7cc965040e31bdfeef6f72b8e8bd",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-012",
+      "type": "requirement",
+      "label": "Honest localized outcomes — no silent failure on any path",
+      "hash": "sha256:4b6ccb22db0b4c05b4046fb90b366587388de0f1eac4a66a160ef9fa2870f077",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-013",
+      "type": "requirement",
+      "label": "Deterministic music-domain rule in KeywordIntentRule",
+      "hash": "sha256:d87bc4f66e364aa8c0f483a550ee71994754ba89cbcecc8eec12110125ed2eeb",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-014",
+      "type": "requirement",
+      "label": "Music-request veto parity in VoiceContactSearchRoute",
+      "hash": "sha256:4fb06714349728e163225a156dd42f6a0924e944d711dfc13ca204110209abaa",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-015",
+      "type": "requirement",
+      "label": "Music-request intake in the voice route ladder",
+      "hash": "sha256:42960c290f78f8410cba32ecfd87625268e90471afc658ed1577bfdb5329a96c",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-016",
+      "type": "requirement",
+      "label": "Settings linking, status surface and privacy disclosure",
+      "hash": "sha256:117d98d1024667a58ec61168a3d685e1b4bd07982abdba0873973511e179817b",
+      "metadata": {}
+    },
+    {
+      "id": "FR-SP-017",
+      "type": "requirement",
+      "label": "Device-validation checklist recorded and passed (DV-* completion gate)",
+      "hash": "sha256:91e0336f80cc7a3676551cf27d5b5595f927dda36fc6f3141e70e74bf28716af",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-SP-001",
+      "type": "requirement",
+      "label": "Provider search responsiveness and timeout budget",
+      "hash": "sha256:cd85f5a02947be47a54c1c949707b6691d549edda83acf6b8ee5a15bed5ef90e",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-SP-002",
+      "type": "requirement",
+      "label": "Log safety — no credentials, queries or provider bodies in logs",
+      "hash": "sha256:a3bd39d2b93aecf6aa6c3c881c1fe4b2530c13f4bc5b49c40fa9989e6019a377",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-SP-003",
+      "type": "requirement",
+      "label": "No new network egress; music stays off any cloud LLM",
+      "hash": "sha256:1f00cb58285417c126ff4d18299f0aa5bb88a9d95323c31d13b304ad38a28592",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-SP-004",
+      "type": "requirement",
+      "label": "Prompt token budget preserved",
+      "hash": "sha256:b62870398d1e9f97d7b9b320fe9e9c583cf7d835209532d7d30cd3f21c43fd4f",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-SP-005",
+      "type": "requirement",
+      "label": "Localisation of all Spotify strings (ne/en)",
+      "hash": "sha256:3d04a2ef4b2668c588b26597c416a41d40ab44351ba43c184e1cfc34009efe5b",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-SP-006",
+      "type": "requirement",
+      "label": "No regression to existing flows",
+      "hash": "sha256:9ca71a554192e6510604877b45e100ae75618bf13d5e79b11569f2521782b196",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-SP-007",
+      "type": "requirement",
+      "label": "Credential and token encryption at rest",
+      "hash": "sha256:0422935128b78262bb958c60fea63b796d7090ebe19adcca7c65bae6fdf5b8c4",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-SP-008",
+      "type": "requirement",
+      "label": "Deep-link URI construction hardening",
+      "hash": "sha256:4920031d24b7706e12475100b2fcc8b8490429cd21f48f15702f754d4499919c",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-SP-009",
+      "type": "requirement",
+      "label": "OAuth redirect validation and token lifecycle",
+      "hash": "sha256:8a78df4b28951efabf25344fbd75861d51960af70e044fadea625f3594d85f58",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-SP-010",
+      "type": "requirement",
+      "label": "Accessibility of the new touch surfaces",
+      "hash": "sha256:a29b289827b1f5ff62ceeda3aae7b37b5a98cdd2e322f981cbe2050f4369d5c9",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-SP-011",
+      "type": "requirement",
+      "label": "Compliance and release gates",
+      "hash": "sha256:3225d93f80a9810a45e6212627d7463581ae1f9c683465fb3f5fcdade82deb4f",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-SP-012",
+      "type": "requirement",
+      "label": "Plugin isolation and model-stack invariance",
+      "hash": "sha256:5acd45dfd6bbf59d7560ec2e98cd505e0b1d1aa8f5690567b2ec54c337fc4bb4",
+      "metadata": {}
+    }
+  ],
+  "edges": [
+    {
+      "source": "design-l1",
+      "target": "define-requirements",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "design-l2",
+      "target": "design-l1",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-l2",
+      "target": "design-l2",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "security-design-review",
+      "target": "review-l2",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "security-design-review",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "implement",
+      "target": "plan-tasks",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-implementation",
+      "target": "implement",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "security-test",
+      "target": "review-implementation",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "final-sign-off",
+      "target": "security-test",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "define-requirements",
+      "target": "define-requirements:output:specs/define-requirements.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "define-requirements",
+      "target": "define-requirements:output:specs/define-requirements.lock.yaml",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "design-l1",
+      "target": "design-l1:output:specs/design-l1.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "design-l2",
+      "target": "design-l2:output:specs/design-l2.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-l2",
+      "target": "review-l2:output:specs/review-l2.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "security-design-review",
+      "target": "security-design-review:output:specs/security-design-review.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "plan-tasks:output:specs/plan-tasks/plan.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "plan-tasks:output:specs/plan-tasks/tasks/",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "implement",
+      "target": "implement:output:specs/implement-notes.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-implementation",
+      "target": "review-implementation:output:specs/review-implementation.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "security-test",
+      "target": "security-test:output:specs/security-test.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "final-sign-off",
+      "target": "final-sign-off:output:specs/final-sign-off.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    }
+  ]
+}

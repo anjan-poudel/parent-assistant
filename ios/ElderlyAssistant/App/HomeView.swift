@@ -10,6 +10,11 @@ enum LeafDestination: Identifiable {
     case call
     case history
     case settings
+    /// "About me" (home-profile-icon, 2026-10-06): the profile editor,
+    /// reached from its own icon on the home hub next to Settings — the
+    /// SAME `ProfileSettingsView` the Settings family tab pushes, just
+    /// one tap from Home.
+    case profile
     /// Directions (directions-screen task, 2026-09-07): the saved-targets
     /// map leaf, docked next to Appliance per the task brief.
     case directions
@@ -38,6 +43,7 @@ enum LeafDestination: Identifiable {
         case .call: return "call"
         case .history: return "history"
         case .settings: return "settings"
+        case .profile: return "profile"
         case .directions: return "directions"
         case .briefing: return "briefing"
         case .updates: return "updates"
@@ -53,6 +59,9 @@ enum LeafDestination: Identifiable {
 /// full-screen page (see `LeafScreen` in `LeafViews.swift`) — this
 /// separation is deliberate (redesign spec §3.2), not an oversight.
 struct HomeView: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @EnvironmentObject var coordinator: AppCoordinator
     @EnvironmentObject var session: VoiceSessionStateMachine
     /// [BOOT-LATENCY] Read so the container can animate the talk hero's
@@ -61,6 +70,13 @@ struct HomeView: View {
 
     @State private var showWizard = false
     @State private var showHistory = false
+    /// [PROFILE-INTERVIEW T-102] Where the wizard opens when presented —
+    /// captured by BOTH entry points: the reminder card at tap time, the
+    /// cold-start one-shot at route time. The cover renders this value,
+    /// never a live re-read of the step map.
+    @State private var wizardStart: OnboardingState.Step?
+    /// The cold-start check runs once per process (first `onAppear`).
+    @State private var didCheckStartupRoute = false
     /// Programmatic push target for voice-driven contact search
     /// (voice-contact-search, 2026-09-07): the router's keyword pre-route
     /// publishes `pendingContactSearchRequest`; this onChange appends the
@@ -74,6 +90,36 @@ struct HomeView: View {
     /// any Hashable value, so dock leaves AND Settings sections push
     /// through the same stack.
     @State private var navPath = NavigationPath()
+    @State private var conversationViewportHeight: CGFloat = 0
+    /// [MEDIUM-FIT] (2026-10-15) The bottom safe-area inset, read from
+    /// the home layout geometry — the "low hug" dock shifts down past
+    /// it so its tiles end ~12pt above the physical screen bottom.
+    @State private var bottomSafeInset: CGFloat = 0
+
+    /// [MEDIUM-FIT] (2026-10-15) True when the iPhone display size is
+    /// Medium or Large (Settings → Display & Brightness) — the optimized
+    /// viewport-fitting layout then applies; Default keeps the original.
+    private var zoomed: Bool { UIScreen.main.isDisplayZoomed }
+
+    private var pinsDock: Bool {
+        // Zoomed display sizes pin the dock at every type size; Default
+        // keeps the original behavior (pinned through .large only).
+        (zoomed || dynamicTypeSize <= .large) && verticalSizeClass != .compact
+    }
+
+    /// How far the pinned dock shifts down past the safe area (owner v3,
+    /// "low hug": tiles ~12pt above the physical bottom; zero on
+    /// home-button devices where there is no home indicator). Only at
+    /// Medium/Large display sizes.
+    private var dockSafeAreaShift: CGFloat {
+        zoomed ? max(0, bottomSafeInset - 12) : 0
+    }
+
+    private var homeDock: some View {
+        HomeDock(edgeAttached: pinsDock,
+                 onAppliance: { coordinator.presentApplianceHelper(question: nil) },
+                 onLiveTranslate: { coordinator.presentLiveTranslate() })
+    }
 
     var body: some View {
         NavigationStack(path: $navPath) {
@@ -87,17 +133,41 @@ struct HomeView: View {
                     }
                     .equatable()
                     .padding(.horizontal, 20)
-                    .padding(.top, 8)
+                    // [MEDIUM-FIT] (2026-10-15) 4pt top clearance at
+                    // Medium/Large display sizes, the original 8pt at
+                    // Default.
+                    .padding(.top, zoomed ? 4 : 8)
+
+                    // [VOICE-OOM] F (2026-10-10) — the degraded-mode
+                    // status pill: visible while the turn in force runs a
+                    // stepped-down brain or the deterministic reply path,
+                    // gone (renders nothing) the moment the next turn
+                    // resolves back to the remembered pick. Outside the
+                    // scroll and above the talk hero, so it never covers
+                    // the mic/voice UI.
+                    DegradedModeStatusPill(mode: coordinator.degradedVoiceMode)
 
                     // One vertical scroll owns every movable Home section.
                     // The previous nested feedback scroller had almost no
                     // height above the fixed two-row dock, so activity cards
                     // rendered behind it and were awkward to pan.
                     ScrollView(showsIndicators: false) {
-                        VStack(spacing: 16) {
+                        // [MEDIUM-FIT] (2026-10-15) 12pt section gap at
+                        // Medium/Large display sizes keeps the whole
+                        // Home flow inside the viewport; the original
+                        // 16pt at Default.
+                        VStack(spacing: zoomed ? 12 : 16) {
                             if !homePresentation.favoriteApps.isEmpty {
                                 QuickAccessStrip(apps: homePresentation.favoriteApps) { app in
-                                    coordinator.performAppLaunch(app)
+                                    // [APP-UI-CONFIRM] (2026-10-14) The
+                                    // tile ASKS first — the app's own
+                                    // localized confirmation instead of
+                                    // iOS's English "Open in <App>?"
+                                    // dialog (owner report, verbatim, on
+                                    // `requestAppLaunchFromTile`).
+                                    // `performAppLaunch` stays the
+                                    // executor behind every yes.
+                                    coordinator.requestAppLaunchFromTile(app)
                                 }
                                 .equatable()
                             }
@@ -106,6 +176,7 @@ struct HomeView: View {
                                 coordinator.cancelTimer(id: id)
                             }
                             .equatable()
+                            Spacer(minLength: 0)
 
                             talkStage
                                 .equatable()
@@ -122,7 +193,11 @@ struct HomeView: View {
                             // is nil) — no dead card, the redesign's
                             // no-mockups rule. Tap pushes the Phone
                             // screen's call log.
-                            if let missedCall = homePresentation.lastMissedCall {
+                            // [MEDIUM-FIT] (2026-10-15) The missed-call
+                            // tile stands down at Medium/Large display
+                            // sizes — the space goes to the viewport fit.
+                            if !zoomed,
+                               let missedCall = homePresentation.lastMissedCall {
                                 HomeMissedCallTile(presentation: missedCall) {
                                     navPath.append(LeafDestination.call)
                                 }
@@ -133,32 +208,45 @@ struct HomeView: View {
                                !homePresentation.setup.isVisible {
                                 historyChip
                             }
+                            Spacer(minLength: 0)
+                            if !pinsDock {
+                                homeDock
+                            }
                         }
                         .padding(.horizontal, 20)
-                        .padding(.top, 12)
-                        .padding(.bottom, 20)
+                        // [MEDIUM-FIT] (2026-10-15) Tighter scroll
+                        // insets at Medium/Large display sizes; the
+                        // original insets at Default.
+                        .padding(.top, zoomed ? 16 : 24)
+                        .padding(.bottom, zoomed ? 12 : 16)
+                        .frame(maxWidth: .infinity, minHeight: conversationViewportHeight)
+                    }
+                    .clipped()
+                    .onGeometryChange(for: CGFloat.self) { geometry in
+                        geometry.size.height
+                    } action: { height in
+                        conversationViewportHeight = height
+                    }
+                    .accessibilityIdentifier("home.content")
+                    if pinsDock {
+                        homeDock
+                            // [MEDIUM-FIT] (2026-10-15) 8pt dock clearance
+                            // at Medium/Large display sizes, the original
+                            // 12pt at Default.
+                            .padding(.top, zoomed ? 8 : 12)
+                            // [MEDIUM-FIT] (2026-10-15) Owner v3 "low
+                            // hug": pull the dock down so its tiles end
+                            // ~12pt above the physical screen bottom.
+                            .padding(.bottom, -dockSafeAreaShift)
                     }
                 }
             }
-            // Dock pinned to the bottom edge (home-redesign 2026-09-08):
-            // previously the dock was the last child of the fixed VStack,
-            // so any overflow above it (the old widget stack) pushed it
-            // off the viewport on small screens. As a `safeAreaInset` it
-            // always owns the bottom of the screen and the scroll region
-            // above it absorbs overflow instead.
-            .safeAreaInset(edge: .bottom, spacing: 16) {
-                // The compact destination rail stays pinned. Conversation
-                // history now lives in the scroll flow above it, so it can
-                // never cover a setup or outcome card on shorter screens.
-                VStack(spacing: 0) {
-                    HomeDock(contactName: homePresentation.primaryContactName,
-                             onAppliance: {
-                                 coordinator.presentApplianceHelper(question: nil)
-                             })
-                    .equatable()
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 8)
+            // [MEDIUM-FIT] (2026-10-15) Read the bottom safe-area inset
+            // the dock shift is computed from.
+            .onGeometryChange(for: CGFloat.self) { geometry in
+                geometry.safeAreaInsets.bottom
+            } action: { inset in
+                bottomSafeInset = inset
             }
             // Home paints its own top bar (HomeTopBar), so the system
             // navigation bar is hidden entirely. `.toolbar(.hidden,
@@ -171,6 +259,15 @@ struct HomeView: View {
             // is fragile — it silently fails to present on some iOS 16
             // builds, which presented as "hub buttons do nothing".
             .navigationDestination(for: LeafDestination.self) { leafView(for: $0) }
+            // Settings leaves pushed straight from Home (menu-audit task,
+            // 2026-09-17): the quick-access strip's plus tile pushes
+            // `.quickApps` directly. While the Settings hub is itself
+            // pushed, ITS registration of this destination type wins (it
+            // is the deeper, later-registered one), so hub rows keep
+            // routing through SettingsDestinationView exactly as before.
+            .navigationDestination(for: SettingsView.SettingsDestination.self) { destination in
+                SettingsDestinationView(destination: destination)
+            }
             // Voice-driven contact search (2026-09-07): a request means
             // "Phone screen + this search" — push the Call leaf when we
             // aren't already on it. The leaf consumes the request on
@@ -189,8 +286,26 @@ struct HomeView: View {
                     navPath.append(LeafDestination.call)
                 }
             }
+            // [PROFILE-INTERVIEW T-102] The cold-start interview route
+            // (FR-PI-016, design-l2 §4 C13): ONE evaluation per process,
+            // on the first appear only; `scenePhase` is deliberately not
+            // observed (no foreground re-check in v1 — it could pop the
+            // interview over a live capture). The route is captured into
+            // `wizardStart` so the cover renders a stable step. Honours
+            // the hosted-test boot guard: unit tests see the behavior
+            // they always had; UI tests run the real shell.
+            .onAppear {
+                guard !didCheckStartupRoute else { return }
+                didCheckStartupRoute = true
+                guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"]
+                        == nil else { return }
+                if let route = coordinator.coldStartInterviewRoute() {
+                    wizardStart = route
+                    showWizard = true
+                }
+            }
             .fullScreenCover(isPresented: $showWizard) {
-                OnboardingWizardView(startingAt: coordinator.onboardingState.firstPendingStep)
+                OnboardingWizardView(startingAt: wizardStart)
                     .environmentObject(coordinator)
                     .environmentObject(session)
                     .environmentObject(coordinator.modelDownloadService)
@@ -246,7 +361,6 @@ struct HomeView: View {
             dateLine: coordinator.homeDateLine,
             notificationCount: activeNotificationCount,
             favoriteApps: coordinator.favoriteApps,
-            primaryContactName: coordinator.familyContacts.first?.name,
             setup: SetupPresentation(
                 pendingCount: coordinator.onboardingState.pendingSteps.count,
                 // Warning styling is reserved for a capability that is
@@ -271,10 +385,14 @@ struct HomeView: View {
         let now = Date()
         guard let entry = AppActivityLog.lastMissedCall(in: coordinator.recentActivity,
                                                         now: now) else { return nil }
+        // The correlated name (missed-calls fix, 2026-09-18) rides the
+        // same published map the list rows read, so the tile and the
+        // list name one caller identically.
         return MissedCallPresentation.resolve(entry,
                                               now: now,
                                               calendar: .current,
-                                              locale: coordinator.activeLocale)
+                                              locale: coordinator.activeLocale,
+                                              correlatedName: coordinator.missedCallDisplayNames[entry.id])
     }
 
     /// The talk stage's [P0-2] readiness value plus its two derived labels.
@@ -312,7 +430,11 @@ struct HomeView: View {
     /// stage element from the same table in the same transaction,
     /// instead of each view re-deriving its own conditions that could
     /// diverge.
-    private var stageVisuals: TalkStageVisuals { session.state.talkVisuals }
+    private var stageVisuals: TalkStageVisuals {
+        TalkStageVisuals.resolved(state: session.state,
+                                  isSpeaking: coordinator.isSpeaking,
+                                  slotAnswerCaptureActive: coordinator.slotAnswerCaptureActive)
+    }
 
     /// Status-line override fed to the hero: the failure-specific error
     /// caption while erroring, else the transient post-reset notice
@@ -336,7 +458,13 @@ struct HomeView: View {
     private var talkStage: TalkStage {
         TalkStage(state: session.state,
                   session: session,
+                  // [AUDIO-REACTIVE-HERO] (2026-10-14) The hero's live
+                  // audio-level model — the app-constant instance the
+                  // pipeline (mic) and the Piper speaker (reply) feed.
+                  audioLevels: coordinator.audioVisualization,
                   voice: voicePresentation,
+                  isSpeaking: coordinator.isSpeaking,
+                  slotAnswerCaptureActive: coordinator.slotAnswerCaptureActive,
                   onStart: coordinator.simulateWakeWordDetection,
                   onRecover: coordinator.recoverVoiceCycle,
                   onReset: coordinator.resetVoiceActivation)
@@ -349,7 +477,13 @@ struct HomeView: View {
                        caption: coordinator.livePartialTranscript ?? coordinator.lastTranscript,
                        outcome: coordinator.lastOutcome,
                        setup: homePresentation.setup,
-                       onResumeSetup: { showWizard = true },
+                       onResumeSetup: {
+                           // Same value the old direct read produced —
+                           // now captured at tap so the cover stays
+                           // stable while the wizard runs.
+                           wizardStart = coordinator.onboardingState.firstPendingStep
+                           showWizard = true
+                       },
                        onOpenHistory: { showHistory = true },
                        onDismissOutcome: coordinator.dismissOutcome)
     }
@@ -379,7 +513,10 @@ struct HomeView: View {
         switch session.state {
         case .idle, .speaking, .error, .stopped:
             return true
-        case .listening, .transcribing, .understanding, .awaitingConfirmation:
+        case .listening, .transcribing, .understanding, .awaitingConfirmation,
+             .awaitingSlotAnswer:
+            // Both answer windows own the stage: no history chip while a
+            // question is outstanding (T-135 follows the confirmation row).
             return false
         }
     }
@@ -390,13 +527,13 @@ struct HomeView: View {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(DesignTokens.warmFont(size: 11, weight: .bold))
                 Text("home.conversation.title")
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
             }
-            .foregroundColor(DesignTokens.textSecondary)
+            .foregroundColor(appearance.colors.textSecondary)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
     }
@@ -423,6 +560,12 @@ struct HomeView: View {
             // before a download surface exists.
             SettingsView()
                 .environmentObject(coordinator.modelDownloadService)
+        case .profile:
+            // The "About me" editor, pushed from the hub's profile icon
+            // (home-profile-icon, 2026-10-06). The coordinator is passed
+            // explicitly (its init contract — the view also reads it
+            // from the environment for the locale/appearance it needs).
+            ProfileSettingsView(coordinator: coordinator)
         case .directions:
             DirectionsView()
         case .briefing:
@@ -448,9 +591,41 @@ struct HomeView: View {
 // MARK: - Talk button (spec §3.3, D5; redesign spec §2 — breathing glow)
 
 struct TalkButton: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+    /// [HERO-SIZE] (2026-10-14) The hero disc is ONE constant size in
+    /// every state and at every Dynamic Type size: the spec's 132pt token
+    /// (`DesignTokens.talkButtonDiameter`). The previous ScaledMetric grew
+    /// the disc to 192pt at accessibility sizes — pushing the dock off
+    /// the viewport at the medium accessibility size — and the
+    /// per-state status line under the hero made the stage height read
+    /// as "different button sizes" across states (owner feedback). The
+    /// state caption now rides the stage's fixed sub-hero slot at
+    /// accessibility sizes (see `TalkStage`), so the disc never needs to
+    /// grow and never moves between states.
+    private var heroDiameter: CGFloat { DesignTokens.talkButtonDiameter }
+    private var usesGloss: Bool {
+        appearance.style != .classic && !reduceTransparency && contrast != .increased
+    }
     @ObservedObject var session: VoiceSessionStateMachine
+    /// [AUDIO-REACTIVE-HERO] (2026-10-14) The live signal model the hero
+    /// renders from — the owner's "the main button should bounce like a
+    /// speaker … the side bars should move like a CD player's equalizer
+    /// - not random but based on music". Observed here (like `session`):
+    /// every ~30 Hz publish re-renders ONLY this button, never the stage
+    /// above it (see TalkStage's `==` note). When `source` reports no
+    /// real signal, every audio-driven branch below stands down and the
+    /// existing [HERO-MOTION] idle/fallback motion takes over unchanged.
+    @ObservedObject var audioLevels: AudioLevelPublisher
     @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// [HERO-STATES] True while any reply audio plays.
+    let isSpeaking: Bool
+    /// [HERO-STATES] True exactly while the auto-listen answer capture
+    /// is live.
+    let slotAnswerCaptureActive: Bool
     /// [P0-2] Manual Talk readiness — the shared `VoicePipelineReadiness`
     /// contract, and the hero's ONLY gate. `.loading` keeps the disc at
     /// its final dimensions with a spinner inside it and disables
@@ -460,9 +635,6 @@ struct TalkButton: View {
     /// consulted — a degraded KWS engine never takes manual Talk down.
     let readiness: VoicePipelineReadiness
     let onTap: () -> Void
-    /// Replaces the state-bound status line when set (used for the
-    /// error state's failure-specific caption and the post-reset notice).
-    var statusOverride: String? = nil
     /// Long-press reset (TALK-CRASH-FIX, 2026-09-07): holding the hero
     /// for `DesignTokens.talkResetHoldSeconds` cancels the talk cycle /
     /// re-primes a dead pipeline through the coordinator's reset path.
@@ -489,6 +661,23 @@ struct TalkButton: View {
     /// arena and cancels the button's own press, but this guard makes the
     /// "no double action" promise independent of gesture arbitration.
     @State private var suppressTapAfterReset = false
+    /// [HERO-MOTION] (2026-10-14) One press-echo flag drives every
+    /// "activated" acknowledgement in the owner's request ("add animation
+    /// to the talk button when its activated and in active states"): the
+    /// tap action AND each flip into an active state family both dip the
+    /// disc to `discPulseScale` and spring it back (see
+    /// `echoActivationPulse()`). Deliberately ONE flag, not one per
+    /// trigger — a tap is followed a beat later by the `.listening` icon
+    /// flip, and a shared echo merges those into one continuous
+    /// press→release instead of two competing pulses.
+    @State private var activationPulse = false
+    /// [HERO-MOTION] The state glyph scales a little with Dynamic Type —
+    /// at accessibility sizes it is the disc's ONLY content (the caption
+    /// hides there), so the old fixed 32pt read small against the 132pt
+    /// disc. The scaled size is capped (`heroIconPointSize`) so it can
+    /// never crowd the constant disc; `heroDiameter` itself is untouched
+    /// ([HERO-SIZE]: the hero never changes size between states).
+    @ScaledMetric(relativeTo: .body) private var heroIconBaseSize: CGFloat = 32
 
     /// Single visual mapping for the hero (call-UI fix, 2026-09-07):
     /// icon, fill, halo, labels and motion all come from
@@ -496,9 +685,150 @@ struct TalkButton: View {
     /// — so the button can never render one state's color with another
     /// state's icon or label, and every element flips in the same
     /// transaction the state publishes.
-    private var visuals: TalkStageVisuals { session.state.talkVisuals }
+    private var visuals: TalkStageVisuals {
+        TalkStageVisuals.resolved(state: session.state,
+                                  isSpeaking: isSpeaking,
+                                  slotAnswerCaptureActive: slotAnswerCaptureActive)
+    }
 
     private var isBreathing: Bool { visuals.pulses && !reduceMotion }
+
+    /// [HERO-MOTION] The press echo's target: 0.94 while
+    /// `activationPulse` is down, springing back to 1.0 (see
+    /// `echoActivationPulse`). Reduce Motion pins the scale at 1.0 — the
+    /// per-state colors and icon still flip, so the static fallback stays
+    /// visually correct.
+    private var discPulseScale: CGFloat {
+        activationPulse && !reduceMotion ? 0.94 : 1.0
+    }
+
+    /// [HERO-MOTION] The Dynamic-Type-adaptive glyph size, capped so the
+    /// constant 132pt disc can never overflow around it.
+    private var heroIconPointSize: CGFloat {
+        min(heroIconBaseSize, 48)
+    }
+
+    // MARK: Audio-reactive motion ([AUDIO-REACTIVE-HERO], 2026-10-14)
+
+    /// The live envelope the disc bounce and the state-glyph breathing
+    /// read — the owner's "the main button should bounce like a speaker
+    /// when talking or when mic sound comes in". 0 under Reduce Motion:
+    /// the static fallback is the correct state visuals with no
+    /// signal-driven displacement.
+    private var audioEnvelope: Double {
+        reduceMotion ? 0 : audioLevels.envelope
+    }
+
+    /// True exactly while the published levels are REAL signal (mic
+    /// capture, or a Piper reply with metering + its played-file band
+    /// track — see `AudioLevelPublisher.Source`). The ONE gate between
+    /// signal-driven motion and the [HERO-MOTION] fallback: the
+    /// meterless speaker path (AVSpeechSynthesizer exposes no audio
+    /// levels of any kind) and every non-audio state fall back to the
+    /// existing motion — never a fabricated meter.
+    private var hasLiveAudio: Bool {
+        !reduceMotion && audioLevels.hasLiveSignal
+    }
+
+    /// The disc's speaker-cone bounce: scale = 1 + envelope x 0.06 (up
+    /// to 1.06 — a cone's excursion, not a zoom), composed
+    /// multiplicatively with the press echo. Applied via `scaleEffect`,
+    /// so the constant 132pt frame, the stage layout and the button's
+    /// hit region are untouched ([HERO-SIZE] invariant).
+    private var discAudioScale: CGFloat {
+        1 + 0.06 * audioEnvelope
+    }
+
+    /// The state glyph's envelope-driven breathing (owner follow-up:
+    /// "the mic in the centre should also be animated when speaking").
+    /// A gentle `scaleEffect` on the Image — never a font-size change,
+    /// which would re-lay-out the content VStack inside the fixed disc —
+    /// strongest for the mic during capture (0.15), softer for live
+    /// reply playback (0.10), exactly 1 when no real signal flows
+    /// (fallback / Reduce Motion). Max 48pt glyph x 1.15 = 55pt, well
+    /// inside the 132pt disc.
+    private var iconAudioScale: CGFloat {
+        guard !reduceMotion else { return 1 }
+        switch audioLevels.source {
+        case .mic: return 1 + 0.15 * audioLevels.envelope
+        case .speakerLive: return 1 + 0.10 * audioLevels.envelope
+        case .none, .speakerMeterless: return 1
+        }
+    }
+
+    /// One side bar's live band level, 0…1 (owner: each bar moves "based
+    /// on music" — the actual band energies, never a random walk). The
+    /// five bars map straight onto `AudioLevelPublisher.bands`
+    /// (200/400/800/1600/3200/6400 Hz edges — low→high, left→right on
+    /// the left flank). The RIGHT flank is mirrored: its innermost bar
+    /// (index 0) shows the HIGHEST band so the equalizer reads as one
+    /// symmetric spectrum spreading outward from the disc, matching the
+    /// mirrored idle stagger in `waveformSide`. Defensive `first`/`last`
+    /// lookups collapse out-of-range reads onto the nearest band instead
+    /// of crashing on an index — the publisher's band count is a service
+    /// detail this view must not assume.
+    private func bandLevel(index: Int, mirrored: Bool) -> Double {
+        let bands = audioLevels.bands
+        guard !bands.isEmpty else { return 0 }
+        let bandIndex = mirrored ? bands.count - 1 - index : index
+        guard bands.indices.contains(bandIndex) else {
+            // bandIndex < 0 only if the publisher ever grows MORE bands
+            // than the five bars; the nearest band is the honest edge.
+            return bandIndex < 0 ? bands[bands.startIndex] : bands[bands.index(before: bands.endIndex)]
+        }
+        return bands[bandIndex]
+    }
+
+    /// The [AUDIO-REACTIVE-HERO] equalizer range for one side bar, as a
+    /// y-scale of its published capsule height
+    /// (`heroDiameter * 0.28 * waveformHeights[index]`). Min 0.30 so a
+    /// quiet band still reads as a present bar (never a vanishing
+    /// capsule — elderly-legibility over meter realism); max 1.55 so
+    /// the tallest bar at full band energy stays inside the overlay's
+    /// fixed height. Applied via `scaleEffect(y:)` like the idle
+    /// oscillation — no layout ever moves.
+    private static let audioBarMinScale: CGFloat = 0.30
+    private static let audioBarMaxScale: CGFloat = 1.55
+
+    /// [HERO-MOTION] Fires the shared press echo: a quick easeOut
+    /// down-stroke to `discPulseScale`, a ~one-frame beat, then a springy
+    /// return. This is the owner's "tap → 0.94 → 1.0". The beat is a
+    /// short-lived main-actor task rather than a
+    /// `repeatCount(1, autoreverses: true)` toggle so the two edges get
+    /// DIFFERENT curves (fast press, softer overshooting release), and so
+    /// a re-trigger mid-flight (tap, then the `.listening` flip a beat
+    /// later) simply extends the same press — the last restore always
+    /// lands, so the disc can never stick at 0.94. No-op under Reduce
+    /// Motion.
+    private func echoActivationPulse() {
+        guard !reduceMotion else { return }
+        withAnimation(.easeOut(duration: 0.10)) { activationPulse = true }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 110_000_000)
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.55)) {
+                activationPulse = false
+            }
+        }
+    }
+
+    /// [HERO-MOTION] The side bars' motion family — the owner's "vary
+    /// amplitude/tempo by state family: gentle at idle, livelier while
+    /// listening/transcribing/understanding/speaking, static at
+    /// error/stopped/loading". Derived from the SAME `TalkStageVisuals`
+    /// flags the rest of the stage reads (never a bespoke state switch),
+    /// so a family's bars can never disagree with its rings or halo.
+    /// `.lively` is exactly the listening→speaking cycle (`showsHalo`);
+    /// `.gentle` the idle family (`pulses`); everything else — error,
+    /// stopped, the chip-owned confirmation, loading, a failed start, and
+    /// the reset hold — stays perfectly still.
+    private var waveformRhythm: WaveformRhythm {
+        guard !isLoading, failure == nil, !isPressingForReset else {
+            return .still
+        }
+        if visuals.showsHalo { return .lively }
+        if visuals.pulses { return .gentle }
+        return .still
+    }
 
     /// [P0-2] The pipeline start is still in flight — the hero shows its
     /// loading presentation and every activation/recovery affordance is
@@ -512,12 +842,17 @@ struct TalkButton: View {
     /// Disabled unless the pipeline's own start callback succeeded AND
     /// the [LAT-M1] boot contract settled (ready OR degraded — a
     /// degraded hero is ENABLED with an honest cold-feature banner, never
-    /// silently), plus the chips' own case: while loading (or failed) the
-    /// hero is inert — the reset hold is not even attached, so a hold
-    /// cannot reach the reset path while the review's "cannot invoke
-    /// recovery merely because startup has not completed" rule applies.
+    /// silently), plus the confirmation window's own case (the yes/no
+    /// chips own that turn): while loading (or failed) the hero is inert
+    /// — the reset hold is not even attached, so a hold cannot reach the
+    /// reset path while the review's "cannot invoke recovery merely
+    /// because startup has not completed" rule applies. The slot answer
+    /// window deliberately does NOT disable the hero: it is answered by
+    /// voice through the Talk control (device defect fix 2026-10-11 —
+    /// the window had no chips, no auto-listen and a dead Talk button).
     private var isDisabled: Bool {
-        !readiness.isTalkEnabled || session.state == .awaitingConfirmation
+        !readiness.isTalkEnabled
+            || !session.state.supportsTalkTap
     }
 
     /// Idle and startup use the supplied glossy burgundy VoiceBridge face.
@@ -528,22 +863,22 @@ struct TalkButton: View {
 
     private var discTint: Color {
         if failure != nil { return DesignTokens.stateError }
-        return usesBrandFace ? DesignTokens.talkMid : visuals.tint
+        return usesBrandFace ? appearance.colors.talkMid : visuals.tint
     }
 
     private var discFill: AnyShapeStyle {
-        guard usesBrandFace else { return AnyShapeStyle(discTint) }
+        guard usesBrandFace && usesGloss else { return AnyShapeStyle(discTint) }
         return AnyShapeStyle(RadialGradient(
-            colors: [DesignTokens.talkHighlight,
-                     DesignTokens.talkMid,
-                     DesignTokens.talkDeep],
+            colors: [appearance.colors.talkHighlight,
+                     appearance.colors.talkMid,
+                     appearance.colors.talkDeep],
             center: UnitPoint(x: 0.27, y: 0.19),
             startRadius: 0,
-            endRadius: DesignTokens.talkButtonDiameter * 0.72))
+            endRadius: heroDiameter * 0.72))
     }
 
     private var heroGlowTint: Color {
-        usesBrandFace ? DesignTokens.brandPink : visuals.tint
+        usesBrandFace ? appearance.colors.brandPink : visuals.tint
     }
 
     /// The hold-to-reset affordance is live only in a reset-eligible state,
@@ -556,10 +891,8 @@ struct TalkButton: View {
     }
 
     var body: some View {
-        // 4pt — the status line HUGS the hero circle so button + caption
-        // read as one unit (visual-polish 2026-09-08; the stage VStack
-        // keeps its own ≤4pt below this line to the hint carousel).
-        VStack(spacing: 4) {
+        // The decorative halo gets real layout clearance before any status text.
+        VStack(spacing: 12) {
             Button(action: {
                 // The reset backstop (see `suppressTapAfterReset`): after
                 // a completed hold the release must not ALSO run the tap
@@ -567,6 +900,11 @@ struct TalkButton: View {
                 // flag and are unaffected.
                 guard !suppressTapAfterReset else { return }
                 onTap()
+                // [HERO-MOTION] Press echo (see `echoActivationPulse`):
+                // the tap dips the disc to 0.94 and springs it back. Kept
+                // inside the backstop guard — a completed reset hold must
+                // not echo a tap it never fired.
+                echoActivationPulse()
             }) {
                 ZStack {
                     // While a reset hold is underway the breathing rings
@@ -578,7 +916,7 @@ struct TalkButton: View {
                     if isBreathing && !isPressingForReset && readiness.isTalkEnabled {
                         breathingRings
                     }
-                    if usesBrandFace && !isPressingForReset {
+                    if usesBrandFace && usesGloss && !isPressingForReset {
                         brandGlassRings
                     }
                     if visuals.showsHalo && !isPressingForReset {
@@ -590,38 +928,88 @@ struct TalkButton: View {
                         // (call-UI fix, 2026-09-07).
                         Circle()
                             .stroke(heroGlowTint.opacity(0.30), lineWidth: 10)
-                            .frame(width: DesignTokens.talkButtonDiameter + 28,
-                                   height: DesignTokens.talkButtonDiameter + 28)
+                            .frame(width: heroDiameter + 28,
+                                   height: heroDiameter + 28)
+                            // [HERO-MOTION] The halo glides to the new
+                            // family's color instead of snapping when the
+                            // state flips; keyed on the color it paints.
+                            // Under Reduce Motion the flip stays instant
+                            // (nil animation) — still the correct color.
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.35),
+                                       value: heroGlowTint)
                     }
-                    // Traffic-light hero (visual-polish 2026-09-08): a
-                    // SOLID state-color disc — flat fills read calmer and
-                    // clearer than the old radial amber "diya" glow, and
-                    // white glyphs hold ≥4.5:1 on every state color (unit
-                    // tested). The breathing rings + halo + shadow carry
-                    // the "alive" light in the state's own color family.
-                    // [P0-2] The disc's DIMENSIONS are readiness-independent
-                    // by construction (the frame below), so the hero keeps
-                    // its final size through loading and failure. The fill
-                    // is `discTint` — solid rest blue while loading or
-                    // failed, the state color otherwise. The floating boot
-                    // capsule is GONE (user feedback, 2026-09-11): the
-                    // hero's own spinner + label is the loading UI, and
-                    // capability diagnostics live in Settings.
+                    // Idle crimson is decorative, not an error. Runtime
+                    // states retain their invariant traffic-light fills.
                     Circle()
                         .fill(discFill)
-                        .frame(width: DesignTokens.talkButtonDiameter,
-                               height: DesignTokens.talkButtonDiameter)
-                        .shadow(color: discTint.opacity(0.34), radius: 16, y: 7)
+                        .frame(width: heroDiameter,
+                               height: heroDiameter)
+                        .shadow(color: discTint.opacity(usesGloss ? 0.34 : 0.10), radius: usesGloss ? 16 : 3, y: usesGloss ? 7 : 1)
+                        // [HERO-MOTION] The disc's fill + glow crossfade
+                        // between state families instead of snapping.
+                        // Keyed on `discTint` — the color this element
+                        // actually paints (`visuals.tint` folded with the
+                        // brand face and the failure override) — so every
+                        // tint change that can reach the disc animates.
+                        // Placed BEFORE the overlays so it never re-times
+                        // the icon transition or the press echo below.
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.35),
+                                   value: discTint)
                         .overlay(heroContent)
+                        .overlay {
+                            if appearance.skin.isDark {
+                                Circle().stroke(appearance.colors.textPrimary.opacity(0.65), lineWidth: 1.5)
+                            }
+                        }
+                        // [HERO-MOTION] The press echo (tap + active-state
+                        // flips): the whole disc — glyph included —
+                        // briefly dips to 0.94 and springs back. Applied
+                        // OUTSIDE the tint animation above so the echo's
+                        // own withAnimation curves are never intercepted.
+                        // `scaleEffect` is a render transform: the disc's
+                        // 132pt frame, the stage layout and the button's
+                        // hit region are all untouched.
+                        //
+                        // [AUDIO-REACTIVE-HERO] (2026-10-14) Composed
+                        // multiplicatively with the live speaker-cone
+                        // bounce (`discAudioScale` = 1 + envelope x 0.06):
+                        // the tap echo and the audio excursion stack, and
+                        // the spring below retargets the disc smoothly
+                        // through every ~30 Hz publish. Reduce Motion
+                        // zeroes the audio factor and the spring is nil —
+                        // the echo alone remains, as before.
+                        .scaleEffect(discPulseScale * discAudioScale, anchor: .center)
+                        .animation(reduceMotion ? nil
+                                   : .spring(response: 0.14, dampingFraction: 0.7),
+                                   value: audioEnvelope)
                     if isPressingForReset {
                         resetProgressRing
                     }
                 }
-                // Decorative rings draw outside the hit target but do not
-                // claim 262pt of layout height. This keeps the compact
-                // activity card visible above the fixed two-row dock.
-                .frame(width: DesignTokens.talkButtonDiameter,
-                       height: DesignTokens.talkButtonDiameter)
+                // [HERO-MOTION] Every flip INTO an active family (the
+                // `.listening` that follows a tap, then
+                // transcribing/understanding/speaking) gets the same soft
+                // echo a tap gets, so the disc acknowledges the pipeline
+                // advancing. Icon-keyed on purpose: each of those flips
+                // changes `visuals.icon` in the same transaction the
+                // state publishes. Error/stopped and the idle wind-down
+                // change the icon too but are NOT active (`showsHalo`
+                // false) — deliberately calm.
+                .onChange(of: visuals.icon) { _ in
+                    guard visuals.showsHalo else { return }
+                    echoActivationPulse()
+                }
+                // [HERO-MOTION] The state halo and breathing rings fade
+                // in/out with the family flip (their `if` inserts/removals
+                // carry the default opacity transition) instead of
+                // popping. Keyed on `showsHalo` so it fires exactly on
+                // the family boundary and never on intra-family flips.
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.35),
+                           value: visuals.showsHalo)
+                // The disc remains the same size; external padding reserves
+                // space for the decorative halo and symmetric waveforms.
+                .frame(width: heroDiameter,
+                       height: heroDiameter)
             }
             .buttonStyle(.plain)
             // Enabled only once the pipeline's start callback succeeded
@@ -636,6 +1024,7 @@ struct TalkButton: View {
             // inside the disc. Greying the whole hero made the white text
             // unreadable (user feedback, 2026-09-11).
             .disabled(isDisabled)
+            .accessibilityIdentifier("home.talk")
             .accessibilityLabel(Text(TalkReadinessCopy.accessibilityLabel(
                 readiness,
                 stateLabel: session.state.buttonText(locale: locale),
@@ -668,13 +1057,37 @@ struct TalkButton: View {
                 },
                 onPressingChanged: handleHoldPressing(_:)
             ))
-
-            if !statusTextLine.isEmpty {
-                Text(statusTextLine)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+            .overlay {
+                HStack(spacing: 0) {
+                    // [HERO-MOTION] Mirrored phase order: the two flanks
+                    // share the tempo tables but stagger in opposite
+                    // directions, so the waveform reads as travelling
+                    // through the disc rather than two copies pumping in
+                    // lockstep. Geometry is untouched — still the same
+                    // fixed overlay frame, zero layout change.
+                    waveformSide(mirrored: false)
+                    Spacer().frame(width: heroDiameter + 24)
+                    waveformSide(mirrored: true)
+                }
+                .frame(width: heroDiameter + 78, height: heroDiameter)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 39)
+            // [HERO-SIZE] Slimmer vertical reserve than the old 32pt: the
+            // disc is 132pt constant now, and every saved point goes to
+            // fitting the stage + dock in the viewport without scrolling.
+            // [MEDIUM-FIT] (2026-10-15) 16pt at Medium/Large display
+            // sizes (still clears the hero's 160pt halo footprint),
+            // the original 20pt at Default.
+            .padding(.vertical, UIScreen.main.isDisplayZoomed ? 16 : 20)
+            if !transientStatusLine.isEmpty {
+                Text(transientStatusLine)
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                 weight: .medium))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             // [P0-2] The ONE recovery a failed boot-time start offers —
             // and only then. It replaces the old "tap the dead hero to
@@ -684,12 +1097,35 @@ struct TalkButton: View {
                 recoveryAction(onRecover)
             }
         }
-        .onAppear {
-            guard !reduceMotion else { return }
+        .task(id: reduceMotion) {
+            guard !reduceMotion else {
+                breathe = false
+                return
+            }
             withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
                 breathe = true
             }
         }
+    }
+
+    /// [HERO-MOTION] The state-icon swap, per the owner's "animate and
+    /// move the icons inside the talk button for different states". The
+    /// outgoing glyph lifts (+ scale 1.3) while the incoming one rises
+    /// into place from below (scale 0.7 → 1) — a fixed "advancing"
+    /// direction that matches the idle → listening → … → speaking flow
+    /// the pipeline actually runs. Chosen over `matchedGeometryEffect`
+    /// deliberately: that would need BOTH glyphs co-resident in a
+    /// ZStack plus a `@Namespace`; this asymmetric transition gives the
+    /// same movement with one view and no extra state to keep coherent
+    /// through rapid listening → transcribing → understanding flips.
+    private var heroIconTransition: AnyTransition {
+        .asymmetric(
+            insertion: .scale(scale: 0.7)
+                .combined(with: .opacity)
+                .combined(with: .offset(y: 9)),
+            removal: .scale(scale: 1.3)
+                .combined(with: .opacity)
+                .combined(with: .offset(y: -9)))
     }
 
     /// The disc's content ([P0-2]). While the pipeline start is in flight
@@ -698,7 +1134,7 @@ struct TalkButton: View {
     /// caption. Both branches sit inside the same fixed-size circle, so
     /// the hero's final dimensions never move with readiness.
     private var heroContent: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 10) {
             if isLoading {
                 // [LOADING-CONTRAST] (2026-09-11) The loading disc is the
                 // SOLID rest blue (`discTint` above — the accepted darker-
@@ -715,28 +1151,59 @@ struct TalkButton: View {
                 // rather than shrinking (≥18pt caption token, no
                 // `minimumScaleFactor`), and bold keeps it clearly legible
                 // on the solid disc.
-                Text(loadingStageLabel)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
-                                                weight: .bold))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .padding(.horizontal, 12)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Text(loadingStageLabel)
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .bold))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 22)
+                }
             } else {
+                // [HERO-MOTION] The glyph is Dynamic-Type-adaptive now
+                // (`heroIconPointSize`, capped at 48pt) because at
+                // accessibility sizes it is the disc's only content.
+                // `.id(visuals.icon)` gives each state's icon its own
+                // identity — the trigger the asymmetric transition above
+                // needs — while states that share a glyph (listening and
+                // the slot-answer window) correctly swap with no
+                // animation at all.
                 Image(systemName: visuals.icon)
-                    .font(.system(size: 32))
+                    .font(.system(size: heroIconPointSize))
+                    // [AUDIO-REACTIVE-HERO] (2026-10-14) The state glyph
+                    // breathes with the live envelope (owner follow-up:
+                    // "the mic in the centre should also be animated when
+                    // speaking") — a `scaleEffect` render transform, NOT
+                    // a font-size change, so the fixed 132pt disc and the
+                    // content VStack's layout never shift. Static 1 under
+                    // Reduce Motion and whenever no real signal flows.
+                    .scaleEffect(iconAudioScale, anchor: .center)
+                    .animation(reduceMotion ? nil
+                               : .spring(response: 0.14, dampingFraction: 0.7),
+                               value: audioEnvelope)
+                    .id(visuals.icon)
+                    .transition(heroIconTransition)
                 // The state caption is essential localized text ("I'm
                 // ready" / Nepali), so it WRAPS to a second line instead
                 // of shrinking: `minimumScaleFactor(0.7)` could render
                 // longer Nepali strings at ~14pt, under the 18pt floor
                 // this audience needs.
-                Text(session.state.buttonText(locale: locale))
-                    .font(DesignTokens.warmFont(size: 20, weight: .bold))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .padding(.horizontal, 12)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Text(session.state.buttonText(locale: locale))
+                        .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .bold))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 22)
+                }
             }
         }
         .foregroundStyle(.white)
+        // [HERO-MOTION] The transition's animation context: placed on the
+        // VStack (OUTSIDE the loading if/else, per the transition
+        // placement rule) so the swap is driven by the icon change
+        // itself. Reduce Motion passes nil — an instant swap, and the
+        // per-state glyph/color still render correctly.
+        .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.7),
+                   value: visuals.icon)
     }
 
     /// [P0-2] The in-hero loading label for the current stage.
@@ -754,22 +1221,24 @@ struct TalkButton: View {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 18, weight: .semibold))
                 Text(TalkReadinessCopy.failureRecovery(locale: locale))
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                 weight: .semibold))
             }
-            .foregroundStyle(DesignTokens.accent)
+            .foregroundStyle(appearance.colors.accentForeground)
             .padding(.horizontal, 18)
             .frame(minHeight: 52)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
+            .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
     }
 
     /// Only exceptional information lives outside the button: reset-hold
-    /// guidance, an actionable startup failure, or voice-off/error detail.
-    /// Normal ready/listening/speaking labels already live inside the hero.
-    private var statusTextLine: String {
+    /// guidance or an actionable startup failure. Steady-state status
+    /// (error/stopped captions) renders in the stage's FIXED sub-hero
+    /// slot ([HERO-SIZE], 2026-10-14) so a state flip never changes the
+    /// layout height around the hero — the owner's "button size must be
+    /// consistent across states" rule.
+    private var transientStatusLine: String {
         if isPressingForReset {
             return L10n.str("voice.resetHold", locale: locale)
         }
@@ -777,13 +1246,7 @@ struct TalkButton: View {
         if let failure {
             return TalkReadinessCopy.failureExplanation(failure, locale: locale)
         }
-        switch session.state {
-        case .error, .stopped:
-            return statusOverride ?? session.state.statusText(locale: locale)
-        case .idle, .listening, .transcribing, .understanding,
-             .speaking, .awaitingConfirmation:
-            return ""
-        }
+        return ""
     }
 
     /// Long-press tracking (called on main): arms the hold hint + ring
@@ -826,8 +1289,8 @@ struct TalkButton: View {
                     .stroke(Color.white, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                     .rotationEffect(.degrees(-90))
             }
-            .frame(width: DesignTokens.talkButtonDiameter + 16,
-                   height: DesignTokens.talkButtonDiameter + 16)
+            .frame(width: heroDiameter + 16,
+                   height: heroDiameter + 16)
         }
     }
 
@@ -835,29 +1298,195 @@ struct TalkButton: View {
     /// text and color still carry meaning when Reduce Motion is enabled.
     private var brandGlassRings: some View {
         ZStack {
+            Color.clear
+                .frame(width: heroDiameter + 26, height: heroDiameter + 26)
+                .appSurface(role: .control, cornerRadius: (heroDiameter + 26) / 2)
             Circle()
-                .fill(DesignTokens.brandBlush.opacity(0.16))
-                .frame(width: DesignTokens.talkButtonDiameter + 52,
-                       height: DesignTokens.talkButtonDiameter + 52)
-                .overlay(Circle().stroke(.white.opacity(0.78), lineWidth: 2))
-            Circle()
-                .stroke(DesignTokens.brandBlush.opacity(0.72), lineWidth: 2)
-                .frame(width: DesignTokens.talkButtonDiameter + 26,
-                       height: DesignTokens.talkButtonDiameter + 26)
+                .stroke(appearance.colors.brandBlush.opacity(0.72), lineWidth: 2)
+                .frame(width: heroDiameter + 52, height: heroDiameter + 52)
         }
-        .shadow(color: DesignTokens.brandBlush.opacity(0.55), radius: 18)
+        .shadow(color: appearance.colors.brandBlush.opacity(0.55), radius: 18)
     }
 
     private var breathingRings: some View {
         ZStack {
             Circle()
                 .stroke(heroGlowTint.opacity(breathe ? 0.05 : 0.35), lineWidth: 2)
-                .frame(width: breathe ? DesignTokens.talkButtonDiameter + 90 : DesignTokens.talkButtonDiameter + 20,
-                       height: breathe ? DesignTokens.talkButtonDiameter + 90 : DesignTokens.talkButtonDiameter + 20)
+                .frame(width: breathe ? heroDiameter + 32 : heroDiameter + 20,
+                       height: breathe ? heroDiameter + 32 : heroDiameter + 20)
             Circle()
                 .stroke(heroGlowTint.opacity(breathe ? 0.02 : 0.22), lineWidth: 2)
-                .frame(width: breathe ? DesignTokens.talkButtonDiameter + 130 : DesignTokens.talkButtonDiameter + 40,
-                       height: breathe ? DesignTokens.talkButtonDiameter + 130 : DesignTokens.talkButtonDiameter + 40)
+                .frame(width: breathe ? heroDiameter + 56 : heroDiameter + 40,
+                       height: breathe ? heroDiameter + 56 : heroDiameter + 40)
+        }
+    }
+
+    // MARK: Side-bar waveform ([HERO-MOTION], 2026-10-14)
+
+    /// The side bars' motion family (see `waveformRhythm`). Owner: "the
+    /// side bars should be animated as well … vary amplitude/tempo by
+    /// state family".
+    private enum WaveformRhythm: Equatable {
+        case still
+        case gentle
+        case lively
+    }
+
+    /// Everything one capsule needs to oscillate: its scale bounds and
+    /// the looping animation's tempo + phase.
+    private struct WaveformBarSpec {
+        let low: CGFloat
+        let high: CGFloat
+        let duration: Double
+        let delay: Double
+    }
+
+    /// The single Equatable key every bar's `.animation(_:value:)` watches
+    /// — started (`breathe`, the SAME flag the breathing rings ride) PLUS
+    /// the rhythm. Bundling both means a state-family flip also animates
+    /// through the looping modifier (springboard: the amplitude/tempo
+    /// change glides from the current render value) instead of snapping.
+    /// [AUDIO-REACTIVE-HERO] (2026-10-14) `audioLevel` was added: the
+    /// LIVE band level this particular bar is rendering (0 while not
+    /// audio-driven). Watching it makes each ~30 Hz publish retarget the
+    /// bar's existing animation toward its new level — continuous
+    /// equalizer motion, and because the key is per-bar, adjacent bars
+    /// are fully decoupled.
+    private struct WaveformMotionKey: Equatable {
+        let breathe: Bool
+        let rhythm: WaveformRhythm
+        let audioLevel: Double
+    }
+
+    /// The per-bar key: the family values, plus THIS bar's live band
+    /// level while real signal flows. Each bar watches its own level, so
+    /// one publish retargets five independent animations — the
+    /// adjacent-bars-decoupled equalizer the owner asked for. Without
+    /// live audio every bar's key collapses to the same family value, so
+    /// state flips retarget exactly as before this feature.
+    private func waveformBarKey(index: Int, mirrored: Bool) -> WaveformMotionKey {
+        WaveformMotionKey(breathe: breathe,
+                          rhythm: waveformRhythm,
+                          audioLevel: hasLiveAudio
+                              ? bandLevel(index: index, mirrored: mirrored) : 0)
+    }
+
+    /// Decorative reference waveforms, not fabricated live audio levels.
+    private static let waveformHeights: [CGFloat] = [0.35, 0.65, 1.0, 0.75, 0.45]
+    /// Calm idle tempos (seconds per half-cycle), one per capsule —
+    /// parallel to `waveformHeights`. Deliberately non-uniform: unequal
+    /// durations keep the five bars permanently out of phase without
+    /// anyone driving a clock.
+    private static let waveformGentleTempo: [Double] = [1.90, 1.60, 1.45, 1.75, 2.05]
+    /// Brisk tempos for the listening→speaking families.
+    private static let waveformLivelyTempo: [Double] = [1.05, 0.85, 0.70, 0.95, 1.15]
+
+    /// The scale range + tempo one capsule oscillates over. `weight` leans
+    /// on the published height array so taller bars swing a little
+    /// further — the way a real level meter reads — and `phase` orders
+    /// the stagger (reversed on the right flank, see `waveformSide`).
+    private func waveformBarSpec(index: Int, mirrored: Bool) -> WaveformBarSpec {
+        let weight = 0.5 + 0.5 * Self.waveformHeights[index]
+        let phase = Double(mirrored ? Self.waveformHeights.count - 1 - index : index)
+        switch waveformRhythm {
+        case .still:
+            // No oscillation at all — the bars hold their published
+            // heights exactly (error / stopped / loading / reset hold).
+            return WaveformBarSpec(low: 1, high: 1, duration: 0.35, delay: 0)
+        case .gentle:
+            return WaveformBarSpec(low: 1 - 0.12 * weight,
+                                   high: 1 + 0.16 * weight,
+                                   duration: Self.waveformGentleTempo[index],
+                                   delay: 0.05 * phase)
+        case .lively:
+            return WaveformBarSpec(low: 1 - 0.30 * weight,
+                                   high: 1 + 0.34 * weight,
+                                   duration: Self.waveformLivelyTempo[index],
+                                   delay: 0.03 * phase)
+        }
+    }
+
+    /// The current scale target for one bar. `scaleEffect(y:)` is a render
+    /// transform — the capsule's frame (the only layout the fixed overlay
+    /// depends on) never changes, so the hero geometry stays constant.
+    /// [AUDIO-REACTIVE-HERO] With LIVE signal the target is this bar's
+    /// band level mapped across the equalizer range — the "CD player
+    /// equalizer, based on music" the owner asked for; adjacent bars
+    /// decouple because each reads its own band. The branch deliberately
+    /// comes before the breathe/parity oscillation: real meter data, not
+    /// a random walk, while sound flows. `.still` rhythm (error/stopped/
+    /// loading/reset-hold families) keeps holding the published heights
+    /// even if a release tail is still decaying — the settled state
+    /// presentation wins.
+    ///
+    /// Fallback (no live signal): adjacent bars move in OPPOSITE
+    /// directions (even indices rise while odd indices fall, then swap)
+    /// — a real meter never pumps in unison, and this keeps the
+    /// antiphase permanent instead of only during the first cycle. The
+    /// spec's `.delay` stays short because SwiftUI applies a repeating
+    /// animation's delay on EVERY cycle: it is there to break the
+    /// initial lockstep, not to gate the loop.
+    private func waveformBarScale(index: Int, mirrored: Bool) -> CGFloat {
+        guard !reduceMotion else { return 1 }
+        if hasLiveAudio, waveformRhythm != .still {
+            let level = CGFloat(bandLevel(index: index, mirrored: mirrored))
+            return Self.audioBarMinScale
+                + (Self.audioBarMaxScale - Self.audioBarMinScale) * level
+        }
+        let spec = waveformBarSpec(index: index, mirrored: false)
+        let risesFirst = index.isMultiple(of: 2)
+        if breathe { return risesFirst ? spec.high : spec.low }
+        return risesFirst ? spec.low : spec.high
+    }
+
+    /// The looping animation for one bar: easeInOut forever, per-index
+    /// tempo + phase. `nil` under Reduce Motion — the static fallback is
+    /// every bar at its exact published height — and a plain settle ease
+    /// while `.still` (so a flip back to error/stopped settles smoothly
+    /// instead of restarting a loop). [AUDIO-REACTIVE-HERO] With LIVE
+    /// signal: a short easeOut to each new band level, fired by that
+    /// bar's own key change. Held brief on purpose — the analyzer's
+    /// attack/release ballistics already do the musical smoothing, so a
+    /// longer view curve would double-smooth and visibly lag the audio;
+    /// each ~30 Hz publish retargets the in-flight ease from wherever
+    /// the bar currently renders.
+    private func waveformBarAnimation(index: Int, mirrored: Bool) -> Animation? {
+        guard !reduceMotion else { return nil }
+        guard waveformRhythm != .still else {
+            return .easeInOut(duration: 0.35)
+        }
+        if hasLiveAudio {
+            return .easeOut(duration: 0.12)
+        }
+        let spec = waveformBarSpec(index: index, mirrored: mirrored)
+        return .easeInOut(duration: spec.duration)
+            .repeatForever(autoreverses: true)
+            .delay(spec.delay)
+    }
+
+    /// The two static capsule groups flanking the disc, animated per the
+    /// owner's "the side bars should be animated as well" — and, with
+    /// live signal, per "the side bars should move like a CD player's
+    /// equalizer - not random but based on music". Each capsule scales
+    /// around its published height
+    /// (`heroDiameter * 0.28 * waveformHeights[index]`) via
+    /// `scaleEffect(y:)` — a transform, never a relayout. TWO drivers,
+    /// picked per frame by `hasLiveAudio`: real band levels via the
+    /// per-bar `.animation(value:)` key (each publish retargets), or the
+    /// fallback oscillation riding the SAME `breathe` flag the breathing
+    /// rings use (one animation driver, per-bar curves via
+    /// `waveformBarSpec`). Everything stays inside the existing overlay
+    /// frame.
+    private func waveformSide(mirrored: Bool) -> some View {
+        HStack(alignment: .center, spacing: 3) {
+            ForEach(Self.waveformHeights.indices, id: \.self) { index in
+                Capsule()
+                    .fill(appearance.colors.accentForeground.opacity(appearance.skin.isDark ? 0.75 : 0.48))
+                    .frame(width: 3, height: heroDiameter * 0.28 * Self.waveformHeights[index])
+                    .scaleEffect(y: waveformBarScale(index: index, mirrored: mirrored), anchor: .center)
+                    .animation(waveformBarAnimation(index: index, mirrored: mirrored),
+                               value: waveformBarKey(index: index, mirrored: mirrored))
+            }
         }
     }
 }
@@ -1029,9 +1658,41 @@ struct ConfirmationChipSpeech {
     /// Whether the chip may follow up with the generic catalog line. The
     /// medication challenge is the only flow left that needs it.
     static func speaksGenericYesNo(_ flags: Flags) -> Bool { !flags.speaksForItself }
+
+    /// [APP-UI-CONFIRM] (2026-10-14) The chip LABEL keys for the flow that
+    /// currently owns the window. The launch flow renames its chips —
+    /// "Open" / "Cancel" (`launcher.chipOpen` / `launcher.chipCancel`,
+    /// en+ne) — for the owner's report, verbatim: the curated-bar launch
+    /// "shows english dialog confirmation. change that to also use custom
+    /// UI instead of native using corresponding components." Under a
+    /// localized prompt ("Should I open ह्वाट्सएप?"), a generic Yes/No pair
+    /// reproduces the native sheet's language problem in our own surface:
+    /// Open/Cancel names the actual actions, and both keys resolve in the
+    /// elder's language.
+    ///
+    /// Every other flow keeps the shared `state.awaitingConfirmation` pair
+    /// — a dose challenge says Yes/No because the question is about
+    /// taking medicine, not opening anything. The launch rename applies
+    /// only when the launch OWNED the window by the same priority the
+    /// chip action and `handleConfirmationResponse` apply: a higher-
+    /// priority flow that is pended at the same time (call, navigation
+    /// walk, calendar write) takes the answer, so the label must promise
+    /// what the tap will actually do. Pure, so the mapping is testable
+    /// without a screen, and paired with the action's own flags read so
+    /// label and behaviour cannot diverge.
+    static func chipKeys(_ flags: Flags) -> (yes: String, no: String) {
+        let launchOwnsWindow = flags.isAppLaunch
+            && !flags.isCall
+            && !flags.isNavigationDisambiguation
+            && !flags.isCalendarEvent
+        return launchOwnsWindow
+            ? ("launcher.chipOpen", "launcher.chipCancel")
+            : ("state.awaitingConfirmation.chipYes", "state.awaitingConfirmation.chipNo")
+    }
 }
 
 struct ConfirmationChips: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
     let titleKey: String
 
@@ -1041,28 +1702,44 @@ struct ConfirmationChips: View {
                 HStack(spacing: 8) {
                     Image(systemName: "questionmark.circle.fill")
                         .font(.system(size: 24))
-                        .foregroundColor(DesignTokens.stateUnderstanding)
+                        .foregroundColor(appearance.statusForeground(DesignTokens.stateUnderstanding))
                     Text(LocalizedStringKey(titleKey))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .bold))
+                        .foregroundColor(appearance.colors.textSecondary)
                 }
                 if let prompt = coordinator.lastAssistantReply, !prompt.isEmpty {
                     Text(prompt)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                        .foregroundColor(DesignTokens.textPrimary)
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                        .foregroundColor(appearance.colors.textPrimary)
                         .multilineTextAlignment(.center)
                 }
             }
+            // [APP-UI-CONFIRM] The labels follow the OWNING flow: the app
+            // launch asks in Open/Cancel (localized), everything else in
+            // the shared yes/no pair — see `ConfirmationChipSpeech.chipKeys`
+            // for why, and for the priority rule the rename respects.
             HStack(spacing: 16) {
-                chip(key: "state.awaitingConfirmation.chipYes", isYes: true)
-                chip(key: "state.awaitingConfirmation.chipNo", isYes: false)
+                let keys = ConfirmationChipSpeech.chipKeys(flowFlags)
+                chip(key: keys.yes, isYes: true)
+                chip(key: keys.no, isYes: false)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .appSurface()
+    }
+
+    /// The flow flags, read exactly as the chip ACTION reads them (one
+    /// property, so label and action can never read different states).
+    /// Read at render time for the labels and again at tap time inside
+    /// the action — the second read is the one that decides the answer,
+    /// because the pends can have changed since the frame was drawn.
+    private var flowFlags: ConfirmationChipSpeech.Flags {
+        ConfirmationChipSpeech.Flags(
+            isCall: coordinator.isAwaitingCallConfirmation,
+            isNavigationDisambiguation: coordinator.isAwaitingNavigationDisambiguation,
+            isCalendarEvent: coordinator.isAwaitingCalendarEventConfirmation,
+            isAppLaunch: coordinator.isAwaitingAppLaunchConfirmation)
     }
 
     private func chip(key: String, isYes: Bool) -> some View {
@@ -1083,11 +1760,7 @@ struct ConfirmationChips: View {
             // opening. `ConfirmationChipSpeech` mirrors
             // `CommandRouter.route`'s `speaksItsOwnYesNo`; the two must
             // move together.
-            let flags = ConfirmationChipSpeech.Flags(
-                isCall: coordinator.isAwaitingCallConfirmation,
-                isNavigationDisambiguation: coordinator.isAwaitingNavigationDisambiguation,
-                isCalendarEvent: coordinator.isAwaitingCalendarEventConfirmation,
-                isAppLaunch: coordinator.isAwaitingAppLaunchConfirmation)
+            let flags = flowFlags
             let response: ConfirmationResponse = isYes ? .yes : .no
             coordinator.handleConfirmationResponse(response)
             if ConfirmationChipSpeech.speaksGenericYesNo(flags) {
@@ -1095,14 +1768,15 @@ struct ConfirmationChips: View {
             }
         } label: {
             Text(LocalizedStringKey(key))
-                .font(DesignTokens.warmFont(size: 24, weight: .bold))
-                .foregroundColor(isYes ? DesignTokens.accent : DesignTokens.textSecondary)
+                .font(DesignTokens.warmFont(size: appearance.typography.scaled(24), weight: .bold))
+                .foregroundColor(isYes ? appearance.colors.accentForeground : appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity)
-                .frame(height: DesignTokens.chipHeight)
-                .background(DesignTokens.card)
+                .frame(minHeight: DesignTokens.chipHeight)
+                .padding(.vertical, 8)
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
                 .overlay(
                     RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
-                        .stroke(isYes ? DesignTokens.accent : DesignTokens.textSecondary,
+                        .stroke(isYes ? appearance.colors.accentForeground : appearance.colors.textSecondary,
                                 lineWidth: 2)
                 )
         }
@@ -1129,6 +1803,33 @@ struct ConfirmationChips: View {
 /// while speaking kept its ring, and each view had to be edited in
 /// lockstep to keep a state's look consistent. Nothing below branches on
 /// state equality; views read this table only.
+extension TalkStageVisuals {
+    /// [HERO-STATES] (2026-10-13) The hero's resolved visual — the one
+    /// mapping every stage element derives from. The speaking overlay
+    /// comes first: while any reply audio plays the hero shows the
+    /// speaking family, whatever the machine state (the slot window
+    /// stays in `.awaitingSlotAnswer` through its probe's speech, and
+    /// the resolved frame can leave the session `.idle` while the reply
+    /// still speaks — both previously showed the wrong icon). The
+    /// chip-owned confirmation window is exempt: its chips stay up
+    /// while the challenge speaks. Then the slot window's capture
+    /// truth: a live auto-listen capture shows the listening family; a
+    /// closed-capture window (the remaining 45 s) falls back to the
+    /// idle talk affordance instead of a false "listening". Everything
+    /// else is the raw state mapping, unchanged.
+    static func resolved(state: VoiceSessionState,
+                         isSpeaking: Bool,
+                         slotAnswerCaptureActive: Bool) -> TalkStageVisuals {
+        if isSpeaking, state != .awaitingConfirmation {
+            return VoiceSessionState.speaking.talkVisuals
+        }
+        if state == .awaitingSlotAnswer, !slotAnswerCaptureActive {
+            return VoiceSessionState.idle.talkVisuals
+        }
+        return state.talkVisuals
+    }
+}
+
 struct TalkStageVisuals {
     /// SF Symbol inside the hero (state icons — spec §3.3).
     let icon: String
@@ -1222,6 +1923,24 @@ extension VoiceSessionState {
                                     showsHalo: false,
                                     showsHintCarousel: false,
                                     isConfirmation: true,
+                                    isError: false)
+        case .awaitingSlotAnswer:
+            // T-135 (FR-MTC-014): the slot answer window. The probe has
+            // been (or is being) spoken and the machine waits for the
+            // elder's spoken answer, so the hero mirrors the LISTENING
+            // family — "go ahead, I'm listening" — with the ear, live
+            // motion and halo. Deliberately NOT the yes/no chips: this
+            // window has no confirm affordance and is answered by voice
+            // (NFR-MTC-009), and deliberately no new copy — the dialogue
+            // probe's own strings ride the TTS reply lane.
+            return TalkStageVisuals(icon: "ear.fill",
+                                    tint: DesignTokens.stateListening,
+                                    captionKey: "state.listening.button",
+                                    statusKey: "state.listening.status",
+                                    pulses: true,
+                                    showsHalo: true,
+                                    showsHintCarousel: false,
+                                    isConfirmation: false,
                                     isError: false)
         case .error:
             return TalkStageVisuals(icon: "exclamationmark",

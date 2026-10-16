@@ -60,6 +60,176 @@ final class ModelCatalogLanguageTests: XCTestCase {
         }
     }
 
+    /// The live-translate tier's head model (round-2b EN→NE, 2026-09-18) is
+    /// tagged for the language it translates INTO — and it is deliberately
+    /// not an assistant-brain picker choice, which is the reason it carries
+    /// a tag no picker consumes.
+    func testTheTranslationBrainIsTaggedNepaliAndNotOfferedAsABrain() {
+        let entry = ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR2bQ8)
+        XCTAssertEqual(entry?.languages, ["ne"],
+                       "it translates INTO Nepali — [\"ne\"]")
+        XCTAssertEqual(entry?.kind, .llamaBase)
+        XCTAssertFalse(ModelCatalog.availableBrainEntries.contains {
+            $0.id == ModelCatalog.nmtEnNeQwen17bR2bQ8
+        })
+        // The tag has to be one the language machinery understands, and the
+        // tier's target language is the one it must match.
+        XCTAssertTrue(LanguageModelResolver.isLanguageCompatible(entry!,
+                                                                language: AppLanguage.nepali.rawValue))
+    }
+
+    /// [TRANSLATION-MODEL-ROW] (2026-09-18) The AI-models screen's
+    /// translation section offers exactly the tier's head, through the
+    /// catalog's own list — not a literal in the view.
+    ///
+    /// Two things are pinned here, and they are the two ways this row can
+    /// go wrong: an offered id with no catalog entry can never be installed
+    /// (the row would render a Download that cannot exist), and an offered
+    /// id that is not the tier's head leaves the row fetching a model the
+    /// tier does not lead with — the download would land and change nothing.
+    /// The assistant brains behind the translation rungs are deliberately NOT
+    /// offered: they have rows of their own in the brain section.
+    ///
+    /// [TEMPORARY OFFER] (Q6-vs-Q8 and Q6-vs-Q4 ARM-kernel A/Bs) Two entries
+    /// are extra rows for the duration of those runs — the round-4 Q8_0 (the
+    /// ceiling, for the earlier run) and the round-4 Q4_K_M (the arm the
+    /// owner's phone can actually hold, for the current one) — so a single
+    /// build can fetch both arms of either comparison. Each revert is deleting
+    /// that id from the catalog's list; the expectation below is the only
+    /// assertion that has to move with it.
+    func testTheOfferedTranslationRowsAreExactlyTheTiersHead() {
+        let offered = ModelCatalog.availableTranslationEntries.map(\.id)
+        XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR8Q8,
+                                 ModelCatalog.nmtEnNeQwen17bR7Q8,
+                                 ModelCatalog.nmtEnNeQwen17bR4Q6,
+                                 ModelCatalog.nmtEnNeQwen17bR4Q4,
+                                 ModelCatalog.nmtEnNeQwen17bR4Q8],
+                       "the tier's shipped head leads, then the rungs behind it "
+                       + "— the Q8 it superseded (kept offered for a device "
+                       + "mid-upgrade), the Q6_K (the standard-class fallback a "
+                       + "phone that cannot hold a Q8 translates on), then the "
+                       + "two temporary A/B offers, the Q4_K_M and the Q8 "
+                       + "ceiling")
+        // Round 8 (2026-09-22) re-decided which artifact that head is: the
+        // withconv Q8_0 is strictly better than the round-7 head at the same
+        // file size (sign 85.3% against 82.4%, safety probe 12/12 on both,
+        // conversational 72.2% against 66.7%) and the verdict promoted it. The
+        // row moved with the verdict, which is the property this assertion
+        // guards — an offered row that did NOT move would leave a household
+        // downloading an artifact the record no longer stands behind.
+        XCTAssertEqual(LiveTranslateConfig.default.brainTranslationModelIDs.first,
+                       offered.first,
+                       "the tier leads with the quant the row offers")
+        for id in offered {
+            XCTAssertNotNil(ModelCatalog.entry(for: id),
+                            "\(id.rawValue) is offered but not in the catalog")
+        }
+        // One model, one row: nothing offered here may also be offered by
+        // the brain picker (its rows would duplicate in the brain section).
+        let brainIDs = Set(ModelCatalog.availableBrainEntries.map(\.id))
+        XCTAssertTrue(Set(offered).isDisjoint(with: brainIDs),
+                      "the translation row is not an assistant-brain choice")
+    }
+
+    /// [MODEL-KIND] (2026-09-21 review) The filename family IS the
+    /// classification: every `.llamaBase` artifact exported for the tier's
+    /// translation contract (`translate-en-ne-qwen17b-*.gguf`) must be in
+    /// `allTranslationEntries`, and nothing else may be.
+    ///
+    /// This is the regression a round-4 export exposed: it became the tier's
+    /// head without being added to the hand-list, so the artifact the
+    /// translation row offered classified as a BRAIN — `brainEntries` is
+    /// derived by subtraction, so the head grew a second row on the brain card
+    /// (the two-places hazard both lists exist to prevent), and a picker that
+    /// filters the ladder by translation-kind lost the head entirely. The
+    /// verdict has since moved the head from the round-4 Q5 to the Q6_K, which
+    /// is the same trap one export later. Held by family rather than by
+    /// re-listing the ids, so the next export fails here instead of on a
+    /// device.
+    func testEveryTranslationArtifactIsClassifiedAsOne() {
+        let family = "translate-en-ne-qwen17b-"
+        let byFamily = ModelCatalog.entries(kind: .llamaBase)
+            .filter { $0.filename.hasPrefix(family) }
+            .map(\.id)
+        XCTAssertFalse(byFamily.isEmpty,
+                       "the family must exist — without it this test proves nothing")
+
+        let classified = ModelCatalog.allTranslationEntries.map(\.id)
+        XCTAssertEqual(Set(classified), Set(byFamily),
+                       "the list and the filename family are the same set")
+        // The head, asked of the config rather than spelled here: the verdict
+        // moves it, and this test must not have to move with it.
+        XCTAssertEqual(classified.first, ModelCatalog.availableTranslationEntries.first?.id,
+                       "the list leads with the row the translation section offers")
+        XCTAssertEqual(classified.first,
+                       LiveTranslateConfig.default.brainTranslationModelIDs.first,
+                       "…which is the quant the tier leads with")
+
+        for id in byFamily {
+            XCTAssertTrue(ModelCatalog.isTranslationModel(id),
+                          "\(id.rawValue) is exported for the translation contract")
+            XCTAssertFalse(ModelCatalog.brainEntries.contains { $0.id == id },
+                           "a translation artifact is never a brain-card row")
+        }
+
+        // And the ladder's fallback tail is deliberately the other way round:
+        // those are assistant brains the tier may resolve, not translation
+        // models — which is why the named path's check is membership in the
+        // tier's own translation ladder and not a kind lookup.
+        XCTAssertFalse(ModelCatalog.isTranslationModel(ModelCatalog.intentQwen4BS43))
+        XCTAssertFalse(ModelCatalog.isTranslationModel(ModelCatalog.intentQwen4BSlotCanon))
+    }
+
+    /// The row's title is copy, so it lives in the string table like every
+    /// other row's — in both shipped languages. The English value is the
+    /// catalog's own `displayName` verbatim; a row that drifted from it
+    /// would read differently in Settings than in the catalog's docs.
+    func testTheTranslationRowIsNamedInBothLanguages() {
+        // Five entries need copy, not one: the translation row that is
+        // OFFERED (the head), the round-7 Q8 it superseded — kept offered for a
+        // device mid-upgrade, and marked superseded by the round-8 head so a
+        // household reading two Qwen rows knows which one to delete — the Q6_K
+        // rung below them, the Q4_K_M ablation offer that rides beside them for
+        // the current A/B (an offered row in every sense, so a Nepali build
+        // must not print its raw id), and the older superseded artifact a
+        // device that upgraded still holds. The installed-hidden row renders
+        // beside the new ones, and the names must read as different rows.
+        //
+        // The round-8 Q8's `model.name.<id>` row lands with this swap
+        // (2026-09-22), and the round-7 row is reworded with it: every offered
+        // row is named here, and the Q5 is still pinned as the last row because
+        // a round-4 tester's device holds it and renders it. All five strings
+        // are the catalog's own `displayName` verbatim, in both shipped
+        // languages.
+        let entries = [ModelCatalog.nmtEnNeQwen17bR8Q8,
+                       ModelCatalog.nmtEnNeQwen17bR7Q8,
+                       ModelCatalog.nmtEnNeQwen17bR4Q6,
+                       ModelCatalog.nmtEnNeQwen17bR4Q4,
+                       ModelCatalog.nmtEnNeQwen17bR4Q5]
+            .compactMap { ModelCatalog.entry(for: $0) }
+        XCTAssertEqual(entries.count, 5, "all five translation entries resolve")
+        let en = Locale(identifier: "en")
+        let ne = Locale(identifier: "ne-NP")
+        for entry in entries {
+            let key = "model.name.\(entry.id.rawValue)"
+            XCTAssertNotEqual(L10n.str(key, locale: en), key,
+                              "\(key) must have an English value")
+            XCTAssertNotEqual(L10n.str(key, locale: ne), key,
+                              "\(key) must have a Nepali value")
+            XCTAssertEqual(entry.displayName(locale: en), entry.displayName,
+                           "the English string IS the catalog displayName")
+            XCTAssertNotEqual(entry.displayName(locale: ne), entry.displayName,
+                              "the Nepali row must not fall back to English")
+        }
+        // The names must DIFFER: identical copy on two rows is exactly the
+        // "which one do I delete?" the superseded rename exists to prevent.
+        // Set-wise, because five rows can collide in more than one pair.
+        XCTAssertEqual(Set(entries.map(\.displayName)).count, entries.count,
+                       "the head, the two rungs behind it, the ablation offer "
+                       + "and the superseded artifact must not read as the "
+                       + "same row")
+    }
+
     func testStockQwenAndLlamaBrainsAreLanguageNeutral() {
         let neutral: [ModelID] = [
             ModelCatalog.qwen3_1_7BInstruct,
@@ -178,6 +348,26 @@ final class ModelCatalogLanguageTests: XCTestCase {
                               "\(id.rawValue) must serve \(code)")
             }
         }
+    }
+
+    // MARK: - The catalog stays device-blind ([MODEL-WARDEN] 2026-09-18)
+
+    /// The language default is a statement about LANGUAGE, never about the
+    /// phone: the ne brain default is the 4B even though
+    /// `ModelBudgetPolicy.standard` refuses it beside a warm ANE STT on a
+    /// 6 GB device. That is deliberate, not an oversight — the memory-aware
+    /// question is `LanguageModelResolver.resolvedAutomaticPick(…)`, which
+    /// takes THIS answer as its first rung and steps down the ladder from
+    /// there. Moving a device probe into the catalog would make one lookup
+    /// answer differently on two phones and break the picker ordering this
+    /// file pins from `[DEFAULTS 2026-09-16]`.
+    func testTheDefaultEntryStaysDeviceBlind() {
+        XCTAssertEqual(ModelCatalog.defaultEntry(kind: .llamaBase, language: "ne")?.id,
+                       ModelCatalog.intentQwen4BSlotCanon,
+                       "the ne brain default is unchanged — the policy gate "
+                       + "lives in the resolver, not in the catalog lookup")
+        XCTAssertEqual(ModelCatalog.defaultEntry(kind: .whisperBase, language: "ne")?.id,
+                       ModelCatalog.whisperKitMediumV6)
     }
 
     func testKindsWithoutAnExplicitPickStillResolve() {

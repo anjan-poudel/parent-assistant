@@ -24,6 +24,26 @@ final class CommandRouterKeywordIntentTests: XCTestCase {
         var appLaunchRequests: [(appID: String, confidence: Double?)] = []
         var appLaunchLine = "के खोल्ने हो?"
         var genericReplies: [String] = []
+        /// Everything the router handed to the speaker, in order — the
+        /// `speak` path is asynchronous (the reply speak lane), so the
+        /// synchronous `noteAssistantSpoke` mark is what a test can read.
+        var assistantSpoke: [String] = []
+        /// [MED-PHOTO] The live medication schedule the router reads its
+        /// vocabulary from, and the entries a matched key resolves back to.
+        var medicationEntries: [MedicationEntry] = []
+        /// Answers `showMedicationPhoto` — the caption when an entry has a
+        /// photo, the honest line when it does not, nil when the entry is
+        /// gone. Scripted here because the line is the coordinator's to
+        /// compose; these tests pin what the STAGE does with it.
+        var medicationPhotoLine: String?
+        var medicationPhotoRequests: [UUID] = []
+
+        var medicationVoiceEntries: [MedicationEntry] { medicationEntries }
+
+        func showMedicationPhoto(entryId: UUID) -> String? {
+            medicationPhotoRequests.append(entryId)
+            return medicationPhotoLine
+        }
 
         func requestAppLaunch(appID: String, confidence: Double?) -> String {
             appLaunchRequests.append((appID, confidence))
@@ -37,8 +57,8 @@ final class CommandRouterKeywordIntentTests: XCTestCase {
         func handleConfirmationResponse(_ response: ConfirmationResponse) {}
         func noteSpeakingStarted() {}
         func noteSpeakingEnded() {}
-        func noteAssistantSpoke(_ text: String) {}
         func noteGenericReply(_ text: String) { genericReplies.append(text) }
+        func noteAssistantSpoke(_ text: String) { assistantSpoke.append(text) }
         func addVoiceReminder(title: String, time: DateComponents) {}
         func requestCallConfirmation(contactQuery: String?, callType: String?,
                                      requestedApp: String?,
@@ -385,6 +405,167 @@ final class CommandRouterKeywordIntentTests: XCTestCase {
         XCTAssertTrue(opener.opened.isEmpty,
                       "alarm/timer vocabulary carries no relaxed keyword set — the table can never claim it")
         XCTAssertTrue(keywordMatchEvents(bus).isEmpty)
+    }
+
+    // MARK: - The medication photo query ([MED-PHOTO] 2026-09-17)
+
+    private func makeMedicationEntry(name: String,
+                                     purpose: String? = nil,
+                                     photos: Int = 0) -> MedicationEntry {
+        MedicationEntry(
+            id: UUID(),
+            userProfileId: UUID(),
+            medicationName: name,
+            doseDescription: "One tablet",
+            scheduleTimes: [DateComponents(hour: 8, minute: 0)],
+            frequency: .daily,
+            ackWindowMinutes: 5,
+            maxRefireCount: 5,
+            escalationWindowMinutes: 60,
+            doubleDoseWindowHours: 4,
+            photoVerificationEnabled: false,
+            confirmationDescription: nil,
+            purpose: purpose,
+            visualAids: (0..<photos).map { VisualAid(filename: "photo-\($0).jpg") }
+        )
+    }
+
+    /// One medicine, asked about by NAME: the stage resolves the matched key
+    /// back to the entry and hands that entry to the coordinator's seam,
+    /// whose caption is what is spoken. The turn ends — the photo screen is
+    /// the answer, not a preamble to something else.
+    func testMedicationPhotoQueryPresentsTheEntryAndSpeaksTheCaption() {
+        let coordinator = MockCoordinator()
+        let entry = makeMedicationEntry(name: "अम्लोडिपिन", photos: 1)
+        coordinator.medicationEntries = [entry]
+        coordinator.medicationPhotoLine = "रक्तचापको औषधि — अम्लोडिपिन"
+        let (router, bus) = makeRouter(coordinator)
+        let utterance = "अम्लोडिपिन कस्तो छ?"
+
+        let result = router.route(transcript: utterance)
+
+        XCTAssertEqual(coordinator.medicationPhotoRequests, [entry.id],
+                       "the matched key must resolve back to the live entry, not to a copy")
+        XCTAssertEqual(coordinator.genericReplies, ["रक्तचापको औषधि — अम्लोडिपिन"],
+                       "the coordinator's caption is what is carded — the stage composes none of its own")
+        XCTAssertEqual(coordinator.assistantSpoke, ["रक्तचापको औषधि — अम्लोडिपिन"])
+        XCTAssertEqual(result, .unrecognised(transcript: utterance))
+        let events = keywordMatchEvents(bus)
+        XCTAssertEqual(events.count, 1, "a relaxed claim must be observable exactly once")
+        XCTAssertEqual(events.first?.metadata["domain"], "medicationPhoto")
+        XCTAssertEqual(events.first?.metadata["matched_keys"], "कस्तो छ",
+                       "only the rule's own lexeme — a medication key is never logged")
+    }
+
+    /// ...and by what it is FOR. The vocabulary is the live schedule's own
+    /// (`MedicationVoiceVocabulary.voiceKeys`), and the resolution is the
+    /// same derivation read backwards — proven here by asking for a
+    /// medicine that is never named in the utterance.
+    func testMedicationPhotoQueryResolvesAMedicineByItsPurposeWord() {
+        let coordinator = MockCoordinator()
+        let entry = makeMedicationEntry(name: "Amlodipine", purpose: "bloodPressure", photos: 2)
+        coordinator.medicationEntries = [entry]
+        coordinator.medicationPhotoLine = "रक्तचापको औषधि — Amlodipine"
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "रक्तचापको औषधि कस्तो छ?")
+
+        XCTAssertEqual(coordinator.medicationPhotoRequests, [entry.id],
+                       "a purpose word is a key like any other — the elder need not know the brand name")
+    }
+
+    /// Several medicines answer to the same word: name them, then show the
+    /// first one that actually has a photo. Never a guess at which was
+    /// meant, and never a blank screen for the one that cannot be shown.
+    func testSeveralMatchesSpeakTheNamesThenShowTheFirstWithAPhoto() throws {
+        let coordinator = MockCoordinator()
+        let withoutPhoto = makeMedicationEntry(name: "Amlodipine", purpose: "bloodPressure")
+        let withPhoto = makeMedicationEntry(name: "Nifedipine", purpose: "bloodPressure", photos: 1)
+        coordinator.medicationEntries = [withoutPhoto, withPhoto]
+        coordinator.medicationPhotoLine = "रक्तचापको औषधि — Nifedipine"
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "रक्तचापको औषधि कस्तो छ?")
+
+        let namesLine = try XCTUnwrap(coordinator.genericReplies.first)
+        XCTAssertTrue(namesLine.contains("Amlodipine") && namesLine.contains("Nifedipine"),
+                      "both names are spoken before anything is shown: \(namesLine)")
+        XCTAssertEqual(coordinator.medicationPhotoRequests, [withPhoto.id],
+                       "the first WITH a photo, not simply the first")
+        XCTAssertEqual(coordinator.genericReplies.last, "रक्तचापको औषधि — Nifedipine")
+        XCTAssertEqual(keywordMatchEvents(bus).count, 1)
+    }
+
+    /// A single match with no photo: the coordinator's honest line is
+    /// carded and spoken — never a silent dead end and never a blank
+    /// screen. The line itself is the coordinator's to compose (it is the
+    /// one that knows where photos are added); the stage's job is to make
+    /// sure it survives the turn.
+    func testASingleMatchWithoutAPhotoStillSpeaksTheHonestLine() {
+        let coordinator = MockCoordinator()
+        let entry = makeMedicationEntry(name: "Amlodipine", purpose: "bloodPressure")
+        coordinator.medicationEntries = [entry]
+        coordinator.medicationPhotoLine = L10n.str("meds.photoMissing",
+                                                   locale: Locale(identifier: "ne-NP"))
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "Amlodipine कस्तो छ?")
+
+        XCTAssertEqual(coordinator.medicationPhotoRequests, [entry.id])
+        XCTAssertEqual(coordinator.genericReplies.count, 1)
+        XCTAssertNotEqual(coordinator.genericReplies.first, "meds.photoMissing",
+                          "the honest line must be resolved catalog copy, not a raw key")
+        XCTAssertEqual(coordinator.assistantSpoke, coordinator.genericReplies,
+                       "carded AND spoken — an elder who is not looking at the screen still hears it")
+    }
+
+    /// The entry is gone by the time the coordinator looks it up (deleted
+    /// on another screen in the pause between the rule and the seam): the
+    /// coordinator returns nothing to say and nothing is claimed.
+    func testAGoneEntryLeavesTheTurnSilent() {
+        let coordinator = MockCoordinator()
+        let entry = makeMedicationEntry(name: "Amlodipine", photos: 1)
+        coordinator.medicationEntries = [entry]
+        // The coordinator's default answer is "nothing to say" — what it
+        // returns for an entry that no longer resolves.
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "Amlodipine कस्तो छ?")
+
+        XCTAssertEqual(coordinator.medicationPhotoRequests, [entry.id])
+        XCTAssertTrue(coordinator.genericReplies.isEmpty,
+                      "nothing to show, nothing said — the stage never invents a line")
+    }
+
+    /// No medicines at all: the vocabulary is empty, so the query never
+    /// fires however it is phrased. A household with no schedule is never
+    /// told about a medicine it does not have.
+    func testThePhotoQueryNeverFiresWithoutAMedicationSchedule() {
+        let coordinator = MockCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        for utterance in ["अम्लोडिपिन कस्तो छ?", "रक्तचापको औषधि कस्तो छ?",
+                          "what does my medicine look like"] {
+            _ = router.route(transcript: utterance)
+        }
+
+        XCTAssertTrue(coordinator.medicationPhotoRequests.isEmpty)
+        XCTAssertTrue(keywordMatchEvents(bus).isEmpty)
+    }
+
+    /// The med-ack safety net runs first, always: an elder confirming a dose
+    /// must never have the turn diverted into a photo question.
+    func testMedicationAckWinsOverThePhotoQuery() {
+        let coordinator = MockCoordinator()
+        let entry = makeMedicationEntry(name: "Amlodipine", photos: 1)
+        coordinator.medicationEntries = [entry]
+        let (router, _) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "मैले औषधि खाएँ, Amlodipine कस्तो छ")
+
+        XCTAssertEqual(result, .acknowledgedMedication)
+        XCTAssertTrue(coordinator.medicationPhotoRequests.isEmpty,
+                      "the safety net claims the utterance before the relaxed table is consulted")
     }
 
     // MARK: - Topic pre-answers: already keywordish (verified — no relaxation needed)

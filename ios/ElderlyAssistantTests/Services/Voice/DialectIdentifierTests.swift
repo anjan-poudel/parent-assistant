@@ -519,11 +519,14 @@ extension DialectIdentifierTests {
 
     // MARK: The shipped rule inventory, pinned
 
-    /// Every shipped rule as (input, expected output, rule id, dialect).
-    /// Written out literally rather than read from the tables so it is an
-    /// INDEPENDENT second source: a rule added, renamed or silently retargeted
-    /// in a JSON file fails `testEveryShippedRuleHasAPinnedInOutPair` instead
-    /// of travelling with the data it would have to disagree with.
+    /// Every shipped rule that fires as its own row, as (input, expected
+    /// output, rule id, dialect) — the bank rows whose variant is claimed
+    /// earlier by another rule live in `pinnedShadowedPairs` below, and the
+    /// four unconfirmed eastern rows in `pinnedInertPairs`. Written out
+    /// literally rather than read from the tables so it is an INDEPENDENT
+    /// second source: a rule added, renamed or silently retargeted in a JSON
+    /// file fails `testEveryShippedRuleHasAPinnedInOutPair` instead of
+    /// travelling with the data it would have to disagree with.
     ///
     /// The dialect is part of the row because a runnable region rule only fires
     /// for the label its table declares — a pinned pair that forgot it would
@@ -537,8 +540,103 @@ extension DialectIdentifierTests {
         // canonical-panregional (dialect-agnostic)
         ("भोली", "भोलि", "pan-drift-bholi", .default),
         ("ह्वाट्सएपमा", "वाट्सएपमा", "pan-loan-whatsapp", .default),
-        // canonical-stt-reductions (dialect-agnostic)
+        // canonical-stt-reductions (dialect-agnostic) — the T-062-attested
+        // reduction plus every row of the measured bank whose variant is
+        // claimed only by its own rule; the 11 rows whose variant is claimed
+        // earlier by another rule are pinned in `pinnedShadowedPairs` below
         ("गर्नुस्", "गर्नुहोस्", "stt-reduction-garnus", .default),
+        ("मायालाई", "माइयालाई", "stt-del-0001", .default),
+        ("सुनुहोस्", "सुन्नुहोस्,", "stt-del-0002", .default),
+        ("वाचसेपमा", "वाट्सएपमा", "stt-del-0003", .default),
+        ("भिटामन", "भिटामिन", "stt-del-0004", .default),
+        ("गर्दै", "गर्देऊ", "stt-del-0005", .default),
+        ("सात", "७", "stt-ins-0001", .default),
+        ("आठ", "८", "stt-ins-0002", .default),
+        ("पाँच", "५", "stt-ins-0003", .default),
+        ("कलगर", "गर", "stt-ins-0004", .default),
+        ("गर्दा", "त,", "stt-ins-0005", .default),
+        ("हान", "हँ,", "stt-ins-0006", .default),
+        ("कल्गर", "गर", "stt-ins-0007", .default),
+        ("साञ्च", "साँझ", "stt-ins-0008", .default),
+        ("तीन", "३", "stt-ins-0009", .default),
+        ("उता", "त", "stt-ins-0010", .default),
+        ("कल्कर", "गर", "stt-ins-0011", .default),
+        ("दिल्लाई", "दिललाई", "stt-ins-0012", .default),
+        ("हुनु पर्छ", "हुनुपर्छ?", "stt-merg-0001", .default),
+        ("क्या मेरा", "क्यामेरा", "stt-merg-0002", .default),
+        ("देखाए दिनुस्", "देखाइदिनुस्", "stt-merg-0003", .default),
+        ("सुन्दै छु", "सुन्दैछु।", "stt-merg-0004", .default),
+        ("रक्त चाप", "रक्तचाप...", "stt-merg-0005", .default),
+        ("अरे !", "अरे,", "stt-merg-0006", .default),
+        ("देखाइ दिनुस्।", "देखाइदिनुस्", "stt-merg-0007", .default),
+        ("नमस्ते कम", "नमस्ते.com", "stt-merg-0008", .default),
+        ("फ्याक्स टाइममा", "फ्याक्स्टाईममा", "stt-merg-0009", .default),
+        ("मामा मामा मामा", "मामामामामामा", "stt-merg-0010", .default),
+        ("हलो !", "Hello,", "stt-merg-0011", .default),
+        ("बजाए दिनु", "बजाइदिनु।", "stt-merg-0012", .default),
+        ("बजाए देऊ", "बजाइदेऊ", "stt-merg-0013", .default),
+        ("बी पी", "BP", "stt-merg-0014", .default),
+        ("हे", "है", "stt-phon-0001", .default),
+        ("प्लिच", "प्लिज", "stt-phon-0002", .default),
+        ("हन", "हँ,", "stt-phon-0003", .default),
+        ("दाइलाई", "दाईलाई", "stt-phon-0004", .default),
+        ("केही", "केहि", "stt-phon-0005", .default),
+        ("मेले", "मैले", "stt-phon-0006", .default),
+        ("नातीलाई", "नातिलाई", "stt-phon-0007", .default),
+        ("पठाइदेऊ", "पठाइदेउ", "stt-phon-0008", .default),
+        ("कर", "गर", "stt-phon-0009", .default),
+        ("माईयालाई", "माइयालाई", "stt-phon-0010", .default),
+        ("मोसम", "मौसम", "stt-phon-0011", .default),
+        ("अली", "अलि", "stt-phon-0012", .default),
+        ("टिभि", "टिभी", "stt-phon-0013", .default),
+        ("माइक्रोवेब", "माइक्रोवेभ", "stt-phon-0014", .default),
+        ("आहो", "अहो,", "stt-phon-0015", .default),
+        ("गति", "कति", "stt-phon-0016", .default),
+        ("मोसमको", "मौसमको", "stt-phon-0017", .default),
+        ("ट्यो", "त्यो", "stt-phon-0018", .default),
+        ("खायो", "खायौ?'", "stt-phon-0019", .default),
+        ("गर्", "गर,", "stt-ext-0001", .default),
+        ("गर्न", "गर", "stt-ext-0002", .default),
+        ("भगवान्", "भगवान,", "stt-ext-0003", .default),
+        ("भन्", "भन,", "stt-ext-0004", .default),
+        ("औषधिक", "औषधि", "stt-ext-0005", .default),
+        ("कलगढ", "कल", "stt-ext-0007", .default),
+        ("भिडियोको", "भिडियो को", "stt-split-0002", .default),
+        ("गर्नुपर्यो", "गर्नु पर्यो", "stt-split-0003", .default),
+        ("गर्नुछ", "गर्नु छ", "stt-split-0007", .default),
+        ("औषधिखान", "औषधि खान", "stt-split-0008", .default),
+        ("कलकर", "कल गर", "stt-split-0009", .default),
+        ("हान्त", "हान त", "stt-split-0011", .default),
+        ("दबाइ", "दवाई", "stt-subst-0001", .default),
+        ("सेमालाई", "सिमालाई", "stt-subst-0002", .default),
+        ("प्लेज", "प्लिज", "stt-subst-0003", .default),
+        ("भेडियो", "भिडियो", "stt-subst-0004", .default),
+        ("यहो", "अहो,", "stt-subst-0005", .default),
+        ("देखाओ", "देखाउ", "stt-subst-0006", .default),
+        ("बोबालाई", "बुबालाई", "stt-subst-0007", .default),
+        ("नातेलाई", "नातिलाई", "stt-subst-0008", .default),
+        ("सन्झाउनु", "सम्झाउनु", "stt-subst-0009", .default),
+        ("बेहान", "बिहान", "stt-subst-0010", .default),
+        ("दायलाई", "दाइलाई", "stt-subst-0011", .default),
+        ("कल", "गर", "stt-subst-0012", .default),
+        ("यौता", "एउटा", "stt-subst-0013", .default),
+        ("गर्छो", "गर्छु", "stt-subst-0014", .default),
+        ("पोरानो", "पुरानो", "stt-subst-0015", .default),
+        ("भेरियो", "भिडियो", "stt-subst-0016", .default),
+        ("भिरियो", "भिडियो", "stt-subst-0017", .default),
+        ("खोन", "फोन", "stt-subst-0018", .default),
+        ("लगाइदे", "लगाइदेऊ", "stt-trunc-0001", .default),
+        ("गर्दे", "गर्देऊ", "stt-trunc-0002", .default),
+        ("पठाइदे", "पठाइदेऊ", "stt-trunc-0003", .default),
+        ("खान", "'खाना", "stt-trunc-0004", .default),
+        ("लिए", "लिएँ", "stt-trunc-0005", .default),
+        ("बजा", "बजाऊ", "stt-trunc-0006", .default),
+        ("देखा", "देखाउ", "stt-trunc-0007", .default),
+        ("थाह", "थाहा", "stt-trunc-0008", .default),
+        ("देखाइदे", "देखाइदेऊ", "stt-trunc-0009", .default),
+        ("लगा", "लगाऊ", "stt-trunc-0011", .default),
+        ("बजाइदे", "बजाइदेऊ", "stt-trunc-0012", .default),
+        ("भने", "भनें...", "stt-trunc-0013", .default),
         // canonical-eastern (conditional, confirmed rows)
         ("गइछ", "गएछ", "east-perfective-gaincha", .eastern),
         ("भइछ", "भएछ", "east-perfective-bhaincha", .eastern),
@@ -556,6 +654,37 @@ extension DialectIdentifierTests {
         ("बेल्का", "east-ortho-belka"),
         ("साझ", "east-ortho-sanjh"),
         ("रात", "east-lex-rat"),
+    ]
+
+    /// The measured STT bank's dead rows: shipped entries whose variant is
+    /// already claimed earlier by another rule, so as a plain in/out pair they
+    /// could never be the single firing rule. First-match-wins order is stage
+    /// order first (orthographic before misSegmentation), then table order
+    /// (pan-regional before the STT bank), then row order within a table — so
+    /// e.g. stt-trunc-0001 (लगाइदे) consumes the front of stt-merg-0015's
+    /// लगाइदे ऊ before the misSegmentation stage ever runs.
+    ///
+    /// Each row pins what ACTUALLY happens: `input` canonicalizes to the
+    /// firing rule's output (`expected`), `ruleID` is the rule that actually
+    /// fires, and `shadowedID` is the dead row this pin stands for — the
+    /// shipped id `testEveryShippedRuleHasAPinnedInOutPair` counts. Shadowed
+    /// rows are a data-owner decision (prune or re-target the bank — not this
+    /// test's to make); until then they must keep shipping and be accounted
+    /// for here. All eleven are dialect-agnostic rows, so no dialect column.
+    private static let pinnedShadowedPairs: [(input: String, expected: String,
+                                              ruleID: String,
+                                              shadowedID: String)] = [
+        ("लगाइदे ऊ", "लगाइदेऊ ऊ", "stt-trunc-0001", "stt-merg-0015"),
+        ("सेमालाई सेमालाई", "सिमालाई सिमालाई", "stt-subst-0002", "stt-merg-0016"),
+        ("भोली", "भोलि", "pan-drift-bholi", "stt-phon-0020"),
+        ("गर्दा", "त,", "stt-ins-0005", "stt-ext-0006"),
+        ("गर्दा", "त,", "stt-ins-0005", "stt-split-0001"),
+        ("कल्कर", "गर", "stt-ins-0011", "stt-split-0004"),
+        ("कल्गर", "गर", "stt-ins-0007", "stt-split-0005"),
+        ("गर्दा", "त,", "stt-ins-0005", "stt-split-0006"),
+        ("कलगर", "गर", "stt-ins-0004", "stt-split-0010"),
+        ("गर्दे", "गर्देऊ", "stt-trunc-0002", "stt-trunc-0010"),
+        ("भने", "भनें...", "stt-trunc-0013", "stt-trunc-0014"),
     ]
 
     /// The safety fixture set: every member of the three frozen classes plus
@@ -635,8 +764,12 @@ extension DialectIdentifierTests {
             for entry in table.entries {
                 XCTAssertNotNil(entry.kind, "unknown kind \(entry.kindRaw)")
                 XCTAssertNotEqual(entry.variant, entry.canonical)
-                XCTAssertGreaterThanOrEqual(entry.evidence.fixtureExamples.count, 2,
-                                            "\(entry.id) needs two cited examples")
+                // Corpus-sourced entries (occurrences >= 1 + corpusRevision)
+                // are justified by their measured evidence; hand-authored
+                // fixture entries must cite two examples. `hasEvidence`
+                // encodes exactly that split (DialectCanonicalizer).
+                XCTAssertTrue(entry.hasEvidence,
+                              "\(entry.id) needs evidence (2 fixtures or corpus occurrences)")
                 for example in entry.evidence.fixtureExamples {
                     XCTAssertTrue(example.contains(entry.variant),
                                   "\(entry.id) fixture does not contain the variant: \(example)")
@@ -650,12 +783,27 @@ extension DialectIdentifierTests {
         let shippedIDs = Set(([tables.orthographic, tables.panRegional, tables.sttReductions]
             .compactMap { $0 } + tables.dialectTables.values)
             .flatMap { $0.entries.map(\.id) })
-        let pinnedIDs = Set(Self.pinnedRulePairs.map(\.ruleID)
-            + Self.pinnedInertPairs.map(\.ruleID))
+        let pairIDs = Set(Self.pinnedRulePairs.map(\.ruleID))
+        let shadowedIDs = Set(Self.pinnedShadowedPairs.map(\.shadowedID))
+        let inertIDs = Set(Self.pinnedInertPairs.map(\.ruleID))
 
-        XCTAssertEqual(shippedIDs, pinnedIDs,
+        XCTAssertEqual(shippedIDs, pairIDs.union(shadowedIDs).union(inertIDs),
                        "a shipped rule was added or removed without a pinned "
-                       + "in/out pair (or an inert-pair row) in this file")
+                       + "in/out pair (or a shadowed or inert row) in this file")
+        // …and every shipped id sits in EXACTLY one group: the three
+        // collections are pairwise disjoint and together count the whole
+        // inventory, so a half-updated bank or a pin copied between groups
+        // fails here instead of quietly double-counting. Totals as of the
+        // measured bank (canonical-stt-reductions.json, 104 rows): 102 + 11
+        // + 4 = 117 shipped ids, the STT bank's 104 = 1 authored + 92
+        // single-application + 11 shadowed.
+        XCTAssertEqual(pairIDs.count + shadowedIDs.count + inertIDs.count,
+                       shippedIDs.count,
+                       "every shipped rule id must appear in exactly one pin group")
+        XCTAssertTrue(pairIDs.isDisjoint(with: shadowedIDs)
+                      && pairIDs.isDisjoint(with: inertIDs)
+                      && shadowedIDs.isDisjoint(with: inertIDs),
+                      "the pin groups must not overlap")
     }
 
     func testShippedRulePairsCanonicalizeExactlyAsPinned() throws {
@@ -679,6 +827,31 @@ extension DialectIdentifierTests {
             // traceable to a reviewable row rather than to "a normalizer".
             XCTAssertEqual(application.dialect,
                            pair.dialect == .default ? nil : pair.dialect)
+        }
+    }
+
+    func testShadowedRulesCanonicalizeToTheRuleThatClaimsThem() throws {
+        let tables = try bundledVariantTables()
+        let policy = widestPolicy()
+
+        // Every shadowed row is an agnostic-bank variant claimed by an
+        // agnostic rule, so `.default` is the grammar they all run under.
+        for pair in Self.pinnedShadowedPairs {
+            let result = canonicalize(pair.input,
+                                      dialect: .default,
+                                      tables: tables,
+                                      policy: policy)
+            XCTAssertEqual(result.canonical, pair.expected,
+                           "\(pair.shadowedID) must canonicalize to the "
+                           + "claiming rule's output")
+            // Set rather than array: stt-merg-0016's variant contains
+            // stt-subst-0002's twice, so the claimant legitimately applies
+            // more than once.
+            XCTAssertEqual(Set(result.applications.map(\.ruleID)), [pair.ruleID],
+                           "\(pair.shadowedID) must be claimed by exactly "
+                           + "\(pair.ruleID)")
+            XCTAssertFalse(result.applications.map(\.ruleID).contains(pair.shadowedID),
+                           "\(pair.shadowedID) is shadowed and must never fire")
         }
     }
 
@@ -743,16 +916,53 @@ extension DialectIdentifierTests {
 
     /// The shipped rules that fail the WIDER keyword-layer invariant. MEASURED
     /// with the real matcher over the committed banks (offline harness,
-    /// 2026-09-15) rather than reasoned: Swift's `String.contains` matches at
-    /// GRAPHEME CLUSTER boundaries, so `वाट्सएप` is found inside `वाट्सएपमा` but
-    /// NOT inside `ह्वाट्सएपमा`, where it starts mid-cluster after the `ह्`
-    /// conjunct. `ह्वाट्सएपमा → वाट्सएपमा` therefore moves an utterance INTO the
-    /// sensitive-call block.
+    /// 2026-09-15; re-run 2026-10-06 over the measured STT bank) rather than
+    /// reasoned: Swift's `String.contains` matches at GRAPHEME CLUSTER
+    /// boundaries, so `वाट्सएप` is found inside `वाट्सएपमा` but NOT inside
+    /// `ह्वाट्सएपमा`, where it starts mid-cluster after the `ह्` conjunct — and
+    /// `कल` is a call phrase that `कलगर` carries but `कल्गर` never matches (the
+    /// `ल्` conjunct is one cluster). The measured set holds BOTH directions:
+    /// `ह्वाट्सएपमा → वाट्सएपमा`, `वाचसेपमा → वाट्सएपमा` and `खोन → फोन` move an
+    /// utterance INTO the call block, `कलगर → गर` and `कल → गर` take one OUT.
     ///
-    /// It ships anyway because the COMPOSITION keeps canonical text away from
-    /// every routing consumer (D-1) — and it is asserted as an exception below,
-    /// so a stale or silently widened set fails rather than passes.
-    private static let keywordLayerExceptions: Set<String> = ["pan-loan-whatsapp"]
+    /// They ship anyway because the COMPOSITION keeps canonical text away from
+    /// every routing consumer (D-1) — and the set is asserted below, so a
+    /// stale or silently widened set fails rather than passes.
+    ///
+    /// One more class appears only in COMPOSITION (same harness): when a
+    /// filler row's spelling sits left of another rewritable token, the
+    /// earlier-ordered right-side match advances the stage's cursor past the
+    /// filler — the engine searches each entry forward from the cursor — and
+    /// stage 2's split then fires on the left-behind text: `कल्गर औषधी खाएँ →
+    /// कल गर औषधि खाएँ`, the split inserting a standalone `कल` the conjunct
+    /// had hidden. The drifting applied ids are the SPLITS; the filler rows
+    /// they shadow (stt-ins-0007, stt-ins-0011) stay ordinary pinned pairs.
+    private static let keywordLayerExceptions: Set<String> = [
+        "pan-loan-whatsapp",
+        "stt-del-0003",
+        "stt-ins-0004",
+        "stt-subst-0012",
+        "stt-subst-0018",
+        "stt-split-0004",
+        "stt-split-0005",
+    ]
+
+    /// Measured composition hazards the carrier rotation must not assert over,
+    /// each pinned to the exact interaction it breaks (offline harness,
+    /// 2026-10-06). stt-ext-0005 rewrites औषधिक onto औषधि; in front of the
+    /// denial forms खाएको छैन / खाएँ / खाए the result newly matches the
+    /// acknowledgement net (`औषधि` + `खाए`) — §4.7 clause (b), the
+    /// `नखाए → खाए` class — and `isLossless` is right to refuse the move. The
+    /// row is a clean pair on its own (pinned above) and a data-owner decision
+    /// in composition (prune or re-target — not this test's to make), so these
+    /// three links are skipped in the rotation and asserted to still drift
+    /// below, so a fixed row fails there instead of the pin going stale. The
+    /// rule's other 57 frozen forms still rotate.
+    private static let pinnedCarrierHazards: [(ruleID: String, frozen: String)] = [
+        ("stt-ext-0005", "खाएको छैन"),
+        ("stt-ext-0005", "खाएँ"),
+        ("stt-ext-0005", "खाए"),
+    ]
 
     /// §4.7's invariant, plus the wider keyword-layer invariant with the
     /// measured exceptions applied to the rules that are allowed to differ.
@@ -771,18 +981,17 @@ extension DialectIdentifierTests {
                            + "\(result.canonical) via \(applied)", line: line)
             return
         }
-        // An excepted rule may only move an utterance INTO the call block. Any
-        // other difference — a clause dropped, a safety clause touched — is a
-        // failure even for an excepted rule.
-        XCTAssertTrue(after.contains(.sensitiveCall),
-                      "the documented exception must actually introduce the call "
-                      + "clause (\(original) -> \(result.canonical))", line: line)
-        XCTAssertTrue(after.subtracting(before).isSubset(of: [.sensitiveCall]),
+        // An excepted rule may move an utterance INTO or OUT of the call
+        // block — the measured set holds both directions — and may change
+        // nothing else: any other clause difference, or a fire that changes no
+        // clause at all, fails even for an excepted rule.
+        XCTAssertNotEqual(after, before,
+                          "the documented exception must actually move the "
+                          + "call clause (\(original) -> \(result.canonical))",
+                          line: line)
+        XCTAssertTrue(after.symmetricDifference(before).isSubset(of: [.sensitiveCall]),
                       "an excepted rule changed more than the call clause: "
                       + "\(before) -> \(after)", line: line)
-        XCTAssertTrue(before.subtracting(after).isEmpty,
-                      "an excepted rule REMOVED a clause: \(before) -> \(after)",
-                      line: line)
     }
 
     func testPinnedSafetyFixturesAreLossless() throws {
@@ -806,13 +1015,24 @@ extension DialectIdentifierTests {
         let tables = try bundledVariantTables()
         let policy = widestPolicy()
         var sawRewrite = false
+        var hazardsSeen: [String] = []
 
         // Carrier sentences place each frozen form next to each shipped rule's
         // surface, so a rule that rewrote ACROSS a frozen form — the hazard the
-        // token boundary exists for — cannot pass by rewriting nothing.
+        // token boundary exists for — cannot pass by rewriting nothing. The
+        // measured composition hazards are skipped in the input-first
+        // orientation only (their reverse carriers are still asserted) and
+        // pinned after the loop instead.
         for frozen in CanonicalSafetyFreeze.substringLists + CanonicalSafetyFreeze.tokenList {
             for pair in Self.pinnedRulePairs {
                 for carrier in ["\(frozen) \(pair.input)", "\(pair.input) \(frozen)"] {
+                    if carrier.hasPrefix(pair.input),
+                       Self.pinnedCarrierHazards.contains(where: {
+                           $0.ruleID == pair.ruleID && $0.frozen == frozen
+                       }) {
+                        hazardsSeen.append("\(pair.ruleID)|\(frozen)")
+                        continue
+                    }
                     let result = canonicalize(carrier, dialect: pair.dialect,
                                               tables: tables, policy: policy)
                     if result.canonical != carrier { sawRewrite = true }
@@ -822,6 +1042,31 @@ extension DialectIdentifierTests {
         }
         XCTAssertTrue(sawRewrite, "carriers must include rewritten text or this "
                       + "test proves nothing")
+        let hazardKeys = Self.pinnedCarrierHazards.map { "\($0.ruleID)|\($0.frozen)" }
+        XCTAssertEqual(hazardsSeen.sorted(), hazardKeys.sorted(),
+                       "every pinned carrier hazard must be hit exactly where "
+                       + "it is measured")
+
+        // The hazards are pinned in the failing direction: if one is fixed or
+        // re-targeted, this fails and its link is deleted so the carrier
+        // rotates again.
+        for hazard in Self.pinnedCarrierHazards {
+            guard let pair = Self.pinnedRulePairs.first(where: {
+                $0.ruleID == hazard.ruleID
+            }) else {
+                XCTFail("pinned carrier hazard names an unpinned rule: "
+                        + hazard.ruleID)
+                continue
+            }
+            let carrier = "\(pair.input) \(hazard.frozen)"
+            let result = canonicalize(carrier, dialect: pair.dialect,
+                                      tables: tables, policy: policy)
+            XCTAssertFalse(CanonicalSafetyFreeze.isLossless(original: carrier,
+                                                            canonical: result.canonical),
+                           "\(hazard.ruleID) no longer drifts §4.7 with "
+                           + "\(hazard.frozen) — delete the link and let the "
+                           + "carrier rotate again")
+        }
     }
 
     func testLosslessnessTracksTheKeywordLayerNotJustTheNet() {
@@ -1258,7 +1503,12 @@ extension DialectIdentifierTests {
 
         let scalars = Array(text.unicodeScalars)
         XCTAssertEqual(String(String.UnicodeScalarView(scalars[4..<12])), "गर्नुहोस")
-        XCTAssertEqual(String(String.UnicodeScalarView(scalars[4..<13])), "गर्नुहोस्")
+        // The halanta-added tail is one scalar longer in the CANONICAL text;
+        // slicing the original at the canonical width grabs the following
+        // space (U+0020) instead of the added virama (U+094D).
+        let canonicalScalars = Array(result.canonical.unicodeScalars)
+        XCTAssertEqual(String(String.UnicodeScalarView(
+            canonicalScalars[4..<13])), "गर्नुहोस्")
     }
 
     func testDigitFoldAndNFCBuiltinsAreRecorded() {
@@ -1312,7 +1562,10 @@ extension DialectIdentifierTests {
         // then abstain for any span a side effect depends on (§4.5).
         let straddle = pair.originalRange(forCanonicalRange: 3..<6)
         XCTAssertTrue(straddle.requiresAbstention)
-        XCTAssertEqual(straddle, .widened(0..<10))
+        // The widening is the union of the overlapping applications'
+        // originalRanges (min(originals)..<max(originals)), per the
+        // SpanMapping doc and design §4.5 — not the whole text.
+        XCTAssertEqual(straddle, .widened(0..<4))
     }
 
     func testObservabilityMetadataCarriesNoSurfaceForms() {
@@ -1438,7 +1691,12 @@ extension DialectIdentifierTests {
         /// one. Every other fixture asserts the bank is clean, because a
         /// fixture that silently degrades would make its test prove nothing.
         allowingIssues: Bool = false,
-        runRevision: String = "correction-fixture/v1"
+        runRevision: String = "correction-fixture/v1",
+        /// [CORRECTION-REVIVE] The additive n-gram bank, decoded from fixture
+        /// data and attached at decode time — the only way a test can put the
+        /// BANDED gate in force, since `CorrectionLexicon.ngramPrior` is a
+        /// `let`. Nil keeps the legacy single-threshold gate.
+        ngramPrior: NgramPrior? = nil
     ) -> CorrectionLexicon {
         func quoted(_ value: String) -> String {
             let escaped = value
@@ -1549,10 +1807,12 @@ extension DialectIdentifierTests {
 
         guard let lexicon = CorrectionLexicon.decode(
             tableData: Data(table.utf8),
-            phoneticData: Data(phoneticWithUnify.utf8)) else {
+            phoneticData: Data(phoneticWithUnify.utf8),
+            ngramPrior: ngramPrior) else {
             XCTFail("the fixture bank did not decode")
             return CorrectionLexicon.decode(tableData: Data(table.utf8),
-                                            phoneticData: Data(phoneticWithUnify.utf8))!
+                                            phoneticData: Data(phoneticWithUnify.utf8),
+                                            ngramPrior: ngramPrior)!
         }
         if !allowingIssues {
             XCTAssertTrue(lexicon.issues.isEmpty,
@@ -2791,9 +3051,10 @@ extension DialectIdentifierTests {
 
     /// The corrector's arm resolution, pinned: an explicit argument wins, then
     /// a stored three-way mode (the debugger's arm, which must keep working),
-    /// then the card's switch. The switch is what makes the matrix reachable
-    /// with no debugger at all; the stored arm is what keeps a deliberate
-    /// `.shadow` or `.off` pin meaningful.
+    /// then the card's switch when it has been WRITTEN. [CORRECTION-DEFAULT-ON]
+    /// A never-written switch is the shipped apply default (owner decision
+    /// 2026-10-11); a written false is the user's deliberate pin-off. The
+    /// stored arm keeps a debugger's `.shadow` or `.off` pin meaningful.
     func testTheCorrectorSwitchIsTheThirdSourceOfTheArm() {
         let lexicon = makeCorrectionLexicon(threshold: 0.65,
                                             lexicon: ["होस्"],
@@ -2802,15 +3063,26 @@ extension DialectIdentifierTests {
         let settings = STTCorrectionSettings(defaults: isolateDefaults(),
                                              lexicon: lexicon)
 
-        // No stored mode, switch off: the control arm — the shipped state.
-        // (`settings` is here to pin the type's own defaults; the assertions
-        // below go through the store `Policy.runtime` actually reads.)
-        let offDefaults = isolateDefaults()
-        XCTAssertNil(STTCorrectionSettings(defaults: offDefaults, lexicon: lexicon)
+        // No stored mode, no written switch: the APPLY arm — the shipped
+        // default. An absent key is an absent arm, and the new default reads
+        // an absence as the layer the owner ships ON.
+        let freshDefaults = isolateDefaults()
+        XCTAssertNil(STTCorrectionSettings(defaults: freshDefaults, lexicon: lexicon)
             .storedMode, "an absent key is an ABSENT arm, not a stored .off")
+        XCTAssertEqual(STTCorrector.Policy.runtime(defaults: freshDefaults,
+                                                   isCompiledIn: true,
+                                                   lexicon: lexicon).mode, .apply,
+                       "[CORRECTION-DEFAULT-ON] a never-touched device gets "
+                       + "the shipped apply default")
+
+        // No stored mode, switch WRITTEN off: the control arm — a deliberate
+        // user pin, and the only way an untouched switch can be off.
+        let offDefaults = isolateDefaults()
+        IntentEncoderPreferences(defaults: offDefaults).setCorrectorEnabled(false)
         XCTAssertEqual(STTCorrector.Policy.runtime(defaults: offDefaults,
                                                    isCompiledIn: true,
-                                                   lexicon: lexicon).mode, .off)
+                                                   lexicon: lexicon).mode, .off,
+                       "a WRITTEN false is the user's pin-off, not an absence")
 
         // No stored mode, switch on: `.apply` — the card can turn the layer on
         // with no debugger and no second key.
@@ -2851,8 +3123,11 @@ extension DialectIdentifierTests {
                                                    isCompiledIn: true,
                                                    isModeOn: .shadow,
                                                    lexicon: lexicon).mode, .shadow)
-        // The settings type's own reading of an absent key, unchanged by any
-        // of the above: the conservative value.
+        // The settings type's own reading of an absent STORED arm, unchanged
+        // by any of the above: no debugger pin exists, so the debugger's
+        // reading is the control value. (It is NOT the shipped default —
+        // `Policy.runtime` reads the absent stored arm as part of the
+        // [CORRECTION-DEFAULT-ON] resolution above, not as `.off`.)
         XCTAssertEqual(settings.mode, .off)
         XCTAssertNil(settings.threshold, "no debugger has moved the threshold either")
     }
@@ -2894,6 +3169,318 @@ extension DialectIdentifierTests {
                        "reset clears the switch as well as the older key")
         XCTAssertNil(defaults.object(forKey: IntentEncoderPreferences.canonicalizerKey))
         XCTAssertNil(defaults.object(forKey: CanonicalizerPreferences.canonicalizerEnabledKey))
+    }
+
+    // MARK: - [CORRECTION-REVIVE] the banded gate
+
+    /// The additive n-gram bank with the pinned bands attached to a pair
+    /// fixture, so a test can put the banded gate in force. The bands are
+    /// the SHIPPED pin: silent apply at the v3 measured floor, judge-eligible
+    /// from 0.40.
+    private func bandedLexicon(threshold: Double = 0.8125,
+                               lexicon: [String],
+                               bigrams: [String: Int] = [:],
+                               bigramTotal: Int = 100,
+                               folds: [(scalars: [String], occurrences: Int)] = [(["श", "स"], 12)])
+    -> CorrectionLexicon {
+        // The separator U+0001 travels as a JSON escape, never as a raw
+        // control character (raw control chars are invalid JSON).
+        let bigramJSON = bigrams.keys.sorted().map { key in
+            let escaped = key.replacingOccurrences(of: "\u{1}", with: "\\u0001")
+            return "\"\(escaped)\": \(bigrams[key] ?? 0)"
+        }.joined(separator: ",")
+        let lexiconJSON = lexicon.enumerated().map { index, token in
+            "{ \"token\": \"\(token)\", \"occurrences\": \(7 + index) }"
+        }.joined(separator: ",")
+        // The decode guard refuses an EMPTY deletes map (an index with
+        // nothing in it is not an index), so the fixture carries one
+        // real delete-form of the first lexicon token.
+        let deleteKey = STTCorrector.deleteOneForms(of: lexicon[0]).first
+            ?? "\u{1}"
+        let bank = """
+        {
+          "formatVersion": 1,
+          "tableID": "stt-ngram-prior",
+          "generation": { "runRevision": "correction-banks/v4#fixture",
+                          "corpusRevision": "fixture-corpus" },
+          "corpus": { "rows": 100, "revision": "fixture-corpus" },
+          "lexicon": [\(lexiconJSON)],
+          "bigrams": { \(bigramJSON) },
+          "trigrams": {},
+          "totals": { "unigrams": 100, "bigrams": \(bigramTotal),
+                      "trigrams": 0 },
+          "symspell": { "maxEdit": 1, "lexiconCount": \(lexicon.count),
+            "deletes": { "\(deleteKey)": [0] } },
+          "bands": { "surfaceFloor": \(threshold),
+                     "applyTotal": \(threshold),
+                     "judgeMin": 0.40,
+                     "origin": "fixture" }
+        }
+        """
+        guard let prior = NgramPrior.decode(Data(bank.utf8)) else {
+            XCTFail("the fixture n-gram bank did not decode")
+            fatalError("unreachable")
+        }
+        // The pair bank must carry at least one measured row: an empty
+        // entries list makes the WHOLE bank unusable (`emptyEntries`) and
+        // the corrector serves every token as `degraded` — the banded
+        // gate never runs, and every band test would silently prove
+        // nothing.
+        return makeCorrectionLexicon(
+            threshold: threshold,
+            lexicon: lexicon,
+            rows: [("fixture-hos", "होस", "होस्", "truncation", 5)],
+            folds: folds,
+            ngramPrior: prior)
+    }
+
+    /// Below the apply floor but above `judgeMin`: the token is marked
+    /// judge-eligible — a pass-through whose readings travel to the
+    /// conversational bands — and the transcript is untouched.
+    func testBandedGateMarksJudgeEligibleBelowTheApplyFloor() {
+        // "गइ" → "गइए": prefix completion with surface ≈ 0.633 (0.35·0.667
+        // similarity + 0.40·1.0 prefix, no key hit) — under the 0.8125
+        // floor, over the 0.40 judge floor.
+        let lexicon = bandedLexicon(lexicon: ["गइए"])
+        let policy = correctionPolicy(lexicon)
+        let result = STTCorrector.correct("गइ", lexicon: lexicon, policy: policy)
+        XCTAssertTrue(result.isIdentity, "a judge-eligible token is NOT "
+                       + "applied — the text passes through untouched")
+        XCTAssertEqual(result.applications.count, 0)
+        XCTAssertEqual(result.judgeItems.count, 1)
+        XCTAssertEqual(result.judgeItems.first?.surface, "गइ")
+        XCTAssertEqual(result.judgeItems.first?.top, ["गइए"])
+        XCTAssertEqual(result.judgeItems.first?.tokenRange, 0..<2,
+                       "the range is scalar-based (गइ = 2 scalars)")
+        XCTAssertTrue(result.bandsActive)
+        XCTAssertEqual(result.decisions.first?.decision.reason, "judge_eligible")
+    }
+
+    /// At the floor the silent-apply set is the v3-calibrated set even with
+    /// the bands in force: the halanta completion (surface 0.8125) applies.
+    func testBandedGateKeepsTheCalibratedApplySetAtTheFloor() {
+        let lexicon = bandedLexicon(lexicon: ["होस्"])
+        let result = STTCorrector.correct("होस", lexicon: lexicon,
+                                          policy: correctionPolicy(lexicon))
+        XCTAssertEqual(result.corrected, "होस्",
+                       "the floor-pinned apply set is byte-identical to the "
+                       + "v3 calibration")
+        XCTAssertTrue(result.judgeItems.isEmpty)
+    }
+
+    /// The n-gram term can never clear the silent gate ALONE: a candidate
+    /// with surface 0.633 and a maximal corpus prior still lands in the
+    /// judge band, never in the applied set.
+    func testTheNgramTermNeverClearsTheApplyFloorAlone() {
+        let lexicon = bandedLexicon(
+            lexicon: ["गइए"],
+            bigrams: ["भोलि\u{1}गइए": 100])
+        let result = STTCorrector.correct("भोलि गइ", lexicon: lexicon,
+                                          policy: correctionPolicy(lexicon))
+        XCTAssertTrue(result.isIdentity,
+                      "semantic agreement cannot rewrite text the surface "
+                      + "evidence refuses")
+        XCTAssertEqual(result.judgeItems.count, 1)
+        let eligible = result.decisions.first {
+            $0.decision.reason == "judge_eligible"
+        }
+        XCTAssertNotNil(eligible)
+    }
+
+    /// The banded gate requires BOTH clauses for a silent apply: the
+    /// surface clears the (lowered) floor but the margin rule refuses a
+    /// zero-margin tie ⇒ judge-eligible, not applied.
+    func testBandedGateHonoursTheMarginRuleBeforeApplying() {
+        // "गइए" and "गइओ" both complete "गइ" with IDENTICAL surface
+        // (0.35·0.667 similarity + 0.40·1.0 prefix, no key hit) — a
+        // zero-margin tie. The fixture floor 0.60 lets clause 1 pass, so
+        // the MARGIN rule is the clause that refuses: judge-eligible.
+        let lexicon = bandedLexicon(threshold: 0.60,
+                                    lexicon: ["गइए", "गइओ"])
+        let result = STTCorrector.correct("गइ", lexicon: lexicon,
+                                          policy: correctionPolicy(lexicon))
+        XCTAssertTrue(result.isIdentity,
+                      "a near-tie above the floor is a question, not a rewrite")
+        XCTAssertEqual(result.judgeItems.count, 1)
+        // Both readings travel to the judge, scalar-ordered (ए < ओ).
+        XCTAssertEqual(result.judgeItems.first?.top, ["गइए", "गइओ"])
+    }
+
+    /// SymSpell generation from the EXPANDED vocabulary: a candidate the
+    /// pair bank's lexicon never carried is generated, verified and
+    /// attributed to the n-gram bank's own ordinal space.
+    func testSymSpellTierGeneratesAndAttributesNgramCandidates() {
+        // The pair bank knows nothing; the n-gram lexicon holds
+        // "सुनाउनुहोस्", whose delete-form "सुनाउनुहोस" is the query.
+        let ngramJSON = """
+        {
+          "formatVersion": 1,
+          "tableID": "stt-ngram-prior",
+          "generation": { "runRevision": "v4#fixture", "corpusRevision": "c" },
+          "corpus": { "rows": 100, "revision": "c" },
+          "lexicon": [ { "token": "सुनाउनुहोस्", "occurrences": 25 } ],
+          "bigrams": {}, "trigrams": {},
+          "totals": { "unigrams": 25, "bigrams": 100, "trigrams": 0 },
+          "symspell": { "maxEdit": 1, "lexiconCount": 1,
+            "deletes": { "सुनाउनुहोस": [0] } },
+          "bands": { "surfaceFloor": 0.8125, "applyTotal": 0.8125,
+                     "judgeMin": 0.40, "origin": "fixture" }
+        }
+        """
+        guard let prior = NgramPrior.decode(Data(ngramJSON.utf8)) else {
+            XCTFail("the fixture n-gram bank did not decode")
+            return
+        }
+        let lexicon = makeCorrectionLexicon(
+            lexicon: [],
+            rows: [("fixture-hos", "होस", "होस्", "truncation", 5)],
+            allowingIssues: true,
+            ngramPrior: prior)
+        let pool = lexicon.candidates(for: "सुनाउनुहोस")
+        XCTAssertTrue(pool.contains("सुनाउनुहोस्"),
+                      "the symspell tier generates from the expanded bank")
+        let attribution = lexicon.attribution(forToken: "सुनाउनुहोस",
+                                              candidate: "सुनाउनुहोस्")
+        XCTAssertEqual(attribution.entryID, "ngram-lex-0",
+                       "an expanded-vocabulary candidate names the n-gram "
+                       + "bank's own ordinal, never a pair-bank row")
+        XCTAssertEqual(attribution.occurrences, 25)
+    }
+
+    /// Without the additive bank the gate is the legacy single threshold —
+    /// no judge items are produced even when a candidate sits between the
+    /// judge floor and the threshold.
+    func testWithoutTheNgramBankNoJudgeItemsAreProduced() {
+        // The dummy row keeps the pair bank USABLE — an empty entries list
+        // degrades the whole bank and the legacy gate never runs.
+        let lexicon = makeCorrectionLexicon(
+            threshold: 0.8125,
+            lexicon: ["गइए"],
+            rows: [("fixture-hos", "होस", "होस्", "truncation", 5)])
+        let result = STTCorrector.correct("गइ", lexicon: lexicon,
+                                          policy: correctionPolicy(lexicon))
+        XCTAssertTrue(result.isIdentity)
+        XCTAssertTrue(result.judgeItems.isEmpty,
+                      "the conversational bands exist only with the additive "
+                      + "bank active")
+        XCTAssertFalse(result.bandsActive)
+        XCTAssertEqual(result.decisions.first?.decision.reason, "below_threshold")
+    }
+
+    // MARK: - [CORRECTION-REVIVE] reRank + clarification building
+
+    /// A judge-eligible result's fixture: "गइ" with the reading "गइए",
+    /// bands active.
+    private func judgeEligibleResult(_ lexicon: CorrectionLexicon,
+                                     transcript: String = "गइ")
+    -> CorrectionResult {
+        STTCorrector.correct(transcript, lexicon: lexicon,
+                             policy: correctionPolicy(lexicon))
+    }
+
+    /// A confident pick applies through `reRank` — the corrected text
+    /// carries the judged reading, the decision is `.judged`, and the
+    /// application names the n-gram bank's attribution.
+    func testReRankAppliesAConfidentPick() {
+        let lexicon = bandedLexicon(lexicon: ["गइए"])
+        let result = judgeEligibleResult(lexicon)
+        let reranked = STTCorrector.reRank(
+            result,
+            judge: [JudgeVerdict(tokenRange: 0..<2, pick: 0, confidence: 0.9)],
+            lexicon: lexicon)
+        XCTAssertEqual(reranked.corrected, "गइए")
+        XCTAssertEqual(reranked.applications.count, 1)
+        XCTAssertEqual(reranked.decisions.first?.decision.reason, "judged")
+    }
+
+    /// The confidence floor: below it the pick does NOT apply — the
+    /// token stays judge-eligible (the clarification path's input).
+    func testReRankRefusesALowConfidencePick() {
+        let lexicon = bandedLexicon(lexicon: ["गइए"])
+        let result = judgeEligibleResult(lexicon)
+        let reranked = STTCorrector.reRank(
+            result,
+            judge: [JudgeVerdict(tokenRange: 0..<2, pick: 0, confidence: 0.5)],
+            lexicon: lexicon)
+        XCTAssertTrue(reranked.isIdentity)
+        XCTAssertEqual(reranked.decisions.first?.decision.reason,
+                       "judge_eligible")
+    }
+
+    /// An out-of-range pick is a judge bug, treated as an abstention —
+    /// never an application.
+    func testReRankTreatsAnOutOfRangePickAsAbstention() {
+        let lexicon = bandedLexicon(lexicon: ["गइए"])
+        let result = judgeEligibleResult(lexicon)
+        let reranked = STTCorrector.reRank(
+            result,
+            judge: [JudgeVerdict(tokenRange: 0..<2, pick: 7, confidence: 0.9)],
+            lexicon: lexicon)
+        XCTAssertTrue(reranked.isIdentity)
+        XCTAssertEqual(reranked.applications.count, 0)
+    }
+
+    /// The vetoes run LAST: a judge-accepted candidate that touches the
+    /// frozen set becomes `.safetyVeto` and passes through — no judge
+    /// output bypasses the safety refusal.
+    func testReRankVetoesRunAfterJudgeAcceptance() {
+        // A lexicon whose only completion of the token is a frozen-set
+        // hazard: "नखा" → "नखाए" manufactures the refusal's denial verb.
+        let lexicon = makeCorrectionLexicon(
+            threshold: 0.40,
+            lexicon: ["नखाए"],
+            allowingIssues: true,
+            ngramPrior: nil)
+        // The pair bank alone (no additive bank) cannot produce judge
+        // items, so drive reRank directly against a hand-built result.
+        let result = STTCorrector.correct("नखा", lexicon: lexicon,
+                                          policy: correctionPolicy(lexicon))
+        var withItems = result
+        withItems.judgeItems = [JudgeItem(tokenRange: 0..<3, surface: "नखा",
+                                          top: ["नखाए"])]
+        let reranked = STTCorrector.reRank(
+            withItems,
+            judge: [JudgeVerdict(tokenRange: 0..<3, pick: 0, confidence: 0.9)],
+            lexicon: lexicon)
+        XCTAssertTrue(reranked.isIdentity,
+                      "a frozen-set hazard is refused even with a confident "
+                      + "judge behind it")
+        XCTAssertEqual(reranked.decisions.first?.decision.reason, "safety_veto")
+    }
+
+    /// The clarification builder: one reading from the first judge item,
+    /// the stated reason, nil without items or outside the apply arm.
+    func testClarificationBuildsFromJudgeItems() {
+        let lexicon = bandedLexicon(lexicon: ["गइए"])
+        let result = judgeEligibleResult(lexicon)
+        let clarification = CorrectionClarification.build(
+            from: result, reason: .judgeUnavailable)
+        XCTAssertEqual(clarification?.readings.count, 1)
+        XCTAssertEqual(clarification?.readings.first?.surface, "गइ")
+        XCTAssertEqual(clarification?.readings.first?.options, ["गइए"])
+        XCTAssertEqual(clarification?.reason, .judgeUnavailable)
+        XCTAssertNil(CorrectionClarification.build(
+            from: CorrectionResult(corrected: "x", applications: [],
+                                   decisions: [], lexiconRevision: "v",
+                                   thresholdUsed: 0.8, degraded: false,
+                                   mode: .apply, original: "x")))
+    }
+
+    /// The splice helper replaces exactly the token at the scalar range
+    /// and leaves every other scalar byte-identical.
+    func testSpliceReplacementReplacesOnlyTheNamedToken() {
+        // खाना = 4 scalars at 2..<6.
+        XCTAssertEqual(STTCorrector.spliceReplacement("खान", into: "म खाना",
+                                                      at: 2..<6),
+                       "म खान")
+        XCTAssertEqual(STTCorrector.spliceReplacement("होस्", into: "होस भोलि",
+                                                      at: 0..<3),
+                       "होस् भोलि")
+        // A range that names no token leaves the text untouched (the
+        // defensive guard, never a half-splice).
+        XCTAssertEqual(STTCorrector.spliceReplacement("x", into: "abc",
+                                                      at: 99..<100),
+                       "abc")
     }
 
     // MARK: - [PIPELINE-TRACE] the two pre-intent rows at the slot's input
@@ -2999,7 +3586,7 @@ extension DialectIdentifierTests {
         XCTAssertEqual(canonicalizer.outputSummary,
                        PipelineTraceSummary.text(pair.modelInput),
                        "…and the last row's output IS what the brain is handed")
-        XCTAssertEqual(canonicalizer.decision, "applied test-order",
+        XCTAssertEqual(canonicalizer.decision, "applied test-order,test-plain",
                        "the row names the rules that fired, by id")
         let stages = trace.rows.map(\.stage)
         XCTAssertEqual(stages.firstIndex(of: .corrector)! + 1,

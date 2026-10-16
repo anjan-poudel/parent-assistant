@@ -86,7 +86,10 @@ final class CommandRouterSafetyNetTests: XCTestCase {
     func testInterpreterAbstainFallsToKeywordRemainder() {
         // Interpreter available but abstains → the REMAINDER of the
         // keyword layer (not the safety net — that already ran) handles
-        // it: a call-ish phrase with no entity extraction stays blocked.
+        // it: a call-shaped phrase with no usable name ("कसै" — someone,
+        // an indefinite pronoun, dropped by the deterministic extractor)
+        // gets the honest name-unclear line, never the old
+        // "secure authentication" refusal.
         let interpreter = StubCommandInterpreter(result: nil)
         let (router, _, bus) = makeRouter(interpreter: interpreter)
 
@@ -95,7 +98,8 @@ final class CommandRouterSafetyNetTests: XCTestCase {
         _ = router.route(transcript: "कसैलाई फोन गर")
         waitForExpectations(timeout: 2)
 
-        XCTAssertTrue(bus.contains("command_sensitive_blocked_auth_unavailable"))
+        XCTAssertTrue(bus.contains("command_call_name_unclear"))
+        XCTAssertFalse(bus.contains("command_sensitive_blocked_auth_unavailable"))
     }
 }
 
@@ -104,18 +108,25 @@ extension CommandRouterSafetyNetTests {
     /// REPHRASE-as-question (spec §4 decision #6): a mid-band tier-free
     /// command is stated as a yes/no question, not dropped, not dispatched.
     func testMidBandTierFreeBecomesAQuestion() {
+        // [MUSIC-PATH] (2026-10-07, T-116) Transcript switched from
+        // "केही भजन जस्तो बजाउनुस्" to a marker-free request — a bare
+        // music-marked utterance (भजन + बजाउनुस्) now terminates in the
+        // deterministic Spotify/YouTube music turn at the keyword ladder,
+        // before the interpreter's mid-band rephrase flow this test pins
+        // (mirrors the [NO-GIBBERISH] precedent below). The mid-band
+        // .music rephrase behavior itself is unchanged.
         let interpreter = StubCommandInterpreter(
             result: makeCommand(action: .music, confidence: 0.5))
         let (router, coordinator, _) = makeRouter(interpreter: interpreter)
 
         let exp = expectation(description: "async interpret")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
-        _ = router.route(transcript: "केही भजन जस्तो बजाउनुस्")
+        _ = router.route(transcript: "केही राम्रो कुरा बताउनुस्")
         waitForExpectations(timeout: 2)
 
         XCTAssertNotNil(coordinator.rephrasePended,
                         "mid-band tier-free must pend as a question, not dispatch")
-        XCTAssertEqual(coordinator.rephrasePended?.sourceTranscript, "केही भजन जस्तो बजाउनुस्")
+        XCTAssertEqual(coordinator.rephrasePended?.sourceTranscript, "केही राम्रो कुरा बताउनुस्")
     }
 
     func testRephraseYesDispatchesThePendedCommand() {

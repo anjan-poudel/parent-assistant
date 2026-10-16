@@ -7,6 +7,13 @@ import Combine
 /// Per-step status (completed/skipped) is persisted so skipped steps can
 /// surface as a reminder card on Home.
 ///
+/// [PROFILE-INTERVIEW T-102] The interview steps (`aboutYou`,
+/// `emergencyContacts`, `voiceFingerprint`) sit between permissions and
+/// the pre-existing family/models steps in `allCases` order — that order
+/// is the wizard's walk AND the routing rule's tie-break. The cold-start
+/// route (`coldStartInterviewStep`) lives here as a pure function so the
+/// coordinator's composition cannot re-implement it differently.
+///
 /// Main-thread-only by contract (SwiftUI-facing state); not `@MainActor`
 /// so it stays constructible from `AppCoordinator`'s nonisolated init.
 final class OnboardingState: ObservableObject {
@@ -14,7 +21,10 @@ final class OnboardingState: ObservableObject {
     enum Step: String, CaseIterable, Identifiable {
         case language
         case permissions
+        case aboutYou
         case familyContact
+        case emergencyContacts
+        case voiceFingerprint
         case models
 
         var id: String { rawValue }
@@ -83,6 +93,36 @@ final class OnboardingState: ObservableObject {
     /// First incomplete/skipped step — where the wizard reopens from the
     /// Home reminder card.
     var firstPendingStep: Step? { pendingSteps.first }
+
+    // MARK: - Cold-start routing (profile-interview, T-102 / C13)
+
+    /// Where the wizard opens on a cold start (FR-PI-016; design-l2 §7,
+    /// edge table):
+    ///
+    /// - the first pending step, EXCEPT that a missing mandatory record
+    ///   (trimmed non-empty name AND address-as in the stored profile)
+    ///   routes back to `.aboutYou` whenever About-you is at or before
+    ///   the first pending step;
+    /// - all steps recorded and the record present → nil (the app starts
+    ///   normally);
+    /// - all steps recorded but the record missing/unreadable → `.aboutYou`
+    ///   (the hard route repairs the record through the wizard's ordinary
+    ///   Next-and-save gate — never a crash, never "nothing to do").
+    ///
+    /// Pure function: the caller supplies the first pending step and the
+    /// mandatory-fields predicate result, so the rule is testable without
+    /// any storage.
+    static func coldStartInterviewStep(firstPending: Step?,
+                                       mandatoryFieldsRecorded: Bool) -> Step? {
+        guard let first = firstPending else {
+            // Nothing pending: the record decides whether there is work.
+            return mandatoryFieldsRecorded ? nil : .aboutYou
+        }
+        guard !mandatoryFieldsRecorded else { return first }
+        // Mandatory missing: the earlier of the two in allCases order —
+        // never skip past About-you on the way to a later step.
+        return first.index < Step.aboutYou.index ? first : .aboutYou
+    }
 
     // MARK: - Persistence
 

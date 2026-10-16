@@ -126,6 +126,22 @@ final class ModelStoreTests: XCTestCase {
         XCTAssertFalse(MemoryProbe.canFit(UInt64.max / 2))
     }
 
+    /// [MODEL-WARDEN] Step 0 — the one reading the ledger cannot derive.
+    /// Everything else in `MemoryProbe` is an estimate of room available;
+    /// this is what the app is actually holding, so the field capture can
+    /// put `phys_footprint` next to the ledger's inferred total and see
+    /// whether they agree.
+    func testPhysFootprintProbeReadsARealNumber() {
+        let footprint = MemoryProbe.physFootprintBytes
+        // A test host is always holding *something* — the XCTest runtime
+        // alone is tens of megabytes — so 0 here means the probe failed,
+        // which is the failure this test exists to catch.
+        XCTAssertGreaterThan(footprint, 10_000_000,
+                             "phys_footprint must be a measurement, not the 0 failure value")
+        XCTAssertLessThan(footprint, MemoryProbe.physicalMemoryBytes,
+                          "the app cannot hold more than the device has")
+    }
+
 
     // MARK: - Stale CoreML bundle removal
 

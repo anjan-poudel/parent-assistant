@@ -1,0 +1,22 @@
+diff --git a/tools/train-intent/config.yaml b/tools/train-intent/config.yaml
+index 5d6987b2..a680e283 100644
+--- a/tools/train-intent/config.yaml
++++ b/tools/train-intent/config.yaml
+@@ -161,14 +161,14 @@ chat:
+   # The full ship gate (`src/eval_golden.py --full-gates`) reads the variant
+   # FROM HERE — the selection is configuration, never a flag — and refuses
+   # to run while this flag is absent or false.
+-  enabled: false
++  enabled: true
+   # Run layout (design §11.5): the corpus builder writes
+   # build/chat-corpus/<run_id>/<mix>/ (corpus, layers/, counters) and the
+   # provenance manifest one directory up, in the run directory; the full
+   # gate resolves the same layout from these keys (never hard-coded).
+-  run_id: v17
++  run_id: cnr-v17-20261015-0209
+   mix: ship
+-  corpus_root: build/chat-corpus
++  corpus_root: /mnt/nvme1/cnr-v17/corpus
+   # Mixture (FR-CNR-016 / design §11.1): 70% conversation / 30% claw-back.
+   # The claw-back is the intent-regression mitigation and is NOT optional —
+   # a run whose recorded shares deviate is not swap-eligible (the full gate

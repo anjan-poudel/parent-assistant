@@ -84,7 +84,12 @@ final class MultipartDownloadTests: XCTestCase {
         }
     }
 
+    /// `minRAM` defaults to a floor every phone clears; the RAM-guard test
+    /// raises it to `UInt64.max` so `MemoryProbe.canFit` answers false on any
+    /// device the suite could run on (the probe compares against
+    /// `ProcessInfo.physicalMemory`, so no real machine can pass it).
     private func makeEntry(id: String, sizeBytes: Int64,
+                           minRAM: UInt64 = 1,
                            parts: [URL]? = nil,
                            sha: String = String(repeating: "a", count: 64)) -> ModelCatalogEntry {
         ModelCatalogEntry(
@@ -96,7 +101,7 @@ final class MultipartDownloadTests: XCTestCase {
             downloadPartURLs: parts,
             sizeBytes: sizeBytes,
             sha256: sha,
-            minDeviceRAMBytes: 1,
+            minDeviceRAMBytes: minRAM,
             languages: [])
     }
 
@@ -319,6 +324,259 @@ final class MultipartDownloadTests: XCTestCase {
         XCTAssertNotEqual(service.states[entry.id], .failed(reason: "model too large"),
                           "the cap is inclusive")
         XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "download_size_cap_rejected" })
+    }
+
+    // MARK: - The warden's class budget
+
+    /// [MODEL-WARDEN 2026-09-20] A floor value is not the last word. An entry
+    /// the device-class warden refuses (here `.requiresEvictingWarmSTT` — the
+    /// model fits the class alone and not beside the warm STT) must not start:
+    /// the household would spend the download on an artifact the app refuses
+    /// at use time, and the floor that admitted it is one number a later
+    /// catalog edit can move.
+    func testAnEntryTheWardenRefusesIsNotDownloaded() throws {
+        let entry = makeEntry(id: "synthetic-warden-refused", sizeBytes: 1_000)
+        let service = ModelDownloadService(
+            store: try makeStore(),
+            observabilityBus: bus,
+            sessionFactory: stubSessionFactory(),
+            availabilityProvider: { _ in .unavailable(reason: .requiresEvictingWarmSTT) },
+            // The [DEVSCREEN-DOWNLOAD] bypass is a SECOND axis, off by
+            // default and pinned on its own below; named here so this test's
+            // verdict cannot depend on a switch a developer once persisted
+            // into this machine's defaults.
+            ignoresFitPolicy: { false })
+        service.start(entry)
+        waitUntil("the warden refusal") {
+            if case .failed = service.states[entry.id] ?? .notStarted { return true }
+            return false
+        }
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "download_policy_rejected"
+                && $0.errorCode == ModelUnavailabilityReason.requiresEvictingWarmSTT.rawValue
+        }, "the refusal must name the class reason on the bus, not fail silently")
+        XCTAssertTrue(MultipartStubURLProtocol.requestedPaths.isEmpty,
+                      "a warden-refused entry must not touch the network")
+    }
+
+    /// The `soloOverBudget` escape hatch: a preference the household stored
+    /// itself is delivered even when the class refuses it
+    /// (`AppCoordinator.resolveBrainModelID` rule 1). Refusing here would
+    /// leave the pick stored, the row's Download hidden and the artifact
+    /// never arriving.
+    func testAStoredPreferenceIsDeliveredEvenWhenTheWardenRefuses() throws {
+        let entry = makeEntry(id: "synthetic-stored-pick", sizeBytes: 1_000)
+        let service = ModelDownloadService(
+            store: try makeStore(),
+            observabilityBus: bus,
+            sessionFactory: stubSessionFactory(),
+            availabilityProvider: { _ in .unavailable(reason: .overClassBudget) })
+        service.start(entry, deliveringStoredPreference: true)
+        waitUntil("the delivery to leave the gate") {
+            service.states[entry.id] != .notStarted
+        }
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "download_policy_rejected" },
+                       "a stored pick is not refused by the warden gate")
+        XCTAssertNotEqual(service.states[entry.id], .failed(reason:
+            "the model is larger than this device class can hold"))
+    }
+
+    /// [DEVSCREEN-DOWNLOAD] THE ON DIRECTION, and the whole reason the
+    /// switch exists: the hidden translation test screen's install card is a
+    /// developer tool — the A/B exists to run models the policy refuses — so
+    /// with `ignoreModelFitPolicyForDownloads` turned on, the class verdict
+    /// must not stop the download. Same warden verdict as the refusal test
+    /// above (`.requiresEvictingWarmSTT`), same flow, one switch different:
+    /// the download must run all the way to a verified install.
+    func testTheDebugSwitchLetsADownloadProceedThroughTheWardenRefusal() throws {
+        let payload = Data("developer-tool-bytes".utf8)
+        let entry = makeEntry(id: "synthetic-devscreen-bypass",
+                              sizeBytes: Int64(payload.count),
+                              sha: sha256Hex(payload))
+        MultipartStubURLProtocol.payloads[entry.downloadURL.lastPathComponent] = payload
+        let store = try makeStore(policy: .strict, resolving: entry)
+        let service = ModelDownloadService(
+            store: store,
+            observabilityBus: bus,
+            sessionFactory: stubSessionFactory(),
+            availableBytesProvider: roomyFreeSpace,
+            availabilityProvider: { _ in .unavailable(reason: .requiresEvictingWarmSTT) },
+            ignoresFitPolicy: { true })
+
+        service.start(entry)
+        waitUntil("the developer download to install") {
+            service.states[entry.id] == .completed
+        }
+
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "download_policy_rejected" },
+                       "the dev-screen carve-out must not be refused by the warden gate")
+        XCTAssertEqual(MultipartStubURLProtocol.requestedPaths,
+                       [entry.downloadURL.lastPathComponent],
+                       "the bypassed download must actually be fetched")
+        let installed = try XCTUnwrap(store.path(for: entry.id),
+                                      "the bypassed download must install the artifact")
+        XCTAssertEqual(try Data(contentsOf: installed), payload)
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "download_completed" && $0.outcome == "success"
+        })
+    }
+
+    /// The carve-out is the CLASS VERDICT and nothing else. A developer
+    /// download that cannot fit on the volume, or that the phone has too
+    /// little RAM for, is refused for the honest reason exactly as before:
+    /// the dev screen is a way around the policy that stops a household
+    /// spending data on a model its device class refuses, not a way around
+    /// the resource facts of the phone in the hand.
+    func testTheDeveloperBypassSkipsTheClassVerdictAndNothingElse() throws {
+        let refusedByPolicy: (ModelCatalogEntry) -> ModelAvailability = { _ in
+            .unavailable(reason: .overClassBudget)
+        }
+
+        let diskCramped = ModelDownloadService(
+            store: try makeStore(),
+            observabilityBus: bus,
+            sessionFactory: stubSessionFactory(),
+            availableBytesProvider: { 1 },
+            availabilityProvider: refusedByPolicy,
+            ignoresFitPolicy: { true })
+        let onDisk = makeEntry(id: "synthetic-devscreen-disk", sizeBytes: 1_000)
+        diskCramped.start(onDisk)
+        waitUntil("the disk refusal") {
+            if case .failed = diskCramped.states[onDisk.id] ?? .notStarted { return true }
+            return false
+        }
+        XCTAssertEqual(diskCramped.states[onDisk.id],
+                       .failed(reason: "not enough disk space"),
+                       "the disk guard outranks the dev-screen carve-out")
+
+        let onRAM = makeEntry(id: "synthetic-devscreen-ram", sizeBytes: 1_000,
+                              minRAM: UInt64.max)
+        let ramTight = ModelDownloadService(
+            store: try makeStore(),
+            observabilityBus: bus,
+            sessionFactory: stubSessionFactory(),
+            availableBytesProvider: roomyFreeSpace,
+            availabilityProvider: refusedByPolicy,
+            ignoresFitPolicy: { true })
+        ramTight.start(onRAM)
+        waitUntil("the RAM refusal") {
+            if case .failed = ramTight.states[onRAM.id] ?? .notStarted { return true }
+            return false
+        }
+        XCTAssertEqual(ramTight.states[onRAM.id],
+                       .failed(reason: "device does not have enough memory for this model"),
+                       "the RAM floor outranks the dev-screen carve-out")
+
+        XCTAssertTrue(MultipartStubURLProtocol.requestedPaths.isEmpty,
+                      "neither resource guard may reach the transport")
+    }
+
+    /// [OWNER-OVERRIDE 2026-10-11] The RAM-tier bypass's contract: with the
+    /// override on, the RAM floor is skipped and the download proceeds; the
+    /// size cap, the disk guard and the iOS tier are untouched (pinned by
+    /// the guard tests above and the existing dev-screen pins). The OFF
+    /// direction proves an unset key leaves the RAM floor refusing exactly
+    /// as before — the override is a persisted, default-off switch, not a
+    /// shipping behaviour.
+    func testTheRamTierOverrideSkipsOnlyTheRamFloorGuard() throws {
+        XCTAssertEqual(ModelDownloadDebugSettings.ignoreRamTierKey,
+                       "modelDownload.ignoreRamTierForDownloads",
+                       "the key is a persisted contract — the switch row and the service must share it")
+
+        let suiteName = "ramtier-override-\(UUID().uuidString)"
+        let freshStore = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { freshStore.removePersistentDomain(forName: suiteName) }
+        XCTAssertFalse(ModelDownloadDebugSettings.ignoresRamTier(in: freshStore),
+                       "an unset key is OFF — nobody bypasses the RAM floor by default")
+
+        // ON direction: the override skips the RAM guard and the download
+        // reaches the transport.
+        let onRAM = makeEntry(id: "synthetic-ramtier-on", sizeBytes: 1_000,
+                              minRAM: UInt64.max)
+        let ramSkipped = ModelDownloadService(
+            store: try makeStore(),
+            observabilityBus: bus,
+            sessionFactory: stubSessionFactory(),
+            availableBytesProvider: roomyFreeSpace,
+            availabilityProvider: { _ in .available },
+            ignoresRamTier: { true })
+        ramSkipped.start(onRAM)
+        waitUntil("the download proceeds past the RAM guard") {
+            if case .downloading = ramSkipped.states[onRAM.id] { return true }
+            if case .failed = ramSkipped.states[onRAM.id] ?? .notStarted { return true }
+            return false
+        }
+        XCTAssertNotEqual(ramSkipped.states[onRAM.id],
+                          .failed(reason: "device does not have enough memory for this model"),
+                          "with the override on, the RAM floor must not refuse the download")
+
+        // OFF direction: the production reader on an unset key still refuses.
+        let offEntry = makeEntry(id: "synthetic-ramtier-off", sizeBytes: 1_000,
+                                 minRAM: UInt64.max)
+        let ramHeld = ModelDownloadService(
+            store: try makeStore(),
+            observabilityBus: bus,
+            sessionFactory: stubSessionFactory(),
+            availableBytesProvider: roomyFreeSpace,
+            availabilityProvider: { _ in .available },
+            ignoresRamTier: { ModelDownloadDebugSettings.ignoresRamTier(in: freshStore) })
+        ramHeld.start(offEntry)
+        waitUntil("the RAM refusal with the switch off") {
+            if case .failed = ramHeld.states[offEntry.id] ?? .notStarted { return true }
+            return false
+        }
+        XCTAssertEqual(ramHeld.states[offEntry.id],
+                       .failed(reason: "device does not have enough memory for this model"),
+                       "an unset override key leaves the RAM floor refusing exactly as before")
+    }
+
+    /// [DEVSCREEN-DOWNLOAD] THE OFF DIRECTION, and the half that keeps this a
+    /// developer switch rather than a shipping behaviour: the production
+    /// reader (`ModelDownloadDebugSettings.ignoresFitPolicy`) answers FALSE
+    /// until a developer persists the key, and a service wired to it the way
+    /// `AppCoordinator` wires the real one refuses exactly as before.
+    ///
+    /// The store is a fresh suite, not `UserDefaults.standard`: what is under
+    /// test is the default of an UNSET key, and the process's own defaults
+    /// may carry whatever a previous run on this machine persisted.
+    func testTheDebugSwitchIsOffUntilPersistedSoThePolicyStillRefuses() throws {
+        XCTAssertEqual(ModelDownloadDebugSettings.ignoreFitPolicyKey,
+                       "modelDownload.ignoreModelFitPolicyForDownloads",
+                       "the key is a persisted contract — the switch row, the "
+                       + "service and the card's caption must share it")
+
+        let suiteName = "devscreen-bypass-\(UUID().uuidString)"
+        let freshStore = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { freshStore.removePersistentDomain(forName: suiteName) }
+        XCTAssertFalse(ModelDownloadDebugSettings.ignoresFitPolicy(in: freshStore),
+                       "an unset key is OFF — nobody bypasses the fit policy by default")
+
+        let entry = makeEntry(id: "synthetic-devscreen-off", sizeBytes: 1_000)
+        let service = ModelDownloadService(
+            store: try makeStore(),
+            observabilityBus: bus,
+            sessionFactory: stubSessionFactory(),
+            availabilityProvider: { _ in .unavailable(reason: .requiresEvictingWarmSTT) },
+            ignoresFitPolicy: { ModelDownloadDebugSettings.ignoresFitPolicy(in: freshStore) })
+        service.start(entry)
+        waitUntil("the warden refusal with the switch off") {
+            if case .failed = service.states[entry.id] ?? .notStarted { return true }
+            return false
+        }
+
+        XCTAssertEqual(service.states[entry.id],
+                       .failed(reason: "the model needs the memory the speech model is holding"))
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "download_policy_rejected"
+                && $0.errorCode == ModelUnavailabilityReason.requiresEvictingWarmSTT.rawValue
+        }, "with the switch unset the class verdict must still refuse the download")
+        XCTAssertTrue(MultipartStubURLProtocol.requestedPaths.isEmpty,
+                      "a refused download must not touch the network")
+
+        // Persisting the switch is what turns the bypass on — the same read
+        // the service makes per call and the card's caption makes per render.
+        freshStore.set(true, forKey: ModelDownloadDebugSettings.ignoreFitPolicyKey)
+        XCTAssertTrue(ModelDownloadDebugSettings.ignoresFitPolicy(in: freshStore))
     }
 
     // MARK: - Reassembly: order and the full-file checksum
@@ -730,7 +988,7 @@ final class MultipartDownloadTests: XCTestCase {
     ///  - CLI: drop the marker in the app's data container —
     ///
     ///        P=$(xcrun simctl get_app_container booted \
-    ///              com.elderlyassistant.app data)
+    ///              ai.voicebridge.senior.assistant data)
     ///        touch "$P/Documents/catalog-live-url-check"
     ///
     ///    then run the single test as usual.

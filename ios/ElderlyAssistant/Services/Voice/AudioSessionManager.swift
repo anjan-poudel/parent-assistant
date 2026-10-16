@@ -24,15 +24,32 @@ protocol AudioSessionControlling: AnyObject {
                      options: AVAudioSession.CategoryOptions) throws
     func setActive(_ active: Bool,
                    options: AVAudioSession.SetActiveOptions) throws
-    /// Switches the session mode in place (category/options untouched) —
-    /// the [LOUD-TTS] response-playback seam uses this to move between the
-    /// capture preset and `.voicePrompt`.
+    /// [MODE-ONLY-LOUD] Switches the session MODE in place (category and
+    /// options untouched) — the response-playback seam's only lever. A
+    /// mode change never affects input availability, so the
+    /// mic-continuity property holds.
     func setMode(_ mode: AVAudioSession.Mode) throws
     /// Enables/disables Voice Processing I/O on the engine's input node
     /// (AVAudioIONode.setVoiceProcessingEnabled — iOS 13+; only while the
     /// engine is stopped, never in manual rendering mode). Throws when
     /// the current route/session configuration cannot do it.
     func setVoiceProcessingEnabled(_ enabled: Bool) throws
+    /// [LOUD-TTS-CATEGORY] Starts/stops the shared engine (idempotent —
+    /// a running engine is left running and vice versa). The playback
+    /// category switch must run with the engine STOPPED: a live input
+    /// tap is what makes the switch fail on iOS 26, and cycling the
+    /// session under a running engine left the NEXT turn's capture dead
+    /// (Anzaan field test 2026-10-14: whisperkit_stt samples=0 after
+    /// every cycle).
+    func setEngineRunning(_ running: Bool) throws
+}
+
+extension AudioSessionControlling {
+    /// Default no-op — fakes and non-engine configurations inherit the
+    /// pre-seam behavior without change.
+    func setEngineRunning(_ running: Bool) throws {}
+    /// Default no-op for the same reason.
+    func setMode(_ mode: AVAudioSession.Mode) throws {}
 }
 
 enum AudioSessionControllingError: Error {
@@ -77,7 +94,18 @@ private final class SystemAudioSessionController: AudioSessionControlling {
     func setCategory(_ category: AVAudioSession.Category,
                      mode: AVAudioSession.Mode,
                      options: AVAudioSession.CategoryOptions) throws {
-        try session.setCategory(category, mode: mode, options: options)
+        // Temporary field-diagnostic prints (2026-10-14): attribute the
+        // Anzaan -50 paramErr to setCategory vs setActive and log the
+        // exact arguments. Removed once the race/refusal is settled.
+        print("[audio_session] setCategory(\(category.rawValue), mode=\(mode.rawValue), "
+              + "options=\(options.rawValue))")
+        do {
+            try session.setCategory(category, mode: mode, options: options)
+            print("[audio_session] setCategory OK")
+        } catch {
+            print("[audio_session] setCategory FAILED code=\((error as NSError).code)")
+            throw error
+        }
     }
 
     func setActive(_ active: Bool,
@@ -87,6 +115,16 @@ private final class SystemAudioSessionController: AudioSessionControlling {
 
     func setMode(_ mode: AVAudioSession.Mode) throws {
         try session.setMode(mode)
+    }
+
+    func setEngineRunning(_ running: Bool) throws {
+        if running {
+            guard !audioEngine.isRunning else { return }
+            try audioEngine.start()
+        } else {
+            guard audioEngine.isRunning else { return }
+            audioEngine.stop()
+        }
     }
 
     func setVoiceProcessingEnabled(_ enabled: Bool) throws {
@@ -167,19 +205,51 @@ final class AudioSessionManager {
     /// never makes an extra call (the byte-identical guarantee).
     private var voiceProcessingEnabledInProcess = false
 
-    // MARK: - Response playback loudness ([LOUD-TTS], 2026-09-11)
+    // MARK: - Response playback loudness ([LOUD-TTS], 2026-09-11;
+    //          [LOUD-TTS-CATEGORY], 2026-10-14)
     //
-    // While the assistant SPEAKS, the session mode switches to
-    // `.voicePrompt` — Apple's mode for spoken responses: loudness-
-    // optimized playback for the app's own output while the mic keeps
-    // running, so replies are clearly audible instead of being routed
-    // through the capture-tuned `.measurement` mode at reduced presence.
-    // The capture preset (`.measurement` / `.voiceChat`) returns the
-    // moment playback settles, so wake-word quality never changes.
+    // While the assistant SPEAKS, the session switches to the BELL's
+    // proven-loud configuration: category `.playback` (media-volume gain
+    // staging), mode `.default`, options `[.duckOthers,
+    // .defaultToSpeaker]` — byte-identical to `TimerAlarmBellPlayer`,
+    // the one audio path the field calls LOUD. The original mode-only
+    // switch to `.voicePrompt` did not move loudness: under
+    // `.playAndRecord` the output stays on call/voice gain staging,
+    // which plays far below media apps (field report 2026-10-14:
+    // replies < 50 % of other apps' loudness even at max boost).
+    //
+    // Trade, accepted (the bell's own doc spells it out): `.playback`
+    // has no input, so the mic is unavailable for the reply's duration.
+    // That is acceptable — wake-word processing is suppressed while the
+    // assistant speaks (AppCoordinator's wake gate), so no listening
+    // feature is lost — and the capture preset (`.measurement` /
+    // `.voiceChat` + VPIO) is restored IN PLACE the moment playback
+    // settles, the session left active (deactivating it would strand
+    // the voice pipeline's engine). Wake-latency after restore is the
+    // device-validation gate for this change (STT is the invariant).
     //
     // Depth-counted, not stacked: Piper falling back to the system
     // speaker nests begin/end, and only the OUTERMOST end restores the
-    // capture mode.
+    // capture preset.
+
+    /// [MODE-ONLY-LOUD] (2026-10-14) The response-playback seam's ONE
+    /// lever: a session MODE change, never a category change.
+    ///
+    /// Field data (iOS 26.6.2 beta AND iOS 27.0.1 — released): the
+    /// always-on pipeline holds the input node in the audio graph, which
+    /// locks the session to `.playAndRecord`; `setCategory` to ANY media
+    /// category returns paramErr (-50) even with the engine stopped and
+    /// the session inactive (the simulator, with its virtual input,
+    /// accepts the same calls). The media-volume lever that exists for
+    /// exactly this shape is Apple's SPOKEN-audio MODES — `.spokenAudio`
+    /// (the pre-iOS-17 Siri mode) falling back to `.voicePrompt` — which
+    /// change playback processing without touching the category, the
+    /// input, or the engine: the MIC-CONTINUITY speak→listen guarantee
+    /// is untouched.
+    ///
+    /// Depth-counted, not stacked: Piper falling back to the system
+    /// speaker nests begin/end, and only the OUTERMOST end restores the
+    /// capture mode.
 
     private var playbackModeDepth = 0
 
@@ -191,7 +261,25 @@ final class AudioSessionManager {
 
     func beginResponsePlayback() {
         if playbackModeDepth == 0 {
-            try? session.setMode(.voicePrompt)
+            do {
+                try session.setMode(.spokenAudio)
+                emit(eventType: "audio_response_playback", outcome: "began",
+                     metadata: ["state": "spokenAudio"])
+            } catch {
+                if #available(iOS 17.0, *) {
+                    do {
+                        try session.setMode(.voicePrompt)
+                        emit(eventType: "audio_response_playback",
+                             outcome: "began",
+                             metadata: ["state": "voicePrompt"])
+                        return
+                    } catch {
+                        emitPlaybackFailure(step: "mode", error: error)
+                    }
+                } else {
+                    emitPlaybackFailure(step: "mode", error: error)
+                }
+            }
         }
         playbackModeDepth += 1
     }
@@ -200,8 +288,29 @@ final class AudioSessionManager {
         guard playbackModeDepth > 0 else { return }
         playbackModeDepth -= 1
         guard playbackModeDepth == 0 else { return }
-        try? session.setMode(captureMode)
+        do {
+            try session.setMode(captureMode)
+            emit(eventType: "audio_response_playback", outcome: "restored",
+                 metadata: ["state": captureMode.rawValue])
+        } catch {
+            emitPlaybackFailure(step: "mode_restore", error: error,
+                                outcome: "restore_failed")
+        }
     }
+
+    private func emitPlaybackFailure(step: String, error: Error,
+                                     outcome: String = "failed") {
+        // Console visibility: LogSanitiser drops non-allow-listed
+        // metadata keys and redacts errorCode (digit runs read as phone
+        // numbers), but the allow-listed "state" key passes through —
+        // so the failing STEP rides there for the device console, and
+        // the numeric code stays in errorCode for the analytics bus.
+        let ns = error as NSError
+        emit(eventType: "audio_response_playback", outcome: outcome,
+             errorCode: "\(ns.code)",
+             metadata: ["state": step])
+    }
+
 
     /// Today's (pre-A/B) session configuration — `.measurement` mode.
     private static let measurementCategory: AVAudioSession.Category = .playAndRecord
@@ -222,10 +331,11 @@ final class AudioSessionManager {
 
     /// Designated initializer — test seam: injects the session fake and a
     /// disposable UserDefaults suite; the production convenience
-    /// initializer below supplies the real controller + `.standard`.
+    /// initializer below supplies the real controller + the settings
+    /// seam (`SettingsPersistence.shared`).
     init(observabilityBus: ObservabilityBus,
          audioSession: AudioSessionControlling,
-         defaults: UserDefaults = .standard) {
+         defaults: UserDefaults = SettingsPersistence.shared) {
         self.observabilityBus = observabilityBus
         self.session = audioSession
         self.defaults = defaults
@@ -238,7 +348,7 @@ final class AudioSessionManager {
     /// pipeline installs its tap on — the VP flag is per-node).
     convenience init(observabilityBus: ObservabilityBus,
                      audioEngine: AVAudioEngine,
-                     defaults: UserDefaults = .standard) {
+                     defaults: UserDefaults = SettingsPersistence.shared) {
         self.init(observabilityBus: observabilityBus,
                   audioSession: SystemAudioSessionController(
                       session: AVAudioSession.sharedInstance(),

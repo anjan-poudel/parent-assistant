@@ -65,19 +65,16 @@ final class UNNotificationScheduler: PlatformAlarmScheduler {
     }
 
     private func registerNotificationCategories() {
-        // Category for medication reminder with acknowledgement actions
-        let acknowledgeAction = UNNotificationAction(
-            identifier: "ACKNOWLEDGE_MEDICATION",
-            title: L10n.str("meds.taken", locale: locale),
-            options: [.foreground]
-        )
-        let category = UNNotificationCategory(
-            identifier: "MEDICATION_REMINDER",
-            actions: [acknowledgeAction],
-            intentIdentifiers: [],
-            options: [.customDismissAction]
-        )
-        center.setNotificationCategories([category])
+        // The medication category with its acknowledge action, plus the
+        // free-form event category (rich-events task, 2026-09-17) —
+        // consumed from ONE shared builder because
+        // `setNotificationCategories` is a full REPLACE: registering the
+        // event category anywhere but here would silently drop the
+        // medication one, and with it the "Taken" action on every dose.
+        // See `NotificationCategories`.
+        let categories = NotificationCategories.all(locale: locale)
+        center.setNotificationCategories(categories)
+        registeredCategories = Set(categories.map(\.identifier))
     }
 
     func scheduleReminder(

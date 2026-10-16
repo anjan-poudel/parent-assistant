@@ -26,6 +26,33 @@ Scaffold an ai-sdd project or feature. Follow these steps:
 
    Hold this inference — Q1 will confirm or override it.
 
+**Messaging transport (when configured).** When the session's messaging plugin is
+configured (`@ai-sdd/messaging` in `.ai-sdd/ai-sdd.yaml`), pose EVERY question in
+this flow — Q1, the mode questions below, the mode-disambiguation question, and
+the Phase-2 clarifications — through the messaging Q&A path instead of the
+terminal, one at a time: the next question is asked only after the previous
+answer arrives. Via Bash:
+
+- choice questions:
+  `ai-sdd messaging ask --question "<question>" --options <a,b,c,...> --wait --project {{PROJECT_PATH}}`
+- open questions:
+  `ai-sdd messaging ask --question "<question>" --wait --project {{PROJECT_PATH}}`
+
+Exit vocabulary: exit 0 — answered; the single stdout line is the answer (the
+choice id for an `--options` question, the reply text for an open question).
+Process it under the same conversational rules as below: a `?`/help answer is
+served by re-asking the question with its help text attached; skip signals follow
+the skip semantics below. Exit 3 — no answer (expired or interrupted): re-ask, or
+continue per the skip semantics. Any other non-zero exit — refusal or failure:
+surface the stderr line and stop asking. Under `slack.answers_only: true`, Slack
+is the only answer surface: never wait on terminal input and never fall back to
+terminal questions — an exit 3 re-asks on the ask path (the wait horizon is
+effectively forever under the knob; exit 3 means the operator interrupted, not an
+expiry). When the plugin is not configured, keep the terminal flow exactly as
+written below. The questions never ask for tokens, keys, or credentials — never
+post a secret in question text and never echo one back into the channel or the
+brief.
+
 3. Ask **Q1** (all modes):
 
    > What are you building — and is this a new project, a new feature in an existing project, or a quick fix?
@@ -124,6 +151,16 @@ Scaffold an ai-sdd project or feature. Follow these steps:
        [? help]: Be specific about boundaries. Example: "User notification preferences —
        lets users choose email vs push for each notification type. Does NOT change the
        notification delivery pipeline itself."
+       Commitment (when messaging is configured): the accepted Q2 answer is the
+       feature-scope answer — it commits slug = deriveSlug(feature_scope). Do NOT
+       run any channel-establishment command: the scaffold CLI creates or verifies
+       the session's Slack channel for that slug in-process when the brief runs in
+       step 7. Only the committed slug's channel is established: re-asked or
+       rejected candidate names must never leave an orphan channel behind.
+       Questions asked before the slug commits post to the configured
+       `slack.fallback_channel` and are answerable from Slack there; to pin
+       post-commitment asks to the committed session regardless of the branch
+       name, pass `--feature <slug>` — the sanctioned session flag.
 
    Q3: Any new safety or compliance concerns beyond what the project already handles?
        [? help]: The root constitution.md already documents the project's safety and
@@ -220,11 +257,17 @@ Scaffold an ai-sdd project or feature. Follow these steps:
 
    b. Run via Bash:
       ```bash
-      ai-sdd scaffold --brief /tmp/sdd-brief-<timestamp>.json --project /Users/anjan/workspace/projects/ai/ai-sdd/ai-sdd-claude/examples/elderly-ai-assistant
+      ai-sdd scaffold --brief /tmp/sdd-brief-<timestamp>.json --project {{PROJECT_PATH}}
       ```
 
       This generates: ai-sdd.yaml, workflow YAML, directory structure, and init-report.
       The output is JSON with `files_created` and `constitution_prompt`.
+      When messaging is configured, this command also establishes the session's
+      Slack channel for the committed brownfield-feature slug in-process — do
+      not run any channel-establishment command yourself. On failure it prints a
+      warning naming the reason and the retry command and emits
+      `messaging.delivery_unavailable`, then continues: surface the warning and
+      continue — never block the scaffold on messaging.
 
    c. Spawn Task(sdd-scaffold) with the `constitution_prompt` from the CLI output.
       The agent writes `constitution.md` (greenfield) or `specs/<feature>/constitution.md`

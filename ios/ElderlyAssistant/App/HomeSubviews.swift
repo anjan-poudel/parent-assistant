@@ -12,12 +12,10 @@ import UIKit
 // call (see `HomePresentationState.swift` for the models and the equality
 // rule).
 //
-// This is why the split matters for the review's acceptance: a feed
-// translation, a model-download tick, a settings change or an unrelated
-// timer invalidates HomeView, but `HomeDock`, `HomeTopBar`,
-// `QuickAccessStrip` and `TalkStage` all compare equal and their bodies
-// never run. Voice animation/state updates invalidate the talk stage (its
-// `==` includes the session state) and leave the dock and top bar alone.
+// Unrelated coordinator updates still compare equal. Skin/style and Dynamic
+// Type are environment dependencies, so their changes invalidate the relevant
+// subviews even across the equatable performance boundaries. Voice animation
+// and state updates remain isolated to the talk stage.
 //
 // iOS 16 floor: these are value-typed slices fed by HomeView, not
 // `@Observable` models — see `HomePresentationState.swift` for the
@@ -25,11 +23,18 @@ import UIKit
 
 // MARK: - Top bar (redesign spec §3.1)
 
-/// Settings (leading), the date line doubling as the calendar's entry
-/// point (centered), the notifications bell and the emergency button
-/// (trailing). Equal-width 44pt containers keep the date line visually
-/// centered; the gear can never be confused with emergency.
+/// Settings and "About me" (leading, home-profile-icon 2026-10-06), the
+/// date line doubling as the calendar's entry point (centered), the
+/// notifications bell and the emergency button (trailing). At larger type
+/// the full date moves below the controls; every entrypoint retains a
+/// minimum 44pt target.
 struct HomeTopBar: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// [MEDIUM-FIT] (2026-10-15) True when the iPhone display size is
+    /// Medium or Large (Settings → Display & Brightness) — the compact
+    /// bar then applies; at Default the original layout renders.
+    private var zoomed: Bool { UIScreen.main.isDisplayZoomed }
     /// Today's composed date line — nil until the first offline
     /// composition lands (one launch frame), which renders as an empty
     /// date area, exactly as before the split.
@@ -44,39 +49,97 @@ struct HomeTopBar: View {
     let onOpenUpdates: () -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            // Settings stays leading; Updates and Emergency remain grouped
-            // at the trailing edge while the date keeps the center target.
-            NavigationLink(value: LeafDestination.settings) {
-                IconBadge(systemImage: "gearshape.fill", tint: .settings, diameter: 32)
-                    .frame(width: 44, height: 44)
+        Group {
+            if zoomed {
+                // [MEDIUM-FIT] (2026-10-15) Medium/Large display size:
+                // the compact stacked bar — profile below settings,
+                // notifications below emergency, the Nepali calendar
+                // date between the two menu columns.
+                stackedBar
+                    .padding(.top, 4)
+            } else {
+                // Default display size: the original bar — one icon row
+                // with the date inline at ordinary type sizes, the date
+                // on its own row at accessibility sizes.
+                originalBar
+                    .padding(.top, 8)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(LocalizedStringKey("home.hub.settings")))
-            .frame(width: 44, alignment: .leading)
-            // Balance the two trailing controls so the date remains at the
-            // physical screen center instead of drifting toward Settings.
-            Color.clear.frame(width: 44, height: 44)
-            Spacer(minLength: 4)
-            // The date area doubles as the calendar's entry point
-            // (2026-09-06): the calendar lives ON the home screen via this
-            // tap target, NOT as a dock item.
-            NavigationLink(value: LeafDestination.calendar) {
-                dateLineView
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("home.hub.calendar"))
-            .accessibilityValue(Text(calendarLine ?? ""))
-            Spacer(minLength: 4)
-            // The ONE notifications affordance (home-redesign v3,
-            // 2026-09-08): a bell with the active-panel badge — the badge
-            // count always matches what the Updates leaf lists (same
-            // registry instance). Emergency stays at the far edge.
-            NotificationBellButton(count: notificationCount, action: onOpenUpdates)
-            EmergencyIconButton()
-                .frame(width: 44, alignment: .trailing)
         }
-        .padding(.top, 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("home.header")
+    }
+
+    /// Settings over profile on the left, the Nepali date in the
+    /// middle, emergency over notifications on the right (zoomed
+    /// display sizes).
+    private var stackedBar: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(spacing: 2) {
+                settingsButton
+                profileButton
+            }
+            calendarButton
+                .frame(maxWidth: .infinity)
+            VStack(spacing: 2) {
+                EmergencyIconButton()
+                NotificationBellButton(count: notificationCount, action: onOpenUpdates)
+            }
+        }
+    }
+
+    /// The pre-medium-fit bar (default display size).
+    private var originalBar: some View {
+        VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 4 : 8) {
+            HStack(spacing: 8) {
+                settingsButton
+                profileButton
+                if dynamicTypeSize <= .large {
+                    calendarButton
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Spacer(minLength: 8)
+                }
+                NotificationBellButton(count: notificationCount, action: onOpenUpdates)
+                EmergencyIconButton()
+            }
+            if dynamicTypeSize > .large {
+                calendarButton
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private var settingsButton: some View {
+        NavigationLink(value: LeafDestination.settings) {
+            ReferenceIconArtwork(name: "settings", diameter: 32)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("home.hub.settings"))
+        .accessibilityIdentifier("home.settings")
+    }
+
+    private var profileButton: some View {
+        NavigationLink(value: LeafDestination.profile) {
+            IconBadge(systemImage: "person.crop.circle.fill", tint: .profile, diameter: 32)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("home.hub.profile"))
+        .accessibilityIdentifier("home.profile")
+    }
+
+    private var calendarButton: some View {
+        NavigationLink(value: LeafDestination.calendar) {
+            dateLineView
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("home.hub.calendar"))
+        .accessibilityValue(Text(calendarLine ?? ""))
     }
 
     /// Compact date content; the whole center target opens Calendar.
@@ -85,18 +148,18 @@ struct HomeTopBar: View {
         VStack(alignment: .center, spacing: 3) {
             if let line = dateLine {
                 Text(line.primary)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                 weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 if !line.overlays.isEmpty {
                     Text(line.overlays.joined(separator: " • "))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                    weight: .medium))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                         .multilineTextAlignment(.center)
-                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -123,64 +186,97 @@ extension HomeTopBar: Equatable {
 /// Settings → Quick apps; the row renders only while at least one
 /// favourite exists (the caller's `if`).
 struct QuickAccessStrip: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var largeTypeTileWidth: CGFloat = 92
+    @State private var availableWidth: CGFloat = 0
     let apps: [AppLauncher.App]
-    /// Tap on a tile: launch through the coordinator, which probes the
-    /// scheme again at tap time and speaks honestly when the app has gone
-    /// away.
+    /// Launch through the coordinator, including its installed-app check.
     let onLaunch: (AppLauncher.App) -> Void
+
+    private var tileWidth: CGFloat {
+        // [MEDIUM-FIT] (2026-10-15) At Medium/Large display sizes every
+        // curated app fits the viewport — the row does not scroll
+        // (owner: apps were hidden behind the horizontal scroll).
+        // Capped at the 4-across width so a single favourite never
+        // balloons to a half-screen tile. Default display size keeps
+        // the original 4-across baseline.
+        if zoomed {
+            let count = apps.count + 1  // favourites + the add tile
+            let totalSpacing = horizontalSpacing * CGFloat(max(count - 1, 0))
+            let fitAll = (availableWidth - totalSpacing) / CGFloat(max(count, 1))
+            let fourAcross = (availableWidth - 3 * horizontalSpacing) / 4
+            return max(DesignTokens.minTapTargetSize, min(fitAll, fourAcross))
+        }
+        let fourAcrossWidth = max(DesignTokens.minTapTargetSize, (availableWidth - 24) / 4)
+        return dynamicTypeSize > .large ? max(largeTypeTileWidth, fourAcrossWidth) : fourAcrossWidth
+    }
+
+    /// [MEDIUM-FIT] (2026-10-15) 4pt tile gaps at Medium/Large display
+    /// sizes, the original 8pt at Default.
+    private var horizontalSpacing: CGFloat {
+        zoomed ? 4 : 8
+    }
+
+    /// [MEDIUM-FIT] (2026-10-15) True when the iPhone display size is
+    /// Medium or Large (Settings → Display & Brightness).
+    private var zoomed: Bool { UIScreen.main.isDisplayZoomed }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
+            HStack(alignment: .top, spacing: horizontalSpacing) {
                 ForEach(apps) { app in
                     tile(app)
                 }
-                NavigationLink(value: LeafDestination.settings) {
+                NavigationLink(value: SettingsView.SettingsDestination.quickApps) {
                     addTile
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("home.quickAccess.add")
             }
             .padding(.vertical, 2)
         }
         .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGFloat.self) { geometry in
+            geometry.size.width
+        } action: { width in
+            availableWidth = width
+        }
+        .accessibilityIdentifier("home.quickAccess")
     }
 
-    /// 56pt badge + name on a 92pt-wide tile, ≥44pt tall — one combined
-    /// accessibility element ("WhatsApp, button").
+    /// Four equal slots fit the viewport at ordinary type sizes. More
+    /// favourites and the picker stay accessible by horizontal scrolling.
     private func tile(_ app: AppLauncher.App) -> some View {
         Button {
             onLaunch(app)
         } label: {
             VStack(spacing: 4) {
-                AppGlyph(app: app, diameter: 56)
+                AppGlyph(app: app, diameter: 48)
                 Text(LocalizedStringKey(app.nameKey))
-                    // [DESIGN-REVIEW] 18pt caption floor + wrapping —
-                    // no minimumScaleFactor on localized tile labels.
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(width: 92)
-            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .frame(width: tileWidth, alignment: .top)
+            .frame(minHeight: DesignTokens.minTapTargetSize, alignment: .top)
             .accessibilityElement(children: .combine)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("home.quickAccess.\(app.id)")
     }
 
-    /// The trailing plus tile → Settings (LeafDestination.settings), where
-    /// the Quick apps picker lives. Same 92pt width as the app tiles so
-    /// the row's rhythm stays even.
+    /// The trailing plus tile opens the Quick apps picker directly.
     private var addTile: some View {
-        VStack(spacing: 4) {
-            IconBadge(systemImage: "plus", tint: .apps, diameter: 56)
-        }
-        .frame(width: 92)
-        .frame(minHeight: DesignTokens.minTapTargetSize)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("home.quickAccess.add"))
+        IconBadge(systemImage: "plus", tint: .apps, diameter: 48)
+            .frame(width: tileWidth)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text("home.quickAccess.add"))
     }
 }
+
 
 extension QuickAccessStrip: Equatable {
     /// The favourites themselves — the only data the row renders (the
@@ -203,13 +299,31 @@ extension QuickAccessStrip: Equatable {
 /// that is what makes a voice state flip re-render the stage even though
 /// the stage does not observe the session.
 struct TalkStage: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// [MEDIUM-FIT] (2026-10-15) True at Medium/Large display sizes.
+    private var zoomed: Bool { UIScreen.main.isDisplayZoomed }
     /// The state the stage renders (branch, hint carousel, tap behavior).
     let state: VoiceSessionState
     /// Handed to the hero, which observes it for its own live updates
     /// (icon, caption, hold eligibility).
     let session: VoiceSessionStateMachine
+    /// [AUDIO-REACTIVE-HERO] (2026-10-14) The live audio-level model the
+    /// hero observes for its signal-driven motion (disc bounce, equalizer
+    /// bars, state-glyph breathing). Crosses the stage like `session`
+    /// does — by reference, so the hero's own `@ObservedObject`
+    /// subscription carries every ~30 Hz publish without re-running the
+    /// stage (identity is constant; deliberately NOT part of `==`, see
+    /// the extension below).
+    let audioLevels: AudioLevelPublisher
     /// [P0-2] Manual Talk readiness + the labels the stage shows.
     let voice: VoicePresentationState
+    /// [HERO-STATES] The speaking overlay: true while any reply audio
+    /// plays (the probe's own speech, the reply after resolution).
+    let isSpeaking: Bool
+    /// [HERO-STATES] True exactly while the auto-listen answer capture
+    /// is live; a closed-capture window shows the talk affordance.
+    let slotAnswerCaptureActive: Bool
     /// Idle hero tap — the manual wake-word simulation that starts a
     /// cycle.
     let onStart: () -> Void
@@ -221,7 +335,11 @@ struct TalkStage: View {
 
     @Environment(\.locale) private var locale
 
-    private var visuals: TalkStageVisuals { state.talkVisuals }
+    private var visuals: TalkStageVisuals {
+        TalkStageVisuals.resolved(state: state,
+                                  isSpeaking: isSpeaking,
+                                  slotAnswerCaptureActive: slotAnswerCaptureActive)
+    }
 
     var body: some View {
         Group {
@@ -231,13 +349,20 @@ struct TalkStage: View {
                 // capability diagnostics live in Settings.
                 ConfirmationChips(titleKey: visuals.captionKey)
             } else {
-                // The stage reads as ONE unit: hero, its status line and
-                // the hint carousel each sit ≤4pt apart (visual-polish
-                // 2026-09-08). The boot capsule is an overlay on the disc
-                // inside `TalkButton`, NOT a flow element here, so nothing
-                // below shifts when it collapses.
-                VStack(spacing: 4) {
+                // Separate the button, its status and the suggested phrase.
+                // [MEDIUM-FIT] (2026-10-15) 12pt hero↔slot gap at
+                // Medium/Large display sizes, the original 16pt at
+                // Default.
+                VStack(spacing: zoomed ? 12 : 16) {
                     TalkButton(session: session,
+                               // [AUDIO-REACTIVE-HERO] The hero's live
+                               // signal feed — observed by the hero
+                               // itself, never redrawing the stage.
+                               audioLevels: audioLevels,
+                               // [HERO-STATES] The overlays flow down
+                               // from the coordinator through the stage.
+                               isSpeaking: isSpeaking,
+                               slotAnswerCaptureActive: slotAnswerCaptureActive,
                                // [P0-2] Manual Talk readiness — the shared
                                // `VoicePipelineReadiness` contract, driven
                                // by the pipeline's own start callback and
@@ -258,11 +383,14 @@ struct TalkStage: View {
                                        // tapping retries the pipeline start
                                        // instead of staying dead.
                                        onRecover()
-                                   case .awaitingConfirmation:
+                                   case .awaitingConfirmation, .awaitingSlotAnswer:
+                                       // The yes/no challenge and the slot
+                                       // answer window own the turn; the
+                                       // hero is inert there (T-135 keeps
+                                       // the confirmation semantics).
                                        break
                                    }
                                },
-                               statusOverride: voice.statusOverride,
                                onLongPressReset: onReset,
                                // [P0-2] The ONE deterministic recovery for a
                                // failed boot-time start: an explicit button
@@ -270,15 +398,102 @@ struct TalkStage: View {
                                // therefore never "recover" merely because
                                // startup has not completed.
                                onRecover: onRecover)
-                    if visuals.showsHintCarousel {
-                        HintCarousel()
-                    }
-                    if visuals.isError, voice.showsOpenSettings {
-                        openSettingsButton
-                    }
+                    // [HERO-LAYOUT] (2026-10-13) The sub-hero region is
+                    // a FIXED slot — extended [HERO-SIZE] (2026-10-14)
+                    // to also own the steady-state status line and the
+                    // accessibility-size state caption. A state flip can
+                    // only swap the slot's CONTENT, never the layout
+                    // height around it: the hero stays at the same
+                    // position and size in every state and every type
+                    // size (owner: "button size and positions must be
+                    // consistent across states").
+                    slotContent
+                        .frame(height: slotHeight, alignment: .top)
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    /// [HERO-SIZE] The sub-hero slot height: the compact value at
+    /// ordinary type sizes (the carousel is ~81–99pt there), the full
+    /// token height at accessibility sizes (the slot also hosts the
+    /// state caption there).
+    private var slotHeight: CGFloat {
+        dynamicTypeSize.isAccessibilitySize
+            ? DesignTokens.talkSubHeroSlotHeight
+            : DesignTokens.talkSubHeroSlotHeightCompact
+    }
+
+    /// The slot's steady-state content, top-aligned inside the FIXED
+    /// frame: the accessibility-size state caption, the status line
+    /// (error/stopped captions, the post-reset notice), the open-settings
+    /// recovery, and the idle hint carousel. Heights may vary per state;
+    /// the frame never does.
+    @ViewBuilder
+    private var slotContent: some View {
+        VStack(spacing: 8) {
+            // [CNR T-177] (2026-10-14) The cloud-chat surfaces — the
+            // activity badge and the consent question (design-l1 §8.5:
+            // "the existing status-slot surface; no new screen"). The
+            // host is parameterless and resolves the coordinator from
+            // the environment (the root injects it), so `TalkStage`'s
+            // stored fields and its `Equatable` are untouched; the badge
+            // renders nothing at all outside a cloud-active window.
+            CloudChatSurfacesHost()
+            if dynamicTypeSize.isAccessibilitySize {
+                Text(accessibilityCaption)
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityHidden(true)
+            }
+            if !statusText.isEmpty {
+                Text(statusText)
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
+                                                weight: .medium))
+                    .foregroundStyle(appearance.colors.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("home.talk.status")
+            }
+            if visuals.isError && voice.showsOpenSettings {
+                openSettingsButton
+            }
+            if showsCarousel {
+                HintCarousel()
+            }
+        }
+    }
+
+    /// At accessibility sizes the in-disc caption is hidden (it would
+    /// not fit the 132pt disc), so the state label renders here instead
+    /// — same text the disc shows at ordinary sizes.
+    private var accessibilityCaption: String {
+        if voice.readiness.isLoading, case .loading(let stage) = voice.readiness {
+            return TalkReadinessCopy.loadingLabel(stage, locale: locale)
+        }
+        return session.state.buttonText(locale: locale)
+    }
+
+    /// The steady-state status line. The error caption (voice's
+    /// statusOverride) wins; `.stopped` falls back to its own status
+    /// text when no override is set (same precedence the hero used to
+    /// apply under the disc).
+    private var statusText: String {
+        switch state {
+        case .error, .stopped:
+            return voice.statusOverride ?? session.state.statusText(locale: locale)
+        default:
+            return voice.statusOverride ?? ""
+        }
+    }
+
+    /// The hint carousel shows at idle only, and stands down while the
+    /// post-reset notice occupies the status line.
+    private var showsCarousel: Bool {
+        visuals.showsHintCarousel && statusText.isEmpty
     }
 
     private var openSettingsButton: some View {
@@ -288,12 +503,11 @@ struct TalkStage: View {
             }
         } label: {
             Label("state.error.openSettings", systemImage: "gear")
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.accent)
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundColor(appearance.colors.accentForeground)
                 .padding(.horizontal, 16)
-                .frame(height: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .padding(.vertical, 8)
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
     }
@@ -302,8 +516,12 @@ struct TalkStage: View {
 extension TalkStage: Equatable {
     /// Session identity (never a fold of it), the state that decides the
     /// branch and the tap behavior, and the two [P0-2] value models. The
-    /// hero's own live updates ride its `@ObservedObject` subscription;
-    /// this comparison exists so HOME's re-render (a feed translation, a
+    /// hero's own live updates ride its `@ObservedObject` subscription —
+    /// for `session` AND, since [AUDIO-REACTIVE-HERO] (2026-10-14), for
+    /// `audioLevels`, whose object identity is the app-constant model on
+    /// the coordinator: comparing it would be constant-equal, so it is
+    /// deliberately left out of `==` exactly as the closures are. This
+    /// comparison exists so HOME's re-render (a feed translation, a
     /// model-download tick, a settings change) cannot re-run the stage.
     static func == (lhs: TalkStage, rhs: TalkStage) -> Bool {
         ObjectIdentifier(lhs.session) == ObjectIdentifier(rhs.session)
@@ -331,6 +549,14 @@ extension TalkStage: Equatable {
 /// not the irreversible class of destructive action the app's
 /// confirmation dialogs guard.
 struct HomeTimerChipView: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var chipLayout: AnyLayout {
+        dynamicTypeSize > .large
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 14))
+    }
     let service: AlarmTimersService
     @Environment(\.locale) private var locale
 
@@ -366,30 +592,29 @@ struct HomeTimerChipView: View {
 
     private var chip: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(spacing: 14) {
+            chipLayout {
                 Image(systemName: "timer")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .font(.system(size: 24, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(LocalizedStringKey("homeTimer.remaining"))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                    weight: .medium))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                     Text(HomeTimerChipModel.countdownText(
                         remaining: viewModel.snapshot.endsAt?.timeIntervalSince(context.date) ?? 0,
                         isNepali: isNepali))
-                        .font(.system(size: DesignTokens.homeTimerDigitPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .font(.system(size: appearance.typography.homeTimerDigitPointSize, weight: .bold))
+                        .foregroundStyle(appearance.colors.textPrimary)
                         .monospacedDigit()
                 }
                 if let label = viewModel.snapshot.label {
                     Text(label)
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                    weight: .regular))
-                        .foregroundStyle(DesignTokens.textSecondary)
-                        .lineLimit(1)
+                        .foregroundStyle(appearance.colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: 8)
+                if dynamicTypeSize <= .large { Spacer(minLength: 8) }
                 if viewModel.snapshot.activeCount > 1 {
                     multipleBadge
                 }
@@ -397,8 +622,7 @@ struct HomeTimerChipView: View {
                     viewModel.stopNearest()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 30))
-                        .foregroundStyle(DesignTokens.stateError)
+                        .font(.system(size: 30)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                         .frame(minWidth: DesignTokens.minTapTargetSize,
                                minHeight: DesignTokens.minTapTargetSize)
                 }
@@ -408,8 +632,7 @@ struct HomeTimerChipView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .appSurface(cornerRadius: DesignTokens.bubbleCornerRadius)
         }
     }
 
@@ -419,12 +642,11 @@ struct HomeTimerChipView: View {
         let more = viewModel.snapshot.activeCount - 1
         let text = HomeTimerChipModel.devanagari("+\(more)")
         return Text(isNepali ? text : "+\(more)")
-            .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
-                                        weight: .semibold))
-            .foregroundStyle(DesignTokens.accent)
+            .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
+                                        weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(DesignTokens.accent.opacity(0.12))
+            .background(appearance.colors.accent.opacity(0.12))
             .clipShape(Capsule())
             .accessibilityLabel(Text(L10n.fmt("homeTimer.multiple", locale: locale, more)))
     }
@@ -448,11 +670,11 @@ extension HomeTimerChipView: Equatable {
 
 /// Everything BELOW the hero inside Home's single scroll region: the
 /// transient setup nudge (only while onboarding steps remain) and the
-/// live-caption/outcome surface. This region between the hero and the
-/// pinned bottom cluster is the only part of Home that ever clips, so on
-/// an iPhone SE-sized viewport its content scrolls while the hero and
-/// dock never leave the screen.
+/// live-caption/outcome surface. The whole Home content column can scroll
+/// on shorter phones; at larger type the dock joins that same scroll flow.
 struct FeedbackRegion: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Which feedback branch shows (the capture states own the pill, the
     /// confirmation state owns nothing here — its chips are the stage).
     let state: VoiceSessionState
@@ -517,7 +739,7 @@ struct FeedbackRegion: View {
                     guard outcome.undo != nil else { return }
                     try? await Task.sleep(nanoseconds: 6_000_000_000)
                     guard !Task.isCancelled else { return }
-                    withAnimation(.easeInOut) { outcomeExpanded = false }
+                    withAnimation(reduceMotion ? nil : .easeInOut) { outcomeExpanded = false }
                 }
             }
         }
@@ -557,6 +779,7 @@ extension FeedbackRegion: Equatable {
 /// render and always pushes the same destination, the rule every extracted
 /// Home view follows (see HomePresentationState).
 struct HomeMissedCallTile: View {
+    @Environment(\.appAppearance) private var appearance
     let presentation: MissedCallPresentation
     let onOpen: () -> Void
 
@@ -568,23 +791,22 @@ struct HomeMissedCallTile: View {
                           diameter: 40)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(presentation.title)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                        .foregroundStyle(appearance.colors.textPrimary)
                         .multilineTextAlignment(.leading)
                         .lineLimit(2)
                     Text(presentation.time)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
             .padding(16)
             .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .appSurface()
         }
         .buttonStyle(.plain)
         // One gesture reads the whole tile: "Missed call: बुबा · १० मिनेट
@@ -612,11 +834,12 @@ extension HomeMissedCallTile: Equatable {
 /// pending steps are OPTIONAL — the app is usable while they remain, which
 /// is exactly what the rendered "3 tasks remaining" treatment failed to
 /// say — so the strip now reads "%lld optional setup items" with the
-/// reassurance line "Talk now, or finish setup" beneath it. Warning
-/// styling (the alert glyph and the warm reminder tint) is reserved for
-/// the one case that IS a degradation: `needsAttention`, i.e. a startup
+/// reassurance line "Talk now, or finish setup" beneath it. The alert
+/// glyph is reserved for the one case that IS a degradation:
+/// `needsAttention`, i.e. a startup
 /// capability that actually failed.
 private struct SetupStrip: View {
+    @Environment(\.appAppearance) private var appearance
     let setup: SetupPresentation
     let action: () -> Void
 
@@ -631,28 +854,25 @@ private struct SetupStrip: View {
                 Image(systemName: setup.needsAttention
                       ? "exclamationmark.triangle.fill"
                       : "checklist")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(setup.needsAttention
-                                     ? DesignTokens.stateError
-                                     : DesignTokens.accent)
+                    .font(.system(size: 18, weight: .semibold)).foregroundStyle(setup.needsAttention ? appearance.statusForeground(DesignTokens.stateError) : appearance.colors.accentForeground)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(L10n.fmt("home.setupOptionalCount",
                                   locale: locale,
                                   setup.pendingCount))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                     weight: .semibold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .foregroundStyle(appearance.colors.textPrimary)
                     Text(L10n.str("home.setupTalkNow", locale: locale))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                     weight: .regular))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                 }
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -660,10 +880,7 @@ private struct SetupStrip: View {
             // at Accessibility XXL — must be able to expand instead of
             // clipping.
             .frame(minHeight: 56)
-            .background(setup.needsAttention
-                        ? DesignTokens.setupReminder
-                        : DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .appSurface(cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
     }
@@ -671,113 +888,129 @@ private struct SetupStrip: View {
 
 // MARK: - Dock (redesign spec §3.1)
 
-/// Home's six manual-documented destinations in the established two-row
-/// dock: secondary tools above, daily actions closest to the thumb below.
-/// Three equal-width tiles per row keep every destination visible without
-/// horizontal scrolling.
+/// Reference action dock: help/translation/news/maps above phone/medicine/reminders.
+/// Larger accessibility text reflows inside Home's scroll area.
 struct HomeDock: View {
-    /// The top family contact's name — its face replaces the generic
-    /// phone icon on the call tile when one is configured (redesign spec
-    /// §3.1/§3.2).
-    let contactName: String?
-    /// The appliance vision helper presents app-wide (via
-    /// `pendingPluginPresentation`), same as the voice path.
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// [MEDIUM-FIT] (2026-10-15) True at Medium/Large display sizes —
+    /// the dock then uses the compact geometry; at Default the
+    /// original geometry renders.
+    private var zoomed: Bool { UIScreen.main.isDisplayZoomed }
+    var edgeAttached: Bool = false
     let onAppliance: () -> Void
+    let onLiveTranslate: () -> Void
+
+    private var topColumns: [GridItem] {
+        if zoomed {
+            return Array(repeating: GridItem(.flexible(minimum: 44), spacing: 8, alignment: .top), count: 4)
+        }
+        return dynamicTypeSize.isAccessibilitySize
+            ? [GridItem(.adaptive(minimum: 140), spacing: 8, alignment: .top)]
+            : Array(repeating: GridItem(.flexible(minimum: 44), spacing: 8, alignment: .top), count: 4)
+    }
+
+    private var bottomColumns: [GridItem] {
+        if zoomed {
+            return Array(repeating: GridItem(.flexible(minimum: 44), spacing: 8, alignment: .top), count: 3)
+        }
+        return dynamicTypeSize.isAccessibilitySize
+            ? [GridItem(.adaptive(minimum: 140), spacing: 8, alignment: .top)]
+            : Array(repeating: GridItem(.flexible(minimum: 44), spacing: 8, alignment: .top), count: 3)
+    }
 
     var body: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 6) {
-                applianceItem
-                dockItem(.directions, icon: "map.fill", tint: .directions,
-                         titleKey: "home.hub.directions")
-                dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds,
-                         titleKey: "home.hub.feeds")
-            }
-            Rectangle()
-                .fill(DesignTokens.brandBlush)
-                .frame(height: 2)
-                .padding(.horizontal, 16)
-            HStack(spacing: 6) {
-                dockItem(.meds, icon: "pills.fill", tint: .meds,
-                         titleKey: "home.hub.meds")
-                callItem
-                dockItem(.reminders, icon: "clock.fill", tint: .reminders,
-                         titleKey: "home.hub.reminders")
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 12)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius,
-                                    style: .continuous))
-        .shadow(color: DesignTokens.brandWine.opacity(0.10), radius: 14, y: 6)
-    }
-
-
-    private func dockItem(_ destination: LeafDestination, icon: String,
-                          tint: DesignTokens.BadgeTint, titleKey: String) -> some View {
-        NavigationLink(value: destination) {
-            tile(icon: icon, tint: tint, titleKey: titleKey)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Appliance is not a leaf push — it presents the vision helper
-    /// app-wide through the plugin presentation seam.
-    private var applianceItem: some View {
-        Button(action: onAppliance) {
-            tile(icon: "camera.viewfinder", tint: .appliance,
-                 titleKey: "plugin.applianceHelper.name")
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Uses the top family contact's face instead of a generic phone icon
-    /// when one is configured.
-    private var callItem: some View {
-        NavigationLink(value: LeafDestination.call) {
-            VStack(spacing: 4) {
-                if let contactName {
-                    FaceAvatar(name: contactName, diameter: 44)
-                } else {
-                    IconBadge(systemImage: "phone.fill", tint: .call, diameter: 44)
+        // [DOCK-FIT] (2026-10-15) Medium/Large display sizes: 28/44pt
+        // glyphs, 4pt row gap, ~10pt rail insets, and the tiles ride
+        // low (~12pt above the physical bottom — HomeView shifts the
+        // dock into the safe area) with the surface flowing to the
+        // screen edge. Default display size keeps the original 32/48pt
+        // geometry. Every tile keeps its 44pt tap floor.
+        VStack(spacing: zoomed ? 4 : 6) {
+            LazyVGrid(columns: topColumns, alignment: .center, spacing: 8) {
+                Button(action: onAppliance) {
+                    // [MEDIUM-FIT] (2026-10-15) The dock label is always
+                    // the short form — owner: just "उपकरण", no "सहायता",
+                    // so the title never spills to a second line.
+                    tile(artwork: "settings",
+                         titleKey: "home.dock.appliance",
+                         onRail: false)
                 }
-                tileLabel("home.hub.call")
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("home.action.appliance")
+                Button(action: onLiveTranslate) {
+                    // [MEDIUM-FIT] (2026-10-15) The dock label is always
+                    // the short form — owner: just "अनुवाद", no "लाइभ",
+                    // so the title never spills to a second line.
+                    tile(artwork: "translate",
+                         titleKey: "home.dock.translate",
+                         onRail: false)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("home.action.liveTranslate")
+                dockItem(.feed, artwork: "news", titleKey: "home.hub.feeds",
+                         onRail: false, identifier: "home.action.feed")
+                dockItem(.directions, artwork: "location", titleKey: "home.hub.directions",
+                         onRail: false, identifier: "home.action.maps")
             }
-            .frame(maxWidth: .infinity, minHeight: 56)
-            .contentShape(Rectangle())
+            .padding(.horizontal, edgeAttached ? 20 : 0)
+            .accessibilityIdentifier("home.actionRow")
+
+            LazyVGrid(columns: bottomColumns, alignment: .center, spacing: 8) {
+                dockItem(.call, artwork: "phone", titleKey: "home.hub.call",
+                         onRail: true, identifier: "home.action.phone")
+                dockItem(.meds, artwork: "medicine", titleKey: "home.hub.meds",
+                         onRail: true, identifier: "home.action.medication")
+                dockItem(.reminders, artwork: "clock", titleKey: "home.hub.reminders",
+                         onRail: true, identifier: "home.action.reminders")
+            }
+            .padding(.horizontal, zoomed ? 10 : 8)
+            .padding(.top, zoomed ? 8 : 6)
+            // [MEDIUM-FIT] (2026-10-15) Owner v3 ("low hug") at
+            // Medium/Large display sizes: the tiles ride ~12pt above
+            // the physical screen bottom — HomeView shifts the dock
+            // past the safe area and the surface bleeds to the bottom
+            // edge, so there is no empty band under the tiles. No
+            // internal bottom inset there: the shift provides the 12pt
+            // clearance itself.
+            .background {
+                Color.clear
+                    .appSurface(role: .dock, cornerRadius: 20)
+                    .ignoresSafeArea(.container, edges: edgeAttached ? .bottom : [])
+            }
+            .accessibilityIdentifier("home.dock")
+        }
+        .accessibilityIdentifier("home.actions")
+    }
+
+    private func dockItem(_ destination: LeafDestination, artwork: String,
+                          titleKey: String, onRail: Bool, identifier: String) -> some View {
+        NavigationLink(value: destination) {
+            tile(artwork: artwork, titleKey: titleKey, onRail: onRail)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier(identifier)
     }
 
-    /// One dock tile: a 44pt badge over an 18pt label (the caption token —
-    /// navigation labels sit at or above the 18pt floor), on a 56pt
-    /// minimum target that grows when the text does.
-    private func tile(icon: String, tint: DesignTokens.BadgeTint,
-                      titleKey: String) -> some View {
-        VStack(spacing: 4) {
-            IconBadge(systemImage: icon, tint: tint, diameter: 44)
-            tileLabel(titleKey)
+
+    private func tile(artwork: String, titleKey: String, onRail: Bool) -> some View {
+        VStack(spacing: onRail ? 2 : 4) {
+            // [MEDIUM-FIT] (2026-10-15) 44/28pt glyphs at Medium/Large
+            // display sizes, the original 48/32pt at Default.
+            ReferenceIconArtwork(name: artwork,
+                                 diameter: onRail
+                                     ? (zoomed ? 44 : 48)
+                                     : (zoomed ? 28 : 32))
+            Text(LocalizedStringKey(titleKey))
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
+                .foregroundStyle(onRail ? appearance.colors.onAccent : appearance.colors.textPrimary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, minHeight: 56)
+        .padding(.horizontal, 4)
+        .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize,
+               maxHeight: .infinity, alignment: onRail ? .center : .top)
         .contentShape(Rectangle())
-    }
-
-    private func tileLabel(_ titleKey: String) -> some View {
-        Text(LocalizedStringKey(titleKey))
-            .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-            .foregroundStyle(DesignTokens.textPrimary)
-            .multilineTextAlignment(.center)
-            .lineLimit(2)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-}
-
-extension HomeDock: Equatable {
-    /// The contact name is the only datum the dock renders: the tiles are
-    /// static links, and the More sheet's choices reach the dock as
-    /// parameters of the closures it calls — never as captured state.
-    static func == (lhs: HomeDock, rhs: HomeDock) -> Bool {
-        lhs.contactName == rhs.contactName
+        .accessibilityElement(children: .combine)
     }
 }

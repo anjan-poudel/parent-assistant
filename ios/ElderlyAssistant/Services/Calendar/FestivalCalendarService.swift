@@ -41,17 +41,24 @@ final class FestivalCalendarService {
     /// user-configurable in Settings; a UI preference, not a secret).
     var advanceReminderDays: Int {
         get {
-            let v = UserDefaults.standard.integer(forKey: Self.advanceDaysDefaultsKey)
+            let v = defaults.integer(forKey: Self.advanceDaysDefaultsKey)
             return v > 0 ? v : 2
         }
-        set { UserDefaults.standard.set(newValue, forKey: Self.advanceDaysDefaultsKey) }
+        set { defaults.set(newValue, forKey: Self.advanceDaysDefaultsKey) }
     }
     static let advanceDaysDefaultsKey = "festivalCalendar.advanceReminderDays"
 
+    /// [SETTINGS-PERSIST] The settings seam (keychain-durable with
+    /// a UserDefaults fallback); production default, tests inject
+    /// their own scratch suite.
+    private let defaults: UserDefaults
+
     init(notificationCenter: UNUserNotificationCenter = .current(),
-         observabilityBus: ObservabilityBus) {
+         observabilityBus: ObservabilityBus,
+         defaults: UserDefaults = SettingsPersistence.shared) {
         self.notificationCenter = notificationCenter
         self.observabilityBus = observabilityBus
+        self.defaults = defaults
     }
 
     // MARK: - Today's overlay

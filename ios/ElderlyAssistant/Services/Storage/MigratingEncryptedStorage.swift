@@ -86,6 +86,22 @@ final class MigratingEncryptedStorage: EncryptedLocalStorage {
 
     func read<T: Decodable>(key: String, type: T.Type) -> Result<T, StorageError> {
         guard StoragePlacementPolicy.migratesToFile(key) else {
+            // [SETTINGS-SURVIVAL] The key is keychain-resident, but a
+            // value written before the placement change may still live in
+            // the file store (the legacy file-resident copy of the
+            // profile). Reverse-migrate it into the Keychain once, so the
+            // invariant ("settings survive uninstalls") holds for data
+
+            // that predates the flip. The payload moves VERBATIM (the
+            // header's byte-identical doctrine), so the read stays
+            // Decodable-only — a decode→encode round trip would both
+            // re-shape bytes and force every conformer to Codable
+            // (build repair 2026-10-14: the settings-survival wave's
+            // committed write-back required Encodable at this site).
+            if case .failure = keychain.read(key: key, type: type),
+               let legacy = files.readRawData(key: key) {
+                _ = keychain.writeRawData(legacy, key: key)
+            }
             return keychain.read(key: key, type: type)
         }
         // Inside a read snapshot the payload is already in memory — one
@@ -183,5 +199,50 @@ final class MigratingEncryptedStorage: EncryptedLocalStorage {
             return
         }
         _ = keychain.delete(key: key)
+    }
+}
+
+// MARK: - ProfilePayloadStorage (profile-interview, T-090)
+//
+// Additive conformance only — no existing method changes. The extension
+// lives in this file for file-scoped access to `files`, `keychain`,
+// `snapshotPayload(for:)` and `migrateToFileIfPossible(key:)`.
+
+extension MigratingEncryptedStorage: ProfilePayloadStorage {
+    /// Mirrors `read()`'s precedence — snapshot → files → legacy Keychain
+    /// (+ the existing transactional migration) — so a record that landed
+    /// on the Keychain fallback channel is still read honestly.
+    func readRawData(key: String) -> Data? {
+        guard StoragePlacementPolicy.migratesToFile(key) else {
+            return keychain.readRawData(key: key)
+        }
+        if let payload = snapshotPayload(for: key) { return payload }
+        if let payload = files.readRawData(key: key) { return payload }
+        guard let legacy = keychain.readRawData(key: key) else { return nil }
+        migrateToFileIfPossible(key: key)
+        return legacy
+    }
+
+    /// The file probe answers first; on `false`, a legacy Keychain copy
+    /// still counts as present; `nil` when the file channel cannot probe
+    /// (or is itself unknowable) — never read as absent.
+    func hasPayload(key: String) -> Bool? {
+        guard StoragePlacementPolicy.migratesToFile(key) else {
+            // Keychain-resident key: a raw read answers presence. `nil`
+            // (rather than false) is never produced here because the
+            // file channel is not involved; the Keychain read is the
+            // full truth for this channel.
+            return keychain.readRawData(key: key) != nil
+        }
+        // Optional chaining flattens: the guard else covers BOTH "no
+        // channel to ask" (the cast failed) and "the channel answered
+        // unknowable" — both are nil, never absent.
+        guard let probe = (files as? ProfilePayloadStorage)?.hasPayload(key: key) else {
+            return nil
+        }
+        if probe { return true }
+        // File channel says absent; a legacy Keychain copy still counts
+        // as present.
+        return keychain.readRawData(key: key) != nil
     }
 }

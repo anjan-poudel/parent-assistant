@@ -1,5 +1,8 @@
 import SwiftUI
 import UIKit
+// [RESPONSIVENESS] (2026-10-14) `CGImageSourceCreateThumbnailAtIndex` —
+// the ImageIO decode path `downsampled(from:maxPixelEdge:)` uses.
+import ImageIO
 
 /// Caches that keep repeatable, expensive work OUT of view evaluation
 /// (design review P2 — `docs/ios-swiftui-startup-review.md`,
@@ -34,6 +37,7 @@ enum LocaleFormatters {
     private static var shortDates: [String: DateFormatter] = [:]
     private static var shortTimes: [String: DateFormatter] = [:]
     private static var weekdaySymbolLists: [String: [String]] = [:]
+    private static var longWeekdaySymbolLists: [String: [String]] = [:]
 
     /// Short localized date, no time ("12 Sep 2026" / "१२ भदौ").
     static func shortDate(locale: Locale) -> DateFormatter {
@@ -68,6 +72,31 @@ enum LocaleFormatters {
             $0.timeStyle = .none
         }.shortWeekdaySymbols ?? []
         weekdaySymbolLists[key] = symbols
+        return symbols
+    }
+
+    /// The locale's FULL weekday names, indexed from Sunday ("Tuesday") —
+    /// the lookup the Events leaf's weekly-recurrence line
+    /// (`events.repeats.weekly`) needs. The long list, not
+    /// `shortWeekdaySymbols`: the composition promises the word, and
+    /// swapping in the short form would change visible copy.
+    ///
+    /// [RESPONSIVENESS] (2026-10-14) EventsView's `weekdayName` used to
+    /// allocate a fresh `DateFormatter` per weekly-recurrence row per
+    /// body pass — this cache is the same fix `shortWeekdaySymbols`
+    /// already carries. Built inside ONE critical section with its own
+    /// formatter for the same non-recursive-lock reason as the short
+    /// variant.
+    static func longWeekdaySymbols(locale: Locale) -> [String] {
+        let key = cacheKey(for: locale)
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = longWeekdaySymbolLists[key] { return cached }
+        let symbols = makeFormatter(locale: locale) {
+            $0.dateStyle = .short
+            $0.timeStyle = .none
+        }.weekdaySymbols ?? []
+        longWeekdaySymbolLists[key] = symbols
         return symbols
     }
 
@@ -114,6 +143,30 @@ enum LocaleFormatters {
 /// downsampled to the size it is actually rendered at, and the cache is
 /// bounded by both entry count and total cost, so scrolling a long list
 /// can neither hitch on repeated decodes nor grow memory without limit.
+///
+/// ## Face key families and the invalidation contract (T-157)
+///
+/// Curated-contact faces enter under one of two key families, chosen so
+/// the two sources can never collide (design-l1 §10.1, design-l2 §1.9):
+///
+/// - `"contact:<filename>"` — an APP-LOCAL stored thumbnail. The file
+///   name is the version: replacing or clearing a contact's photo
+///   changes the name, so the new photo is a cache MISS, never a stale
+///   serve.
+/// - `"sysphoto:<identifier>:<token>"` — a SYSTEM photo from the linked
+///   address-book record, where `<token>` is the 16-hex sha256 prefix
+///   of the resolved bytes. The token is the bytes' version: new bytes
+///   (an external edit, picked up on the next foreground refresh) hash
+///   differently, so the key changes and the old entry is simply never
+///   asked for again.
+///
+/// The `faceEpoch` counter deliberately does NOT appear in these keys:
+/// it exists to re-trigger RESOLUTION (via the coordinator's face
+/// identity, which callers pass as `.task(id:)`), while cache validity
+/// is decided by content — an epoch bump whose re-resolve reads the
+/// same bytes must hit the cache, not duplicate it. No invalidation API
+/// is needed: entries are derivable, bounded (count + decoded-byte
+/// cost) and safe to evict at any moment.
 final class DownsampledImageCache {
 
     static let shared = DownsampledImageCache()
@@ -162,7 +215,87 @@ final class DownsampledImageCache {
         cache.removeAllObjects()
     }
 
+    // MARK: Remote images (news-feed-images task, 2026-10-14)
+
+    /// The REMOTE-image variant of `thumbnail(forKey:...)`: the source
+    /// is bytes fetched over the network, so the load is async and the
+    /// decode is explicitly hopped off the caller's actor.
+    ///
+    /// Key family: `"feedimg:<url>"` — the feed article images
+    /// (`FeedArticleImageView` draws all three surfaces this serves: the
+    /// text card's thumbnail, the image card, the article reader). The
+    /// URL is the identity; feed content is immutable per URL in
+    /// practice, and every entry is derivable and bounded, so a miss is
+    /// always safe and a stale serve cannot outlive its URL.
+    ///
+    /// `loadData` runs ONLY on a miss (the same contract as the sync
+    /// variant's `load`), on the caller's actor — pass `URLSession`'s
+    /// async fetch, whose transfer work is off-main already. The
+    /// DOWNSAMPLE then runs on a detached task: `downsampled(from:)` is
+    /// ImageIO's thumbnail decode, but the caller is typically a SwiftUI
+    /// `.task` (main actor), and the [RESPONSIVENESS] house rule is that
+    /// the decode of an image never runs on the main thread — the same
+    /// `Task.detached` hop `EventsView`'s photo picker takes.
+    func thumbnail(forKey key: String,
+                   pointSize: CGFloat,
+                   displayScale: CGFloat,
+                   loadData: @escaping () async -> Data?) async -> UIImage? {
+        let pixelEdge = max(1, (pointSize * displayScale).rounded(.up))
+        let cacheKey = "\(key)@\(Int(pixelEdge))" as NSString
+        if let hit = cache.object(forKey: cacheKey) { return hit }
+        guard let data = await loadData() else { return nil }
+        // A trailing closure cannot sit inside a `guard` condition
+        // (Swift's parser binds it to the wrong construct), so the
+        // detached decode is built first and its value awaited after.
+        let decode = Task.detached(priority: .userInitiated) {
+            DownsampledImageCache.downsampled(from: data, maxPixelEdge: pixelEdge)
+        }
+        guard let thumb = await decode.value else { return nil }
+        cache.setObject(thumb, forKey: cacheKey, cost: Self.cost(of: thumb))
+        return thumb
+    }
+
     // MARK: Downsampling
+
+    /// `data` decoded DIRECTLY at the target size via ImageIO — the path
+    /// for bytes that may be tens of megapixels (a picked camera-roll
+    /// photo). `UIImage(data:)` decodes the FULL bitmap first (a 48 MP
+    /// photo is ~190 MB resident at the decode peak) and only then can
+    /// `downsampled(_:maxPixelEdge:)` shrink it; ImageIO's thumbnail
+    /// path never materializes the full-size bitmap, so both the decode
+    /// cost and the peak memory collapse to the size actually kept.
+    ///
+    /// [RESPONSIVENESS] (2026-10-14) The other half of the win is where
+    /// this runs: it is a pure function of `data`, so callers run it on
+    /// a background task (`Task.detached`) and the main thread never
+    /// pays the decode of an image it is about to throw away.
+    ///
+    /// `kCGImageSourceCreateThumbnailWithTransform` bakes the EXIF
+    /// orientation into the pixels (what drawing the old path produced,
+    /// so the visible result is identical); ImageIO never upscales, so
+    /// an image already within `maxPixelEdge` comes back at native size
+    /// — the same never-upscale rule as `downsampled(_:maxPixelEdge:)`.
+    /// Returns nil for undecodable bytes; callers treat that as "no
+    /// photo", exactly like the old `UIImage(data:)` guard.
+    static func downsampled(from data: Data, maxPixelEdge: CGFloat) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return nil
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            // Decode during creation, not lazily on first draw — the
+            // first draw happens on the main thread, the creation here
+            // does not.
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixelEdge.rounded(.up)),
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(
+            source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage)
+    }
 
     /// `image` re-rendered so its longest edge is at most `maxPixelEdge`
     /// PIXELS; never upscaled. Returns the image itself when it is
@@ -204,9 +337,16 @@ extension DownsampledImageCache {
     /// decoded once for the whole app (the family list, the phone tiles,
     /// a search row) and every later draw is a memory hit.
     ///
+    /// This is the APP-LOCAL (`contact:<filename>`) branch of the
+    /// coordinator's face path; a system-photo face enters through
+    /// `thumbnail(forKey:)` under the `sysphoto:` family instead (see
+    /// the class doc's key-family note).
+    ///
     /// - Parameters:
     ///   - diameter: the circle's width in points.
-    ///   - resolve: the coordinator's `contactPhoto(for:)` — called only
+    ///   - resolve: the app-local file read
+    ///     (`ContactPhotoStore.load(named:)` via the coordinator's
+    ///     `faceThumbnail(for:diameter:displayScale:)`) — called only
     ///     on a miss, never for a contact with no photo on file.
     func contactFace(for contact: FamilyContact,
                      diameter: CGFloat,

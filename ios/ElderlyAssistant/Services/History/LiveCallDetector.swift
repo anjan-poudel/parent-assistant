@@ -223,9 +223,13 @@ final class LiveCallDetector {
     private let onChange: ((Bool) -> Void)?
     /// Fired once per call that ended without ever connecting, with the
     /// moment the end was observed (missed-calls task, 2026-09-07).
-    /// ANONYMOUS: the event carries no caller identity or number — iOS
-    /// masks both for calls that involve other apps — and nothing
-    /// derived from it ever claims one.
+    /// ANONYMOUS at this seam: the event carries no caller identity or
+    /// number — iOS masks both for calls that involve other apps — and
+    /// nothing derived from it ever claims one. The COORDINATOR may
+    /// attribute the event to a dial the app itself placed moments
+    /// before (`OpenedCallAttributor`, wired by the missed-calls fix,
+    /// 2026-09-18): that is where a missed-call row's NUMBER comes from
+    /// — the dial the app opened, not the observer.
     private let onUnanswered: ((Date) -> Void)?
 
     /// Current belief about whether a call is connected.
