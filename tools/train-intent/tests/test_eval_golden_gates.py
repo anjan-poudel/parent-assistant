@@ -23,6 +23,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent          # tools/train-intent/
 SRC = ROOT / "src"
@@ -282,6 +283,68 @@ class CanonicalIntentKeyBridgeTests(unittest.TestCase):
         self.assertIsNone(eval_golden._first_complete_json("no json here"))
         self.assertIsNone(eval_golden._first_complete_json('{"intent": 7}'))
         self.assertIsNone(eval_golden._first_complete_json('[1, 2, 3]'))
+
+
+class PredsOutReplayRoundTripTests(unittest.TestCase):
+    """--preds-out records the scored predictions; the dump replays (2026-10-16
+    instrumentation: one live decode can later feed
+    `--full-gates --backend fixture --preds` without re-decoding)."""
+
+    def _inputs(self, preds_by_id):
+        corpus = [{"id": "r1", "utterance": "u1"}, {"id": "r2", "utterance": "u2"}]
+        nearmiss = [{"id": "n1", "utterance": "u3"}]
+        return {"corpus": corpus, "nearmiss": nearmiss,
+                "preds_by_id": preds_by_id}
+
+    def test_dump_then_replay_is_a_fixpoint(self):
+        preds_by_id = {"r1": {"action": "call", "confidence": 0.9,
+                              "contact": "amir"},
+                       "r2": {"action": "none", "confidence": 0.4},
+                       "n1": {"action": "emergency", "confidence": 0.95}}
+        inputs = self._inputs(preds_by_id)
+        with tempfile.TemporaryDirectory() as td:
+            dump1 = Path(td) / "preds1.jsonl"
+            args = SimpleNamespace(backend="fixture", preds_out=str(dump1))
+            p1, n1 = eval_golden._predict_all(args, {}, inputs)
+            self.assertEqual(p1[0], preds_by_id["r1"])
+            self.assertEqual(n1[0], preds_by_id["n1"])
+            rows1 = _rows(dump1)
+            self.assertEqual([r["id"] for r in rows1], ["r1", "r2", "n1"],
+                             "corpus rows then near-miss rows, ids attached")
+            self.assertEqual(rows1[0], {"id": "r1", "action": "call",
+                                        "confidence": 0.9, "contact": "amir"})
+            # Replaying the dump (records now carry their own id) and dumping
+            # again is the identity — and every row passes the fixture
+            # loader's own acceptance rules.
+            inputs2 = self._inputs({r["id"]: r for r in rows1})
+            dump2 = Path(td) / "preds2.jsonl"
+            args2 = SimpleNamespace(backend="fixture", preds_out=str(dump2))
+            p2, n2 = eval_golden._predict_all(args2, {}, inputs2)
+            self.assertEqual(p2[0]["action"], "call")
+            self.assertEqual(_rows(dump2), rows1)
+            for rec in rows1:
+                self.assertTrue(eval_golden._fixture_replayable(rec), rec)
+
+    def test_no_dump_without_the_flag(self):
+        preds_by_id = {"r1": {"action": "call", "confidence": 0.9},
+                       "r2": {"action": "none", "confidence": 0.4},
+                       "n1": {"action": "emergency", "confidence": 0.95}}
+        args = SimpleNamespace(backend="fixture")   # no preds_out attribute
+        p, n = eval_golden._predict_all(args, {}, self._inputs(preds_by_id))
+        self.assertEqual([r["action"] for r in p] + [r["action"] for r in n],
+                         ["call", "none", "emergency"])
+
+    def test_out_of_taxonomy_action_is_written_verbatim_and_flagged(self):
+        rec = {"id": "x", "action": "chat", "confidence": 0.5}
+        self.assertFalse(eval_golden._fixture_replayable(rec),
+                         "an action outside the schema-v2 allowlist cannot replay")
+        self.assertTrue(eval_golden._fixture_replayable(
+            {"id": "y", "action": "none", "confidence": 0.0}))
+        self.assertFalse(eval_golden._fixture_replayable(
+            {"id": "z", "action": "call"}), "a missing confidence cannot replay")
+        self.assertFalse(eval_golden._fixture_replayable(
+            {"id": "w", "action": "call", "confidence": 1.5}),
+            "a confidence outside [0, 1] cannot replay")
 
 
 class GateFixtureIntegrationTests(unittest.TestCase):
