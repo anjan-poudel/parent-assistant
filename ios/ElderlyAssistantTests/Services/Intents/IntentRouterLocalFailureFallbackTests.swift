@@ -15,7 +15,7 @@ final class IntentRouterLocalFailureFallbackTests: XCTestCase {
         let store = try! ModelStore(observabilityBus: NullObservabilityBus())
         let interpreter = LocalIntentInterpreter(modelStore: store, observabilityBus: bus)
         var calls = 0
-        interpreter.generateOverride = { _ in
+        interpreter.generateOverride = { _, _ in
             calls += 1
             return output(calls)
         }
