@@ -305,16 +305,35 @@ def _first_complete_json(text: str) -> dict | None:
 
     The output is expected to START with the model's JSON object, but some
     rows begin by echoing/continuing the prompt template first; every brace
-    candidate is tried until one parses as a complete object with an
-    "action" field. Returns None when no complete object exists (the model
-    refused / echoed forever / degenerated without emitting JSON)."""
+    candidate is tried until one parses as a complete object carrying the
+    app's canonical "intent" key (the wire LlamaCommandInterpreter's
+    grammar emits) or the legacy "action" key. The metric layer reads
+    "action" (the harness's historic internal name), so a canonical
+    completion is normalized onto it — the value is passed through
+    untouched. Returns None when no complete object exists (the model
+    refused / echoed forever / degenerated without emitting JSON).
+
+    Canonical-key bridge (2026-10-16, T-183 defect repair): this helper
+    previously required "action" only, while seeds/prompt_template.txt and
+    the golden corpus have emitted the canonical "intent" since the schema
+    reconciliation — so every correct model completion on the gguf path
+    was silently discarded and scored as an abstention (a live gguf run
+    could not measure any working model; exposed by the first real gguf
+    run of the v17 candidate). The canonical key is accepted here; the
+    metric layer's read path and every threshold stay untouched.
+    """
     decoder = json.JSONDecoder()
     for m in re.finditer(r"\{", text):
         try:
             obj, _ = decoder.raw_decode(text, m.start())
         except json.JSONDecodeError:
             continue
-        if isinstance(obj, dict) and isinstance(obj.get("action"), str):
+        if not isinstance(obj, dict):
+            continue
+        if isinstance(obj.get("action"), str):
+            return obj
+        if isinstance(obj.get("intent"), str):
+            obj["action"] = obj["intent"]
             return obj
     return None
 

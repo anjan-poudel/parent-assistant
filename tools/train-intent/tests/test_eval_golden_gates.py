@@ -251,6 +251,39 @@ class ScoringUnitTests(unittest.TestCase):
             self.assertEqual(unbound, ["gemini-legacy", "gemini-other@cafebabe"])
 
 
+class CanonicalIntentKeyBridgeTests(unittest.TestCase):
+    """The gguf parse bridge: canonical "intent" completions are accepted
+    and normalized onto the metric layer's historic "action" name
+    (2026-10-16, T-183 defect repair — before it, every correct model
+    completion was scored as an abstention)."""
+
+    def test_canonical_intent_completion_parses_and_normalizes(self):
+        text = ('{"intent": "call", "entryId": null, "contact": "माइया",'
+                ' "time": null, "confidence": 0.85, "response": "हुन्छ।"}')
+        obj = eval_golden._first_complete_json(text)
+        self.assertIsNotNone(obj)
+        self.assertEqual(obj["action"], "call")
+        self.assertEqual(obj["intent"], "call", "the canonical key is kept")
+        self.assertEqual(obj["contact"], "माइया", "fields pass through untouched")
+
+    def test_legacy_action_completion_still_parses_unchanged(self):
+        obj = eval_golden._first_complete_json('{"action": "none", "confidence": 0.0}')
+        self.assertEqual(obj, {"action": "none", "confidence": 0.0})
+        # when both keys are present, the legacy "action" value wins (exact
+        # prior behaviour — no inference over the bridge)
+        obj = eval_golden._first_complete_json('{"action": "none", "intent": "call"}')
+        self.assertEqual(obj["action"], "none")
+
+    def test_preamble_then_canonical_json_and_refusals(self):
+        text = 'Here is the JSON you asked for:\n{"intent": "music", "confidence": 0.9}'
+        obj = eval_golden._first_complete_json(text)
+        self.assertEqual(obj["action"], "music")
+        # no complete object, non-string intent, or non-dict JSON -> None
+        self.assertIsNone(eval_golden._first_complete_json("no json here"))
+        self.assertIsNone(eval_golden._first_complete_json('{"intent": 7}'))
+        self.assertIsNone(eval_golden._first_complete_json('[1, 2, 3]'))
+
+
 class GateFixtureIntegrationTests(unittest.TestCase):
     """Committed fixtures prove each gate can fail the run on its own."""
 
