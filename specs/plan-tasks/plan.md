@@ -1,149 +1,135 @@
-# Task Breakdown — Medication Schedules & Reminders
+# Task Breakdown — Conversational Nepali Replies (CNR)
 
-Feature `medication-schedules-reminders` · worktree `/Users/anjan/workspace/projects/elderly-ai-assistant-medication-schedules-reminders` · branch `feat/medication-schedules-reminders` · HEAD `f31ffa79`.
-Inputs: `specs/design-l2.md` (frozen components C1–C13, interfaces IF-1–IF-24, decisions D1–D11), `specs/review-l2.md` (GO; required resolutions R-1…R-4), `specs/review-l1.md` (resolutions M-1, m-1…m-5), `specs/define-requirements.md` (locked 22 FR-MSR, 10 NFR-MSR), `specs/medication-schedules-reminders/constitution.md`.
+Feature: `conversational-nepali-replies` — worktree `/Users/anjan/workspace/projects/elderly-ai-assistant-conversational-nepali-replies` (branch `feat/conversational-nepali-replies`).
+Decomposition source: `specs/design-l1.md` (combined L1+L2 design of record, 2026-10-14), read against `specs/define-requirements.md` (29 FR-CNR, 11 NFR-CNR) and the feature workflow `specs/conversational-nepali-replies/workflow.yaml` (2026-10-14 lean-chain directive).
 
 ## Summary
 
-- **Units:** 24 leaf units, `T-001` … `T-024` (T-023 and T-024 inserted mid-run by the owner-directed amendments 6 and 7), one unit per file, flat under `tasks/` (this workflow's plan-tasks contract; no task-group folders). Each unit carries: an explicit **Owned files** list (every source/test/config file it creates or modifies), components touched (C1–C13) and interfaces (IF-1–IF-24), a FR/NFR trace, explicit unit-id dependencies, a wave assignment, checkable acceptance criteria (Gherkin reusing the locked FR phrasing where behavioral), named tests with exact `-only-testing:` filters (or an explicit no-test note), and an S/M/L effort estimate with a risk note.
-- **Waves:** 10 (W0…W7, plus W6.5 = T-023 and W6.6 = T-024 from the amendments), organized for maximum width around the parallel-safe seams (models / editor UI / voice-ack path / photo-evidence / notifier+calendar / tests). Widths: 4 / 4 / 5 / 3 / 2 / 2 / 1 / 1 / 1 / 1. No two units in a wave own the same file (proof in the wave table below).
-- **Estimated effort:** ~41–45 developer-days nominal (2 S, 11 M, 9 L units). Longest dependency chain: 8 waves. With the wave-parallel dispatch (all units of a wave at once) the wall-clock estimate is ~2.5–3.5 weeks; strictly sequential ~9 weeks.
-- **Critical path:** T-001 → T-003 → T-009 → T-017 → T-018 → T-020 → T-021 → T-022. Running parallel: the scheduler spine T-001 → T-003 → T-008 → T-010 → T-016 → T-020, and the voice-ack lane T-001 → T-006 → T-013 → T-014 (done by W3). T-021 (evidence surfaces) waits on both the hold seam (T-019) and the settings surface (T-020); T-022 closes the feature.
-- **Required resolutions (review-l2) pinned:**
-  - **R-1 pin (a) — chosen:** the coordinator mints the log id at capture time (`EvidenceContext.pendingDose(entryId)`), the store names the file by it, and `finalizeAcknowledgement` uses that held id for the log it writes (stated at T-019; the `<logId>.jpg` scheme stays true everywhere, including pending captures).
-  - **R-2:** one named home, `ConfirmationChallenge.defaultChallengeTimeoutSeconds`; the scheduler passes it explicitly at both construction sites (`MedicationScheduler.swift` :255, :434) and `AckClarificationConfig` derives its window from the same home; no literal timeout at any call site (T-006).
-  - **R-3:** a hold registered when no un-finalized reminder exists for the entry is cleared at registration (file deleted); the record stays honestly evidence-free (T-019, with a named test).
-  - **R-4:** the walk consult is a sibling immediately ahead of the `if coordinator?.isAwaitingConfirmation == true` block at `CommandRouter.swift` :1049, so the flag flip skips the block and the refusal ladder (:2491) handles the denial; the two risk-5 router tests are kept (T-014).
-- **Scope discipline:** all 22 FR-MSR and 10 NFR-MSR are covered by at least one unit (matrix below); nothing beyond design-l2 and the review findings is added; no timing-target claim is asserted anywhere.
+- **Task groups (Jira epics):** 6 — TG-34 … TG-39.
+- **Total tasks:** 27 (leaf-task-only; 0 subtasks — the unit planner keys units on the leading `T-<digits>` token, so subtask files would collide).
+- **Estimated effort:** about **50.5 developer-days nominal** (P0 runtime ≈ 20.0, P1 training ≈ 16.0, release/acceptance/device ≈ 4.5, P2 polish + feasibility statement ≈ 10.0). Realistically about **4 to 5 weeks with two developers** working the waves, including unattended training-box time and one Anzaan device session.
+- **Execution mode:** `unit_based` with default wave parallelism (`implement.unit_execution.plan_task_id: plan-tasks`); the confidence overlay (threshold 0.85) and `max_rework_iterations: 5` are the only implement overlays. **No review or security-gate tasks exist in this plan** — the 2026-10-14 lean chain (design-l1 combined, review gates dropped, one advisory non-blocking security pass at the final sign-off) is the operating basis; the hard safety gates are enforced as code by T-181/T-182 and by the implementation tests.
+- **Test cadence (amendment-4, 2026-10-14 owner directive):** per-unit work is code + build/typecheck only (no per-unit test execution); each wave closes with ONE consolidated scoped (`-only-testing`) typecheck + focused-test pass over the wave's touched suites; unit evidence records and the commit are batched per wave; the single full-suite pass stays at the very end and the T-181/T-182 hard eval gates and the DV-1..DV-6 protocol are unchanged. See `amendments/amendment-4-wave-end-testing-and-batched-closure-2026-10-14.md`.
+- **Critical path:** T-166 → T-178 → T-179 → T-180 → T-182 → T-183 → T-184 → T-186 → T-187 → T-188 → T-192 — about 23 days, dominated by the P1 chain. With the P2 legs descoped, the path shortens to about 19 days (T-166 → … → T-187).
+- **Ordering note (OD-3 — RESOLVED 2026-10-14 as P0-first):** the P0 runtime slice (TG-34, TG-35, TG-36, the T-185 gate and the T-182 harness — waves 0–4) is independently landable and depends on no P1 or P2 artifact. The operator resolved the P0-versus-P1 sequencing question as **P0-first** (decision relayed via the main session, Slack question `q-ask-2f6a8883`; recorded with operator provenance in `amendments/amendment-5-od3-resolved-p0-first-and-p0-integration-2026-10-14.md`): when waves 0–4 are green and T-185 passes, the P0 integration PR is raised (push + PR against master; the PR's own review/merge stays a normal reviewed merge, not autonomous); P1 (T-183, T-184) continues in the same worktree on top of the PR head with the catalog swap still behind its green gates. The declared wave graph already matches the P0-first ordering — no re-layering was needed. (OD-3's former open status: `amendments/amendment-3-lean-review-gates-and-od3-2026-10-14.md`.)
+- **P2 descope (DECIDED 2026-10-15):** the four P2 legs (T-188 … T-191) are descoped from this run — P2 is separated as its own initiative (`docs/features/2026-10-15-p2-conversation-polish-initiative.md`, main checkout). Each leg completed with an explicit owner-descope record at its declared notes path (risk 10: descoping never silent), and T-192 stays in this run, accounting for all four legs. See `amendments/amendment-6-p2-descoped-2026-10-15.md`. The run's scope now closes the critical path at T-187; T-192 remains as the statement.
+- **Device-validation gate:** DV-1…DV-6 (T-187) is the feature's completion gate; without an Anzaan session every item is recorded BLOCKED with the reason and the feature stays outstanding.
 
 ## Contents
 
-- [T-001](tasks/T-001.md) — Slot-clock foundation: types, defaults, fail-closed resolution, mapping store (C1) — Wave 0 — depends on: —
-- [T-002](tasks/T-002.md) — Dose line composition from structured quantity (C2) — Wave 1 — depends on: T-001
-- [T-003](tasks/T-003.md) — Model additions, legacy migration decode, and the `withScheduleTimes` trap (C6) — Wave 1 — depends on: T-001
-- [T-004](tasks/T-004.md) — Ack resolver and closed vocabulary, pure and deterministic (C3) — Wave 1 — depends on: T-001
-- [T-005](tasks/T-005.md) — Scanned schedule to slots conversion, pinned hour table (C9) — Wave 1 — depends on: T-001
-- [T-006](tasks/T-006.md) — Challenge-timeout single source: named home, explicit at both construction sites, into `AckClarificationConfig` (R-2) — Wave 0 — depends on: —
-- [T-007](tasks/T-007.md) — On-device evidence store: compression cap, replace-in-place, fail-soft deletes (C5) — Wave 0 — depends on: —
-- [T-008](tasks/T-008.md) — Resolution feed at arming: resolved times, persist-before-arm preserved (C7.1) — Wave 2 — depends on: T-001, T-003
-- [T-009](tasks/T-009.md) — Editor draft extension: slot rows, scan application, preselection rules (C8 draft) — Wave 2 — depends on: T-001, T-005
-- [T-010](tasks/T-010.md) — Guarded re-arm on mapping change with `SlotClockRearmReport` (C7.2, m-1) — Wave 3 — depends on: T-008
-- [T-011](tasks/T-011.md) — Honest push transport, per-contact outcomes, PII-free envelope `v: 1` (C10, D9) — Wave 2 — depends on: T-003
-- [T-012](tasks/T-012.md) — Localisation key sets and the M-1 consent copy amendment, ne + en (C13) — Wave 0 — depends on: —
-- [T-013](tasks/T-013.md) — Coordinator seams: ack candidates and the clarification walk state (C4 state half, IF-7/IF-8) — Wave 2 — depends on: T-003, T-006
-- [T-014](tasks/T-014.md) — Router: resolution call and walk interception placement (C4 router half, R-4) — Wave 3 — depends on: T-004, T-013
-- [T-015](tasks/T-015.md) — Calendar significant-event writes and one-off bookkeeping (C11, D7) — Wave 2 — depends on: T-003, T-012
-- [T-016](tasks/T-016.md) — Scheduler significant-event triggers, event hooks, and the slot retime refusal (C7.3–C7.5, D10, m-5) — Wave 4 — depends on: T-003, T-008
-- [T-017](tasks/T-017.md) — Save plumbing: `MedicationSaveRequest`, N rows to N entries, duplicate rule (C12, D1, m-2) — Wave 3 — depends on: T-002, T-003, T-007, T-009
-- [T-018](tasks/T-018.md) — Editor surface: slot/quantity/meal controls, dose rows, edit-existing conversion flow (C8 view) — Wave 4 — depends on: T-009, T-017
-- [T-019](tasks/T-019.md) — Evidence hold, finalize attach, discard paths, R-1(a) and R-3 pins (C7.6, IF-15) — Wave 5 — depends on: T-007, T-008
-- [T-020](tasks/T-020.md) — Medicine-times settings section, mapping save action, re-arm lines, one-shot retime note, hook wiring (C8/C12) — Wave 5 — depends on: T-001, T-010, T-012, T-016, T-017, T-018
-- [T-021](tasks/T-021.md) — Evidence capture plumbing and surfaces: pending-dose hold, record-surface attach, "Taken today" (C5 UX, C12, D11) — Wave 6 — depends on: T-012, T-018, T-019, T-020
-- [T-022](tasks/T-022.md) — Integration tests, release gates, and the honesty claim audit (NFR-MSR-008/009, FR-MSR-022/018) — Wave 7 — depends on: T-003, T-013, T-014, T-015, T-016, T-017, T-019, T-020, T-021
-- [T-023](tasks/T-023.md) — Medication manage-list screen: list-first Settings surface, explicit add, tap-to-edit (owner-directed defect fix, amendment 6) — Wave 6.5 — depends on: T-018, T-020
-- [T-024](tasks/T-024.md) — Scanner frequency→slot grouping: "twice a day" yields two slot rows, Afternoon + Evening after food (owner-directed defect fix, amendment 7) — Wave 6.6 — depends on: T-005, T-009
+- [tasks/index.md](tasks/index.md) — the group table, ID numbering, dependency-line format and preconditions
+- [TG-34 — Style Spec, Chat Decode and Persona Seams](tasks/TG-34-style-spec-chat-decode-and-persona-seams/index.md) — T-166, T-167, T-168
+- [TG-35 — Grammar Guard, Prompt Mirrors and Localised Copy](tasks/TG-35-grammar-guard-prompt-mirrors-and-copy/index.md) — T-169, T-170, T-171
+- [TG-36 — Cloud Chat Consent, Routing and Elder Surfaces](tasks/TG-36-cloud-chat-consent-routing-and-elder-surfaces/index.md) — T-172 … T-177
+- [TG-37 — v17 Chat-Aware Training Suite](tasks/TG-37-v17-chat-aware-training-suite/index.md) — T-178 … T-184
+- [TG-38 — Release Gate, Acceptance and Device Validation](tasks/TG-38-release-gate-acceptance-and-device-validation/index.md) — T-185, T-186, T-187
+- [TG-39 — P2 Polish and Feasibility Honesty](tasks/TG-39-p2-polish-and-feasibility-honesty/index.md) — T-188 … T-192
+- [amendments/](amendments/) — plan amendments for this run (amendment 3 records the lean-chain directive and the OD-3 status)
+- Design and requirements inputs: `specs/design-l1.md`, `specs/define-requirements.md`, `specs/conversational-nepali-replies/workflow.yaml`
 
-## Waves: parallel dispatch, file ownership, closing test pass
+## Wave order
 
-Dispatch model: the coordinator dispatches ALL units of a wave in parallel (subagents on the shared worktree). Per unit: code + typecheck only — no unit owner runs tests, and no unit's acceptance requires a build beyond typecheck. xcodebuild is serialized across the worktree: exactly ONE consolidated build + scoped test pass per wave, run by the coordinator after the wave's units land, using the filter line in the table. A single full-suite run happens only at the end (W7).
+Waves are the dependency-safe parallel groups, computed as longest-path layering over each unit's declared dependency line; units in the same wave own disjoint declared files and can run concurrently. The unit planner re-derives membership at implement time and may push a unit later when a same-file conflict appears (T-177 before T-184 on the coordinator file), never earlier than shown.
 
-| Wave | Units (dispatched in parallel) | Files owned in this wave (disjointness proof) | Closing consolidated scoped pass |
-|------|-------------------------------|-----------------------------------------------|----------------------------------|
-| W0 | T-001, T-006, T-007, T-012 | T-001: `Services/MedicationScheduler/MedicationSlotClock.swift` (new), `Tests/.../MedicationSlotClockTests.swift` (new) · T-006: `Services/MedicationScheduler/AckClarificationConfig.swift` (new), `ConfirmationChallenge.swift`, `MedicationScheduler.swift`, `Tests/.../ConfirmationChallengeTests.swift`, `Tests/.../MedicationSchedulerTests.swift` · T-007: `Services/MedicationScheduler/MedicationEvidenceStore.swift` (new), `Tests/.../MedicationEvidenceStoreTests.swift` (new) · T-012: `Resources/Localizable.xcstrings`, `Tests/App/L10nCatalogCoverageTests.swift`, `Tests/App/CalendarShareConsentCopyTests.swift` (new) | `-only-testing:ElderlyAssistantTests/MedicationSlotClockTests -only-testing:ElderlyAssistantTests/ConfirmationChallengeTests -only-testing:ElderlyAssistantTests/MedicationSchedulerTests -only-testing:ElderlyAssistantTests/MedicationEvidenceStoreTests -only-testing:ElderlyAssistantTests/L10nCatalogCoverageTests -only-testing:ElderlyAssistantTests/CalendarShareConsentCopyTests` |
-| W1 | T-002, T-003, T-004, T-005 | T-002: `DoseLine.swift` (new), `Tests/.../DoseLineTests.swift` (new) · T-003: `Models.swift`, `Tests/.../MedicationEntryMigrationTests.swift` (new), `Tests/Services/FamilyNotifier/FamilyNotifierTests.swift` (raw-value list extension only) · T-004: `MedicationAckResolver.swift` (new), `Tests/.../MedicationAckResolverTests.swift` (new) · T-005: `ScannedSchedule.swift` (new), `Tests/.../ScannedScheduleTests.swift` (new) | `-only-testing:ElderlyAssistantTests/DoseLineTests -only-testing:ElderlyAssistantTests/MedicationEntryMigrationTests -only-testing:ElderlyAssistantTests/FamilyNotifierTests -only-testing:ElderlyAssistantTests/MedicationAckResolverTests -only-testing:ElderlyAssistantTests/ScannedScheduleTests` |
-| W2 | T-008, T-009, T-011, T-013, T-015 | T-008: `MedicationScheduler.swift`, `Tests/.../MedicationSchedulerTests.swift` · T-009: `MedicationEditorDraft.swift`, `Tests/.../MedicationEditorDraftTests.swift` · T-011: `Services/FamilyNotifier/FamilyNotifier.swift`, `Tests/Services/FamilyNotifier/FamilyNotifierTests.swift`, `Tests/Services/FamilyNotifier/NotifyChannelTests.swift` · T-013: `App/AppCoordinator.swift`, `Tests/App/MedicationAckClarificationTests.swift` (new) · T-015: `Services/CalendarSync/CalendarShareService.swift`, `Services/CalendarSync/CalendarShareMapper.swift`, `Tests/Services/CalendarSync/CalendarShareServiceTests.swift`, `Tests/Services/CalendarSync/CalendarShareMapperTests.swift` | `-only-testing:ElderlyAssistantTests/MedicationSchedulerTests -only-testing:ElderlyAssistantTests/MedicationEditorDraftTests -only-testing:ElderlyAssistantTests/FamilyNotifierTests -only-testing:ElderlyAssistantTests/NotifyChannelTests -only-testing:ElderlyAssistantTests/MedicationAckClarificationTests -only-testing:ElderlyAssistantTests/CalendarShareServiceTests -only-testing:ElderlyAssistantTests/CalendarShareMapperTests` |
-| W3 | T-010, T-014, T-017 | T-010: `MedicationScheduler.swift`, `Tests/.../MedicationSchedulerTests.swift` · T-014: `Services/Voice/CommandRouter.swift`, `Tests/Services/Voice/CommandRouterMedicationWalkTests.swift` (new), `Tests/Services/Voice/AckFastLaneTests.swift` · T-017: `App/AppCoordinator.swift`, `Tests/App/MedicationSavePlumbingTests.swift` (new) | `-only-testing:ElderlyAssistantTests/MedicationSchedulerTests -only-testing:ElderlyAssistantTests/CommandRouterMedicationWalkTests -only-testing:ElderlyAssistantTests/AckFastLaneTests -only-testing:ElderlyAssistantTests/MedicationSavePlumbingTests` |
-| W4 | T-016, T-018 | T-016: `MedicationScheduler.swift`, `Tests/.../MedicationSchedulerTests.swift`, `Tests/.../EscalationEngineTests.swift` · T-018: `App/SettingsView.swift`, `Tests/App/MedicationEditorSurfaceTests.swift` (new) | `-only-testing:ElderlyAssistantTests/MedicationSchedulerTests -only-testing:ElderlyAssistantTests/EscalationEngineTests -only-testing:ElderlyAssistantTests/MedicationEditorSurfaceTests -only-testing:ElderlyAssistantTests/MedicationEditorDraftTests` |
-| W5 | T-019, T-020 | T-019: `MedicationScheduler.swift`, `Tests/.../MedicationSchedulerTests.swift` · T-020: `App/SettingsView.swift`, `App/AppCoordinator.swift`, `Services/Storage/SettingsPersistence.swift`, `Tests/App/MedicationSlotClockSettingsTests.swift` (new) | `-only-testing:ElderlyAssistantTests/MedicationSchedulerTests -only-testing:ElderlyAssistantTests/MedicationSlotClockSettingsTests -only-testing:ElderlyAssistantTests/MedicationSavePlumbingTests` |
-| W6 | T-021 | T-021: `App/AppCoordinator.swift`, `App/SettingsView.swift`, `App/MedicationVisualAidViews.swift`, `Services/Notifications/MedicationVisualAidFireHandler.swift`, `Tests/App/MedicationEvidenceCaptureTests.swift` (new), `Tests/App/MedicationVisualAidPresentationTests.swift`, `Tests/Services/Notifications/MedicationVisualAidFireHandlerTests.swift` | `-only-testing:ElderlyAssistantTests/MedicationEvidenceCaptureTests -only-testing:ElderlyAssistantTests/MedicationVisualAidPresentationTests -only-testing:ElderlyAssistantTests/MedicationVisualAidFireHandlerTests` |
-| W6.5 | T-023 | T-023 (amendment 6 + addendum, owner-directed): `App/MedicationManageListView.swift` (new), `App/SettingsView.swift`, `App/SettingsTabs.swift`, `App/AppCoordinator.swift` (redraw signal + save-failure propagation), `Services/MedicationScheduler/MedicationScheduler.swift` (the `loadSchedule` persist tail only), `Resources/Localizable.xcstrings` (only if a key is added), `Tests/App/MedicationManageListTests.swift` (new), `Tests/App/L10nCatalogCoverageTests.swift` / `Tests/.../MedicationSchedulerTests.swift` / `Tests/App/MedicationSavePlumbingTests.swift` (only where a shipped pin must be updated) | `-only-testing:ElderlyAssistantTests/MedicationManageListTests -only-testing:ElderlyAssistantTests/MedicationEditorSurfaceTests -only-testing:ElderlyAssistantTests/MedicationSlotClockSettingsTests -only-testing:ElderlyAssistantTests/MedicationSchedulerTests -only-testing:ElderlyAssistantTests/MedicationSavePlumbingTests -only-testing:ElderlyAssistantTests/SettingsTabMappingTests -only-testing:ElderlyAssistantTests/L10nCatalogCoverageTests` (L10n and SettingsTabMappingTests included as executed: the catalog gained `settings.meds.saveFailed` and `SettingsTabs.swift` changed). NOT under the W5/W6 strip directive: this scoped pass runs at the wave close, before W7. |
-| W6.6 | T-024 | T-024 (amendment 7, owner-directed): `Services/MedicationScheduler/MedicationLabelOCR.swift`, `Services/MedicationScheduler/ScannedSchedule.swift`, `Services/MedicationScheduler/MedicationEditorDraft.swift` (scan application only), `Tests/.../MedicationLabelOCRTests.swift`, `Tests/.../ScannedScheduleTests.swift`, `Tests/.../MedicationEditorDraftTests.swift`. NOT `SettingsView` and NOT the capture seam (`MedicationLabelScanner.swift`). Delivered as an isolated-worktree patch (`/tmp/msr-scanner-frequency.patch`) applied by the coordinator at wave close. | `-only-testing:ElderlyAssistantTests/MedicationLabelOCRTests -only-testing:ElderlyAssistantTests/ScannedScheduleTests -only-testing:ElderlyAssistantTests/MedicationEditorDraftTests`. NOT under the W5/W6 strip directive: this scoped pass runs at the wave close, before W7. |
-| W7 | T-022 | T-022: `Tests/App/MedicationSchedulesIntegrationTests.swift` (new), `Tests/Services/MedicationScheduler/MedicationLLMIndependenceTests.swift` (new), `tools/check-release-log-safety.py`, `Services/Observability/LogSanitiser.swift`, `Tests/Services/Observability/LogSanitiserTests.swift` | `-only-testing:ElderlyAssistantTests/MedicationSchedulesIntegrationTests -only-testing:ElderlyAssistantTests/MedicationLLMIndependenceTests -only-testing:ElderlyAssistantTests/LogSanitiserTests` then ONE full-suite run compared against the documented pre-existing baseline |
+| Wave | Units | What the wave delivers |
+|------|-------|------------------------|
+| 0 | T-166, T-172 | The style spec (single source) and the fail-closed consent gate — the two foundations nothing else waits on |
+| 1 | T-167, T-168, T-169, T-171, T-173, T-178 | Both chat decode/persona seams, the guard core, the bilingual copy, the routing decision, the held-out chat set |
+| 2 | T-170, T-174, T-175, T-176, T-179, T-181 | Prompt mirrors, the guard flag at the dispatch seam, the router chat lane, the consent prompt, the four-layer corpus, the chat gate harness |
+| 3 | T-177, T-180 | Indicator/revocation/coordinator wiring, the provenance manifest |
+| 4 | T-182, T-185 | Chat-variant config + full harness over one candidate; release log-safety gate coverage |
+| 5 | T-183 | The v17 chat-aware QLoRA run and its gate evidence |
+| 6 | T-184 | The versioned, reversible catalog swap (promotion only behind green gates) |
+| 7 | T-186 | End-to-end acceptance, scoped sweep, the one full-suite run with the baseline named |
+| 8 | T-187 | The DV-1…DV-6 protocol and record (executed or BLOCKED) |
+| 9 | T-188, T-189, T-190, T-191 | The four owner-descopable P2 legs (each after the P1 swap is live and the DV protocol has run) — **DESCoped 2026-10-15** (amendment-6; each closed by an explicit owner-descope record) |
+| 10 | T-192 | The feasibility honesty statement for the sign-off package |
 
-Placement rule applied: every unit sits in the earliest wave its declared dependencies allow, and same-file units are never in one wave (one of the two constraints pushed a unit later where they met).
-
-## Cross-wave hotspot ordering (explicit)
-
-Shared files appear in multiple units and MUST land in different waves in this order (each later unit inherits the earlier unit's code):
-
-- `MedicationScheduler.swift` (+ its test suite): **T-006 (W0) → T-008 (W2) → T-010 (W3) → T-016 (W4) → T-019 (W5) → T-021 (W6, IF-24 read seam; ownership extension disclosed in implement-notes) → T-023 (W6.5, the `loadSchedule` persist tail)**.
-- `AppCoordinator.swift`: **T-013 (W2) → T-017 (W3) → T-020 (W5) → T-021 (W6) → T-023 (W6.5, redraw signal + save-failure propagation)**.
-- `SettingsView.swift`: **T-018 (W4) → T-020 (W5) → T-021 (W6) → T-023 (W6.5)**.
-- `FamilyNotifierTests.swift`: **T-003 (W1, adds the two new taxonomy cases to the wire-value stability list) → T-011 (W2, flips the stub-success assertions)**; T-011 depends on T-003.
-- `Tests/.../MedicationSchedulerTests.swift`: follows its production file (T-006 → T-008 → T-010 → T-016 → T-019 → T-021 → T-023).
-- `CommandRouter.swift`: **T-014 (W3)** only. `Models.swift`: **T-003 (W1)** only. `FamilyNotifier.swift`: **T-011 (W2)** only. `Localizable.xcstrings`: **T-012 (W0)** then **T-023 (W6.5, only if a genuinely missing key is needed)** (later units reference its keys; a key missed at W0 is a follow-up edit in a later wave, pin re-measured by that unit). `SettingsTabs.swift`: **T-023 (W6.5)** only. `MedicationManageListView.swift`: **T-023 (W6.5)** only. `MedicationEditorDraft.swift`: **T-009 (W2) → T-024 (W6.6, scan application)**. `ScannedSchedule.swift`: **T-005 (W1) → T-024 (W6.6)**. `MedicationLabelOCR.swift`: **T-024 (W6.6)** only. Calendar files: **T-015 (W2)** only. `MedicationVisualAidViews.swift` / `MedicationVisualAidFireHandler.swift`: **T-021 (W6)** only. `LogSanitiser.swift` + `tools/check-release-log-safety.py` + `LogSanitiserTests.swift`: **T-022 (W7)** only. `SettingsPersistence.swift`: **T-020 (W5)** only.
-
-## Must-carry obligations index
-
-| Obligation (source) | Unit | Where pinned |
-|---------------------|------|--------------|
-| R-1 (major) — pending-capture evidence identity: pin **(a)** | T-019 | Acceptance text + `testHoldIdEqualsFinalizedLogId`; finalize change stated at :461 |
-| R-2 (minor) — hoist timeout constant; explicit at :255/:434; into `AckClarificationConfig`; no literal; keep shorter-window test | T-006 | Acceptance text + `ConfirmationChallengeTests` / `MedicationSchedulerTests` extensions |
-| R-3 (minor) — late hold cleared at registration; record stays honestly evidence-free | T-019 | Acceptance text + `testLateHoldClearedAtRegistration` |
-| R-4 (minor) — walk consult sibling immediately ahead of the :1049 block; keep the two risk-5 router tests | T-014 | Acceptance text + `CommandRouterMedicationWalkTests` |
-| `withScheduleTimes` migration trap — named test, highest-risk silent defect | T-003 | Acceptance text + `testSlotEntrySurvivesScheduleTimesCopy` |
-| Honest push stub flip — `notDelivered("transport_unimplemented")`; flip every stub-success assertion | T-011 | Acceptance text + explicit FamilyNotifierTests flip list |
-| D10 — `escalationStarted` at first re-fire decision (`.fireReminder` refireCount 0→1 at :394 / EscalationEngine :117) | T-016 | Acceptance text + `testEscalationStartedAtFirstRefireOnly` |
-| D7 — calendar one-off keys out of `outboundKeys` and out of the reconcile snapshot (:703; sweep :553-583) | T-015 | Acceptance text + `testOneOffKeyNotInReconcileSnapshot` |
-| M-1 — consent copy amendment ne + en incl. `परिवारलाई परिवारलाई` repair, with the hold condition | T-012 | Acceptance text + `CalendarShareConsentCopyTests` |
-| m-5 — `medication_retime_refused` event + one-shot settings note (appointmentSmsNoteDismissed precedent) | T-016 (event), T-020 (note) | Acceptance text in both |
-| m-3 — OCR hour table {8→morning; 12/13→afternoon; 19/20/21→evening; others nothing} | T-005 | Acceptance text + `ScannedScheduleTests` |
-| m-4 — 3+ candidates: `no` advances; after the last candidate's `no` the walk ends | T-013 | Acceptance text + walk state tests |
-| m-1 — `SlotClockRearmReport` per-entry effects surfaced honestly | T-010 (report), T-020 (lines) | Acceptance text in both |
-| m-2 — duplicate rule retains the shipped expression incl. mixed legacy/slot pairs | T-017 | Acceptance text + duplicate tests |
-| D1 — row = entry; N rows to N entries | T-017 | Acceptance text + `testNRowsCreateNEntries` |
-| D9 — `v: 1` on the wire; no PII keys | T-011 | Acceptance text + wire tests |
-
-## Coverage matrix (locked requirement → units)
-
-| FR | Units | | NFR | Units |
-|----|-------|-|-----|-------|
-| FR-MSR-001 | T-001, T-003, T-009, T-017, T-018 | | NFR-MSR-001 | T-004, T-013, T-022 |
-| FR-MSR-002 | T-001, T-008, T-010, T-016, T-020 | | NFR-MSR-002 | T-008, T-011, T-016, T-022 |
-| FR-MSR-003 | T-002, T-017 | | NFR-MSR-003 | T-007, T-021 |
-| FR-MSR-004 | T-003, T-018 | | NFR-MSR-004 | T-012, T-020, T-021 |
-| FR-MSR-005 | T-005, T-009, T-018 | | NFR-MSR-005 | T-018, T-020, T-021 |
-| FR-MSR-006 | T-005, T-009, T-018 | | NFR-MSR-006 | T-001, T-003, T-017, T-022 |
-| FR-MSR-007 | T-004, T-014 | | NFR-MSR-007 | T-004, T-014, T-022 |
-| FR-MSR-008 | T-004, T-012, T-013, T-014 | | NFR-MSR-008 | T-006, T-022 |
-| FR-MSR-009 | T-006, T-013, T-014, T-019 | | NFR-MSR-009 | T-012, T-022 |
-| FR-MSR-010 | T-019, T-021 | | NFR-MSR-010 | T-008, T-022 |
-| FR-MSR-011 | T-014 | | | |
-| FR-MSR-012 | T-014 | | | |
-| FR-MSR-013 | T-007, T-019, T-021 | | | |
-| FR-MSR-014 | T-021 | | | |
-| FR-MSR-015 | T-003, T-016 | | | |
-| FR-MSR-016 | T-011, T-012, T-015, T-016 | | | |
-| FR-MSR-017 | T-003, T-011, T-015 | | | |
-| FR-MSR-018 | T-007, T-010, T-011, T-015, T-020, T-021, T-022 | | | |
-| FR-MSR-019 | T-008, T-010, T-016, T-022 | | | |
-| FR-MSR-020 | T-007, T-017, T-021 | | | |
-| FR-MSR-021 | T-018, T-020, T-021 | | | |
-| FR-MSR-022 | T-008, T-010, T-019, T-022 | | | |
+Phase view: P0 = the runtime units (TG-34 ... TG-36) with the release gate T-185 (wave 4) and the runtime half of T-186 (wave 7); P1 = the training suite TG-37 (waves 1-6, ending in the gated swap at wave 6); P2 = the four P2 legs and the honesty statement (waves 9-10).
 
 ## Critical path
 
-T-001 → T-003 → T-009 → T-017 → T-018 → T-020 → T-021 → T-022 is the longest chain (models before drafts, drafts before save plumbing, save plumbing before the editor surface, the editor surface before the settings surface, both before the evidence surfaces, all before the integration wave). The scheduler spine T-001 → T-003 → T-008 → T-010 → T-016 → T-020 merges at T-020, and the voice-ack lane T-001 → T-006 → T-013 → T-014 finishes at W3. The two single-unit tail waves (W6, W7) are structurally forced: T-021 needs every surface in place, and T-022 gates the whole feature.
+T-166 (1.5) → T-178 (3) → T-179 (4) → T-180 (1.5) → T-182 (1.5) → T-183 (2.5) → T-184 (1.5) → T-186 (2) → T-187 (1.5) → T-188 (3) → T-192 (1) = **23 developer-days**.
+
+The chain runs spec → held-out set → corpus → manifest → harness → run → swap → acceptance → device validation → first P2 leg → statement. It is dominated by the P1 training leg because the swap (T-184) is explicitly gated behind the run's evidence, and the P2 legs are gated behind the swap being live and the DV protocol having run (FR-CNR-026). The P0-only chain (T-166 → T-167 → T-170 → T-174 → T-177 ≈ 8.5 days to a landable runtime slice, plus T-185/T-186) is short — which is why the P0 slice can ship first under either OD-3 ordering. If the owner descopes P2, the tail closes at T-187 (about 19 days).
 
 ## Key risks
 
-1. **`withScheduleTimes` memberwise rebuild (T-003)** — a slot entry silently loses its slot on any copy path; the named migration test is the guard and must not be dropped.
-2. **Router walk interception and denial order (T-014)** — होइन inside a walk must not reach the challenge handler; an acknowledgement inside a walk must restart resolution; the denial ladder (:2491) is the refusal path. Kept as the two risk-5 tests.
-3. **Honest push flip breaks shipped assertions (T-011)** — every stub-success assertion in `FamilyNotifierTests` flips with the transport; partial delivery must never read as success.
-4. **Re-arm guard (T-010)** — re-arming a finalize-in-flight entry would corrupt the sequence; the guard and the second-pass-replaces-nothing property are tested.
-5. **Pending-capture evidence identity (T-019, R-1(a))** — the log id minted at capture is the id finalize writes; the test asserts name equality end-to-end.
-6. **M-1 hold condition (T-012)** — until the copy amendment lands, no surface, log line or test may claim the pre-amendment consent text covers the significant-event audience (restated in every unit that could make such a claim: T-015, T-016, T-011; the amendment itself lands at W0, before any of them).
-7. **Cross-wave file chains (hotspots)** — the ordering table above is binding for the implement planner; two same-file units in one wave would conflict in the shared worktree.
-8. **Full-suite baseline (T-022)** — the single end-of-feature full run is compared against the documented pre-existing full-bundle baseline; scoped wave passes are the working gate.
+1. **Command-decode determinism regression on the shared model (T-167, CRITICAL).** The chat shape adds a per-turn temperature override on the same resident handle the command path uses; a chat turn leaking temperature into a command decode would break reminders, alarms and confirmations silently. Mitigation: per-turn re-assertion of every shape's parameters, byte-identical command decode pinned by test, DV-5 on device.
+2. **Cloud chat egress without consent (T-172, T-173, T-174, T-175, CRITICAL).** Two egress surfaces (the routing lane and the guard escalation) make it possible to leak chat content after a decline or revocation. Mitigation: one decision function, fail-closed on every non-granted state, egress-disabled local lane for chat turns, spy tests asserting zero cloud attempts on the declined paths.
+3. **Ship-mix contamination by a non-commercial source (T-180, CRITICAL).** A CC BY-NC research layer or a research-gated transcript reaching a shipped artifact is a compliance event. Mitigation: the manifest's ship/dev enforcement as code, the license registry as the assertion source, the manifest hash bound to the gate results.
+4. **A flagged reply spoken anyway, or a false success (T-174, CRITICAL).** The guard's whole purpose is to stop a flagged reply and degrade honestly. Mitigation: the verdict carries no text (no rewrite path), flagged text asserted absent from every spoken path, `unavailable` → degraded event rather than a claimed verification.
+5. **Safety-gate regression in the v17 variant (T-181, T-182, T-183, HIGH).** Emergency recall 1.00, abstention at or above 0.90 and closed-intent at or above 0.95 bind the swap. Mitigation: the full harness over one candidate behind one report, red gate = no swap, shortfalls reported rather than absorbed.
+6. **Jetsam on the reference tier (T-167, T-184, T-190, HIGH).** A second handle or a per-turn reload would kill the app mid-conversation on the 6 GB tier. Mitigation: one resident handle, no second instance, tier admission measured for the 4B candidate.
+7. **Held-out set leak (T-178, T-179, HIGH).** A golden turn in the training corpus invalidates the gate run. Mitigation: admission-time dedupe against the held-out file, exclusions reported, gate results voided on a proven leak.
+8. **Prompt or persona drift between the spec and its consumers (T-166, T-170, HIGH).** Four consumers of one spec is exactly where copies appear. Mitigation: byte-identity mirror checks in the build (chat template, both personas, guard lexicons) and the pinned intent prompt asserted untouched.
+9. **Device validation outstanding at sign-off (T-187, HIGH).** The completion gate cannot be satisfied by unit tests. Mitigation: the protocol is written and executable in one session; without a session every item is BLOCKED with a reason and the feature is reported outstanding.
+10. **A P2 leg quietly skipped (T-188 … T-191, MEDIUM).** Descoping must never be silent. Mitigation: each leg completes with an explicit owner-descope record if descoped, and T-192 must account for every leg.
+11. **A new content path outside the log gate's coverage (T-185, HIGH).** The gate only protects what it scans. Mitigation: coverage audit for every new content-rendering path, a seeded-violation demonstration, and event fields checked against the allowed-key set.
 
-## Security blockers
+## Security-advisory mapping (advisory, non-blocking — final-sign-off pass)
 
-None: `review-l2` returned GO with no blockers. The four required resolutions (R-1…R-4) are carried in the named unit obligations (T-019, T-006, T-019, T-014 respectively; see the obligations index). Safety invariants preserved and pinned by unit acceptance: acknowledgement → challenge → double-dose → record remains intact (T-013/T-014/T-019), persistence precedes alarm arming (T-008/T-010/T-019), no new egress and no medication photo leaves the device (T-007/T-021), PII-free observability (T-008, T-011, T-016, T-022), dementia machinery untouched (T-007, T-017, T-021).
+The workflow's advisory security focus areas map to units as follows; findings are recorded with the sign-off, not treated as exit conditions, while each area's enforcement lives in the unit's own tests:
 
-## Residual opens consciously deferred
+| Advisory focus area | Enforced by |
+|---|---|
+| Safety-gate regression on the shared model; versioned reversible catalog swap | T-167 (command determinism pinned), T-182, T-183 (gates over one candidate), T-184 (versioned entry, catalog-level rollback), T-187 (DV-5) |
+| Cloud chat consent/disclosure (OD-12 shape); never blocks chat | T-172 (fail-closed gate), T-173 (single decision), T-175 (no-leak lane), T-176 (blocking prompt, local answer meanwhile), T-177 (indicator, revocation) |
+| Credential + content hygiene (B2/T-050 precedent; no user content in logs or the `reply_grammar_flag` event) | T-168 (header-only key, payload scope), T-174 (event field set), T-175 (fallback event), T-185 (release log gate coverage) |
+| Guard integrity: verify-never-rewrite; honest degradation | T-169 (verdict-only contract), T-170 (lexicon mirror), T-174 (escalate / safe template / degraded) |
+| Data provenance: no CC BY-NC in a shipped artifact | T-179 (layer separation), T-180 (ship-mix enforcement, manifest hash), T-191 (consent-based transcripts only) |
+| Prompt discipline: 1,024-token budget; seed byte-mirror | T-167 (budget unchanged, single handle), T-170 (byte-identity mirrors + budget check) |
 
-1. **`MedicationSchedulerProtocol` extension** — extended only if a suite needs it (residual open 8 of design-l2); decision rides T-019/T-020 implementation notes, no unit owns a standalone seam change.
-2. **DV-1…DV-7 device validation** (Anzaan, final-sign-off gate) — not implement units; the recorded checklist and latency evidence live in final-sign-off. Noted in T-022.
-3. **Copy wording polish within the pinned facts** — rides T-012; facts and the M-1 amendment strings are pinned, fine-tuning is allowed only inside them.
-4. **Legacy task folders under `specs/plan-tasks/tasks/`** — prior-feature TG folders remain untouched; the flat `T-NNN.md` files and the Contents section above are this feature's authoritative index.
-5. **Full-suite baseline** — the single end-of-feature full run (T-022) is reported against the documented known-red baseline; the wave-level scoped passes are the working gate.
+## Requirement coverage
+
+Functional requirements (FR-CNR-001 … 029), each satisfied by at least one unit:
+
+| Requirement | Units |
+|---|---|
+| FR-CNR-001 style spec, single source, four consumers | T-166, T-167, T-168, T-169, T-170 |
+| FR-CNR-002 persona upgrade, both seams | T-167, T-168, T-170 |
+| FR-CNR-003 chat sampling: fixed seed, temp ~0.3, chat only | T-167, T-192 |
+| FR-CNR-004 command decode determinism preserved | T-167, T-186, T-187 |
+| FR-CNR-005 guard verify-never-rewrite | T-169, T-170, T-174 |
+| FR-CNR-006 flag outcome, honest degradation | T-171, T-174 |
+| FR-CNR-007 reply-grammar-flag telemetry, no content | T-174, T-185 |
+| FR-CNR-008 cloud-first chat routing toggle | T-168, T-173, T-175, T-177 |
+| FR-CNR-009 consent, disclosure, indicator, revocation | T-172, T-173, T-175, T-176, T-177 |
+| FR-CNR-010 cloud chat egress scope | T-168, T-173, T-175 |
+| FR-CNR-011 explicit Gemini chat temperature | T-168 |
+| FR-CNR-012 credential and content hygiene | T-168, T-174, T-185 |
+| FR-CNR-013 single-decode schema unchanged | T-167, T-175, T-186 |
+| FR-CNR-014 router ladder and emergency gate unchanged | T-175, T-187 |
+| FR-CNR-015 STT, permissions, data collection unchanged | T-177, T-186, T-191 |
+| FR-CNR-016 v17 chat-aware QLoRA variant | T-179, T-182, T-183 |
+| FR-CNR-017 four-layer corpus construction | T-179 |
+| FR-CNR-018 ship-mix provenance manifest | T-180, T-191 |
+| FR-CNR-019 held-out chat evaluation set | T-178, T-179 |
+| FR-CNR-020 new chat gates | T-181, T-182 |
+| FR-CNR-021 full gate harness before the swap | T-182, T-183, T-184 |
+| FR-CNR-022 v17 catalog entry, versioned and reversible | T-184 |
+| FR-CNR-023 chat prompt template discipline | T-170 |
+| FR-CNR-024 feasibility honesty reporting | T-183, T-188 … T-191, T-192 |
+| FR-CNR-025 DV completion gate | T-186, T-187 |
+| FR-CNR-026 P2 DPO on judge preferences | T-188 |
+| FR-CNR-027 P2 romanized Nepali chat | T-189 |
+| FR-CNR-028 P2 4B tier via the per-device resolver | T-190 |
+| FR-CNR-029 P2 consent-based real transcripts | T-191 |
+
+Non-functional requirements (NFR-CNR-001 … 011):
+
+| Requirement | Units |
+|---|---|
+| NFR-CNR-001 chat reply reproducibility | T-167, T-169 |
+| NFR-CNR-002 listening-turn latency envelope | T-173, T-175, T-190 |
+| NFR-CNR-003 memory and jetsam device tiers | T-167, T-184, T-187, T-190 |
+| NFR-CNR-004 chat prompt token budget | T-167, T-170 |
+| NFR-CNR-005 prompt template byte-mirror | T-166, T-170 |
+| NFR-CNR-006 log safety | T-168, T-172, T-174, T-185, T-186 |
+| NFR-CNR-007 telemetry content hygiene | T-174, T-177 |
+| NFR-CNR-008 gate thresholds | T-181, T-182 |
+| NFR-CNR-009 accessibility (voice-first, no internals) | T-171, T-176, T-177, T-187 |
+| NFR-CNR-010 localisation ne/en | T-171, T-177 |
+| NFR-CNR-011 compliance and release gates | T-172, T-180, T-185, T-186 |
+
+Deferred items stayed deferred: the design's deferred list (catalog entry literal id, spec field-level schemas, final en/ne copy, voice revocation phrases, wave decomposition) has no standalone task; each is authored inside the unit that owns it (T-166, T-171, T-177, T-184). Post-MVP and out-of-scope items have no tasks.
