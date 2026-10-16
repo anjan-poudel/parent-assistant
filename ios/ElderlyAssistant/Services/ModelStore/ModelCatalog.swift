@@ -242,6 +242,16 @@ enum ModelCatalog {
     /// v14 slim-template retrain (seed 43) — NEW artifact id so devices
     /// cached on the v12 seed-42 file download it fresh.
     static let intentQwenS43       = ModelID("intent-ne-qwen-s43-q4km")
+    /// [CNR T-184] v17 CHAT-AWARE retrain of the seed-43 1.7B (T-183's run
+    /// `cnr-v17-20261015-0209`): the same `checkpoints/qwen-s43-merged`
+    /// 1.7B lineage as `intentQwenS43`, retrained for the conversational
+    /// chat lane, exported + Q4_K_M quantized. A NEW id BESIDE the
+    /// previous entry, never in place of it — the swap is versioned and
+    /// reversible, and a device cached on the seed-43 file must download
+    /// the new artifact fresh. Its promotion to the served default is NOT
+    /// a change to this constant; it is the data in
+    /// `chatVariantPromotionRecord`, gated by `promotionVerdict(for:)`.
+    static let intentQwenS43ChatV17 = ModelID("intent-ne-qwen-s43-chat-v17-q4km")
     /// 4B slim-template retrain seed 43 — the first gate-passing brain
     /// (all five gates, 2026-09-13) and the default brain until the
     /// slot-canonical retrain below superseded it. LAN-hosted for testing;
@@ -1575,6 +1585,51 @@ enum ModelCatalog {
             // Language tag (2026-09-13): ne-only model.
             languages: ["ne"]
         ),
+        // [CNR T-184] The v17 CHAT-AWARE retrain — BESIDE the seed-43
+        // entry above, never in place of it (FR-CNR-022: versioned +
+        // reversible; the previous entry is the rollback target and stays
+        // selectable). Identity from T-183's run `cnr-v17-20261015-0209`:
+        // artifact `intent-ne-qwen-s43-chat-v17-q4_k_m.gguf`, sha256
+        // e05cc8a2…, 1,107,408,736 bytes — the same
+        // `checkpoints/qwen-s43-merged` 1.7B lineage and the same Q4_K_M
+        // quantizer as the seed-43 file it retrains, 160 bytes larger.
+        // `ModelLifecycleBudget.brainClasses` keys on the file size and
+        // both files land in the same 1.5 GB / 1.7B rung, so the memory
+        // class is the previous entry's — the EVICTION question (which
+        // class may hold it beside a warm STT) is `ModelBudgetPolicy`'s
+        // and unchanged by this entry.
+        //
+        // PUBLISHED 2026-10-17: release v23 of the public models repo,
+        // titled "gates pending, test candidate" — the sha256 sidecar
+        // ships beside the asset. Publication is NOT promotion: the run
+        // remains unpromoted (see `chatVariantPromotionRecord` below —
+        // no gate report has landed and the latency gate is unmeasured
+        // until the Anzaan DV session), and the digest is the REAL
+        // artifact's identity, unchanged by publication. An untimely tap
+        // downloads the exact pinned bytes or fails honestly.
+        ModelCatalogEntry(
+            id: intentQwenS43ChatV17,
+            kind: .llamaBase,
+            displayName: "Brain — Qwen 1.7B · Nepali chat-aware (v17 · gates pending)",
+            // The NAME quotes the run state (FR-CNR-022 failure path: the
+            // entry may stay selectable only where its evidence posture is
+            // stated). It is offered for an explicit pick; no automatic
+            // path serves it while `chatVariantPromotionRecord` is blocked
+            // (`isAutomaticPickEligible`). A green run edits the record,
+            // not this row.
+            filename: "intent-ne-qwen-s43-chat-v17-q4_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v23/intent-ne-qwen-s43-chat-v17-q4_k_m.gguf")!,
+            sizeBytes: 1_107_408_736,
+            sha256: "e05cc8a266198336f508cef2f6d2a8887b3db1eee3f4a4159cdeb2ab3df59d71",
+            // Same 3 GB floor as the seed-43 sibling: the floor is the
+            // phone's own RAM claim (see that entry's note), and the
+            // `.compact` class's refusal of the 1.7B beside a warm STT is
+            // the policy's verdict, not this number's.
+            minDeviceRAMBytes: 3_000_000_000,
+            dependsOn: nil,
+            // Language tag (2026-10-16): ne-only model, same as its base.
+            languages: ["ne"]
+        ),
         ModelCatalogEntry(
             id: intentGemma1B,
             kind: .llamaBase,
@@ -1930,9 +1985,10 @@ enum ModelCatalog {
     ].compactMap { entry(for: $0) }
 
     /// The brain models the Settings picker offers: the gate-passing
-    /// slot-canonical Qwen 4B (the default brain) and the two smaller
-    /// Nepali intent fine-tunes, then the two stock Qwen 3 sizes —
-    /// biggest first.
+    /// slot-canonical Qwen 4B (the default brain), the seed-43 1.7B and
+    /// its [CNR T-184] v17 chat-aware retrain (the two smaller Nepali
+    /// intent fine-tunes), then the two stock Qwen 3 sizes — biggest
+    /// first.
     ///
     /// Hidden (in `all`, not offered):
     ///   - `intentQwen4BS43` — the seed-43 4B, superseded by the
@@ -1944,6 +2000,15 @@ enum ModelCatalog {
     ///     (legacy; Qwen 3 supersedes both sizes).
     static let availableBrainEntries: [ModelCatalogEntry] = [
         intentQwen4BSlotCanon,
+        // [CNR T-184] The v17 chat-aware 1.7B sits BESIDE the seed-43
+        // entry it retrains — second only because `intentQwen4BSlotCanon`
+        // is the list leader (a multipart-download test pins `.first`),
+        // so the two 1.7B siblings read together. Being offered is NOT
+        // being promoted: `isAutomaticPickEligible` keeps a
+        // record-blocked chat variant out of the automatic ladder, and
+        // the resolved default only moves when the promotion record is
+        // green (see `chatVariantPromotionRecord`).
+        intentQwenS43ChatV17,
         intentQwenS43,
         qwen4BNepali,
         qwen3_4BInstruct,
@@ -2192,15 +2257,39 @@ enum ModelCatalog {
     /// The explicit pick for `kind` + `language`, when the map has one AND
     /// the id still resolves to a live catalog entry (a removed entry must
     /// fall through to the generic logic, never strand the resolver).
-    static func explicitDefaultEntry(kind: ModelKind, language: String) -> ModelCatalogEntry? {
+    ///
+    /// [CNR T-184] A map pick that names a record-BLOCKED chat variant is
+    /// REFUSED here (nil — the generic steps answer). The map is reference
+    /// data a future promotion edit will touch, and promotion must be
+    /// impossible without the gate evidence: pointing this map at the v17
+    /// entry while `promotionRecord` is blocked does not promote it, it
+    /// falls through to the previous entry exactly as if the map had not
+    /// moved. Enforcement lives here (and in `resolvedAutomaticPick`'s
+    /// eligibility filter), not in a comment on the map.
+    static func explicitDefaultEntry(
+        kind: ModelKind, language: String,
+        promotionRecord: ChatVariantPromotionRecord? = chatVariantPromotionRecord
+    ) -> ModelCatalogEntry? {
         guard let id = languageDefaultPicks[kind]?[language.lowercased()] else { return nil }
-        return entry(for: id)
+        guard let entry = entry(for: id) else { return nil }
+        if let record = promotionRecord, record.modelID == entry.id,
+           case .blocked = promotionVerdict(for: record) {
+            return nil
+        }
+        return entry
     }
 
     /// The default entry of `kind` for an ISO 639-1 `language` code.
     ///
     /// Preference order (documented + pinned by
     /// `ModelCatalogLanguageTests`):
+    ///   -1. [CNR T-184] THE PROMOTED CHAT VARIANT, when `promotionRecord`
+    ///      resolves to `.promoted` and its entry serves this kind and
+    ///      language — a promotion IS the default-resolution change (see
+    ///      `chatVariantPromotionRecord`), so it is consulted before every
+    ///      other step. While the shipped record is blocked this step
+    ///      answers nothing and every step below is byte-identical to the
+    ///      pre-CNR behavior,
     ///   0. the EXPLICIT per-language pick (`languageDefaultPicks`) — the
     ///      curated auto-switch target, consulted first so an app-language
     ///      change lands on a small/bundled model (see the map's note),
@@ -2225,8 +2314,25 @@ enum ModelCatalog {
     /// there. Keeping the two apart is what lets a caller ask for the
     /// language default on purpose (the Settings picker's own ordering) and
     /// keeps a device probe out of a pure catalog lookup.
-    static func defaultEntry(kind: ModelKind, language: String) -> ModelCatalogEntry? {
-        if let explicit = explicitDefaultEntry(kind: kind, language: language) {
+    static func defaultEntry(
+        kind: ModelKind, language: String,
+        promotionRecord: ChatVariantPromotionRecord? = chatVariantPromotionRecord
+    ) -> ModelCatalogEntry? {
+        // Step -1 [CNR T-184]: the promoted chat variant, for the kind and
+        // language it was promoted FOR. The compatibility rule is
+        // `LanguageModelResolver.isLanguageCompatible`'s (neutral `[]`
+        // entries serve every language; a tagged entry only its own),
+        // inlined because the resolver already depends on this type and a
+        // reverse call would make the pair mutually recursive for no
+        // behavioural gain.
+        if let promoted = promotedChatVariantEntry(record: promotionRecord),
+           promoted.kind == kind,
+           promoted.languages.isEmpty
+            || promoted.languages.contains(language.lowercased()) {
+            return promoted
+        }
+        if let explicit = explicitDefaultEntry(kind: kind, language: language,
+                                               promotionRecord: promotionRecord) {
             return explicit
         }
         let curated = curatedEntries(kind: kind)
@@ -2234,5 +2340,208 @@ enum ModelCatalog {
         return curated.first { $0.languages.contains(code) }
             ?? curated.first { $0.languages.isEmpty }
             ?? curated.first
+    }
+
+    // MARK: - [CNR T-184] The v17 chat-variant promotion (reference data, gated)
+
+    /// The evidence a chat-variant promotion must carry, and the shipped
+    /// state of the v17 promotion. This is REFERENCE DATA in the same
+    /// sense `languageDefaultPicks` is — a static data structure, not
+    /// logic: the resolution rules above and below read it, so promoting
+    /// (or rolling back) is an edit of THIS value and the swap's code
+    /// paths are untouched either way. Rollback needs no gate re-run: the
+    /// previous entry stays in `all` and `availableBrainEntries` carrying
+    /// its own shipped identity, and returning to it is this record's
+    /// value reverting, nothing else.
+    struct ChatVariantPromotionRecord: Equatable {
+
+        /// The artifact this record promotes. A record naming anything
+        /// else is inert.
+        let modelID: ModelID
+
+        /// The artifact identity the run's gate report and manifest name.
+        /// BINDING: a record whose digest or size disagrees with the
+        /// shipped entry below is `.artifactMismatch` — never a promotion.
+        let artifactSHA256: String
+        let artifactSizeBytes: Int64
+
+        /// The run's provenance manifest hash — binding piece one. nil
+        /// means no manifest is attached, which blocks promotion.
+        let provenanceManifestSHA256: String?
+
+        /// The FULL-GATE report: where it lives and its own digest —
+        /// binding piece two, recorded at promotion time so the evidence
+        /// the promotion was decided on stays addressable. A nil path OR
+        /// digest means there is no recorded gate evidence, which blocks.
+        let gateReportPath: String?
+        let gateReportSHA256: String?
+
+        /// The gate verdicts, in the report's own order. An empty list is
+        /// NOT "all gates green" — a report that records no verdicts is
+        /// `.noGatesRecorded`, blocked.
+        let gates: [GateVerdict]
+
+        struct GateVerdict: Equatable {
+            let name: String
+            let passed: Bool
+        }
+    }
+
+    /// Why a promotion is refused. A CLOSED vocabulary: `reasonCode` is
+    /// the stable token the launch record carries, so no report path and
+    /// no gate name ever reaches a log surface.
+    enum ChatVariantPromotionBlock: Equatable {
+        /// The record's artifact identity (digest or size) disagrees with
+        /// the shipped entry — FR-CNR-022's failure path: a GGUF whose
+        /// hash differs from the one the record names is not served.
+        /// Also answers for a record naming an id the catalog does not
+        /// ship. Checked first: identity is the root of trust.
+        case artifactMismatch
+        /// No full-gate report is recorded (path or digest missing).
+        case gateReportMissing
+        /// No provenance manifest hash is attached.
+        case manifestMissing
+        /// A report is recorded but lists no gate verdicts — vacuous
+        /// green is refused rather than read as "all gates passed".
+        case noGatesRecorded
+        /// A named gate is below its threshold. The name stays on the
+        /// verdict for tooling; the log token is the bare `gate_failed`.
+        case gateFailed(String)
+
+        /// The closed-vocabulary token for the launch record.
+        var reasonCode: String {
+            switch self {
+            case .artifactMismatch: return "artifact_mismatch"
+            case .gateReportMissing: return "gate_report_missing"
+            case .manifestMissing: return "manifest_missing"
+            case .noGatesRecorded: return "no_gates_recorded"
+            case .gateFailed: return "gate_failed"
+            }
+        }
+    }
+
+    /// The verdict on a promotion record: `promoted` names the entry the
+    /// record admits; `blocked` names the first failing precondition.
+    ///
+    /// `Equatable` by hand, exactly like `LanguageModelResolver
+    /// .AutomaticPick`: two promoted verdicts are the same verdict when
+    /// they name the same artifact, and `ModelCatalogEntry` deliberately
+    /// carries no conformance to lean on (its URLs and sizes are
+    /// properties of the artifact, not of the verdict).
+    enum ChatVariantPromotionVerdict: Equatable {
+        case promoted(entry: ModelCatalogEntry)
+        case blocked(ChatVariantPromotionBlock)
+
+        static func == (lhs: ChatVariantPromotionVerdict,
+                        rhs: ChatVariantPromotionVerdict) -> Bool {
+            switch (lhs, rhs) {
+            case (.promoted(let l), .promoted(let r)):
+                return l.id == r.id
+            case (.blocked(let l), .blocked(let r)):
+                return l == r
+            case (.promoted, .blocked), (.blocked, .promoted):
+                return false
+            }
+        }
+    }
+
+    /// The verdict on `record`. Block order is deterministic and
+    /// documented: artifact identity → gate report → manifest → gate
+    /// verdicts. `.promoted` is the LAST case, so evidence complete
+    /// enough to reach it is evidence complete enough to ship.
+    static func promotionVerdict(for record: ChatVariantPromotionRecord)
+    -> ChatVariantPromotionVerdict {
+        guard let entry = entry(for: record.modelID) else {
+            // A record naming an artifact the catalog does not ship is a
+            // mismatch of the same class: nothing is served from it.
+            return .blocked(.artifactMismatch)
+        }
+        if entry.sha256 != record.artifactSHA256
+            || entry.sizeBytes != record.artifactSizeBytes {
+            return .blocked(.artifactMismatch)
+        }
+        if record.gateReportPath == nil || record.gateReportSHA256 == nil {
+            return .blocked(.gateReportMissing)
+        }
+        if record.provenanceManifestSHA256 == nil {
+            return .blocked(.manifestMissing)
+        }
+        if record.gates.isEmpty {
+            return .blocked(.noGatesRecorded)
+        }
+        if let failed = record.gates.first(where: { !$0.passed }) {
+            return .blocked(.gateFailed(failed.name))
+        }
+        return .promoted(entry: entry)
+    }
+
+    /// The shipped promotion state of the v17 chat variant: a COMPLETE
+    /// attempt that is honestly BLOCKED, not a placeholder and not a
+    /// green hardcode.
+    ///
+    /// Run identity `cnr-v17-20261015-0209` (T-183): the artifact exists
+    /// (digest + size below are the local file's real identity, matching
+    /// the entry's pin), the provenance manifest is attached (sha256
+    /// fb7f7779c801706caddc74ef499198eb14c1ddc05dd89da1a7766cd476adab55),
+    /// and the held-out chat fixture scored against the candidate is
+    /// 40bec05d…. What does NOT exist is the run's full-gate report —
+    /// the chat judge is blocked on a funded API key and the latency
+    /// gate is unmeasured until the Anzaan device session — so
+    /// `gateReportPath`/`gateReportSHA256`/`gates` are empty ON PURPOSE
+    /// and the verdict resolves to `.blocked(.gateReportMissing)`:
+    /// `defaultEntry` does not serve v17 and `isAutomaticPickEligible`
+    /// refuses it on every automatic rung. The entry stays selectable by
+    /// hand (its name quotes the gate state), which is FR-CNR-022's
+    /// "never silently promoted" posture.
+    ///
+    /// PROMOTION (a later run, not this unit): fill in the gate report
+    /// path + digest and the gate verdicts from the green run, keeping
+    /// the identity and manifest fields as the binding pieces. ROLLBACK:
+    /// revert this value; the resolution logic re-reads it, the previous
+    /// entry keeps its own green evidence, and no gate re-runs. Both are
+    /// edits to this record alone — no test outside this pair changes.
+    static let chatVariantPromotionRecord = ChatVariantPromotionRecord(
+        modelID: intentQwenS43ChatV17,
+        artifactSHA256: "e05cc8a266198336f508cef2f6d2a8887b3db1eee3f4a4159cdeb2ab3df59d71",
+        artifactSizeBytes: 1_107_408_736,
+        provenanceManifestSHA256: "fb7f7779c801706caddc74ef499198eb14c1ddc05dd89da1a7766cd476adab55",
+        gateReportPath: nil,
+        gateReportSHA256: nil,
+        gates: []
+    )
+
+    /// The catalog entry a promotion record admits, or nil while it is
+    /// blocked. nil `record` means no promotion data at all — the
+    /// pre-CNR answer — so a caller can ask the promotion-free question.
+    static func promotedChatVariantEntry(
+        record: ChatVariantPromotionRecord? = chatVariantPromotionRecord
+    ) -> ModelCatalogEntry? {
+        guard let record else { return nil }
+        switch promotionVerdict(for: record) {
+        case .promoted(let entry): return entry
+        case .blocked: return nil
+        }
+    }
+
+    /// Whether the automatic ladder (`LanguageModelResolver
+    /// .resolvedAutomaticPick`) may serve `entry`.
+    ///
+    /// A chat variant the SHIPPED record names is eligible only once its
+    /// verdict is `.promoted` — the gate, expressed where serving
+    /// happens, not where the size comparison happens. Without this
+    /// filter the v17 file's 160 extra bytes would make it the step-2
+    /// "largest fitting" winner on classes the previous entry serves,
+    /// i.e. it would be silently promoted by arithmetic. nil `record`
+    /// gates nothing (the promotion-free question). Everything not named
+    /// by the record is untouched.
+    static func isAutomaticPickEligible(
+        _ entry: ModelCatalogEntry,
+        record: ChatVariantPromotionRecord? = chatVariantPromotionRecord
+    ) -> Bool {
+        guard let record, record.modelID == entry.id else { return true }
+        switch promotionVerdict(for: record) {
+        case .promoted: return true
+        case .blocked: return false
+        }
     }
 }

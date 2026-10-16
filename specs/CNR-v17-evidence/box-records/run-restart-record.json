@@ -1,0 +1,57 @@
+{
+  "schema": "cnr_run_restart_record/v1",
+  "run_id": "cnr-v17-20261015-0209",
+  "recorded_at": "2026-10-16T11:19:17+11:00",
+  "floor_readings_red_standing": [
+    {
+      "step": 300,
+      "at": "2026-10-16T06:42:03+11:00",
+      "token_acc": 0.862,
+      "command_acc": 0.935,
+      "chat_acc": 0.831,
+      "json_start": 1.0,
+      "evidence": "eval/floor-cnr-cnr-v17-20261015-0209.at300-abort.json"
+    },
+    {
+      "step": 1000,
+      "at": "2026-10-16T10:37:55+11:00",
+      "token_acc": 0.884,
+      "command_acc": 0.945,
+      "chat_acc": 0.857,
+      "json_start": 1.0,
+      "evidence": "eval/floor-cnr-cnr-v17-20261015-0209.at1000-abort.json"
+    }
+  ],
+  "restarts": [
+    {
+      "index": 1,
+      "mode": "fresh (step 0)",
+      "launched": "2026-10-16T09:07:57+11:00",
+      "changed": {
+        "--floor-step": "300 -> 1000"
+      },
+      "outcome": "aborted at the step-1000 check (red reading above); checkpoints preserved at checkpoints/cnr-cnr-v17-20261015-0209.abort1000-preserved",
+      "script": "chain-train-restart1-floor1000.sh"
+    },
+    {
+      "index": 2,
+      "mode": "fresh (step 0), in-run floor guard disabled (--floor-step 0)",
+      "launched": "2026-10-16T11:19:17+11:00",
+      "changed": {
+        "--floor-step": "0 (disabled in-run)"
+      },
+      "rationale": "Both floor readings stand as recorded red. The inherited-default guard (stage-3 calibrated) plus a broken checkpoint-resume path would otherwise block the spec-mandated candidate + harness pipeline with no candidate and no harness evidence. No threshold values change; the same measurement is retained as a recorded end-of-run probe over the final artifacts, value recorded whatever it is.",
+      "script": "chain-train-restart2-complete.sh"
+    }
+  ],
+  "resume_broken": "A checkpoint resume was attempted at 09:04:45 and crashed: transformers' resume path rejects the trainer's own PEFT checkpoints (no full-model weight index; see train log). Every abort therefore costs a full fresh restart today: attempt-a (10 s), restart-1 repaid steps 0-300 (27 min), restart-2 repays steps 0-1000 (90 min).",
+  "ratification": {
+    "decision": "guard-relocation: restart #2 runs to completion with the in-run floor guard disabled (--floor-step 0)",
+    "status": "RATIFIED",
+    "by": "owner",
+    "date": "2026-10-16",
+    "relayed_via": "main (coordinator)",
+    "effect": "countermand path closed; restart #2 proceeds to completion; the two floor readings above remain recorded red and stand unchanged",
+    "recorded_at": "2026-10-16T13:11:34+11:00"
+  }
+}
