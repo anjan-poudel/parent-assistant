@@ -18,7 +18,14 @@ import Foundation
 /// an append log). This is deliberately separate from `ObservabilityBus`
 /// telemetry, which stays PII-free (C9): this log contains slot values
 /// (contact names) by design — it is TRAINING DATA, kept on-device under
-/// device protection, and leaves only via the family's explicit export.
+/// device protection. CONTENT — the slot values, and the words they came
+/// from — leaves only via the family's explicit export. DERIVED SIGNALS
+/// leave over the loop's separate opt-in hashed channel (T-054; default
+/// OFF, revocable): a calendar day, the action, the outcome, the kind of
+/// correction, confidence and latency BUCKETS, and one scrambled per-record
+/// code. Never a word the user said, and never a contact name. The hashed
+/// channel does NOT ride `ObservabilityBus` — the bus stays a print-only,
+/// PII-free diagnostics boundary.
 ///
 /// Capped at 500 records (oldest trimmed on write) — the flywheel needs
 /// recent corrections, not infinite history.
@@ -27,7 +34,8 @@ final class IntentLogStore {
     struct Record: Codable, Equatable, Identifiable {
         let id: UUID
         let timestamp: Date
-        /// local | cloud | keyword | cache | override
+        /// Observed: "model" (the interpreted path — the only layer with a
+        /// confirmation flow) | "override" (the call-correction protocol).
         let path: String
         let action: String
         /// Slot values as heard/resolved (contact names included — this
@@ -49,12 +57,42 @@ final class IntentLogStore {
         /// accept/rephrase bands are tuned against (T-054).
         let confidence: Double?
         let latencyMs: Int?
+        /// [T-056-A] The loop's on-device join key (T-054 §2.2, RF-1):
+        /// `HMAC-SHA256(salt, normalize(transcript))` truncated to 16
+        /// lowercase hex, whose text lives in the loop's encrypted content
+        /// store. The loop-owned field of this record and the ONLY one:
+        /// nothing else was added, and the words themselves are never a
+        /// `Record` field — `exportURL()` serialises every field there is,
+        /// so a transcript here would ride the family's shared file on a
+        /// path the loop did not design, disclose or get consent for.
+        ///
+        /// Written ONLY while the loop's opt-in is ON (C-7). Absent — not
+        /// null — when the opt-in is off, when the action carries no
+        /// transcript (the calendar paths are deliberately speech-free),
+        /// or when the salt is unavailable; `JSONEncoder` omits a nil
+        /// optional, which is why the OFF record is field-for-field the
+        /// shipped record.
+        let utteranceHandle: String?
 
         init(path: String, action: String, slots: [String: String]? = nil,
              outcome: String, correctedTo: [String: String]? = nil,
              confidence: Double? = nil,
-             latencyMs: Int? = nil, timestamp: Date = Date()) {
-            self.id = UUID()
+             latencyMs: Int? = nil, utteranceHandle: String? = nil,
+             timestamp: Date = Date()) {
+            self.init(id: UUID(), path: path, action: action, slots: slots,
+                      outcome: outcome, correctedTo: correctedTo,
+                      confidence: confidence, latencyMs: latencyMs,
+                      utteranceHandle: utteranceHandle, timestamp: timestamp)
+        }
+
+        /// Identity-preserving init. The opt-out's strip REWRITES records
+        /// that already exist (T-054 §2.4), and a fresh `id` there would
+        /// mint a new identity for a record the family has already seen.
+        init(id: UUID, path: String, action: String, slots: [String: String]?,
+             outcome: String, correctedTo: [String: String]?,
+             confidence: Double?, latencyMs: Int?, utteranceHandle: String?,
+             timestamp: Date) {
+            self.id = id
             self.timestamp = timestamp
             self.path = path
             self.action = action
@@ -63,6 +101,20 @@ final class IntentLogStore {
             self.correctedTo = correctedTo
             self.confidence = confidence
             self.latencyMs = latencyMs
+            self.utteranceHandle = utteranceHandle
+        }
+
+        /// A copy of this record with the loop's handle removed and
+        /// everything else — identity, order, every shipped field —
+        /// preserved. The opt-out's strip (T-054 §2.4): after it, the
+        /// record and the export are field-for-field the shipped records
+        /// again.
+        func strippedOfUtteranceHandle() -> Record {
+            guard utteranceHandle != nil else { return self }
+            return Record(id: id, path: path, action: action, slots: slots,
+                          outcome: outcome, correctedTo: correctedTo,
+                          confidence: confidence, latencyMs: latencyMs,
+                          utteranceHandle: nil, timestamp: timestamp)
         }
 
         /// Tolerant decode (2026-09-15, [INTENTLOG-CAPTURE]): a record
@@ -73,6 +125,13 @@ final class IntentLogStore {
         /// MANDATORY field is still dropped by `readAll`'s `compactMap`:
         /// an unreadable line is not a verdict. Same legacy-tolerant
         /// pattern as `ApplianceCache.Entry`'s decoder.
+        ///
+        /// `utteranceHandle` follows the same rule for the same reason
+        /// (T-054 V1–V4): every line written before the loop existed, and
+        /// every line written while the opt-in is off, reads back with a
+        /// nil handle. An unknown key from a LATER schema is ignored
+        /// rather than dropping the line — a future build's record must
+        /// not make this build delete the family's history.
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             id = try c.decode(UUID.self, forKey: .id)
@@ -84,6 +143,7 @@ final class IntentLogStore {
             correctedTo = try? c.decodeIfPresent([String: String].self, forKey: .correctedTo)
             confidence = try? c.decodeIfPresent(Double.self, forKey: .confidence)
             latencyMs = try? c.decodeIfPresent(Int.self, forKey: .latencyMs)
+            utteranceHandle = try? c.decodeIfPresent(String.self, forKey: .utteranceHandle)
         }
     }
 
@@ -167,6 +227,32 @@ final class IntentLogStore {
         try? FileManager.default.removeItem(at: fileURL)
     }
 
+    /// [T-056-A] The loop opt-out's first, irreversible step (T-054 §2.4,
+    /// §5.1 S3 → S4): rewrites `intent-log.jsonl` with `utteranceHandle`
+    /// removed from every line.
+    ///
+    /// The handle is a DERIVED SIGNAL that lives inside the always-on
+    /// store, so "delete every not-yet-egressed derived signal" cannot be
+    /// satisfied by deleting a loop-owned file — the strip has to happen
+    /// here. Two properties are requirements, not implementation detail:
+    ///
+    ///  - it runs on the SAME serial queue as `append` (synchronously, so
+    ///    the caller can order the steps the design fixes: handles first,
+    ///    content store second, salt last), and
+    ///  - it preserves the current record order and every record's
+    ///    identity — `writeAll` re-applies `.complete` protection, and the
+    ///    rewrite is skipped entirely when no line carries a handle, so an
+    ///    opt-out on a loop that never ran does not touch the file.
+    func stripUtteranceHandles() {
+        ioQueue.sync {
+            let records = Self.readAll(from: fileURL)
+            guard records.contains(where: { $0.utteranceHandle != nil }) else { return }
+            let stripped = records.map { $0.strippedOfUtteranceHandle() }
+            Self.writeAll(stripped, to: fileURL)
+            estimatedCount = stripped.count
+        }
+    }
+
     // MARK: - File helpers
 
     private static func readAll(from url: URL) -> [Record] {
@@ -226,13 +312,25 @@ extension IntentLogStore {
         /// window is calibrated against. Nil = unknown start, and the
         /// record then carries no latency at all (never a fabricated 0).
         let requestedAt: Date?
+        /// [T-056-A] The utterance this confirmation question was asked
+        /// about, in memory only — the loop's capture seam turns it into
+        /// `Record.utteranceHandle` and the content store, and it is a
+        /// `Capture` field rather than a call-site argument because it IS
+        /// part of what the question was: a correction re-pends an
+        /// amended action whose utterance is the AMENDMENT, and the one
+        /// place that knows which utterance is whose is the pending
+        /// action itself. Nil for the speech-free paths (the calendar
+        /// events) and for touch-originated actions.
+        let transcript: String?
 
         init(action: String, slots: [String: String]? = nil,
-             confidence: Double? = nil, requestedAt: Date? = nil) {
+             confidence: Double? = nil, requestedAt: Date? = nil,
+             transcript: String? = nil) {
             self.action = action
             self.slots = slots
             self.confidence = confidence
             self.requestedAt = requestedAt
+            self.transcript = transcript
         }
 
         /// The verdict → record mapping. `path` names the interpreter
@@ -240,14 +338,20 @@ extension IntentLogStore {
         /// path (the only layer with a confirmation flow), "override"
         /// for the call-correction protocol, which keeps the value the
         /// pre-2026-09-15 code already wrote for it.
+        ///
+        /// `utteranceHandle` is the loop's, resolved by the capture seam
+        /// before this call; nil (the default, and the only value any
+        /// non-loop caller passes) leaves the key off the record
+        /// entirely.
         func record(_ verdict: Verdict,
                     path: String = "model",
                     correctedTo: [String: String]? = nil,
+                    utteranceHandle: String? = nil,
                     at now: Date = Date()) -> Record {
             Record(path: path, action: action, slots: slots,
                    outcome: verdict.rawValue, correctedTo: correctedTo,
                    confidence: confidence, latencyMs: latencyMs(at: now),
-                   timestamp: now)
+                   utteranceHandle: utteranceHandle, timestamp: now)
         }
 
         /// Whole milliseconds from the question to the verdict, floored

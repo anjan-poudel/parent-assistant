@@ -739,6 +739,41 @@ final class AppCoordinator: ObservableObject {
     }
     private static let cloudFallbackKey = "cloudFallbackEnabled"
 
+    // MARK: - [T-056-A] Learning loop consent (T-054 §5)
+
+    /// The loop's user-visible state — what the Settings → Privacy card and
+    /// the family review surface both read, so a loop that is ON and not
+    /// sending is never displayed as simply "ON" (C-17).
+    ///
+    /// Published rather than computed: `status` consults the Keychain
+    /// (the salt), and a SwiftUI `body` must not do storage IO. It is
+    /// refreshed at boot and on every transition — there is no polling.
+    @Published private(set) var learningLoopStatus: LearningLoopStatus = .off
+
+    /// S1 → S2 — the consent the user just confirmed. Minting the salt and
+    /// writing the consent record both happen here, in the design's safe
+    /// order (T-054 §5.1); a failure leaves the loop OFF and the switch
+    /// snaps back, which is the honest outcome.
+    func enableLearningLoop() {
+        _ = learningLoop.enable()
+        refreshLearningLoopStatus()
+    }
+
+    /// S3 → S4 — the opt-out the user just confirmed: handles stripped,
+    /// content store deleted, salt destroyed (T-054 §5.1). The assistant
+    /// keeps working exactly as before; only the loop's own state goes.
+    func disableLearningLoop() {
+        _ = learningLoop.disable()
+        refreshLearningLoopStatus()
+    }
+
+    /// Re-reads the loop's state. Called from the boot queue after the
+    /// consent and salt have been loaded, and after each transition.
+    func refreshLearningLoopStatus() {
+        learningLoopStatus = learningLoop.status
+    }
+
+
     /// Voice Processing I/O A/B gate (voice-personalisation P0, slice C,
     /// 2026-09-08): when ON, the audio session activates with the VPIO
     /// preset (`.voiceChat` mode + `setVoiceProcessingEnabled(true)` on
@@ -2515,6 +2550,14 @@ final class AppCoordinator: ObservableObject {
     /// Flywheel intent log (spec §11) — feeds the family review screen
     /// (Settings) and the export→retrain loop.
     private(set) lazy var intentLogStore = IntentLogStore()
+    /// [T-056-A] The continuous-learning loop's capture half (T-054): the
+    /// opt-in consent, the per-install salt, the on-device handle and the
+    /// encrypted content store behind it. Lazy because it is constructed
+    /// on first use, and its init performs no IO — the consent record and
+    /// the salt are read on the boot queue (`bootRestoreData`), never
+    /// between launch and first paint.
+    private(set) lazy var learningLoop = LearningLoopCapture(storage: storage,
+                                                             intentLogStore: intentLogStore)
     /// Deep-link builder/opener for the call & message flows (v2 pivot
     /// Phase 2, §4.3) — FaceTime video/audio, WhatsApp text, tel:.
     /// Stateless, so no lazy needed; tests fake it via `CallLinkOpening`.
@@ -4898,8 +4941,17 @@ final class AppCoordinator: ObservableObject {
             storage: storage,
             now: Date()
         )
+        // [T-056-A] The learning loop's launch work, on the boot queue
+        // beside the other stores' restores: the consent record and the
+        // salt are read here (never in `init`), and the 90-day content
+        // sweep runs here — T-054 §3.8 names the launch as one of its two
+        // opportunistic sweep points. Both are no-ops while the loop is
+        // off, which is the default.
+        let loopStatus = learningLoop.status
+        learningLoop.sweepExpiredContent()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            self.learningLoopStatus = loopStatus
             self.familyContacts = batch.contacts
             self.familyNotifier.updateContacts(
                 Self.emergencyContacts(from: batch.contacts,
@@ -9809,6 +9861,15 @@ self.noteTalkContractChanged()
         /// construction that omits the field takes the default — the new
         /// question's clock is the one the answer belongs to.
         var requestedAt: Date = Date()
+        /// [T-056-A] The amendment utterance that produced THIS action,
+        /// set only at the correction site and only on the rebuilt action.
+        /// It exists because a correction has two ends — the misheard
+        /// plan and the words that fixed it — and the loop's content
+        /// store has to hold both for the correction pair to be minable
+        /// (T-052 M3, T-054 §2.3). `var` with a default rather than `let`
+        /// so the memberwise init keeps it optional for every other
+        /// construction site.
+        var amendmentTranscript: String? = nil
         /// Channels the chain attempted and skipped, in attempt order —
         /// empty when nothing fell back (FR-CDP-008). Drives the prompt
         /// disclosure (FR-CDP-013); never mutated after construction.
@@ -9825,12 +9886,16 @@ self.noteTalkContractChanged()
         /// two values the confirmation question named (who, and through
         /// which app); the confidence is the interpreted command's — nil
         /// for a touch-originated action, which no interpreter produced.
+        /// The transcript is the utterance THIS action's question was
+        /// about: the amendment when the action was rebuilt by a
+        /// correction, the original otherwise.
         var capture: IntentLogStore.Capture {
             IntentLogStore.Capture(
                 action: "call",
                 slots: ["contact": contact.name, "method": method.rawValue],
                 confidence: sourceCommand?.confidence,
-                requestedAt: requestedAt)
+                requestedAt: requestedAt,
+                transcript: amendmentTranscript ?? sourceTranscript)
         }
 
         /// The hop's re-entry copy (FR-CDP-015; L2-D3/D7): routed method
@@ -9999,11 +10064,17 @@ self.noteTalkContractChanged()
             speak(text: L10n.fmt("router.call.messengerNoHandle", locale: activeLocale, action.contact.name))
             return true
         }
-        let amended = PendingCallAction(contact: action.contact,
+        var amended = PendingCallAction(contact: action.contact,
                                         method: override,
                                         unsupportedRequestedApp: nil,
                                         sourceTranscript: action.sourceTranscript,
                                         sourceCommand: action.sourceCommand)
+        // [T-056-A] The correction's second end: this utterance is what the
+        // amended action's own verdict is about, so it is the one the
+        // confirmed record's handle resolves to. Without it the loop would
+        // hold the misheard plan and never the words that fixed it — the
+        // pair T-052 M3 mines (T-054 §2.3).
+        amended.amendmentTranscript = utterance
         pendingCallAction = amended
         // Flywheel gold (spec §11): original plan → corrected plan. The
         // capture is the ORIGINAL action's — the plan the elder rejected
@@ -13978,11 +14049,21 @@ self.noteTalkContractChanged()
     /// four outcomes. The record's SHAPE belongs to
     /// `IntentLogStore.Capture` (and to each pending action's own
     /// `capture` property); this only writes it.
+    ///
+    /// [T-056-A] This is also the loop's ONLY capture path (C-16): the
+    /// transcript is resolved to a handle and stored in the loop's
+    /// encrypted content store here, at verdict time, BEFORE the record is
+    /// appended — and only while the opt-in is ON. With the opt-in off the
+    /// handle is nil, `JSONEncoder` omits the key, and the appended record
+    /// is field-for-field the shipped record (C-7).
     private func appendCapture(_ capture: IntentLogStore.Capture,
                                _ verdict: IntentLogStore.Verdict,
                                path: String = "model",
                                correctedTo: [String: String]? = nil) {
-        intentLogStore.append(capture.record(verdict, path: path, correctedTo: correctedTo))
+        let now = Date()
+        let handle = learningLoop.handle(forTranscript: capture.transcript, at: now)
+        intentLogStore.append(capture.record(verdict, path: path, correctedTo: correctedTo,
+                                             utteranceHandle: handle, at: now))
     }
 
     /// [APP-UI-CONFIRM] (2026-10-14) The launch branch of the flywheel
