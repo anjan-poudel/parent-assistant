@@ -2598,6 +2598,16 @@ final class AppCoordinator: ObservableObject {
     ///     this phone" can never be the model Automatic runs. The
     ///     catalogue's `defaultBrainModelID` remains the floor for the case
     ///     the resolution has nothing to say (a kind with no curated entry).
+    ///
+    /// [CNR T-184] Both rules see the promotion record. Rule 1 is the
+    /// explicit-selection path and deliberately does not gate: a household
+    /// that picked the v17 entry BY HAND is served it (that is what
+    /// "selectable" means — the entry's name quotes its gate state). Rule 2
+    /// threads `ModelCatalog.chatVariantPromotionRecord` into the resolver,
+    /// which is where a record-blocked chat variant is refused every
+    /// automatic rung: it neither becomes the default nor wins the
+    /// largest-fitting step. The record is reference data; this call site
+    /// names it so the wiring is one grep, not a default argument away.
     static func resolveBrainModelID(storedPreference: ModelID?,
                                     language: String,
                                     ledger: ModelLifecycleManager) -> ModelID {
@@ -2610,7 +2620,8 @@ final class AppCoordinator: ObservableObject {
             language: language,
             policy: inputs.policy,
             physicalMemoryBytes: inputs.physicalMemoryBytes,
-            warmSTTLiveBytes: inputs.warmSTTLiveBytes)?.entry.id
+            warmSTTLiveBytes: inputs.warmSTTLiveBytes,
+            promotionRecord: ModelCatalog.chatVariantPromotionRecord)?.entry.id
             ?? Self.defaultBrainModelID
     }
 
@@ -7330,6 +7341,10 @@ self.noteTalkContractChanged()
     private func ensureAssistantBrainDownloadIfNeeded() {
         guard Self.isLLMRuntimeLinked else { return }
         recordAutomaticBrainResolutionIfMoved()
+        // [CNR T-184] The promotion verdict rides the same once-per-launch
+        // reporting seam: while the v17 chat variant's record is blocked
+        // (the shipped state), the capture says so and names the block.
+        recordChatVariantPromotionIfBlocked()
         guard Self.shouldAutoDownloadAssistantBrain(
             modelCached: modelStore.isCached(resolvedBrainModelID),
             cloudEnabled: intentRouter?.cloudEnabled ?? false,
@@ -7363,6 +7378,15 @@ self.noteTalkContractChanged()
     /// catalogue fact the reader can look up; what the capture could not
     /// otherwise say is *why* it is not the one the language asked for.
     ///
+    /// [CNR T-184] The payload also carries the TIER the decision was made
+    /// for (`compact` / `standard` / `roomy` — `AutomaticPick.deviceClass`,
+    /// the resolver's own record of the class it resolved against), so the
+    /// sentence "this phone's class could not hold what the language asked
+    /// for" is readable from the line without re-deriving the class from
+    /// the probe. The `tier` key is the shipped `LogSanitiser.allowedKeys`
+    /// entry ([CASCADE-PROVENANCE]); its values here are the device-class
+    /// tokens, disjoint from the translation tier's, closed either way.
+    ///
     /// Silent for an explicit pick: that is the household's own choice, not
     /// an automatic resolution, and `recordedReason` is nil whenever the
     /// resolution simply agreed with the language default.
@@ -7376,7 +7400,8 @@ self.noteTalkContractChanged()
             language: appLanguage.rawValue,
             policy: inputs.policy,
             physicalMemoryBytes: inputs.physicalMemoryBytes,
-            warmSTTLiveBytes: inputs.warmSTTLiveBytes),
+            warmSTTLiveBytes: inputs.warmSTTLiveBytes,
+            promotionRecord: ModelCatalog.chatVariantPromotionRecord),
               let reason = pick.recordedReason else { return }
         observabilityBus.emit(ObservabilityEvent(
             component: "model_lifecycle",
@@ -7385,7 +7410,50 @@ self.noteTalkContractChanged()
             outcome: "info",
             errorCode: nil,
             metadata: ["slot": ModelSlot.brain.rawValue,
+                       "tier": pick.deviceClass.rawValue,
                        "reason": reason.rawValue]))
+    }
+
+    /// [CNR T-184] The launch record for a BLOCKED v17 chat-variant
+    /// promotion — FR-CNR-022's "the violation is reported" side. Emitted
+    /// once per launch while the shipped record is blocked (the shipped
+    /// state: no full-gate report exists until a green run lands), so a
+    /// field capture can answer "why is this phone not on the chat-aware
+    /// brain yet" with one line; silent the moment the record promotes.
+    ///
+    /// Static and pure so the payload is unit-testable without an
+    /// AppCoordinator instance (the `resolveBrainModelID` seam's own
+    /// convention). The payload is this ledger's slot name and the block's
+    /// closed-vocabulary `reasonCode` — never a gate-report path, a gate
+    /// name or a digest: which evidence is missing is a catalogue fact
+    /// (`chatVariantPromotionRecord`), and the record's own doc is where
+    /// it is read. Both keys are shipped `LogSanitiser.allowedKeys`
+    /// entries.
+    static func chatVariantPromotionEvent(
+        block: ModelCatalog.ChatVariantPromotionBlock) -> ObservabilityEvent {
+        ObservabilityEvent(
+            component: "model_lifecycle",
+            eventType: "chat_variant_promotion",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: ["slot": ModelSlot.brain.rawValue,
+                       "reason": block.reasonCode])
+    }
+
+    /// Emits the promotion verdict's block, if there is one, on the launch
+    /// path beside `recordAutomaticBrainResolutionIfMoved` — same
+    /// once-per-launch discipline, same silence when there is nothing to
+    /// say. It reports the CATALOG state, not the household's pick:
+    /// whether this device runs v17 is the resolution's business (rule 1 /
+    /// rule 2 above), and that record already exists.
+    private func recordChatVariantPromotionIfBlocked() {
+        switch ModelCatalog.promotionVerdict(for: ModelCatalog.chatVariantPromotionRecord) {
+        case .promoted:
+            return
+        case .blocked(let block):
+            observabilityBus.emit(Self.chatVariantPromotionEvent(block: block))
+        }
     }
 
     /// A newly-configured Gemini key makes the local brain model redundant

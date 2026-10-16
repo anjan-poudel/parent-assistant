@@ -190,6 +190,14 @@ enum LanguageModelResolver {
         /// are the same sentence, said once.
         let declinedDefaultReason: ModelUnavailabilityReason?
 
+        /// [CNR T-184] The device tier this decision was made for — the
+        /// policy's own class. Carried so the record of a resolution that
+        /// had to step off a tier-inadmissible model names the tier it
+        /// stepped off (FR-CNR-022 failure path: "the decision is recorded
+        /// with the tier named"), without the caller having to re-derive
+        /// the class from the probe bytes after the fact.
+        let deviceClass: ModelLifecycleBudget.DeviceClass
+
         /// The single honest token for this resolution, or nil when the
         /// language default was taken and fits (nothing to report, nothing
         /// to explain).
@@ -209,11 +217,14 @@ enum LanguageModelResolver {
         /// whole entry because a catalog entry is identified by its id (its
         /// URLs and sizes are properties of the artifact, not of the
         /// choice), which also keeps `AutomaticPick` free of a conformance
-        /// `ModelCatalogEntry` does not carry.
+        /// `ModelCatalogEntry` does not carry. The device class joins the
+        /// comparison so a pick on the 6 GB tier never compares equal to
+        /// the "same" pick on the 8 GB one.
         static func == (lhs: AutomaticPick, rhs: AutomaticPick) -> Bool {
             lhs.entry.id == rhs.entry.id
                 && lhs.availability == rhs.availability
                 && lhs.declinedDefaultReason == rhs.declinedDefaultReason
+                && lhs.deviceClass == rhs.deviceClass
         }
     }
 
@@ -232,13 +243,27 @@ enum LanguageModelResolver {
     ///
     /// Nil only when the kind ships no curated entry at all. See the header
     /// for the resolution order and for why an explicit pick is untouched.
-    static func resolvedAutomaticPick(kind: ModelKind,
-                                      language: String,
-                                      policy: ModelBudgetPolicy,
-                                      physicalMemoryBytes: UInt64,
-                                      warmSTTLiveBytes: UInt64? = nil) -> AutomaticPick? {
-        guard let languageDefault = ModelCatalog.defaultEntry(kind: kind,
-                                                              language: language) else {
+    ///
+    /// `promotionRecord` is [CNR T-184]'s gate, threaded through both
+    /// places it bites: the step-1 default (`ModelCatalog.defaultEntry`
+    /// answers the promoted chat variant only when the record is green)
+    /// and the candidate ladder (`ModelCatalog.isAutomaticPickEligible`
+    /// refuses a record-blocked chat variant, so the v17 file's extra 160
+    /// bytes can never win step 2 while it is unpromoted). The shipped
+    /// record is the default, so every caller — including every
+    /// pre-existing test — is gated by the SHIPPED evidence state without
+    /// having to pass anything.
+    static func resolvedAutomaticPick(
+        kind: ModelKind,
+        language: String,
+        policy: ModelBudgetPolicy,
+        physicalMemoryBytes: UInt64,
+        warmSTTLiveBytes: UInt64? = nil,
+        promotionRecord: ModelCatalog.ChatVariantPromotionRecord? = ModelCatalog.chatVariantPromotionRecord
+    ) -> AutomaticPick? {
+        guard let languageDefault = ModelCatalog.defaultEntry(
+            kind: kind, language: language,
+            promotionRecord: promotionRecord) else {
             // The kind ships nothing (an empty curated list): there is no
             // pick to make, and inventing one is how a caller ends up
             // loading a model the catalog does not have.
@@ -258,17 +283,21 @@ enum LanguageModelResolver {
             // was already fine.
             return AutomaticPick(entry: languageDefault,
                                  availability: defaultVerdict,
-                                 declinedDefaultReason: nil)
+                                 declinedDefaultReason: nil,
+                                 deviceClass: policy.deviceClass)
         }
 
         // The candidates, in the catalog's own preference order — the order
         // the size ties below are broken by, so the result is a pure
         // function of the curated list. Only language-compatible entries
         // compete: an automatic pick that cannot serve the household's
-        // language is not a pick at all.
+        // language is not a pick at all. And only entries the promotion
+        // record does not exclude compete ([CNR T-184]): a gated chat
+        // variant is selectable by hand and never served by the ladder.
         let candidates: [(entry: ModelCatalogEntry, verdict: ModelAvailability)] =
             ModelCatalog.curatedEntries(kind: kind)
                 .filter { isLanguageCompatible($0, language: language) }
+                .filter { ModelCatalog.isAutomaticPickEligible($0, record: promotionRecord) }
                 .map { (entry: $0, verdict: verdict($0)) }
 
         // Step 2 — the ladder: the largest artifact that still fits beside
@@ -279,7 +308,8 @@ enum LanguageModelResolver {
             .max(by: { $0.entry.sizeBytes < $1.entry.sizeBytes }) {
             return AutomaticPick(entry: best.entry,
                                  availability: best.verdict,
-                                 declinedDefaultReason: defaultVerdict.reason)
+                                 declinedDefaultReason: defaultVerdict.reason,
+                                 deviceClass: policy.deviceClass)
         }
 
         // Step 3 — nothing fits beside the warm STT, so the honest answer is
@@ -294,11 +324,13 @@ enum LanguageModelResolver {
             // all — this function does not invent a worse one.
             return AutomaticPick(entry: languageDefault,
                                  availability: defaultVerdict,
-                                 declinedDefaultReason: nil)
+                                 declinedDefaultReason: nil,
+                                 deviceClass: policy.deviceClass)
         }
         return AutomaticPick(entry: lightest.entry,
                              availability: lightest.verdict,
-                             declinedDefaultReason: defaultVerdict.reason)
+                             declinedDefaultReason: defaultVerdict.reason,
+                             deviceClass: policy.deviceClass)
     }
 
     /// The reply-voice preference (`ResponseVoiceSelection`) after the app

@@ -1203,6 +1203,17 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     static let measuredFramings: [ModelID: ChatFormat.Kind] = [
         // — offered picker brains (ModelCatalog.availableBrainEntries) —
         ModelCatalog.intentQwen4BSlotCanon: .raw,   // inherited (see above)
+        // [CNR T-184] The v17 chat-aware retrain of the seed-43 1.7B: the
+        // same `qwen-s43-merged` base lineage and the same training
+        // pipeline (train_qlora.py) as the seed-43 row below, so its row
+        // is INHERITED from that measurement — `.qwen3`, the one fine-tune
+        // the app-faithful check put the official Qwen3 wrap ahead of the
+        // bare shape for. Inherited-row precedent: `intentQwen4BSlotCanon`
+        // above. Re-run `framing_check.py` on the v17 artifact when it is
+        // published and replace this row with its own measurement; the
+        // offered-brain test requires SOME row, and the LLaMA 3.2 fallback
+        // would mis-frame it.
+        ModelCatalog.intentQwenS43ChatV17: .qwen3,  // inherited (see above)
         ModelCatalog.intentQwenS43:   .qwen3,
         ModelCatalog.qwen4BNepali:    .raw,
         ModelCatalog.qwen3_4BInstruct: .qwen3,
