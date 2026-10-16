@@ -32,8 +32,9 @@ import Foundation
 /// question, so it reads open-meteo's `daily` block for that day —
 /// requested as `dayOffset` days ahead of the location's today
 /// (1 = भोलि/tomorrow, 2 = पर्सि/the day after tomorrow) — and the reply
-/// names the day ("Tomorrow it will be 14 to 22°C …" / "भोलि १४ देखि
-/// २२°C … हुनेछ।"). Pre-fix the tool had no day concept at all: every
+/// names the day ("Tomorrow it will be 14 to 22 degrees Celsius …" /
+/// "भोलि १४ देखि २२ डिग्री सेल्सियस … हुनेछ।"). Pre-fix the tool had no
+/// day concept at all: every
 /// question fetched the `current` block and the reply said "अहिले"
 /// ("now"), so a tomorrow question was answered with TODAY's weather —
 /// the field report this path exists to fix. A day-0 (today) question
@@ -435,8 +436,15 @@ enum WeatherTool {
 
     // MARK: - Reply
 
-    /// The spoken answer: "It's 24°C and clear in Kathmandu." /
-    /// "काठमाडौंमा अहिले २४°C र खुला छ।"
+    /// The spoken answer: "It's 24 degrees Celsius and clear in
+    /// Kathmandu." / "काठमाडौंमा अहिले २४ डिग्री सेल्सियस र खुला छ।"
+    ///
+    /// [WEATHER-WORDING] (2026-10-14) The unit is spoken WORDS in the
+    /// template — the synthesizer used to read the raw degree token
+    /// letter-by-letter ("24 c", the field report). A degree sign or a
+    /// C suffix must never come back into these templates; `SpokenUnits`
+    /// is the net for the model-generated path, not a reason to regress
+    /// here.
     ///
     /// Temperature renders in Devanagari numerals under Nepali — the house
     /// convention of `TopicPreAnswer`/`CalculatorTool` — so the reply key
@@ -457,14 +465,16 @@ enum WeatherTool {
         let temperatureText = temperatureText(conditions.temperatureC, isNepali: isNepali)
         let condition = conditionName(wmoCode: conditions.wmoCode, locale: locale)
 
-        // en: "It's 24°C and clear in Kathmandu." / ne: "काठमाडौंमा अहिले २४°C र खुला छ।"
+        // en: "It's 24 degrees Celsius and clear in Kathmandu." /
+        // ne: "काठमाडौंमा अहिले २४ डिग्री सेल्सियस र खुला छ।"
         return L10n.fmt("weather.reply", locale: locale,
                         temperatureText, condition, placeClause(placeName, isNepali: isNepali))
     }
 
     /// [TOMORROW-WEATHER] (2026-09-13) The spoken answer for a FUTURE day:
-    /// "Tomorrow it will be 14 to 22°C and rain in Kathmandu." /
-    /// "काठमाडौंमा भोलि १४ देखि २२°C र पानी परिरहेको हुनेछ।"
+    /// "Tomorrow it will be 14 to 22 degrees Celsius and rain in
+    /// Kathmandu." / "काठमाडौंमा भोलि १४ देखि २२ डिग्री सेल्सियस र पानी
+    /// परिरहेको हुनेछ।"
     ///
     /// The day the forecast was READ FOR (`forecast.dayOffset`) picks the
     /// reply key, so the sentence names भोलि/पर्सि — a future-day reading
@@ -485,15 +495,19 @@ enum WeatherTool {
             ? "weather.reply.dayAfterTomorrow"
             : "weather.reply.tomorrow"
 
-        // en: "Tomorrow it will be 14 to 22°C and rain in Kathmandu."
-        // ne: "काठमाडौंमा भोलि १४ देखि २२°C र पानी परिरहेको हुनेछ।"
+        // en: "Tomorrow it will be 14 to 22 degrees Celsius and rain in
+        // Kathmandu." / ne: "काठमाडौंमा भोलि १४ देखि २२ डिग्री सेल्सियस
+        // र पानी परिरहेको हुनेछ।"
         return L10n.fmt(key, locale: locale,
                         minText, maxText, condition,
                         placeClause(placeName, isNepali: isNepali))
     }
 
     /// Spoken degrees: Devanagari numerals under Nepali, rounded to the
-    /// nearest degree (the house convention of `TopicPreAnswer`).
+    /// nearest degree (the house convention of `TopicPreAnswer`). The
+    /// NUMBER only — the unit words ("degrees Celsius" / "डिग्री
+    /// सेल्सियस") live in the reply templates, and a negative value
+    /// formats as "-2" / "-२" (BikramSambat.devanagariDigits is total).
     private static func temperatureText(_ celsius: Double, isNepali: Bool) -> String {
         let rounded = Int(celsius.rounded())
         return isNepali ? BikramSambat.devanagariDigits(rounded) : String(rounded)

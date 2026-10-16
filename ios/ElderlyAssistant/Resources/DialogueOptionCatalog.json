@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "groups": [
+    {
+      "id": "bhajan.deity",
+      "questionKey": "dialogue.probe.bhajanKind",
+      "matchKeys": ["भजन", "bhajan"],
+      "options": [
+        { "id": "shiva",  "labelKey": "dialogue.option.bhajan.shiva",
+          "query": "shiva bhajan",  "aliases": ["शिव", "shiv", "shiva"] },
+        { "id": "durga",  "labelKey": "dialogue.option.bhajan.durga",
+          "query": "durga bhajan",  "aliases": ["दुर्गा", "durga"] },
+        { "id": "bishnu", "labelKey": "dialogue.option.bhajan.bishnu",
+          "query": "bishnu bhajan", "aliases": ["विष्णु", "bishnu"] },
+        { "id": "devi",   "labelKey": "dialogue.option.bhajan.devi",
+          "query": "devi bhajan",   "aliases": ["देवी", "devi"] }
+      ]
+    }
+  ]
+}

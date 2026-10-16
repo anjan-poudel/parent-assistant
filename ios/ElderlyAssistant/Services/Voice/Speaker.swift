@@ -12,15 +12,370 @@ protocol Speaker: AnyObject {
     func cancel()
 }
 
-/// [LOUD-TTS] Response-playback loudness seam: switches the shared audio
-/// session to `.voicePrompt` mode while the assistant speaks and restores
-/// the capture preset afterwards (see `AudioSessionManager`). A static
-/// seam — the same pattern as `NewsSourceEditorSeam` — installed by
+/// Speakers that can honor a per-utterance rate (the Piper engine).
+/// Utterances that need a slower pace — the dialogue probes — cast to
+/// this seam; every other speaker keeps the standard `speak(_:locale:)`.
+protocol SpeechRateAdjusting: Speaker {
+    func speak(_ text: String, locale: Locale, speed: Float) async
+}
+
+/// [MODE-ONLY-LOUD] Response-playback loudness seam: switches the
+/// shared audio session to Apple's spoken-audio MODE (.spokenAudio →
+/// .voicePrompt) while the assistant speaks and restores the capture
+/// mode afterwards (see `AudioSessionManager`) — a mode change never
+/// closes the mic, unlike the retired category switch. A static seam —
+/// the same pattern as `NewsSourceEditorSeam` — installed by
 /// `AppCoordinator.start()`; the no-op default keeps speaker unit tests
 /// audio-free.
 enum ResponsePlaybackModeSeam {
     static var begin: () -> Void = {}
     static var end: () -> Void = {}
+}
+
+// MARK: - [VOLUME-BOOST] Spoken-reply output volume (poor hearing)
+
+/// Persisted loudness setting for the assistant's SPOKEN REPLIES: percent
+/// of the voice file's own amplitude, 50–200 % in 10 % steps, default
+/// 100 % (the loudness the app shipped with). The top of the range is the
+/// boost; the range goes below 100 % so a quiet room can be covered too.
+///
+/// Scope: a pure PLAYBACK-side parameter of the TTS output path. Nothing
+/// routes, decides, or synthesizes differently because of it, and it is
+/// never the system output volume — the alarm bell, the wake-word cue and
+/// other apps' audio are untouched (see `VoiceOutputGain`).
+///
+/// One writer: the Settings → Voices screen (`TTSVoicesSettingsView`).
+/// Every playback site reads through `percent(defaults:)`. Out-of-range
+/// stored values (an older range, a hand-edited plist) clamp on READ as
+/// well as on write, so a bad value can never reach the limiter.
+enum VoiceOutputVolume {
+    /// Stable UserDefaults key — never rename it: a rename silently
+    /// resets every user's setting to 100 %.
+    static let defaultsKey = "voice.outputVolumePercent"
+    /// [VOLUME-DEFAULT] (owner field verdict 2026-10-14): the shipped
+    /// default IS the loud baseline — with the [VOLUME-BASELINE] fold,
+    /// 100 % carries the 3× body gain the owner validated at the old
+    /// 300 %. Elderly users get loud replies out of the box at the
+    /// number they expect to be "normal".
+    static let defaultPercent = 100
+    static let minimumPercent = 50
+    static let maximumPercent = 300
+    static let stepPercent = 10
+
+    /// Range clamp — the single definition both the write path and the
+    /// read path use.
+    static func clamp(_ percent: Int) -> Int {
+        min(maximumPercent, max(minimumPercent, percent))
+    }
+
+    /// The effective percentage: the persisted value (clamped), or
+    /// `defaultPercent` when the key was never written.
+    static func percent(defaults: UserDefaults = SettingsPersistence.shared) -> Int {
+        guard defaults.object(forKey: defaultsKey) != nil else {
+            return defaultPercent
+        }
+        return clamp(defaults.integer(forKey: defaultsKey))
+    }
+
+    /// Persists a clamped value (the only write path).
+    static func set(_ percent: Int, defaults: UserDefaults = SettingsPersistence.shared) {
+        defaults.set(clamp(percent), forKey: defaultsKey)
+    }
+
+    /// One Settings ±-press: moves `percent` by one step, saturating at
+    /// the ends of the range.
+    static func stepped(_ percent: Int, bySteps steps: Int) -> Int {
+        clamp(percent + steps * stepPercent)
+    }
+}
+
+/// [VOLUME-BOOST] The playback gain + soft-knee limiter for one spoken
+/// reply.
+///
+/// Gain — linear factor = percent / 100 × 3 ([VOLUME-BASELINE]: the
+/// owner-validated loudness folded into the 100 % baseline), i.e.
+/// 1.5× … 9.0× (+3.5 dB … +19.1 dB). It is applied to the SAMPLES of
+/// the reply WAV
+/// that is about to play — never to the shared audio session, never to a
+/// global/system volume — so no other audio path in the app can change
+/// because of it.
+///
+/// The per-sample transfer (gain `g`, knee `k`, ceiling `c`):
+///
+///     boosted = sample × g
+///     g ≤ 1:   out = clamp(boosted, −c, +c)                  — pure linear
+///     g > 1:   |boosted| ≤ k → out = boosted                 — full gain
+///              |boosted| > k → out = sign · (k + (c − k) ·
+///                                        tanh((|boosted| − k) / (c − k)))
+///
+/// Why a knee instead of the original whole-buffer ceiling scale: the
+/// bundled Piper speech peaks near full scale, so a pure peak limiter
+/// applied ≈ ceiling/peak ≈ 1.0× at 150 % — the setting bought almost
+/// nothing on real replies (field report 2026-10-14: replies far
+/// quieter than other apps even at the top of the range). Speech is
+/// low-RMS with occasional peaks, so the knee gives the BODY of the
+/// speech the full requested gain while the loudest moments compress
+/// smoothly toward the ceiling instead of clipping. The gain ≤ 1
+/// linear branch remains in the transfer (direct callers and tests);
+/// the SLIDER no longer reaches it — [VOLUME-BASELINE] 50 % is
+/// "softer than 100 %", not attenuation.
+///
+/// Ceiling = −1 dBFS (≈ 0.891 linear), knee = −15 dBFS (≈ 0.178
+/// linear; −12 compressed too much of the speech body — the boost
+/// must lift the BODY, which carries intelligibility). tanh is
+/// smooth (derivative 1 at the knee), so the
+/// compression onset has no audible corner, and |out| approaches the
+/// ceiling asymptotically without ever reaching it. One transfer for
+/// every channel keeps the stereo image unshifted.
+///
+/// Honest limits — this is NOT a hearing aid and makes no such claim:
+///  · High settings trade dynamics for loudness: the loudest passages
+///    compress, so speech near the top of the range sounds denser
+///    rather than simply louder.
+///  · Broadband gain only — no frequency shaping, no per-band
+///    compression, no assistive-device claims.
+///  · The gain can only amplify what the voice file already contains —
+///    digital silence stays silent, and an already-loud RMS gains less
+///    than a quiet one.
+///
+/// The system-speech fallback (`SystemSpeechSpeaker`) cannot exceed
+/// unity at all: `AVSpeechUtterance.volume` caps at 1.0, so replies that
+/// fall back to OS speech are unaffected by this setting — an honest
+/// limit, not a hidden one.
+enum VoiceOutputGain {
+
+    /// Target peak ceiling in dBFS.
+    static let ceilingDBFS: Float = -1
+
+    /// The ceiling as a linear amplitude (≈ 0.8913).
+    static var ceilingLinear: Float { powf(10, ceilingDBFS / 20) }
+
+    /// Soft-knee threshold in dBFS — below it the full requested gain
+    /// applies linearly, above it samples compress toward the ceiling.
+    /// −15 (2026-10-14 field tuning): the −12 knee compressed too much
+    /// of the speech body on quiet Piper synthesis — the boost must
+    /// lift the BODY, which is what carries intelligibility.
+    static let kneeDBFS: Float = -15
+
+    /// The knee as a linear amplitude (≈ 0.2512).
+    static var kneeLinear: Float { powf(10, kneeDBFS / 20) }
+
+    /// Percent → linear multiplier. Clamped first: the transfer must
+    /// never see an out-of-range gain.
+    /// [VOLUME-BASELINE] (owner verdict 2026-10-14) The scale is folded
+    /// so 100 % delivers the loudness the owner validated at the old
+    /// 300 %: gain = percent/100 × 3. 100 % = 3.0× (the loud baseline),
+    /// 300 % = 9.0× (the knee saturates it into maximum density),
+    /// 50 % = 1.5× — the range no longer attenuates below the raw file;
+    /// the quiet-room use is "softer than 100 %", not "below raw".
+    static func linearFactor(percent: Int) -> Float {
+        Float(VoiceOutputVolume.clamp(percent)) / 100 * 3
+    }
+
+    /// Percent → dB, for logs and diagnostics (the DSP uses the linear
+    /// form). 100 % = +9.5 dB (the [VOLUME-BASELINE] loud default).
+    static func decibels(percent: Int) -> Float {
+        20 * log10f(linearFactor(percent: percent))
+    }
+
+    /// What the transfer did to one buffer (diagnostics + tests).
+    struct LimiterResult: Equatable {
+        /// The gain applied in the linear region — the requested gain,
+        /// clamped to ≥ 0. The knee compresses individual loud samples;
+        /// it never reduces the whole-buffer factor.
+        var appliedGain: Float
+        /// Peak |sample| of the input.
+        var peakIn: Float
+        /// Peak |sample| of the output (never above the ceiling).
+        var peakOut: Float
+        /// True when the boost pushed the loudest samples into the knee
+        /// (they compress toward the ceiling instead of scaling freely).
+        var didLimit: Bool
+
+        /// Output peak in dBFS (−∞ for digital silence).
+        var peakOutDBFS: Float {
+            peakOut > 0 ? 20 * log10f(peakOut) : -.infinity
+        }
+    }
+
+    /// The loudest |sample| of one channel. Non-finite samples are
+    /// ignored (they are handled as silence downstream, never as a peak).
+    static func peak(of channel: [Float]) -> Float {
+        var peak: Float = 0
+        for value in channel where value.isFinite {
+            peak = max(peak, abs(value))
+        }
+        return peak
+    }
+
+    /// The buffer-wide decision: the linear-region gain (the requested
+    /// gain) plus whether the loudest samples enter the knee. Every
+    /// channel goes through the SAME transfer, so the stereo image
+    /// cannot shift under the boost.
+    static func scale(gain: Float, peaks: [Float],
+                      ceiling: Float = VoiceOutputGain.ceilingLinear) -> LimiterResult {
+        let peakIn = peaks.reduce(Float(0)) { max($0, $1.isFinite ? $1 : 0) }
+        guard peakIn > 0 else {
+            // Digital silence (or a broken buffer): silence stays silent.
+            return LimiterResult(appliedGain: 0, peakIn: 0, peakOut: 0, didLimit: false)
+        }
+        let requested = max(0, gain)
+        let boosted = peakIn * requested
+        guard boosted.isFinite, requested > 0 else {
+            return LimiterResult(appliedGain: 0, peakIn: peakIn, peakOut: 0,
+                                 didLimit: false)
+        }
+        let didLimit = requested > 1 && boosted > kneeLinear
+        let peakOut = min(limited(peakIn, gain: requested, ceiling: ceiling),
+                          ceiling)
+        return LimiterResult(appliedGain: requested,
+                             peakIn: peakIn,
+                             peakOut: peakOut,
+                             didLimit: didLimit)
+    }
+
+    /// One sample through the transfer. Gain ≤ 1 is pure linear (a quiet
+    /// room is attenuated, never compressed); a boost applies the full
+    /// gain below the knee and a tanh soft-knee above it, so the output
+    /// approaches — and never reaches — the ceiling. Non-finite input (a
+    /// broken synthesis, not a signal) becomes silence — never NaN into
+    /// the player.
+    static func limited(_ sample: Float, gain: Float,
+                        ceiling: Float = VoiceOutputGain.ceilingLinear,
+                        knee: Float = VoiceOutputGain.kneeLinear) -> Float {
+        guard sample.isFinite else { return 0 }
+        let boosted = sample * gain
+        guard boosted.isFinite else { return 0 }
+        if gain <= 1 {
+            // Linear half of the range: clamp to the ceiling for safety,
+            // never compress.
+            return min(ceiling, max(-ceiling, boosted))
+        }
+        let magnitude = abs(boosted)
+        guard magnitude > knee else { return boosted }
+        let sign: Float = boosted < 0 ? -1 : 1
+        let compressed = knee + (ceiling - knee)
+            * tanhf((magnitude - knee) / (ceiling - knee))
+        return sign * compressed
+    }
+
+    /// In-place gain + limit for one channel.
+    @discardableResult
+    static func apply(gain: Float, to samples: inout [Float],
+                      ceiling: Float = VoiceOutputGain.ceilingLinear) -> LimiterResult {
+        let result = scale(gain: gain, peaks: [peak(of: samples)], ceiling: ceiling)
+        for i in samples.indices {
+            samples[i] = limited(samples[i], gain: result.appliedGain, ceiling: ceiling)
+        }
+        return result
+    }
+
+    /// In-place gain + limit for a multi-channel buffer (each `[[Float]]`
+    /// is one channel; all channels share the factor).
+    @discardableResult
+    static func apply(gain: Float, toChannels channels: inout [[Float]],
+                      ceiling: Float = VoiceOutputGain.ceilingLinear) -> LimiterResult {
+        let result = scale(gain: gain, peaks: channels.map(peak(of:)), ceiling: ceiling)
+        for c in channels.indices {
+            for i in channels[c].indices {
+                channels[c][i] = limited(channels[c][i], gain: result.appliedGain,
+                                         ceiling: ceiling)
+            }
+        }
+        return result
+    }
+}
+
+/// [VOLUME-BOOST] File-domain application of `VoiceOutputGain` to a
+/// synthesized reply WAV — the "gain applied before playback" step.
+///
+/// Why a file transform rather than a player property:
+///  · `AVAudioPlayer.volume` is 0…1 — it can only attenuate, so a boost
+///    is impossible there (the reason the boost has to touch samples);
+///  · doing the transfer here is what keeps a boost from clipping — a
+///    bare gain would hard-clip every full-scale passage.
+///
+/// Honest limits: this is a broadband gain + soft-knee limiter applied to
+/// the reply's own WAV, nothing more (no frequency shaping, no
+/// hearing-aid behavior). It can only amplify what the file contains —
+/// see `VoiceOutputGain`. If the file cannot be read/rewritten as PCM
+/// the caller plays the ORIGINAL file: processing can degrade loudness,
+/// never speech.
+enum SpokenReplyGainProcessor {
+
+    enum GainError: Error, Equatable {
+        case unreadable(URL)
+        case unsupportedFormat
+        case writeFailed(URL)
+    }
+
+    /// The URL to hand `AVAudioPlayer` for `wav` at `percent`:
+    ///  · 100 % → the input URL itself (byte-identical legacy path —
+    ///    no temp file, no extra IO);
+    ///  · otherwise → a processed copy in the temporary directory that
+    ///    the CALLER owns and deletes.
+    ///
+    /// The source file is never rewritten in place: it may be a shared
+    /// asset (the ack cache slot is read by later turns), and rewriting
+    /// it would leak the gain into every reader.
+    static func playbackURL(for wav: URL, percent: Int,
+                            fileManager: FileManager = .default) throws -> URL {
+        let gain = VoiceOutputGain.linearFactor(percent: percent)
+        guard gain != 1 else { return wav }
+
+        let source: AVAudioFile
+        do { source = try AVAudioFile(forReading: wav) }
+        catch { throw GainError.unreadable(wav) }
+
+        let format = source.processingFormat          // Float32, native channels
+        let frames = AVAudioFrameCount(source.length)
+        guard frames > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format,
+                                            frameCapacity: frames) else {
+            throw GainError.unsupportedFormat
+        }
+        do { try source.read(into: buffer) }
+        catch { throw GainError.unreadable(wav) }
+        guard let data = buffer.floatChannelData else { throw GainError.unsupportedFormat }
+
+        // Peak FIRST (every channel), then one transfer for the whole
+        // utterance — the decision needs the entire buffer in hand before
+        // it can say whether the knee engages, which is exactly what a
+        // file transform gives us.
+        let channelCount = Int(format.channelCount)
+        let length = Int(buffer.frameLength)
+        var peaks: [Float] = []
+        peaks.reserveCapacity(channelCount)
+        for ch in 0..<channelCount {
+            let samples = data[ch]
+            var peak: Float = 0
+            for i in 0..<length {
+                let value = samples[i]
+                if value.isFinite { peak = max(peak, abs(value)) }
+            }
+            peaks.append(peak)
+        }
+        let decision = VoiceOutputGain.scale(gain: gain, peaks: peaks)
+        for ch in 0..<channelCount {
+            let samples = data[ch]
+            for i in 0..<length {
+                samples[i] = VoiceOutputGain.limited(samples[i],
+                                                     gain: decision.appliedGain)
+            }
+        }
+
+        let dest = fileManager.temporaryDirectory
+            .appendingPathComponent("reply-gain-\(UUID().uuidString).wav")
+        do {
+            let output = try AVAudioFile(forWriting: dest,
+                                         settings: source.fileFormat.settings)
+            try output.write(from: buffer)
+        } catch {
+            try? fileManager.removeItem(at: dest)
+            throw GainError.writeFailed(dest)
+        }
+        return dest
+    }
 }
 
 // MARK: - AVSpeechSynthesizer (default)
@@ -29,6 +384,10 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
     private let synthesizer: AVSpeechSynthesizer
     private let observabilityBus: ObservabilityBus
     private var currentContinuation: CheckedContinuation<Void, Never>?
+    /// [MODE-ONLY-LOUD] True between this speaker's own seam begin/end —
+    /// `cancel()` ends the seam ONLY when this speaker opened it (see
+    /// PiperVoiceSpeaker's `playbackSeamOpen`).
+    private var seamOpen = false
 
     init(observabilityBus: ObservabilityBus,
          synthesizer: AVSpeechSynthesizer = AVSpeechSynthesizer()) {
@@ -41,6 +400,16 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
     func speak(_ text: String, locale: Locale) async {
         cancel()
 
+        // [AUDIT-SPOKEN] The shared speech-text normalization pass
+        // (`SpokenTextNormalizer`): ONE stop at the synthesizer seam for
+        // every spoken path that reaches this speaker — SpeakQueue
+        // lanes, direct calls, plugin/guide text, LiveTranslate, feed
+        // read-aloud, notification-reader fallback. Producers keep raw
+        // text for their cards; only what is SPOKEN is normalized here.
+        // Idempotent by contract (re-spoken replies pass through
+        // unharmed), locale-aware (en + ne).
+        let text = SpokenTextNormalizer.normalize(text, locale: locale)
+
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = Self.voice(for: locale)
         // Elderly-friendly defaults — slower rate, slightly higher volume.
@@ -48,10 +417,16 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
         utterance.volume = 1.0
         utterance.pitchMultiplier = 1.0
 
-        // [LOUD-TTS] Spoken responses get the loudness-optimized session
-        // mode for the duration of the utterance (restored by the
-        // delegate's finish/cancel below and by cancel()).
+        // [MODE-ONLY-LOUD] (2026-10-14) The seam is BACK — but it is a
+        // session MODE switch (.spokenAudio → .voicePrompt), never a
+        // category change: iOS 26/27 refuse every media category while
+        // the always-on input node is attached, and the spoken-audio
+        // modes are the loudness lever that exists for that shape. A
+        // mode change never closes the mic — the MIC-CONTINUITY
+        // speak→listen guarantee is untouched (no deactivation, no
+        // engine restart; the sample-level boost still applies).
         ResponsePlaybackModeSeam.begin()
+        seamOpen = true
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             currentContinuation = continuation
@@ -64,7 +439,16 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
-        ResponsePlaybackModeSeam.end()
+        settleSpeech()
+    }
+
+    /// Ends the seam (if this speaker opened it) and resumes the
+    /// awaiting continuation exactly once.
+    private func settleSpeech() {
+        if seamOpen {
+            seamOpen = false
+            ResponsePlaybackModeSeam.end()
+        }
         if let cont = currentContinuation {
             currentContinuation = nil
             cont.resume()
@@ -101,19 +485,11 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
 extension SystemSpeechSpeaker: AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                            didFinish utterance: AVSpeechUtterance) {
-        ResponsePlaybackModeSeam.end()
-        if let cont = currentContinuation {
-            currentContinuation = nil
-            cont.resume()
-        }
+        settleSpeech()
     }
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                            didCancel utterance: AVSpeechUtterance) {
-        ResponsePlaybackModeSeam.end()
-        if let cont = currentContinuation {
-            currentContinuation = nil
-            cont.resume()
-        }
+        settleSpeech()
     }
 }
 
@@ -158,6 +534,13 @@ protocol TTSEngine {
     /// construction inside `synthesize` would. The default is a no-op so
     /// fakes and the non-sherpa stub build inherit it without change.
     func warm(voiceDirectory: URL) throws
+
+    /// [MODEL-WARDEN] Step 0 — drop every cached engine, returning the
+    /// voices' bytes to the process. The default is a no-op because only an
+    /// engine that CACHES has anything to flush; a caching engine must
+    /// override it, or the ledger's `.ttsVoices` row would be an evictable
+    /// slot whose eviction frees nothing.
+    func unloadCachedVoices()
 }
 
 extension TTSEngine {
@@ -167,6 +550,8 @@ extension TTSEngine {
     }
 
     func warm(voiceDirectory: URL) throws {}
+
+    func unloadCachedVoices() {}
 }
 
 enum TTSEngineError: Error {
@@ -217,6 +602,25 @@ final class SherpaTTSEngine: TTSEngine {
         // re-entrant, and the warm must not race a live synthesize.
         try engineQueue.sync {
             _ = try engine(for: voiceDirectory)
+        }
+    }
+
+    /// [MODEL-WARDEN] Step 0 — the release path this engine never had.
+    ///
+    /// Serialized on `engineQueue` for the same reason every other entry
+    /// point is: dropping a `SherpaOnnxOfflineTtsWrapper` while
+    /// `generate()` is running on it is a use-after-free, and the ledger's
+    /// eviction is asynchronous with respect to synthesis. The wrappers are
+    /// released inside the `sync` block, so a `synthesize` that is already
+    /// in flight finishes first and the free cannot land mid-call.
+    ///
+    /// `onEngineCreated` is deliberately NOT re-armed or reset here: the
+    /// next `engine(for:)` constructs a fresh wrapper and fires the
+    /// `tts_voice_loaded` stage boundary exactly as it did the first time,
+    /// which is the honest timing for a reload.
+    func unloadCachedVoices() {
+        engineQueue.sync {
+            engines.removeAll()
         }
     }
 
@@ -305,6 +709,8 @@ final class SherpaTTSEngine: TTSEngine {
     func warm(voiceDirectory: URL) throws {
         throw TTSEngineError.engineInitFailed(voiceDirectory)
     }
+    /// Nothing is ever cached in this configuration, so the protocol's
+    /// no-op default (`unloadCachedVoices`) is already the truth.
 }
 #endif
 
@@ -321,7 +727,7 @@ final class SherpaTTSEngine: TTSEngine {
 /// speaker id) and one-shot audition requests — see `resolveVoiceSpec`.
 /// Untouched until the user picks: no selection, or the default
 /// google-medium speaker 0, is byte-identical to the pre-picker path.
-final class PiperVoiceSpeaker: NSObject, Speaker {
+final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
     private let fallback: SystemSpeechSpeaker
     private let silenceFallback: Speaker
     private let observabilityBus: ObservabilityBus
@@ -332,14 +738,23 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     private let turnTracer: VoiceTurnLatencyTracer?
     /// [TURN-TIMING-BREAKDOWN] Turn-scoped stage stopwatch for
     /// `tts_start` — handed-to-speaker → audio start (voice resolution +
-    /// synthesis ramp), NOT the playback duration. Nil on every
-    /// configuration but an `INTENT_ENCODER` build.
+    /// synthesis ramp), NOT the playback duration. Nil unless the build
+    /// carries `INTENT_ENCODER` — [ENCODER-ALWAYS-ON] the default build
+    /// does, so the recorder is live here (the toggle still gates service).
     private let timingRecorder: TurnTimingRecorder?
+    /// [PIPELINE-TRACE] The debug trace's recorder: the reply handed to
+    /// the speaker in, "audio started" (or the fallback branch taken) out.
+    /// Nil (the default) makes every call below a nil check.
+    private let traceRecorder: PipelineTraceRecorder?
     /// [LAT-M2] Shared pre-ack WAV cache the warm-time build writes and
     /// the router's fast-lane player reads. A nil injection gets a
     /// private instance pointing at the SAME default directory — the
     /// files are the shared state (see `AckAudioCache`).
     private let ackCache: AckAudioCache
+    /// [MODEL-WARDEN] The ledger the voice cache registers its residency
+    /// with. Injected so a test can hand in its own ledger instead of
+    /// writing into the process-wide one.
+    private let lifecycle: ModelLifecycleManager
 
     /// Elderly-friendly pace: 5% slower than the voice's natural rate.
     static let defaultSpeed: Float = 0.95
@@ -348,6 +763,17 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     private var currentContinuation: CheckedContinuation<Void, Never>?
     private var generationTask: Task<URL?, Never>?
     private var cancelled = false
+    /// [MODE-ONLY-LOUD] True between this speaker's own seam
+    /// begin/end — `cancel()` ends the seam ONLY when this speaker
+    /// opened it (a cancel while synthesis is in flight must not
+    /// consume a concurrent playback's begin).
+    private var playbackSeamOpen = false
+    /// [AUDIO-REACTIVE-HERO] (2026-10-14) The hero's live level feed
+    /// (see AudioVisualization.swift). Injected post-init by the
+    /// coordinator (the `wakeAcknowledger` pattern — the speaker exists
+    /// before the wiring site runs). nil = byte-identical pre-feature
+    /// behavior: no metering, no band track, no sends.
+    var audioVisualization: AudioLevelPublisher?
 
     init(fallback: SystemSpeechSpeaker,
          observabilityBus: ObservabilityBus,
@@ -357,14 +783,18 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
          bundle: Bundle = .main,
          turnTracer: VoiceTurnLatencyTracer? = nil,
          timingRecorder: TurnTimingRecorder? = nil,
-         ackCache: AckAudioCache? = nil) {
+         traceRecorder: PipelineTraceRecorder? = nil,
+         ackCache: AckAudioCache? = nil,
+         lifecycle: ModelLifecycleManager = .shared) {
         self.fallback = fallback
         self.silenceFallback = silenceFallback
         self.observabilityBus = observabilityBus
         self.modelStore = modelStore
         self.turnTracer = turnTracer
         self.timingRecorder = timingRecorder
+        self.traceRecorder = traceRecorder
         self.ackCache = ackCache ?? AckAudioCache()
+        self.lifecycle = lifecycle
         let sherpa = SherpaTTSEngine()
         // [TURN-TIMING] Voice engine ready — the load ms rides as a point
         // entry when a fresh engine loads inside a live turn.
@@ -374,6 +804,52 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         self.engine = engine ?? sherpa
         self.bundle = bundle
         super.init()
+        registerVoiceCacheWithLedger()
+    }
+
+    /// [MODEL-WARDEN] Step 0 — bring the voice cache into the ledger
+    /// (proposal §1.2, finding H5: `SherpaTTSEngine.engines` is "one per
+    /// voice directory, cached for the process lifetime, **no TTL, no
+    /// unload, no release API**"). That is what Step 0 changed:
+    /// `TTSEngine.unloadCachedVoices()` now exists, so the `.ttsVoices` row
+    /// is the one invisible resident that can be both declared AND
+    /// evicted — which is why it is the only one of the three registered
+    /// `evictable: true`.
+    ///
+    /// Registered only when the engine actually caches. A fake or a
+    /// non-caching engine would otherwise put a permanent row in the
+    /// process-wide ledger for bytes nobody holds, and the ledger's total
+    /// is supposed to stay checkable against `phys_footprint`.
+    ///
+    /// Owner decision, recorded rather than defaulted: TTS residency stays
+    /// today's behaviour (boot-warm one voice, keep the cache) and is
+    /// revisited once the field numbers land — see
+    /// `specs/model-warden-field-notes.md`.
+    private func registerVoiceCacheWithLedger() {
+        guard let sherpa = engine as? SherpaTTSEngine else { return }
+        lifecycle.register(
+            slot: .ttsVoices,
+            modelID: nil,
+            owner: self,
+            evictable: true
+        ) { [weak self] in
+            guard let self else { return }
+            self.engine.unloadCachedVoices()
+            // The owner's own release path cannot call `evict(_:reason:)`
+            // (that would recurse); `didUnload` is the "I dropped it
+            // myself" record, exactly as `WhisperKitSpeechRecognizer` uses
+            // it.
+            self.lifecycle.didUnload(.ttsVoices, owner: self)
+        }
+        // Residency follows the cache, not the object: the row counts from
+        // the first engine construction — which is when the 21-24 MB
+        // actually appear — and not before.
+        let previous = sherpa.onEngineCreated
+        sherpa.onEngineCreated = { [weak self] loadMs in
+            previous?(loadMs)
+            guard let self else { return }
+            self.lifecycle.didLoad(.ttsVoices, owner: self)
+        }
     }
 
     /// The fallback that can never make things worse: Nepali gets silence
@@ -441,6 +917,10 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     }
 
     func speak(_ text: String, locale: Locale) async {
+        await speak(text, locale: locale, speed: Self.defaultSpeed)
+    }
+
+    func speak(_ text: String, locale: Locale, speed: Float) async {
         cancel()
         cancelled = false
         // [TURN-TIMING-BREAKDOWN] `tts_start` opens when the utterance is
@@ -449,23 +929,41 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         // audio. A cancelled utterance never finishes its span, so it
         // records nothing (no speech started).
         let ttsStartSpan = timingRecorder?.start(.ttsStart)
+        // [PIPELINE-TRACE] The tts row rides the same edges as the timing
+        // span above: the utterance is the input, and the branch taken is
+        // the output. A cancelled utterance finishes neither span, so the
+        // row falls to the fill's `off(not_spoken)` — no audio started is
+        // the honest readout.
+        let ttsTrace = traceRecorder?.start(
+            .tts,
+            input: PipelineTraceSummary.text(text))
         let spec = resolveVoiceSpec(for: text, locale: locale)
         if spec.usedAudition || spec.speakerID != 0
             || spec.voiceID != Self.voiceID(for: spec.locale) {
             emit("tts_voice_" + (spec.usedAudition ? "audition" : "selected"),
                  locale: spec.locale, voice: spec)
         }
+        // [AUDIT-SPOKEN] The same shared normalization pass as
+        // `SystemSpeechSpeaker` (see there), placed AFTER
+        // `resolveVoiceSpec`: the audition matcher compares exact text,
+        // so it must see the raw utterance. Normalized with
+        // `spec.locale` — the locale the utterance is treated as
+        // (auditions force ne-NP, matching their Nepali sample text).
+        let text = SpokenTextNormalizer.normalize(text, locale: spec.locale)
         guard let voiceDir = modelStore.ttsVoiceDirectory(for: spec.voiceID)
                 ?? modelStore.installBundledTTSVoice(for: spec.voiceID, bundle: bundle) else {
             emit("tts_voice_missing_fallback", locale: spec.locale)
             ttsStartSpan?.finish()
-            await fallbackSpeaker(for: spec.locale).speak(text, locale: spec.locale)
+            ttsTrace?.finish(output: "voice missing — system fallback",
+                             decision: "fallback")
+            await speakFallback(fallbackSpeaker(for: spec.locale),
+                                text: text, locale: spec.locale)
             return
         }
 
         let task = Task.detached(priority: .userInitiated) { [engine] () -> URL? in
             try? engine.synthesize(text, voiceDirectory: voiceDir,
-                                   speed: Self.defaultSpeed,
+                                   speed: speed,
                                    speakerID: spec.speakerID)
         }
         generationTask = task
@@ -477,7 +975,10 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
             if wav == nil && !cancelled {
                 emit("tts_synthesis_failed_fallback", locale: spec.locale)
                 ttsStartSpan?.finish()
-                await fallbackSpeaker(for: spec.locale).speak(text, locale: spec.locale)
+                ttsTrace?.finish(output: "synthesis failed — system fallback",
+                                 decision: "failed")
+                await speakFallback(fallbackSpeaker(for: spec.locale),
+                                text: text, locale: spec.locale)
             }
             return
         }
@@ -487,6 +988,7 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         // playback (the playback duration is the tracer's `speak_finished`
         // span, not this one).
         ttsStartSpan?.finish()
+        ttsTrace?.finish(output: "audio started", decision: "spoken")
         await play(wav, text: text, locale: spec.locale)
     }
 
@@ -497,9 +999,13 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         engine.cancelSynthesis()
         player?.stop()
         player = nil
-        // [LOUD-TTS] Restore the capture mode (a no-op when playback never
-        // began — the seam's depth guard handles it).
-        ResponsePlaybackModeSeam.end()
+        if playbackSeamOpen {
+            playbackSeamOpen = false
+            ResponsePlaybackModeSeam.end()
+        }
+        // [AUDIO-REACTIVE-HERO] A cancelled reply ends its meter epoch on
+        // the same path as a settled one (idempotent with settlePlayback).
+        audioVisualization?.speakerEnded()
         fallback.cancel()
         if let cont = currentContinuation {
             currentContinuation = nil
@@ -534,27 +1040,107 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     // MARK: - Playback
 
     private func play(_ wav: URL, text: String, locale: Locale) async {
+        // [VOLUME-BOOST] The assistant's spoken reply gets the user's
+        // output volume applied to its samples (gain + peak limiter, see
+        // `SpokenReplyGainProcessor`) before playback starts. At the
+        // default 100 % this returns `wav` itself — the pre-task path,
+        // byte-identical, with no temp file and no extra IO. A processing
+        // failure falls back to the unprocessed file (never worse) and
+        // says so on the events bus.
+        let playbackURL = gainedPlaybackURL(for: wav, locale: locale)
+        defer {
+            if playbackURL != wav {
+                try? FileManager.default.removeItem(at: playbackURL)
+            }
+        }
         do {
-            let player = try AVAudioPlayer(contentsOf: wav)
+            let player = try AVAudioPlayer(contentsOf: playbackURL)
             self.player = player
             player.delegate = self
             player.prepareToPlay()
-            // [LOUD-TTS] Spoken responses get the loudness-optimized
-            // session mode for the duration of the playback (restored by
-            // settlePlayback and cancel() below).
+            // [AUDIO-REACTIVE-HERO] (2026-10-14) Hand the hero's meter a
+            // LIVE source for this playback: the player's own metering
+            // (`isMeteringEnabled` + `averagePower` — a documented
+            // AVAudioPlayer API; the envelope) plus a band track
+            // precomputed from the exact file about to play
+            // (`playbackURL` — the gained copy when the volume boost is
+            // active, so what plays is what is analysed). Nothing here
+            // delays `play()`: the track builds concurrently on a
+            // detached task and the bars simply hold still for its first
+            // few milliseconds (turn latency is sacred — see `play`).
+            if let visualization = audioVisualization {
+                player.isMeteringEnabled = true
+                visualization.speakerStarted(source: PiperPlaybackLevelSource(
+                    player: player, playbackURL: playbackURL))
+            }
+            // [MODE-ONLY-LOUD] (2026-10-14) The seam is BACK — but it is
+            // now a session MODE switch (.spokenAudio → .voicePrompt),
+            // never a category change: the always-on input node locks
+            // the session to .playAndRecord on iOS 26/27, so the mode is
+            // the only loudness lever that exists, and a mode change
+            // never closes the mic — the MIC-CONTINUITY speak→listen
+            // guarantee is untouched (no deactivation, no engine stop).
             ResponsePlaybackModeSeam.begin()
+            playbackSeamOpen = true
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                 currentContinuation = cont
-                player.play()
+                // play() can return false (broken file, session race):
+                // no delegate callback ever fires, so settle here —
+                // otherwise the turn hangs.
+                if !player.play() {
+                    settlePlayback()
+                }
             }
         } catch {
             emit("tts_player_failed_fallback", locale: locale)
-            await fallbackSpeaker(for: locale).speak(text, locale: locale)
+            await speakFallback(fallbackSpeaker(for: locale),
+                                text: text, locale: locale)
+        }
+    }
+
+    /// [AUDIO-REACTIVE-HERO] (2026-10-14) Every Piper→system fallback
+    /// speaks through here so the hero's meter knows a reply is playing
+    /// there with NO readable signal: AVSpeechSynthesizer exposes no
+    /// audio-level API of any kind (no metering, no tap — do not pretend
+    /// otherwise), so the publisher marks the source meterless and the
+    /// UI keeps its existing subtle idle motion — clearly labelled
+    /// fallback, never a fake meter. The NullSpeaker (Nepali silence
+    /// fallback) returns immediately, shrinking the window to ~zero;
+    /// honest either way.
+    private func speakFallback(_ speaker: Speaker, text: String,
+                               locale: Locale) async {
+        audioVisualization?.speakerStartedMeterless()
+        await speaker.speak(text, locale: locale)
+        audioVisualization?.speakerEnded()
+    }
+
+    /// [VOLUME-BOOST] The file this reply should play from: the
+    /// synthesized WAV at 100 %, else a gained+limited temp copy. Reading
+    /// the setting here (at playback time, not at synthesis time) is what
+    /// makes a Settings change apply from the very next reply.
+    private func gainedPlaybackURL(for wav: URL, locale: Locale) -> URL {
+        let percent = VoiceOutputVolume.percent()
+        // TEMPORARY field diagnostic (2026-10-14): the device reports
+        // quiet replies at a 200 % setting — pin down the effective
+        // percent and the gain actually applied, then remove.
+        print("[speaker] volume percent=\(percent) linear=\(VoiceOutputGain.linearFactor(percent: percent))")
+        do {
+            return try SpokenReplyGainProcessor.playbackURL(for: wav, percent: percent)
+        } catch {
+            emit("tts_gain_failed_raw_playback", locale: locale)
+            return wav
         }
     }
 
     private func settlePlayback() {
-        ResponsePlaybackModeSeam.end()
+        if playbackSeamOpen {
+            playbackSeamOpen = false
+            ResponsePlaybackModeSeam.end()
+        }
+        // [AUDIO-REACTIVE-HERO] Playback over (finished, failed, or
+        // cancelled): the hero's meter lets its last REAL readings fall
+        // to rest (ballistic release — see AudioLevelPublisher).
+        audioVisualization?.speakerEnded()
         if let cont = currentContinuation {
             currentContinuation = nil
             cont.resume()

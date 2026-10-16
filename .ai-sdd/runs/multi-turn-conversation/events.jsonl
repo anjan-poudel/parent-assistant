@@ -1,0 +1,1 @@
+{"type":"workflow.started","run_id":"4c6a9882-a3b8-457d-8899-e3e881280b2b","workflow_id":"multi-turn-conversation","timestamp":"2026-10-10T01:25:08.583Z","data":{"workflow_name":"multi-turn-conversation","task_count":10,"adapter_type":"claude_code","dry_run":true}}

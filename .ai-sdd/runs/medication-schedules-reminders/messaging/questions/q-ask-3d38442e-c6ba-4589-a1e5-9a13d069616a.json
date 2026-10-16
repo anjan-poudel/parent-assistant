@@ -1,0 +1,18 @@
+{
+  "schema_version": "1",
+  "question_id": "q-ask-3d38442e-c6ba-4589-a1e5-9a13d069616a",
+  "kind": "choice",
+  "channel_id": "C0C95FFFBMK",
+  "message_ts": "C0C95FFFBMK:1792018375.230099",
+  "thread_ts": "C0C95FFFBMK:1792018375.230099",
+  "hil_id": null,
+  "status": "answered",
+  "asked_at": "2026-10-14T22:52:55.217Z",
+  "expires_at": "2026-11-08T19:24:18.864Z",
+  "consumed": [],
+  "answer": {
+    "choice_id": "yes",
+    "text": null,
+    "from_user": "U0C6DTHDMV0"
+  }
+}

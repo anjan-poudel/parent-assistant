@@ -1,16 +1,21 @@
 import XCTest
+import UIKit
 @testable import ElderlyAssistant
 
 /// Records routine alarm calls — the `MockAlarmScheduler` analogue for
 /// `RoutineAlarmScheduling`.
 final class MockRoutineAlarmScheduler: RoutineAlarmScheduling {
-    var scheduled: [UUID: (entryId: UUID, title: String, at: Date)] = [:]
+    /// `visualAidURL` rides along (photo-visual-aids task, 2026-09-16) so
+    /// the tests can assert the scheduler handed the reminder's photo to
+    /// the notification, and that it passes nil when there is none.
+    var scheduled: [UUID: (entryId: UUID, title: String, visualAidURL: URL?, at: Date)] = [:]
     var scheduleCalls: [UUID: Int] = [:]
     var cancelled: [UUID] = []
 
     func scheduleRoutineReminder(occurrenceId: UUID, entryId: UUID,
-                                 title: String, at scheduledTime: Date) {
-        scheduled[occurrenceId] = (entryId, title, scheduledTime)
+                                 title: String, visualAidURL: URL?,
+                                 at scheduledTime: Date) {
+        scheduled[occurrenceId] = (entryId, title, visualAidURL, scheduledTime)
         scheduleCalls[occurrenceId, default: 0] += 1
     }
 
@@ -483,5 +488,138 @@ final class RoutineSchedulerTests: XCTestCase {
         XCTAssertEqual(scheduler.todaysOccurrences().first?.state, .delivered,
                        "the delivery itself is unaffected by the notify toggle")
         XCTAssertTrue(notifier.contexts.isEmpty)
+    }
+
+    // MARK: - Visual aids (photo-visual-aids task, 2026-09-16)
+
+    private var tmpVisualAids: URL!
+
+    /// A scheduler wired to a throwaway photo store — the production
+    /// shape (`AppCoordinator` passes the app's shared store).
+    private func makeSchedulerWithPhotoStore() -> (RoutineScheduler, VisualAidStore) {
+        tmpVisualAids = FileManager.default.temporaryDirectory
+            .appendingPathComponent("routine-aid-tests-\(UUID().uuidString)")
+        let photoStore = VisualAidStore(rootDirectory: tmpVisualAids)
+        let photoScheduler = RoutineScheduler(
+            store: store, alarmScheduler: alarm, observabilityBus: bus,
+            familyNotifier: notifier, caregiverNotifySettings: caregiverNotifySettings,
+            visualAidStore: photoStore,
+            now: { [weak self] in self?.fakeNow ?? Date() }
+        )
+        return (photoScheduler, photoStore)
+    }
+
+    private func makeImage(_ side: CGFloat = 40) -> UIImage {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side),
+                                       format: format).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        }
+    }
+
+    override func tearDown() {
+        if let tmpVisualAids { try? FileManager.default.removeItem(at: tmpVisualAids) }
+        tmpVisualAids = nil
+        super.tearDown()
+    }
+
+    /// The reminder's first photo reaches the alarm scheduler, which is
+    /// what puts the medicine box in the firing banner — the whole point
+    /// of the attachment path.
+    func testScheduledReminderCarriesTheFirstAidsURL() throws {
+        let (photoScheduler, photoStore) = makeSchedulerWithPhotoStore()
+        var entry = makeEntry(hour: 11)
+        let aid = try XCTUnwrap(photoStore.save(makeImage(), for: entry.id))
+        entry.visualAids = [aid]
+
+        photoScheduler.addEntry(entry)
+
+        let armed = try XCTUnwrap(alarm.scheduled.values.first)
+        XCTAssertEqual(armed.visualAidURL?.lastPathComponent, aid.filename)
+        XCTAssertEqual(armed.title, entry.displayTitle(locale: photoScheduler.locale))
+    }
+
+    /// An entry with no photos arms exactly as it did before the feature
+    /// — nil is the signal for "text-only banner".
+    func testScheduledReminderWithoutPhotosPassesNilURL() {
+        let (photoScheduler, _) = makeSchedulerWithPhotoStore()
+        photoScheduler.addEntry(makeEntry(hour: 11))
+
+        XCTAssertEqual(alarm.scheduled.count, 2)
+        XCTAssertTrue(alarm.scheduled.values.allSatisfy { $0.visualAidURL == nil })
+    }
+
+    /// A model entry whose file is gone (deleted by hand, or a restore
+    /// that lost the container's Application Support) must not hand a
+    /// missing URL to the notification system — that would fail the
+    /// attachment and, worse, could drop the whole reminder.
+    func testMissingPhotoFileArmsWithNilURL() {
+        let (photoScheduler, photoStore) = makeSchedulerWithPhotoStore()
+        var entry = makeEntry(hour: 11)
+        let aid = VisualAid(filename: "never-written.jpg")
+        entry.visualAids = [aid]
+        XCTAssertNil(photoStore.existingFileURL(aid, for: entry.id))
+
+        photoScheduler.addEntry(entry)
+
+        XCTAssertTrue(alarm.scheduled.values.allSatisfy { $0.visualAidURL == nil },
+                      "a missing file must degrade to a text-only reminder")
+    }
+
+    /// `setVisualAids` is the photo editor's save path: durable, and
+    /// re-armed so the banner picks the photo up immediately.
+    func testSetVisualAidsPersistsAndRearms() throws {
+        let (photoScheduler, photoStore) = makeSchedulerWithPhotoStore()
+        let entry = makeEntry(hour: 11)
+        photoScheduler.addEntry(entry)
+        XCTAssertTrue(alarm.scheduled.values.allSatisfy { $0.visualAidURL == nil })
+
+        let aid = try XCTUnwrap(photoStore.save(makeImage(), for: entry.id))
+        XCTAssertTrue(photoScheduler.setVisualAids([aid], entryId: entry.id))
+
+        XCTAssertEqual(photoScheduler.entry(for: entry.id)?.visualAids, [aid],
+                       "durable across the store")
+        XCTAssertEqual(RoutineStore(storage: storage).loadEntries().first?.visualAids, [aid])
+        XCTAssertEqual(alarm.scheduled.count, 2)
+        XCTAssertTrue(alarm.scheduled.values.allSatisfy {
+            $0.visualAidURL?.lastPathComponent == aid.filename
+        }, "the re-arm is what carries the photo into the already-armed window")
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "entry_visual_aids_updated" })
+    }
+
+    func testSetVisualAidsOnAnUnknownEntryIsANoOp() {
+        let (photoScheduler, _) = makeSchedulerWithPhotoStore()
+        XCTAssertFalse(photoScheduler.setVisualAids([VisualAid(filename: "a.jpg")],
+                                                    entryId: UUID()))
+        XCTAssertTrue(alarm.scheduled.isEmpty)
+    }
+
+    /// Deleting a reminder deletes its photos — a picture of a medicine
+    /// box must not outlive the reminder it was attached to.
+    func testRemoveEntryDeletesItsPhotos() throws {
+        let (photoScheduler, photoStore) = makeSchedulerWithPhotoStore()
+        var entry = makeEntry(hour: 11)
+        let aid = try XCTUnwrap(photoStore.save(makeImage(), for: entry.id))
+        entry.visualAids = [aid]
+        photoScheduler.addEntry(entry)
+
+        photoScheduler.removeEntry(id: entry.id)
+
+        XCTAssertNil(photoStore.load(aid, for: entry.id),
+                     "the entry's whole photo directory must be gone")
+    }
+
+    /// The scheduler is usable without a photo store at all (every
+    /// existing harness) — nothing touches the disk and reminders arm
+    /// text-only.
+    func testSchedulerWithoutAPhotoStoreStillArms() {
+        store.add(makeEntry(hour: 11))
+
+        scheduler.scheduleAll()
+
+        XCTAssertEqual(alarm.scheduled.count, 2)
+        XCTAssertTrue(alarm.scheduled.values.allSatisfy { $0.visualAidURL == nil })
     }
 }

@@ -19,6 +19,16 @@ struct LocalToolLogEntry: Codable, Equatable, Identifiable {
         /// open. The `response` field is EMPTY for ok entries by design:
         /// the title-bearing confirmation is spoken-only, never recorded.
         case youtube
+        /// Spotify music request ([SPOTIFY] 2026-10-06, C-SP-14) — the
+        /// linked-account search/play round-trip or the deep-link open;
+        /// no entry at all is written when no Spotify attempt was made
+        /// (the YouTube leg then writes its own existing entry).
+        /// Contract §21 (ADR-SP-15, stricter than YouTube): `query` is
+        /// ALWAYS empty and `response` is empty except the terminal
+        /// honest line (the static spoken fallback, carried verbatim in
+        /// `response`). No query text, track title, track id, token or
+        /// provider body ever reaches this row (NFR-SP-002).
+        case spotify
     }
 
     let id: UUID
@@ -28,10 +38,14 @@ struct LocalToolLogEntry: Codable, Equatable, Identifiable {
     /// snapshotted before the request went out (never a trimmed or
     /// post-parsed copy). Privacy (C9): this is user speech, which is why
     /// the log is encrypted on-device only — see `LocalToolLogStore`.
+    /// The Spotify kind is the contract §21 exception: its rows keep
+    /// this EMPTY — no query text is ever recorded (NFR-SP-002).
     let query: String
     /// What the app answered: the spoken/delivered line — the conditions
     /// sentence (hedge included), the search summary, or the honest
     /// fallback/cap line. Empty for the rare failure with no delivery.
+    /// Spotify rows keep this empty too, except the terminal honest line
+    /// (contract §21; see `Kind.spotify`).
     let response: String
     /// "ok" | "cap" | "fail" | "fallback" — see `logToolRequest` in
     /// CommandRouter for what each means per tool.
@@ -99,6 +113,15 @@ final class LocalToolLogStore {
 
     private let storage: EncryptedLocalStorage
     private let lock = NSLock()
+    /// [RESPONSIVENESS] (2026-10-14) The serial queue that owns the
+    /// encode + file write (the `IntentLogStore.ioQueue` shape,
+    /// `Services/Intents/IntentLogStore.swift:93`). `record` runs on the
+    /// main actor (deliveries) and on the voice queue (the cap path) —
+    /// both were paying a whole-array JSON encode plus an encrypted
+    /// atomic file write inline, once per logged tool turn. Only the
+    /// mutation and the COW snapshot stay on the caller now; memory
+    /// remains authoritative for `entries()`/`exportJSON()`.
+    private let ioQueue = DispatchQueue(label: "local.tool.log.io", qos: .utility)
     /// Oldest → newest, never above `maxEntries`.
     private var all: [LocalToolLogEntry] = []
     /// Nil until the first read; a record before any read loads first so
@@ -127,7 +150,26 @@ final class LocalToolLogStore {
         if all.count > Self.maxEntries {
             all.removeFirst(all.count - Self.maxEntries)
         }
-        _ = storage.write(key: Self.storageKey, value: all)
+        // [RESPONSIVENESS] (2026-10-14) Snapshot + enqueue INSIDE the
+        // critical section: enqueue order is then guaranteed to equal
+        // mutation order even when record is called from main and the
+        // voice queue concurrently, and the serial ioQueue writes them
+        // in that same order — the file converges on the newest
+        // snapshot (each write carries the full array; the last wins).
+        let snapshot = all
+        ioQueue.async { [storage] in
+            _ = storage.write(key: Self.storageKey, value: snapshot)
+        }
+    }
+
+    /// Blocks until every enqueued write has reached storage — the
+    /// synchronous seam for tests that read the persisted payload
+    /// through a second store instance right after recording
+    /// (production never needs it: memory is authoritative and the
+    /// queue drains on its own). `ioQueue.sync` cannot deadlock: its
+    /// blocks never hop back to the calling thread.
+    func flush() {
+        ioQueue.sync {}
     }
 
     // MARK: - Read

@@ -92,35 +92,71 @@ final class IntentEncoderWiringTests: XCTestCase {
         return router
     }
 
-    // MARK: The gate keeps the shipped default
+    // MARK: The UI gate is unconditional; the toggle keeps the shipped default
 
-    func testTheGateIsOffInThisBuildSoTheShippedDefaultIsUnchanged() {
-        // The unit-test target is built WITHOUT the INTENT_ENCODER
-        // condition. This exercises the coordinator's real decisions
-        // (`IntentEncoderWiring.gatedEncoder` / `preferredLocalBrain` /
-        // `selectionEventMetadata`) — note the resolve closure counts its
-        // own invocations, so the launch-time lazy construction the review
-        // flagged would fail this test.
-        XCTAssertFalse(IntentEncoderFeature.isEnabled)
+    /// [ENCODER-ALWAYS-ON] The encoder UI is NOT optional any more: the
+    /// `INTENT_ENCODER` condition is part of the app target's DEFAULT
+    /// compilation conditions (`ios/project.yml`), so the Settings card and
+    /// the hidden-screen door exist in every build, Debug and Release.
+    /// `IntentEncoderFeature.isEnabled` is a compile-time constant of the
+    /// APP build this test bundle runs inside, so a project.yml change that
+    /// dropped the condition fails HERE — instead of silently losing the
+    /// whole encoder UI, which is the recurring pain this test exists for.
+    ///
+    /// The shipped DEFAULT is still preserved, but by the persisted toggle
+    /// (default OFF) rather than by the absence of the code: this also
+    /// exercises the coordinator's real decisions
+    /// (`IntentEncoderWiring.gatedEncoder` / `preferredLocalBrain` /
+    /// `selectionEventMetadata`) — the resolve closure counts its own
+    /// invocations, so a launch-time lazy construction would fail it.
+    func testEncoderUIIsUnconditionalAndTheToggleKeepsTheShippedDefault() throws {
+        XCTAssertTrue(IntentEncoderFeature.isEnabled,
+                      "the encoder UI must be present in every build — "
+                      + "the app target's SWIFT_ACTIVE_COMPILATION_CONDITIONS "
+                      + "carries INTENT_ENCODER (ios/project.yml)")
+
+        let name = "intent-encoder-always-on-\(UUID().uuidString)"
+        let suite = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { suite.removePersistentDomain(forName: name) }
+
+        // The coordinator's gate is the SERVING decision: the (now always
+        // true) compile gate AND the tester's persisted switch.
+        let withToggleOff = IntentEncoderWiring.isServingEnabled(
+            isCompiledIn: IntentEncoderFeature.isEnabled,
+            isToggleOn: IntentEncoderPreferences(defaults: suite).isEnabled)
+        XCTAssertFalse(withToggleOff,
+                       "an untouched install still serves the picker brain")
 
         var resolutions = 0
-        let offered = IntentEncoderWiring.gatedEncoder {
+        let offered = IntentEncoderWiring.gatedEncoder(isEnabled: withToggleOff) {
             resolutions += 1
             return nil   // stand-in for the lazy `intentEncoderInterpreter`
         }
         XCTAssertNil(offered)
         XCTAssertEqual(resolutions, 0,
-                       "without the gate the coordinator must not even resolve "
+                       "toggle off: the coordinator must not even resolve "
                        + "the lazy encoder")
+
+        // …and the gate that IS compiled in does resolve the factory once
+        // the tester has switched the encoder on (the lazy construction is
+        // gated by the switch, not by a build flag).
+        var resolutionsWithToggleOn = 0
+        _ = IntentEncoderWiring.gatedEncoder(isEnabled: true) {
+            resolutionsWithToggleOn += 1
+            return nil
+        }
+        XCTAssertEqual(resolutionsWithToggleOn, 1,
+                       "the compilation condition is present — the only "
+                       + "remaining gate is the toggle")
 
         let fallback = StubCommandInterpreter(result: makeCommand(action: .query))
         let preferred = IntentEncoderWiring.preferredLocalBrain(encoder: offered,
                                                                 fallback: fallback)
         XCTAssertTrue(preferred === fallback,
-                      "without the gate the coordinator installs the SAME fallback instance")
+                      "toggle off: the coordinator installs the SAME fallback instance")
         XCTAssertNil(IntentEncoderWiring.selectionEventMetadata(preferred: preferred,
                                                                 encoder: offered),
-                     "no selection event without the gate")
+                     "no selection event for a slot the encoder does not hold")
     }
 
     func testEncoderIsPreferredOnlyWhenOfferedAndAvailable() throws {
@@ -368,6 +404,156 @@ final class IntentEncoderWiringTests: XCTestCase {
         XCTAssertFalse(IntentEncoderPreferences(defaults: suite).isCascadeEnabled)
     }
 
+    // MARK: [CORRECTION-TOGGLES] the two pre-intent layers' switches
+
+    /// The corrector's and the canonicalizer's switches, in the same
+    /// namespace and under the same rule as the two above: absent ⇒ the raw
+    /// flag is OFF, a flip survives a relaunch, and each switch moves only
+    /// its own key. [CORRECTION-DEFAULT-ON] The corrector adds the
+    /// absent-vs-false distinction the shipped apply default depends on:
+    /// `isCorrectorToggleSet` is false while the key was never written, and
+    /// true after ANY write — including a deliberate false, which is the
+    /// user's pin-off. The four-way matrix the internal-testing card offers
+    /// is only expressible because they are separate — one switch could not
+    /// say "corrector only".
+    func testCorrectionLayerTogglesDefaultOffAndRoundTrip() throws {
+        let name = "intent-encoder-correction-toggles-\(UUID().uuidString)"
+        let suite = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { suite.removePersistentDomain(forName: name) }
+
+        let prefs = IntentEncoderPreferences(defaults: suite)
+        XCTAssertEqual(IntentEncoderPreferences.correctorKey, "intentEncoder.corrector")
+        XCTAssertEqual(IntentEncoderPreferences.canonicalizerKey,
+                       "intentEncoder.canonicalizer")
+        for key in [IntentEncoderPreferences.correctorKey,
+                    IntentEncoderPreferences.canonicalizerKey] {
+            XCTAssertFalse([IntentEncoderPreferences.enabledKey,
+                            IntentEncoderPreferences.cascadeKey].contains(key),
+                           "the layers get their own keys, never the encoder's: "
+                           + "\(key)")
+        }
+
+        XCTAssertFalse(prefs.isCorrectorEnabled, "an absent key reads as OFF")
+        XCTAssertFalse(prefs.isCanonicalizerEnabled, "an absent key reads as OFF")
+        XCTAssertFalse(prefs.isCorrectorToggleSet,
+                       "[CORRECTION-DEFAULT-ON] an ABSENT key is not a written "
+                       + "toggle — `Policy.runtime` reads it as the shipped "
+                       + "apply default, not as a pin")
+
+        // No other switch may IMPLY either layer: both rewrite the text the
+        // model reads, so switching the encoder — or its cascade — on must
+        // leave them exactly where the tester left them.
+        prefs.setEnabled(true)
+        prefs.setCascadeEnabled(true)
+        XCTAssertFalse(prefs.isCorrectorEnabled)
+        XCTAssertFalse(prefs.isCanonicalizerEnabled)
+
+        prefs.setCorrectorEnabled(true)
+        XCTAssertTrue(IntentEncoderPreferences(defaults: suite).isCorrectorEnabled,
+                      "the tester's choice survives a relaunch")
+        XCTAssertFalse(prefs.isCanonicalizerEnabled,
+                       "the corrector's switch is not the canonicalizer's")
+        XCTAssertTrue(prefs.isEnabled, "and it never disturbs the encoder's")
+
+        prefs.setCanonicalizerEnabled(true)
+        XCTAssertTrue(IntentEncoderPreferences(defaults: suite).isCanonicalizerEnabled)
+        XCTAssertTrue(prefs.isCorrectorEnabled)
+
+        prefs.setCorrectorEnabled(false)
+        XCTAssertFalse(IntentEncoderPreferences(defaults: suite).isCorrectorEnabled)
+        XCTAssertTrue(IntentEncoderPreferences(defaults: suite).isCorrectorToggleSet,
+                      "[CORRECTION-DEFAULT-ON] a WRITTEN false is a deliberate "
+                      + "pin-off, not an absence — the distinction the shipped "
+                      + "default turns on")
+        XCTAssertTrue(prefs.isCanonicalizerEnabled,
+                      "and turning one off leaves the other where it was")
+    }
+
+    /// [CORRECTION-ANYBRAIN] The two rows are NOT gated on the encoder switch
+    /// any more, and this is the behavioural half of that statement: with the
+    /// enable gate closed the slot falls through to the picker brain
+    /// (`mode: .pickerBrain`), and a stored layer switch still rewrites what
+    /// that brain reads.
+    ///
+    /// It replaces the pre-relocation test that pinned the OPPOSITE — that a
+    /// stored layer switch could not reach a turn the encoder was not
+    /// answering. That was true while the composition lived inside
+    /// `IntentEncoderInterpreter` and is false by design now: the layers act
+    /// at the slot's input, whichever brain serves it. What still cannot
+    /// happen is the reverse — neither row can conjure the encoder into the
+    /// slot (`preferredLocalBrain` / `gatedEncoder` are untouched).
+    func testTheLayerSwitchesActWithTheEncoderOff() {
+        let picker = StubCommandInterpreter(
+            result: makeCommand(action: .query, reply: "picker"))
+        let seam = RecordingInputSeam(rewrite: { "\($0) भोलि" })
+        let slot = IntentEncoderWiring.localBrainSlot(
+            mode: .pickerBrain,          // the enable switch is off
+            encoder: nil,
+            encoderFallback: picker,
+            pickerBrain: picker,
+            inputSeam: seam.seam)
+
+        XCTAssertEqual(interpret(slot, "मौसम कस्तो छ")?.reply, "picker")
+        XCTAssertEqual(picker.lastTranscript, "मौसम कस्तो छ भोलि",
+                       "with the encoder off, the prepared text reaches the "
+                       + "PICKER brain — which is what makes a corrector-only "
+                       + "or canonicalizer-only A/B against it possible")
+        XCTAssertEqual(seam.callCount, 1, "one turn, one run of the layers")
+        XCTAssertEqual(seam.pairs.last?.safetyNetInput, "मौसम कस्तो छ",
+                       "and the safety half is still the sanitised transcript")
+    }
+
+    /// The double-apply guard through the SHIPPED slot builder: one turn runs
+    /// the seam ONCE, and the encoder's tokenizer is handed the pair's
+    /// prepared text — never a re-derivation of it, which is what a second
+    /// preparation of the pair's `original` would produce.
+    ///
+    /// `secondRuns` is the direct detector: it counts the times a seam was
+    /// handed text that had already been through it, so a future wiring that
+    /// attached the slot's seam to the nested chain as well would show up here
+    /// as a number rather than as a subtle rewrite of an already-rewritten
+    /// transcript.
+    func testTheSlotRunsTheSeamOnceAndTheEncoderReadsThePairsText() throws {
+        let store = try makeStore()
+        try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let spy = IntentEncoderRunnerSpy()
+        let model = StubIntentEncoderModel()
+        let manifest = IntentEncoderManifest.t033Spike
+        model.logits = IntentEncoderLogits(
+            intentLogits: manifest.intents.map { $0 == "set_reminder" ? 6 : -6 },
+            slotLogits: [[-6, -6, -6, 6, 6], [-6, -6, -6, -6, 6]])
+        spy.make = { model }
+        let encoder = makeEncoder(store: store, tokenizer: tokenizer, spy: spy)
+        let fallback = StubCommandInterpreter(result: makeCommand(action: .query))
+        let picker = StubCommandInterpreter(
+            result: makeCommand(action: .query, reply: "picker"))
+        let seam = RecordingInputSeam(rewrite: { "\($0) भोलि" })
+        let slot = IntentEncoderWiring.localBrainSlot(mode: .standaloneEncoder,
+                                                      encoder: encoder,
+                                                      encoderFallback: fallback,
+                                                      pickerBrain: picker,
+                                                      inputSeam: seam.seam)
+
+        XCTAssertEqual(interpret(slot, "भोलि")?.action, .setReminder)
+
+        let pair = try XCTUnwrap(seam.pairs.last)
+        XCTAssertEqual(seam.callCount, 1,
+                       "the slot owns the seam and runs it once per turn — the "
+                       + "nested chain in the preferred slot owns none")
+        XCTAssertEqual(seam.secondRuns, 0,
+                       "no seam was handed text it had already prepared: no "
+                       + "correct∘correct on the shipped path")
+        XCTAssertEqual(tokenizer.lastSanitisedTranscript, pair.modelInput,
+                       "the encoder's tokenizer ran on the pair's prepared text")
+        XCTAssertNotEqual(tokenizer.lastSanitisedTranscript,
+                          InputSanitiser.sanitise("भोलि", level: .quarantine),
+                          "…and never on a re-derivation of the pair's original, "
+                          + "which is what a second prepare() would have produced")
+        XCTAssertEqual(picker.callCount, 0,
+                       "the picker brain is not consulted while the encoder serves")
+    }
+
     /// The shipped slot builder: `.standaloneEncoder` keeps the encoder's
     /// abstention untouched (the picker brain is never consulted), and
     /// `.encoderFirstEscalate` escalates the SAME abstention to the picker
@@ -564,11 +750,20 @@ final class IntentEncoderWiringTests: XCTestCase {
         let standIn = StubCommandInterpreter(result: makeCommand(action: .query))
         let encoder = makeEncoder(store: store, spy: spy)
         let coordinator = StubCoordinator()
+        // [CORRECTION-ANYBRAIN] The slot's seam is attached AND armed with a
+        // rewrite that would destroy the keyword it is checked for: if the
+        // router's safety decision ever read the prepared text, this turn
+        // would stop being an emergency. The layers rewrite what a MODEL
+        // reads; the net reads the transcript the router was handed.
+        let seam = RecordingInputSeam(rewrite: {
+            $0.replacingOccurrences(of: "मद्दत", with: "सहयोग")
+        })
         let router = CommandRouter(coordinator: coordinator,
                                    observabilityBus: bus,
                                    speaker: nil,
                                    interpreter: LocalBrainChain(preferred: encoder,
-                                                                standIn: standIn))
+                                                                standIn: standIn,
+                                                                inputSeam: seam.seam))
 
         let result = router.route(transcript: "मद्दत गर्नुहोस्")
 
@@ -576,6 +771,9 @@ final class IntentEncoderWiringTests: XCTestCase {
         XCTAssertTrue(bus.contains("command_emergency_keyword"))
         XCTAssertEqual(spy.urls.count, 0, "no weights are even loaded")
         XCTAssertEqual(standIn.callCount, 0)
+        XCTAssertEqual(seam.callCount, 0,
+                       "a safety-classified turn never reaches the slot's seam: "
+                       + "the keywords are checked upstream, on the original")
     }
 
     func testExplicitMedicationAckNeverConsultsTheEncoder() throws {

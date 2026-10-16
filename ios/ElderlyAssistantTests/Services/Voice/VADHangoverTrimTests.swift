@@ -4,9 +4,10 @@ import SwiftUI
 @testable import ElderlyAssistant
 
 /// [LAT-M2] Tests for the flag-gated VAD hangover trim: the pure policy
-/// (700 ms by default, 900 ms when explicitly OFF), the EnergyVAD's
-/// frame-level end latency at the trimmed value, and the pipeline seam
-/// that hands the policy's value to the detector per capture.
+/// ([VAD-HANGOVER-DEFAULT]: 1200 ms by default, 700 ms when the trim
+/// flag is explicitly ON), the EnergyVAD's frame-level end latency at
+/// the trimmed value, and the pipeline seam that hands the policy's
+/// value to the detector per capture.
 /// The existing EnergyVADTests pin the 900 ms world with explicit
 /// values — untouched, they stay green alongside these.
 final class VADHangoverTrimTests: XCTestCase {
@@ -17,25 +18,79 @@ final class VADHangoverTrimTests: XCTestCase {
         UserDefaults(suiteName: "vad-hangover-\(UUID().uuidString)")!
     }
 
-    func testDefaultIsTrimmed700() {
-        XCTAssertEqual(VADHangoverPolicy.hangoverMs(defaults: freshDefaults()),
-                       VADHangoverPolicy.trimmedMs,
-                       "the trim is ON by default (the plan's default-ON contract)")
+    func testDefaultPolicyIsAdaptive() {
+        XCTAssertEqual(VADHangoverPolicy.hangoverPolicy(defaults: freshDefaults()),
+                       .production,
+                       "the default is the self-calibrating policy ([ADAPTIVE-ENDPOINT])")
     }
 
-    func testExplicitFalseRestores900() {
+    func testExplicitFalseKeepsAdaptive() {
         let defaults = freshDefaults()
         defaults.set(false, forKey: VADHangoverPolicy.trim700DefaultsKey)
-        XCTAssertEqual(VADHangoverPolicy.hangoverMs(defaults: defaults),
-                       VADHangoverPolicy.legacyMs,
-                       "the field can restore the pre-trim hangover without a release")
+        XCTAssertEqual(VADHangoverPolicy.hangoverPolicy(defaults: defaults),
+                       .production,
+                       "flag OFF keeps the adaptive policy")
     }
 
-    func testExplicitTrueKeeps700() {
+    func testExplicitTrueGivesFixed700() {
         let defaults = freshDefaults()
         defaults.set(true, forKey: VADHangoverPolicy.trim700DefaultsKey)
-        XCTAssertEqual(VADHangoverPolicy.hangoverMs(defaults: defaults),
-                       VADHangoverPolicy.trimmedMs)
+        XCTAssertEqual(VADHangoverPolicy.hangoverPolicy(defaults: defaults),
+                       .fixed(VADHangoverPolicy.trimmedMs),
+                       "the explicitly-enabled trim keeps the old fixed behavior")
+    }
+
+    // MARK: - AdaptiveEndpointPolicy (pure)
+
+    func testAdaptiveWindowBeforeFirstPauseIsInitial() {
+        var policy = AdaptiveEndpointPolicy.production
+        XCTAssertEqual(policy.effectiveWindowMs, 2800,
+                       "before any pause is observed the window is the full cap — the speaker always finishes")
+        XCTAssertFalse(policy.shouldEnd(currentQuietMs: 2_799))
+        XCTAssertTrue(policy.shouldEnd(currentQuietMs: 2_800))
+    }
+
+    func testAdaptiveWindowScalesWithTheSpeakersPauses() {
+        var policy = AdaptiveEndpointPolicy.production
+        // The speaker pauses 800 ms mid-thought, twice.
+        policy.recordPause(800)
+        policy.recordPause(800)
+        // p75 = 800 -> window = max(1800, 800 x 1.6 = 1280) = 1800
+        // (the raised floor).
+        XCTAssertEqual(policy.effectiveWindowMs, 1800)
+        XCTAssertFalse(policy.shouldEnd(currentQuietMs: 1_000),
+                       "a 1 s pause no longer ends the capture once the speaker is known to pause long")
+        XCTAssertFalse(policy.shouldEnd(currentQuietMs: 1_799))
+        XCTAssertTrue(policy.shouldEnd(currentQuietMs: 1_800))
+    }
+
+    func testAdaptiveWindowNeverFallsBelowFloor() {
+        var policy = AdaptiveEndpointPolicy.production
+        policy.recordPause(100)   // a fast speaker's short pauses
+        XCTAssertEqual(policy.effectiveWindowMs, 1800,
+                       "the 1800 ms floor still bounds a fast speaker's window")
+    }
+
+    func testAdaptiveWindowCapsAtForceEnd() {
+        var policy = AdaptiveEndpointPolicy.production
+        policy.recordPause(2_500)
+        XCTAssertEqual(policy.effectiveWindowMs, 2_800,
+                       "the window caps just under the 3 s force end")
+    }
+
+    func testFixedPolicyIsTheOldFixedBehavior() {
+        let policy = AdaptiveEndpointPolicy.fixed(700)
+        XCTAssertEqual(policy.effectiveWindowMs, 700)
+        XCTAssertFalse(policy.shouldEnd(currentQuietMs: 699))
+        XCTAssertTrue(policy.shouldEnd(currentQuietMs: 700))
+    }
+
+    func testPauseSamplesResetPerCapture() {
+        var policy = AdaptiveEndpointPolicy.production
+        policy.recordPause(800)
+        policy.resetForCapture()
+        XCTAssertEqual(policy.effectiveWindowMs, 2_800,
+                       "a new capture recalibrates from its own pauses — back to the full initial cap")
     }
 
     // MARK: - EnergyVAD end latency at the trimmed hangover
@@ -56,7 +111,7 @@ final class VADHangoverTrimTests: XCTestCase {
         var frameIndex = 0
         vad.onEndOfUtterance = { endFrame = frameIndex }
 
-        vad.start(endOfUtteranceMs: VADHangoverPolicy.trimmedMs)
+        vad.start(policy: .fixed(VADHangoverPolicy.trimmedMs))
         for f in frames(3_000, count: 4) { frameIndex += 1; vad.process(f) }
         for f in frames(0, count: 30) { frameIndex += 1; vad.process(f) }
 
@@ -70,7 +125,7 @@ final class VADHangoverTrimTests: XCTestCase {
         var frameIndex = 0
         vad.onEndOfUtterance = { endFrame = frameIndex }
 
-        vad.start(endOfUtteranceMs: VADHangoverPolicy.legacyMs)
+        vad.start(policy: .fixed(900))
         for f in frames(3_000, count: 4) { frameIndex += 1; vad.process(f) }
         for f in frames(0, count: 30) { frameIndex += 1; vad.process(f) }
 
@@ -86,7 +141,7 @@ final class VADHangoverTrimTests: XCTestCase {
         var ended = false
         vad.onEndOfUtterance = { ended = true }
 
-        vad.start(endOfUtteranceMs: VADHangoverPolicy.trimmedMs)
+        vad.start(policy: .fixed(VADHangoverPolicy.trimmedMs))
         for f in frames(3_000, count: 8) { vad.process(f) }
         for f in frames(0, count: 16) { vad.process(f) }       // 0.5 s breath
         XCTAssertFalse(ended,
@@ -104,7 +159,7 @@ final class VADHangoverTrimTests: XCTestCase {
         var ended = false
         vad.onEndOfUtterance = { ended = true }
 
-        vad.start(endOfUtteranceMs: VADHangoverPolicy.trimmedMs)
+        vad.start(policy: .fixed(VADHangoverPolicy.trimmedMs))
         for f in frames(3_000, count: 8) { vad.process(f) }
         for f in frames(0, count: 22) { vad.process(f) }
         XCTAssertTrue(ended,
@@ -147,8 +202,8 @@ final class VADHangoverTrimTests: XCTestCase {
         var onSpeechStateChange: ((Bool) -> Void)?
         var onEndOfUtterance: (() -> Void)?
         var onForcedEndOfUtterance: (() -> Void)?
-        private(set) var startedMs: [Int] = []
-        func start(endOfUtteranceMs: Int) { startedMs.append(endOfUtteranceMs) }
+        private(set) var startedPolicies: [AdaptiveEndpointPolicy] = []
+        func start(policy: AdaptiveEndpointPolicy) { startedPolicies.append(policy) }
         func stop() {}
         func reset() {}
         func process(_ pcm: [Int16]) {}
@@ -214,21 +269,21 @@ final class VADHangoverTrimTests: XCTestCase {
         return (pipeline, vad, defaults)
     }
 
-    func testPipelineStartsVADWithTrimmed700ByDefault() {
+    func testPipelineStartsVADWithAdaptivePolicyByDefault() {
         let h = makeHarness()
         h.pipeline.debugEnterIdleForTesting()
         h.pipeline.simulateWakeWordDetection()
-        XCTAssertEqual(h.vad.startedMs, [VADHangoverPolicy.trimmedMs],
-                       "the capture hands the trimmed hangover to the VAD by default")
+        XCTAssertEqual(h.vad.startedPolicies, [.production],
+                       "the capture hands the adaptive policy to the VAD by default")
     }
 
-    func testPipelineStartsVADWith900WhenFlagOff() {
+    func testPipelineStartsVADWithFixedTrimWhenExplicitlyOn() {
         let h = makeHarness()
-        h.defaults.set(false, forKey: VADHangoverPolicy.trim700DefaultsKey)
+        h.defaults.set(true, forKey: VADHangoverPolicy.trim700DefaultsKey)
         h.pipeline.debugEnterIdleForTesting()
         h.pipeline.simulateWakeWordDetection()
-        XCTAssertEqual(h.vad.startedMs, [VADHangoverPolicy.legacyMs],
-                       "the flag OFF restores the pre-trim hangover per capture")
+        XCTAssertEqual(h.vad.startedPolicies, [.fixed(VADHangoverPolicy.trimmedMs)],
+                       "the explicitly-enabled trim hands the fixed 700 ms policy")
     }
 
     func testPipelineReadsTheFlagPerCapture() {
@@ -236,11 +291,59 @@ final class VADHangoverTrimTests: XCTestCase {
         h.pipeline.debugEnterIdleForTesting()
         h.pipeline.simulateWakeWordDetection()
         h.pipeline.stop()
-        // Flip the flag mid-session: the NEXT capture picks it up.
-        h.defaults.set(false, forKey: VADHangoverPolicy.trim700DefaultsKey)
+        // Flip the trim ON mid-session: the NEXT capture picks it up.
+        h.defaults.set(true, forKey: VADHangoverPolicy.trim700DefaultsKey)
         h.pipeline.debugEnterIdleForTesting()
         h.pipeline.simulateWakeWordDetection()
-        XCTAssertEqual(h.vad.startedMs, [700, 900],
-                       "the hangover is read at capture start, not cached at launch")
+        XCTAssertEqual(h.vad.startedPolicies,
+                       [AdaptiveEndpointPolicy.production,
+                        .fixed(VADHangoverPolicy.trimmedMs)],
+                       "the policy is read at capture start, not cached at launch")
+    }
+
+    // MARK: - Adaptive integration (the field case)
+    //
+    // The owner's sentence: "मलाई भोलि बिहान ७ बजे … औषधि खान …
+    // सम्झाउनु" — natural pauses of 0.7-1.2 s. The detector learns the
+    // speaker's pause from the FIRST pause and never cuts the second.
+
+    /// The measured field case: the FIRST pause exceeds the old 1200 ms
+    /// initial window (the owner's cut at "७ बजे"). 2000 ms rides through
+    /// it, and the learned window covers every later pause.
+    func testFirstPauseUpToTwoSecondsIsProtected() {
+        let vad = EnergyVAD()
+        var ended = false
+        vad.onEndOfUtterance = { ended = true }
+
+        vad.start(policy: .production)
+        for f in frames(3_000, count: 8) { vad.process(f) }     // "मलाई भोलि बिहान ७ बजे"
+        for f in frames(0, count: 84) { vad.process(f) }        // ~2.69 s first breath
+        XCTAssertFalse(ended, "a 2.69 s first pause must not cut the capture")
+        for f in frames(3_000, count: 6) { vad.process(f) }     // "औषधि खान सम्झाउनु"
+        // The learned window is the full 2800 ms cap (the 2.69 s pause) —
+        // the final silence must exceed it: 90 frames = 2880 ms, still
+        // under the 3 s force end.
+        for f in frames(0, count: 90) { vad.process(f) }        // ~2.88 s final silence
+        XCTAssertTrue(ended, "the finished utterance still ends after the final silence")
+    }
+
+    func testDeliberateSpeakerIsNeverCutAtTheirOwnPause() {
+        let vad = EnergyVAD()
+        var ended = false
+        vad.onEndOfUtterance = { ended = true }
+
+        vad.start(policy: .production)
+        for f in frames(3_000, count: 8) { vad.process(f) }     // "मलाई भोलि"
+        for f in frames(0, count: 25) { vad.process(f) }        // ~0.8 s breath
+        XCTAssertFalse(ended, "the first pause must never end the capture")
+        for f in frames(3_000, count: 6) { vad.process(f) }     // "बिहान ७ बजे"
+        for f in frames(0, count: 30) { vad.process(f) }        // ~0.96 s pause — below the learned 1280 window
+        XCTAssertFalse(ended, "the learned window rides through the second pause")
+        for f in frames(3_000, count: 6) { vad.process(f) }     // "औषधि खान सम्झाउनु"
+        // The two pauses taught a 1800 ms window (the raised floor) — the
+        // final silence must exceed it (60 frames = 1920 ms; still below
+        // the 3 s force end).
+        for f in frames(0, count: 60) { vad.process(f) }        // ~1.92 s final silence
+        XCTAssertTrue(ended, "after the last word the capture ends within the learned window")
     }
 }

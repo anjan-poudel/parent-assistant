@@ -111,7 +111,15 @@ public actor LLMCore {
     private var sampler: UnsafeMutablePointer<llama_sampler>?
     private var chatSession: OpaquePointer?
     
-    func setParameters(seed: UInt32? = nil, topK: Int32? = nil, topP: Float? = nil, temp: Float? = nil, repeatPenalty: Float? = nil, repetitionLookback: Int32? = nil) {
+    /// [CHAT-SAMPLING] (2026-10-14, T-167) `public` so the app can re-assert a
+    /// turn's sampling parameters on the resident handle immediately before
+    /// that turn's decode. The app awaits this on the SAME actor that runs
+    /// `generateWithConstraints`, which orders the write before the decode —
+    /// the wrapper's fire-and-forget `temp`/`seed` setters (the `configure`
+    /// task chain) cannot give that ordering. Access-level change only: the
+    /// body, defaults and every caller inside this module are unchanged, and
+    /// no sampling behaviour differs.
+    public func setParameters(seed: UInt32? = nil, topK: Int32? = nil, topP: Float? = nil, temp: Float? = nil, repeatPenalty: Float? = nil, repetitionLookback: Int32? = nil) {
         if let seed { self.seed = seed }
         if let topK { self.topK = topK }
         if let topP { self.topP = topP }
@@ -218,30 +226,39 @@ public actor LLMCore {
             return cached as String
         }
         
+        guard var decoded = String(bytes: tokenPieceBytes(token, special: special), encoding: .utf8) else { return "" }
+
+        if decoded.contains("\0") {
+            decoded = decoded.filter { $0 != "\0" }
+        }
+
+        tokenDecodeCache.setObject(decoded as NSString, forKey: NSNumber(value: cacheKey))
+
+        return decoded
+    }
+
+    /// Raw bytes of a token's piece, before any decoding.
+    ///
+    /// Kept separate from `decode(_:special:)` because decoding a token on its own
+    /// is only sound when the token happens to end on a UTF-8 character boundary.
+    /// Byte-fallback tokens for multi-byte scripts (Devanagari among them) do not,
+    /// so streaming call sites carry the incomplete tail over to the next token
+    /// with `UTF8ByteCarry` instead of dropping it.
+    func tokenPieceBytes(_ token: Token, special: Bool = false) -> [UInt8] {
         var bufferLength = 16
         var buffer: [CChar] = .init(repeating: 0, count: bufferLength)
         var actualLength = Int(llama_token_to_piece(vocab, token, &buffer, Int32(bufferLength), 0, special))
-        
-        guard actualLength != 0 else { return "" }
-        
+
+        guard actualLength != 0 else { return [] }
+
         if actualLength < 0 {
             bufferLength = -actualLength
             buffer = .init(repeating: 0, count: bufferLength)
             actualLength = Int(llama_token_to_piece(vocab, token, &buffer, Int32(bufferLength), 0, special))
-            guard actualLength > 0 else { return "" }
+            guard actualLength > 0 else { return [] }
         }
-        
-        let validBuffer = Array(buffer.prefix(actualLength))
-        let bytes = validBuffer.map { UInt8(bitPattern: $0) }
-        guard var decoded = String(bytes: bytes, encoding: .utf8) else { return "" }
-        
-        if decoded.contains("\0") {
-            decoded = decoded.filter { $0 != "\0" }
-        }
-        
-        tokenDecodeCache.setObject(decoded as NSString, forKey: NSNumber(value: cacheKey))
-        
-        return decoded
+
+        return buffer.prefix(actualLength).map { UInt8(bitPattern: $0) }
     }
     
     public func getChatTemplateHint() -> String? {
@@ -408,6 +425,7 @@ public actor LLMCore {
             var currentlyInThinkingPhase = thinkingMode == .enabled && startMarker != nil
             var shouldGuaranteeOutput = true
             var pendingText = ""
+            var utf8Carry = UTF8ByteCarry()
             
             func stream(_ text: String) {
                 guard !text.isEmpty else { return }
@@ -477,12 +495,13 @@ public actor LLMCore {
                         continue
                     }
                     
+                    pendingText += utf8Carry.flush()
                     streamPendingText()
                     finishAllStreams()
                     return
                 }
                 
-                pendingText += decode(token)
+                pendingText += utf8Carry.consume(tokenPieceBytes(token))
                 
                 let detectingThinkingMarkers = thinkingMode != .none
                 
@@ -494,10 +513,11 @@ public actor LLMCore {
                 streamOldestPendingTextIfNeeded()
             }
             
+            pendingText += utf8Carry.flush()
             streamPendingText()
             finishAllStreams()
         }
-        
+
         return (thinkingStream, responseStream)
     }
     
@@ -551,6 +571,7 @@ public actor LLMCore {
             var rawText = ""
             var streamedReasoning = ""
             var streamedContent = ""
+            var utf8Carry = UTF8ByteCarry()
 
             func streamDeltas(from message: GeneratedMessage) {
                 if let reasoning = message.reasoningContent, reasoning.hasPrefix(streamedReasoning), reasoning != streamedReasoning {
@@ -568,12 +589,13 @@ public actor LLMCore {
                 let token = predictNextToken(excluding: isFirstToken ? [endToken] : [])
                 isFirstToken = false
                 if token == endToken || token == endOfTurnToken { break }
-                rawText += decode(token, special: true)
+                rawText += utf8Carry.consume(tokenPieceBytes(token, special: true))
                 if let partial = parseGeneration(rawText, isPartial: true) {
                     streamDeltas(from: partial)
                 }
             }
 
+            rawText += utf8Carry.flush()
             let message = parseGeneration(rawText, isPartial: false)
                 ?? GeneratedMessage(content: rawText, reasoningContent: nil, toolCalls: [])
             streamDeltas(from: message)
@@ -673,6 +695,7 @@ public actor LLMCore {
         defer { llama_sampler_free(constrainedSampler) }
 
         var output = ""
+        var utf8Carry = UTF8ByteCarry()
         while !isInterrupted(generation) && shouldContinuePredicting && currentTokenCount < Int32(maxTokenCount) {
             let token = llama_sampler_sample(constrainedSampler, context, batch.n_tokens - 1)
             if token == endToken || token == endOfTurnToken { break }
@@ -686,9 +709,10 @@ public actor LLMCore {
             contextTokens.append(token)
             currentTokenCount += 1
 
-            output += decode(token)
+            output += utf8Carry.consume(tokenPieceBytes(token))
             debugLastGeneratedTokens.append(token)
         }
+        output += utf8Carry.flush()
         return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -1052,9 +1076,11 @@ open class LLM: ObservableObject {
         self.repeatPenalty = repeatPenalty
         self.repetitionLookback = repetitionLookback
         
-        #if DEBUG
-        print("GNERATING WITH SEEED: \(seed)")
-        #endif
+        // elderly-ai-assistant (2026-09-19): removed a DEBUG-only
+        // print("GNERATING WITH SEEED: \(seed)") that fired on every
+        // generation in Debug builds (the owner's device-test config).
+        // The seed is deterministic via OnDeviceSampling.fixedSeed, so
+        // the log line carried no diagnostic value — only console noise.
         var modelParams = llama_model_default_params()
         #if targetEnvironment(simulator)
         modelParams.n_gpu_layers = 0

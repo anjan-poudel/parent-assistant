@@ -127,42 +127,42 @@ final class WeatherToolTests: XCTestCase {
         let conditions = WeatherTool.CurrentConditions(temperatureC: 24.3,
                                                        wmoCode: 0, windKmh: nil, humidityPercent: nil)
         XCTAssertEqual(WeatherTool.reply(for: conditions, placeName: "Kathmandu", locale: en),
-                       "It's 24°C and clear in Kathmandu.")
+                       "It's 24 degrees Celsius and clear in Kathmandu.")
     }
 
     func testEnglishReplyWithoutPlaceNameOmitsTheClause() {
         let conditions = WeatherTool.CurrentConditions(temperatureC: -1.6,
                                                        wmoCode: 71, windKmh: nil, humidityPercent: nil)
         XCTAssertEqual(WeatherTool.reply(for: conditions, placeName: nil, locale: en),
-                       "It's -2°C and snow.")
+                       "It's -2 degrees Celsius and snow.")
     }
 
     func testNepaliReplyUsesDevanagariNumeralsAndPlaceFirst() {
         let conditions = WeatherTool.CurrentConditions(temperatureC: 24.3,
                                                        wmoCode: 1, windKmh: nil, humidityPercent: nil)
         XCTAssertEqual(WeatherTool.reply(for: conditions, placeName: "काठमाडौं", locale: ne),
-                       "काठमाडौंमा अहिले २४°C र आंशिक बादल छ।")
+                       "काठमाडौंमा अहिले २४ डिग्री सेल्सियस र आंशिक बादल छ।")
     }
 
     func testNepaliReplyWithoutPlaceNameStillReadsGrammatically() {
         let conditions = WeatherTool.CurrentConditions(temperatureC: 9.0,
                                                        wmoCode: 61, windKmh: nil, humidityPercent: nil)
         XCTAssertEqual(WeatherTool.reply(for: conditions, placeName: nil, locale: ne),
-                       "अहिले ९°C र पानी परिरहेको छ।")
+                       "अहिले ९ डिग्री सेल्सियस र पानी परिरहेको छ।")
     }
 
     func testTemperatureRoundsToNearestDegree() {
         let conditions = WeatherTool.CurrentConditions(temperatureC: 24.6,
                                                        wmoCode: 0, windKmh: nil, humidityPercent: nil)
         XCTAssertEqual(WeatherTool.reply(for: conditions, placeName: nil, locale: en),
-                       "It's 25°C and clear.")
+                       "It's 25 degrees Celsius and clear.")
     }
 
     func testEmptyPlaceNameIsTreatedAsAbsent() {
         let conditions = WeatherTool.CurrentConditions(temperatureC: 20,
                                                        wmoCode: 95, windKmh: nil, humidityPercent: nil)
         XCTAssertEqual(WeatherTool.reply(for: conditions, placeName: "   ", locale: en),
-                       "It's 20°C and thunderstorm.")
+                       "It's 20 degrees Celsius and thunderstorm.")
     }
 
     // MARK: - Named-place extraction (weather-routing, 2026-09-07)
@@ -375,22 +375,22 @@ final class WeatherToolTests: XCTestCase {
         let forecast = WeatherTool.DailyForecast(temperatureMaxC: 22.1, temperatureMinC: 14.0,
                                                  wmoCode: 61, dayOffset: 1)
         XCTAssertEqual(WeatherTool.reply(for: forecast, placeName: "Kathmandu", locale: en),
-                       "Tomorrow it will be 14 to 22°C and rain in Kathmandu.")
+                       "Tomorrow it will be 14 to 22 degrees Celsius and rain in Kathmandu.")
         XCTAssertEqual(WeatherTool.reply(for: forecast, placeName: nil, locale: en),
-                       "Tomorrow it will be 14 to 22°C and rain.")
+                       "Tomorrow it will be 14 to 22 degrees Celsius and rain.")
         XCTAssertEqual(WeatherTool.reply(for: forecast, placeName: "काठमाडौं", locale: ne),
-                       "काठमाडौंमा भोलि १४ देखि २२°C र पानी परिरहेको हुनेछ।")
+                       "काठमाडौंमा भोलि १४ देखि २२ डिग्री सेल्सियस र पानी परिरहेको हुनेछ।")
         XCTAssertEqual(WeatherTool.reply(for: forecast, placeName: nil, locale: ne),
-                       "भोलि १४ देखि २२°C र पानी परिरहेको हुनेछ।")
+                       "भोलि १४ देखि २२ डिग्री सेल्सियस र पानी परिरहेको हुनेछ।")
     }
 
     func testDayAfterTomorrowReplyUsesTheFarDayWord() {
         let forecast = WeatherTool.DailyForecast(temperatureMaxC: 25.0, temperatureMinC: 16.0,
                                                  wmoCode: 3, dayOffset: 2)
         XCTAssertEqual(WeatherTool.reply(for: forecast, placeName: nil, locale: en),
-                       "The day after tomorrow it will be 16 to 25°C and partly cloudy.")
+                       "The day after tomorrow it will be 16 to 25 degrees Celsius and partly cloudy.")
         XCTAssertEqual(WeatherTool.reply(for: forecast, placeName: nil, locale: ne),
-                       "पर्सि १६ देखि २५°C र आंशिक बादल हुनेछ।")
+                       "पर्सि १६ देखि २५ डिग्री सेल्सियस र आंशिक बादल हुनेछ।")
     }
 
     /// The honesty pin: a future-day reading is a forecast, so it must

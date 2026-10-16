@@ -10,18 +10,26 @@ import Foundation
 /// behind this gate. It must therefore be impossible for the encoder to
 /// become the local brain in a release build by accident.
 ///
-/// The gate is a Swift compilation condition, so a build WITHOUT
-/// `INTENT_ENCODER` cannot even construct the interpreter's wiring — the
-/// app builds and behaves exactly as it does today.
+/// The gate is a Swift compilation condition. [ENCODER-ALWAYS-ON] It is
+/// part of this target's DEFAULT build settings
+/// (`ios/project.yml` → `SWIFT_ACTIVE_COMPILATION_CONDITIONS:
+/// "$(inherited) INTENT_ENCODER"`), so every build of the app — Debug and
+/// Release — carries the encoder runtime and its Settings card. A build
+/// can no longer silently lose the whole encoder UI because a caller
+/// forgot the flag on the command line; passing the condition to
+/// `xcodebuild` was the old opt-in and is no longer required.
 ///
 /// [ENCODER-RUNTIME-TOGGLE] Compiling the condition in is necessary but
-/// no longer sufficient: the tester ALSO has to switch the encoder on in
+/// never sufficient: the tester ALSO has to switch the encoder on in
 /// Settings → AI मोडेल (hidden; long-press the Settings title) →
 /// "on-device intent encoder". The toggle is the persisted
 /// `IntentEncoderPreferences` value (`intentEncoder.enabled`, default
-/// OFF), so a flagged build still ships the incumbent brain until someone
-/// opts in, and a flagged device can A/B the encoder against the picker
-/// brain from the same install by flipping one switch.
+/// OFF), so every build still serves the incumbent brain until someone
+/// opts in, and a device can A/B the encoder against the picker brain
+/// from the same install by flipping one switch. The artifact must still
+/// be installed (`ModelStore`), the tokenizer still has to be ready, and
+/// a build that genuinely removed the condition still cannot even
+/// construct the interpreter's wiring — the `#if` is the belt.
 ///
 /// [ENCODER-RUNTIME-CASCADE] A second, independent switch
 /// (`intentEncoder.cascade`, same card, default OFF) widens the A/B to a
@@ -31,26 +39,33 @@ import Foundation
 /// [ENCODER-RUNTIME-TOGGLE] behaviour). It is ignored while the enable
 /// switch is off — see `IntentEncoderWiring.servingMode`.
 ///
-/// Internal-testing enablement (Debug/internal builds only):
+/// Internal-testing enablement (no build flags, no environment):
 ///
-///   xcodebuild ... SWIFT_ACTIVE_COMPILATION_CONDITIONS="\$(inherited) INTENT_ENCODER"
+///   1. the condition is already in the default build settings (above);
+///   2. stage the artifact — `t033-encoder-int8-mlmodelc.zip` in the
+///      app's `Documents/` directory (AirDrop / `devicectl`), or point
+///      `INTENT_ENCODER_SPIKE_ZIP` at a copy elsewhere;
+///   3. switch the encoder ON on the hidden internal screen — that is
+///      also what starts the install.
 ///
-/// or add `INTENT_ENCODER` to the target's Active Compilation Conditions
-/// in the Xcode UI for the internal-testing scheme. With the condition
-/// present AND the runtime toggle ON AND the artifact installed in
-/// `ModelStore` AND a ready tokenizer, `AppCoordinator` offers the
+/// With all of that AND a ready tokenizer, `AppCoordinator` offers the
 /// encoder as `LocalBrainChain.preferred`; otherwise the chain keeps
 /// today's brain (`LocalIntentInterpreter`, LLaMA stand-in) and no error
 /// is surfaced — a missing artifact or a flipped-off switch is a normal,
-/// silent fall-through, never a failure the user has to read.
+/// silent fall-through, never a failure the user has to read. A missing
+/// zip file is the one exception that is reported, to the event trail
+/// only: `zip_missing`, never a silent success.
 ///
 /// Even when enabled, the keyword safety net (emergency, explicit
 /// med-ack) runs upstream of every interpreter in `CommandRouter`, so no
 /// encoder output can intercept or suppress those paths (FR-009).
 enum IntentEncoderFeature {
 
-    /// True when the build defines `INTENT_ENCODER`. Compiled-out on a
-    /// non-gated build, so no test can flip it at runtime.
+    /// True when the build defines `INTENT_ENCODER` — which, since
+    /// [ENCODER-ALWAYS-ON], every build of the app target does by default
+    /// (see `ios/project.yml`). Still a compile-time constant: no test and
+    /// no stored preference can flip it at runtime, and a build that
+    /// deliberately drops the condition compiles the encoder out.
     static var isEnabled: Bool {
         #if INTENT_ENCODER
         return true
@@ -77,11 +92,31 @@ enum IntentEncoderFeature {
 /// The key is deliberately namespaced away from the shipped preferences:
 /// `intentEncoder.enabled` can be set (or cleared) from a debugger or a
 /// UITest launch argument without touching any user-facing setting.
+///
+/// [CORRECTION-TOGGLES] The two pre-intent layers — the STT-error corrector
+/// and the dialect canonicalizer — carry switches of the SAME shape and the
+/// SAME default here (`intentEncoder.corrector`, `intentEncoder.canonicalizer`),
+/// so all four switches on the internal-testing card are persisted in one
+/// namespace with one rule: absent reads OFF.
+///
+/// [CORRECTION-ANYBRAIN] They do not touch the local-brain slot's SHAPE:
+/// nothing is re-installed when one flips, because both policies are
+/// re-resolved from the stored keys on every turn at the slot's input seam
+/// (`IntentEncoderWiring.localSlotInputSeam`). That seam feeds whichever
+/// local brain serves — encoder or picker — so neither switch is gated on
+/// the encoder switch, and a stored ON cannot silently mean nothing.
 final class IntentEncoderPreferences {
     static let enabledKey = "intentEncoder.enabled"
     /// [ENCODER-RUNTIME-CASCADE] The cascade switch, same treatment and
     /// same default.
     static let cascadeKey = "intentEncoder.cascade"
+    /// [CORRECTION-TOGGLES] The STT-error corrector's switch (§5.5.1:
+    /// "correction rewrites the text a model reads, so serving it is an
+    /// explicit decision").
+    static let correctorKey = "intentEncoder.corrector"
+    /// [CORRECTION-TOGGLES] The dialect canonicalizer's switch, the same
+    /// rule at the same seam.
+    static let canonicalizerKey = "intentEncoder.canonicalizer"
 
     private let defaults: UserDefaults
 
@@ -90,26 +125,62 @@ final class IntentEncoderPreferences {
     }
 
     /// True only when someone has explicitly switched the encoder on.
-    var isEnabled: Bool {
-        guard defaults.object(forKey: Self.enabledKey) != nil else { return false }
-        return defaults.bool(forKey: Self.enabledKey)
-    }
+    var isEnabled: Bool { flag(Self.enabledKey) }
 
     func setEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Self.enabledKey)
+    }
+
+    /// [CORRECTION-TOGGLES] True only when someone has explicitly switched
+    /// the corrector on. Absent reads false, so a device that never opened
+    /// the internal card still rewrites nothing.
+    var isCorrectorEnabled: Bool { flag(Self.correctorKey) }
+
+    /// [CORRECTION-DEFAULT-ON] True only when the corrector key has been
+    /// WRITTEN AT ALL — the "absent" vs "false" distinction the new
+    /// shipped default turns on. Under the default-ON policy (owner
+    /// decision 2026-10-11) an absent key means "never touched", which
+    /// `STTCorrector.Policy.runtime` reads as the apply arm; a stored
+    /// `false` is a deliberate pin-off by the user. The two states must
+    /// not collapse into one bool.
+    var isCorrectorToggleSet: Bool {
+        defaults.object(forKey: Self.correctorKey) != nil
+    }
+
+    func setCorrectorEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: Self.correctorKey)
+    }
+
+    /// [CORRECTION-TOGGLES] True only when someone has explicitly switched
+    /// the canonicalizer on — the same rule again, and deliberately a
+    /// SEPARATE key from the corrector's: the two layers must be testable
+    /// one at a time, and a single switch could not express that.
+    var isCanonicalizerEnabled: Bool { flag(Self.canonicalizerKey) }
+
+    func setCanonicalizerEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: Self.canonicalizerKey)
     }
 
     /// [ENCODER-RUNTIME-CASCADE] True only when someone has explicitly
     /// switched the cascade on. Absent key reads as false, so an
     /// enable-only device gets the standalone encoder, and the cascade is
     /// never in play on a build whose enable switch was never touched.
-    var isCascadeEnabled: Bool {
-        guard defaults.object(forKey: Self.cascadeKey) != nil else { return false }
-        return defaults.bool(forKey: Self.cascadeKey)
-    }
+    var isCascadeEnabled: Bool { flag(Self.cascadeKey) }
 
     func setCascadeEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Self.cascadeKey)
+    }
+
+    /// One rule for all four switches in this namespace: an absent key is
+    /// OFF. `bool(forKey:)` alone would read an absent key as false too, but
+    /// it would also read a key someone stored as a non-Bool (a string, a
+    /// number from an old build) as false silently; checking for the
+    /// object's existence first is the shape `DialectBiasSettings` and
+    /// `CanonicalizerPreferences` already use, and having ONE reader is what
+    /// keeps the four switches from drifting into four readings of "unset".
+    private func flag(_ key: String) -> Bool {
+        guard defaults.object(forKey: key) != nil else { return false }
+        return defaults.bool(forKey: key)
     }
 }
 
@@ -171,11 +242,22 @@ enum IntentEncoderWiring {
     ///
     /// `onEscalated` is consulted only in the cascade mode; the default
     /// no-op keeps the non-cascading call sites honest (nothing to report).
+    ///
+    /// [CORRECTION-ANYBRAIN] `inputSeam` is the local slot's input seam — the
+    /// corrector + canonicalizer composition, run ONCE per turn here and
+    /// handed to whichever brain serves (see `localSlotInputSeam`). It is
+    /// attached to THIS OUTER chain only, and it is deliberately independent
+    /// of `mode`: in every mode the chain is the boundary between the
+    /// transcript the router routed on and the input a local brain reads, so
+    /// the two layer switches act whichever brain answers. Nil (the default,
+    /// and the pre-relocation shape) leaves the transcript byte-identical.
     static func localBrainSlot(mode: ServingMode,
                                encoder: IntentEncoderInterpreter?,
                                encoderFallback: CommandInterpreter,
                                pickerBrain: CommandInterpreter,
                                timingRecorder: TurnTimingRecorder? = nil,
+                               inputSeam: LocalBrainChain.InputSeam? = nil,
+                               traceRecorder: PipelineTraceRecorder? = nil,
                                onEscalated: @escaping (LocalBrainChain.EscalationReason) -> Void = { _ in })
     -> CommandInterpreter {
         let preferredLocal = deferredEncoderPreference(encoder: encoder,
@@ -190,7 +272,41 @@ enum IntentEncoderWiring {
         return LocalBrainChain(preferred: preferredLocal,
                                standIn: pickerBrain,
                                cascade: cascade,
-                               timingRecorder: timingRecorder)
+                               timingRecorder: timingRecorder,
+                               inputSeam: inputSeam,
+                               // [PIPELINE-TRACE] The same chain's trace
+                               // row; nil (non-gated builds) leaves the
+                               // chain's behavior and cost identical.
+                               traceRecorder: traceRecorder)
+    }
+
+    /// [CORRECTION-ANYBRAIN] The SHIPPED local-slot input seam: §4.6's
+    /// composition (`sanitise → correct → canonicalize`), resolved from the
+    /// two stored switches on EVERY turn.
+    ///
+    /// It is a value, not an instance: `IntentInputCanonicalization.prepare`
+    /// reads the persisted policies itself (absent key = OFF, and the layers'
+    /// own compile gate still applies), so flipping a row in Settings acts on
+    /// the next turn with nothing re-installed — neither layer is a brain,
+    /// and no availability question is asked of them.
+    ///
+    /// Extracted here rather than inlined in `AppCoordinator` for the house
+    /// reason: the shipped call site is the tested one, so a wiring test can
+    /// drive the same seam the app installs.
+    ///
+    /// [PIPELINE-TRACE] The seam is where the corrector and canonicalizer
+    /// rows are born (`IntentInputCanonicalization.prepare` opens one span
+    /// per layer), so the recorder travels with the seam it traces: the
+    /// relocated composition would otherwise be invisible to the trace on
+    /// the production path — the exact gap the relocation could have left.
+    /// Nil (the default) makes both spans nil checks.
+    static func localSlotInputSeam(traceRecorder: PipelineTraceRecorder? = nil)
+    -> LocalBrainChain.InputSeam {
+        LocalBrainChain.InputSeam { sanitisedTranscript in
+            IntentInputCanonicalization.prepare(
+                sanitisedTranscript: sanitisedTranscript,
+                traceRecorder: traceRecorder)
+        }
     }
 
     /// Returns the encoder when the caller OFFERS it (feature gate passed)
@@ -258,6 +374,14 @@ enum IntentEncoderWiring {
     /// from `selectionEventMetadata(preferred:encoder:)` fed by
     /// `preferredLocalBrain` — the encoder-available-now decision — not by
     /// this wrapper.
+    ///
+    /// [CORRECTION-ANYBRAIN] This nested chain is built WITHOUT an input seam
+    /// on purpose. It sits inside the slot's outer chain, so its input has
+    /// already been prepared; a seam here would run the corrector and the
+    /// canonicalizer a second time, on their own output, and a `correct∘correct`
+    /// turn is not a turn any switch is asking for. The pair travels down
+    /// instead: `LocalBrainChain` conforms to `PreparedTranscriptInterpreting`,
+    /// so the outer chain hands it the pair rather than a string.
     static func deferredEncoderPreference(encoder: IntentEncoderInterpreter?,
                                           fallback: CommandInterpreter)
     -> CommandInterpreter {

@@ -138,11 +138,31 @@ final class IntentEncoderRuntimeWiringTests: XCTestCase {
         return zipURL
     }
 
-    func testInstallerIsAnExplicitNoOpWithoutTheEnvironmentOverride() throws {
+    /// [ENCODER-ALWAYS-ON] No environment variable is required any more:
+    /// with the environment empty the installer reads the app-container
+    /// Documents copy, so the decision is a REAL one (`.started`) instead
+    /// of the no-op the env-var-only rule used to produce. Whether the file
+    /// is actually staged is the honest part, and it is the background
+    /// job's to report — absent, `zip_missing` (it can never succeed
+    /// silently); present, an install through ModelStore's strict path.
+    /// (This test asserts the DECISION, not the file system: the app
+    /// container's Documents directory is the developer's own.)
+    func testInstallerWithoutAnEnvironmentOverrideReadsTheDocumentsCopy() throws {
         let store = try makeStore()
         let installer = IntentEncoderSpikeInstaller(modelStore: store,
                                                     observabilityBus: bus)
-        XCTAssertEqual(installer.installIfConfigured(environment: [:]), .notConfigured)
+        XCTAssertEqual(installer.installIfConfigured(environment: [:]), .started,
+                       "the Documents copy is the default source — no "
+                       + "environment variable needed")
+    }
+
+    /// The install is switched off only by an EXPLICITLY blank override —
+    /// the one "not configured" state left, and it stays a silent no-op for
+    /// the right reason (nothing failed).
+    func testInstallerTreatsAnExplicitlyBlankOverrideAsDisabled() throws {
+        let store = try makeStore()
+        let installer = IntentEncoderSpikeInstaller(modelStore: store,
+                                                    observabilityBus: bus)
         XCTAssertEqual(installer.installIfConfigured(
             environment: ["INTENT_ENCODER_SPIKE_ZIP": "   "]), .notConfigured)
         XCTAssertTrue(bus.events.isEmpty, "a no-op decision emits nothing")
@@ -230,13 +250,17 @@ final class IntentEncoderRuntimeWiringTests: XCTestCase {
 
     // MARK: - Readiness request (the gated interpreter seam)
 
-    /// This test target is built WITHOUT the `INTENT_ENCODER` compilation
-    /// condition — the shipped default — so the interpreter must refuse to
-    /// start an install even when handed an installer. That is the
-    /// "gate-off by default" contract.
-    func testRequestReadinessIsAGatedNoOpWithoutTheCompilationCondition() throws {
-        XCTAssertFalse(IntentEncoderFeature.isEnabled,
-                       "the unit-test build must not define INTENT_ENCODER")
+    /// [ENCODER-ALWAYS-ON] The app target compiles `INTENT_ENCODER` in by
+    /// default (`ios/project.yml`), so the interpreter's hard gate is OPEN
+    /// in this build: a readiness request reaches the installer instead of
+    /// being refused. The gate itself stays in place as defense in depth —
+    /// it is a compile-time constant, so it cannot be flipped from a test
+    /// any more; what pins it is the assertion below, which fails if a
+    /// future build drops the condition.
+    func testRequestReadinessReachesTheInstallerInTheDefaultBuild() throws {
+        XCTAssertTrue(IntentEncoderFeature.isEnabled,
+                      "the app target's default compilation conditions carry "
+                      + "INTENT_ENCODER (ios/project.yml)")
         let store = try makeStore()
         let zip = try makeEncoderZip()
         let installer = RecordingInstaller()
@@ -247,9 +271,9 @@ final class IntentEncoderRuntimeWiringTests: XCTestCase {
             tokenizer: StubIntentEncoderTokenizer(),
             artifactInstaller: installer)
         XCTAssertEqual(interpreter.requestReadiness(
-            environment: ["INTENT_ENCODER_SPIKE_ZIP": zip.path]), .notConfigured)
-        XCTAssertEqual(installer.callCount, 0,
-                       "the gate must stop the call before the installer sees it")
+            environment: ["INTENT_ENCODER_SPIKE_ZIP": zip.path]), .started)
+        XCTAssertEqual(installer.callCount, 1,
+                       "the gate is compiled in — the installer is consulted")
     }
 
     func testRequestReadinessWithoutAnInstallerStaysAnExplicitNoOp() throws {

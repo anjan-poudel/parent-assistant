@@ -48,6 +48,32 @@ enum RoutineFrequency: String, Codable {
     case weekly
 }
 
+/// One photo attached to a routine entry as a visual aid (photo-visual-aids
+/// task, 2026-09-16) — a medication reminder carrying a picture of the
+/// actual box, a walk carrying the route, a meal carrying the dish.
+///
+/// The model stores only the BARE FILE NAME, never a path and never image
+/// bytes: the JPEG lives under
+/// `Application Support/VisualAids/<entryId>/<filename>` (`VisualAidStore`),
+/// exactly the split `FamilyContact.photoFilename` uses, so the encrypted
+/// entry payload stays small and the image stays out of Photos (lifecycle +
+/// privacy — a reminder's photo must die with the reminder, not linger in
+/// the user's library).
+struct VisualAid: Codable, Equatable, Identifiable {
+    let id: UUID
+    /// `<uuid>.jpg` — a plain file name under the owning entry's directory.
+    var filename: String
+    /// Optional caregiver-written label shown under the image ("the blue
+    /// box", "with water"). Nil/empty renders nothing.
+    var caption: String?
+
+    init(id: UUID = UUID(), filename: String, caption: String? = nil) {
+        self.id = id
+        self.filename = filename
+        self.caption = caption
+    }
+}
+
 /// One recurring routine reminder (walk at 17:30, exercise at 07:00 and
 /// 16:00, call a relative on Sundays). Not safety-critical: no
 /// acknowledgement window, no escalation, no re-fire — those stay
@@ -69,6 +95,9 @@ struct RoutineEntry: Codable, Identifiable, Equatable {
     /// treated as every day rather than never.
     var weekdays: [Int]
     var isEnabled: Bool
+    /// Photos shown with this reminder — empty for the vast majority of
+    /// entries, which carry no image at all.
+    var visualAids: [VisualAid]
 
     init(
         id: UUID = UUID(),
@@ -77,7 +106,8 @@ struct RoutineEntry: Codable, Identifiable, Equatable {
         scheduleTimes: [DateComponents],
         frequency: RoutineFrequency = .daily,
         weekdays: [Int] = [],
-        isEnabled: Bool
+        isEnabled: Bool,
+        visualAids: [VisualAid] = []
     ) {
         self.id = id
         self.category = category
@@ -86,6 +116,32 @@ struct RoutineEntry: Codable, Identifiable, Equatable {
         self.frequency = frequency
         self.weekdays = weekdays
         self.isEnabled = isEnabled
+        self.visualAids = visualAids
+    }
+
+    /// Explicit keys because `init(from:)` is hand-written (see below) —
+    /// every other field keeps the synthesized, strict decode so a payload
+    /// missing an unrelated key still fails loudly rather than quietly
+    /// yielding a defaulted entry.
+    private enum CodingKeys: String, CodingKey {
+        case id, category, titleOverride, scheduleTimes, frequency,
+             weekdays, isEnabled, visualAids
+    }
+
+    /// Migration-safe decode: `visualAids` was added after the first
+    /// installs shipped, so every payload persisted before it MUST decode
+    /// as an empty list rather than throwing `keyNotFound` and losing the
+    /// user's whole reminder list. All other keys stay required.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        category = try container.decode(RoutineCategory.self, forKey: .category)
+        titleOverride = try container.decodeIfPresent(String.self, forKey: .titleOverride)
+        scheduleTimes = try container.decode([DateComponents].self, forKey: .scheduleTimes)
+        frequency = try container.decode(RoutineFrequency.self, forKey: .frequency)
+        weekdays = try container.decode([Int].self, forKey: .weekdays)
+        isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+        visualAids = try container.decodeIfPresent([VisualAid].self, forKey: .visualAids) ?? []
     }
 
     /// What the user sees/hears: the verbatim override when present,

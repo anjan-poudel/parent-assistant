@@ -66,6 +66,13 @@ final class StubCommandInterpreter: CommandInterpreter {
     var available: Bool
     private(set) var callCount = 0
     private(set) var lastTranscript: String?
+    /// [PROFILE-INTERVIEW T-094] The context the router composed for this
+    /// turn — the A/B clause test compares the `addressAs` field across
+    /// runs (absent vs hostile term) through this record.
+    private(set) var lastContext: InterpreterContext?
+    /// [TRUNCATION-FIX] The cascade must drop the preferred brain's
+    /// resident model before the stand-in takes the turn.
+    private(set) var unloadCount = 0
 
     init(available: Bool = true, result: InterpretedCommand? = nil) {
         self.available = available
@@ -79,7 +86,108 @@ final class StubCommandInterpreter: CommandInterpreter {
                    completion: @escaping (InterpretedCommand?) -> Void) {
         callCount += 1
         lastTranscript = transcript
+        lastContext = context
         DispatchQueue.main.async { completion(self.nextResult) }
+    }
+
+    func unload() {
+        unloadCount += 1
+    }
+}
+
+/// [CORRECTION-ANYBRAIN] A `LocalBrainChain.InputSeam` with a record of what
+/// it was run on: how many times, on which text, and the pair it produced.
+///
+/// Its default rewrite is the identity, so a test that wants "the seam ran and
+/// changed nothing" (the shipped default's shape) and a test that wants "a
+/// layer rewrote the text" differ by one argument. The rewrite is deliberately
+/// visible in the pair (`canonical`) AND in the pair's `applications`, because
+/// `IntentTranscriptPair.isIdentity` is STRUCTURAL (`applications.isEmpty`):
+/// a pair whose rewritten `canonical` records no application reads as an
+/// identity turn — a shape the production seam cannot produce ("no silent
+/// rewrite path", §4.2/D-5) — and every non-identity consumer (the chain's
+/// text selection, the trace's decision words) would see a turn on which
+/// nothing happened. `secondRuns` counts the times the seam was handed text
+/// that had ALREADY been through it — the `correct∘correct` a mis-wired nested
+/// chain would produce.
+final class RecordingInputSeam {
+    private(set) var callCount = 0
+    private(set) var inputs: [String] = []
+    private(set) var pairs: [IntentTranscriptPair] = []
+    private(set) var secondRuns = 0
+    private let rewrite: (String) -> String
+    private let marker: String
+
+    init(rewrite: @escaping (String) -> String = { $0 },
+         marker: String = " भोलि") {
+        self.rewrite = rewrite
+        self.marker = marker
+    }
+
+    var seam: LocalBrainChain.InputSeam {
+        LocalBrainChain.InputSeam { [self] text in
+            callCount += 1
+            if text.contains(marker) { secondRuns += 1 }
+            inputs.append(text)
+            let prepared = rewrite(text)
+            // The rewrite is recorded, so the pair is self-consistent: the
+            // canonical form differs from the original AND the application
+            // that produced it exists, which is exactly the shape
+            // `IntentInputCanonicalization.prepare` returns. A full-string
+            // substitution keeps every decoded span `exact` in the §4.5
+            // mapping (no widening, so no spurious abstention).
+            let scalars = text.unicodeScalars.count
+            let pair = IntentTranscriptPair(
+                original: text,
+                canonical: prepared,
+                applications: prepared == text ? [] : [CanonicalVariantApplication(
+                    ruleID: "test-seam/rewrite",
+                    tableID: "test-seam/v1",
+                    dialect: nil,
+                    kind: .orthographic,
+                    originalRange: 0..<scalars,
+                    canonicalRange: 0..<prepared.unicodeScalars.count,
+                    original: text,
+                    canonical: prepared)],
+                tableRevision: "test-seam/v1")
+            pairs.append(pair)
+            return pair
+        }
+    }
+}
+
+/// [CORRECTION-ANYBRAIN] A local brain with the ENCODER's shape — a
+/// `PreparedTranscriptInterpreting` consumer — and no model behind it.
+///
+/// It records which entry point it was reached through, because that IS the
+/// property under test at the slot's input: a brain that consumes the
+/// prepared pair must be handed the pair (`interpret(preparedInput:)`), never
+/// the plain string, while every other brain reads the pair's prepared text
+/// through `interpret(transcript:)`. A spy that recorded only "I was called"
+/// could not tell the two apart.
+final class PreparedBrainSpy: CommandInterpreter, PreparedTranscriptInterpreting {
+    var result: InterpretedCommand?
+    private(set) var pairs: [IntentTranscriptPair] = []
+    private(set) var transcripts: [String] = []
+
+    init(result: InterpretedCommand? = makeCommand(action: .query, confidence: 0.9)) {
+        self.result = result
+    }
+
+    var isAvailable: Bool { true }
+
+    func interpret(transcript: String,
+                   context: InterpreterContext,
+                   completion: @escaping (InterpretedCommand?) -> Void) {
+        transcripts.append(transcript)
+        DispatchQueue.main.async { completion(self.result) }
+    }
+
+    func interpret(preparedInput pair: IntentTranscriptPair,
+                   context: InterpreterContext,
+                   completion: @escaping (InterpretedCommand?) -> Void) {
+        pairs.append(pair)
+        DispatchQueue.main.async { completion(self.result) }
     }
 }
 
@@ -136,7 +244,18 @@ final class StubCoordinator: VoiceCommandCoordinating {
     func handleConfirmationResponse(_ response: ConfirmationResponse) {}
     func noteSpeakingStarted() {}
     func noteSpeakingEnded() {}
-    func noteAssistantSpoke(_ text: String) {}
+    /// [PROFILE-INTERVIEW T-094] Opt-in override for the read seam — the
+    /// extension default is nil (un-personalized turn); tests that script
+    /// personalization set this and the router reads it through the
+    /// protocol reference, exactly like production.
+    var profilePersonalization: ProfilePersonalizationReading?
+    /// [CLOUD-CASCADE] Records what the router handed the speaker. The
+    /// cue's own speech is asynchronous (the reply lane), but
+    /// `noteAssistantSpoke` is called SYNCHRONOUSLY on the way in — so
+    /// this recorder is the deterministic seam for "the cue was spoken,
+    /// once, and this is its text", without waiting on a lane.
+    private(set) var assistantSpokeTexts: [String] = []
+    func noteAssistantSpoke(_ text: String) { assistantSpokeTexts.append(text) }
     func noteGenericReply(_ text: String) { genericReplies.append(text) }
     func addVoiceReminder(title: String, time: DateComponents) {}
     func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?,

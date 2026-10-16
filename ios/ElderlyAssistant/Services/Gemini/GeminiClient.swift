@@ -71,6 +71,15 @@ final class GeminiClient {
 
     struct Config {
         var timeoutSeconds: TimeInterval
+        /// [GEMINI-SOLIDIFY] (2026-09-18) ONE bounded retry on transport
+        /// errors only (see `send(_:)`). Never applies to quota, rate
+        /// limit or policy refusals — those are honest answers, not
+        /// failures to retry. 1 = one retry after the first attempt.
+        var maxTransportRetries: Int
+        /// Backoff between transport attempts. Kept short: the retry
+        /// exists to survive a transient wire fault, not to wait out an
+        /// outage.
+        var retryBackoffSeconds: TimeInterval
         /// 6s was sized for gemini-2.5-flash-lite's typical latency and
         /// was too short the moment the model picker (2026-09-04) let
         /// this point at gemini-2.5-pro — confirmed live via a real
@@ -80,7 +89,17 @@ final class GeminiClient {
         /// (`GeminiModelCatalog`); `AppCoordinator.voiceWatchdogSeconds`
         /// must stay longer than this PLUS max capture time, or the same
         /// class of bug recurs from the other direction.
-        static let `default` = Config(timeoutSeconds: 25)
+        ///
+        /// Coupled-numbers family (with the retry, the worst transport
+        /// leg is 2×25s + 0.5s backoff ≈ 50.5s): the voice watchdog (60s)
+        /// only fires in `.listening`, never during understanding, so it
+        /// cannot tear down a retrying turn; `VoicePipeline`'s
+        /// `turnPendingSafetySeconds` (45s) is a deferred-idle HOLD whose
+        /// timeout only releases the hold early — the reply still commits
+        /// and speaks whenever it lands (see `IntentRouter`).
+        static let `default` = Config(timeoutSeconds: 25,
+                                      maxTransportRetries: 1,
+                                      retryBackoffSeconds: 0.5)
     }
 
     private let configStore: GeminiConfigStore
@@ -146,11 +165,27 @@ final class GeminiClient {
     /// model-specific (e.g. `NepaliCalendarPlugin`) — costs more (a real
     /// search per call) and adds latency, so it stays opt-in per call,
     /// never a blanket default.
-    func generateJSON(prompt: String, useSearchGrounding: Bool = false) async throws -> String {
+    /// `temperature`: [CNR T-168 / OD-5] the explicit cloud chat sampling
+    /// temperature (design-l1 §9). Optional and `nil` by default, and a nil
+    /// value encodes as ABSENT from `GenerationConfig`
+    /// (`encodeIfPresent`), so every pre-feature call site — voice
+    /// transcription, the translation tier, the command `interpret` path,
+    /// plugins, vision — sends its shipped request shape byte-for-byte.
+    /// ONLY the cloud chat call site passes a value
+    /// (`GeminiChatConfig.temperature`); FR-CNR-011 makes that scoping the
+    /// requirement, not a convention.
+    func generateJSON(prompt: String,
+                      useSearchGrounding: Bool = false,
+                      systemInstruction: String? = nil,
+                      temperature: Double? = nil) async throws -> String {
         let request = GeminiRequest(
             contents: [.init(parts: [.text(prompt)])],
-            generationConfig: .init(responseMimeType: "application/json"),
-            tools: useSearchGrounding ? [.init(googleSearch: .init())] : nil
+            generationConfig: .init(responseMimeType: "application/json",
+                                    temperature: temperature),
+            tools: useSearchGrounding ? [.init(googleSearch: .init())] : nil,
+            systemInstruction: systemInstruction.map {
+                .init(parts: [.text($0)])
+            }
         )
         return try await send(request)
     }
@@ -422,15 +457,54 @@ final class GeminiClient {
         // make the call — success AND HTTP/network failure alike, because
         // a request that went out (even one that came back 500, timed
         // out, or was cancelled mid-flight) is what Google bills. Only
-        // attempts that never left the device skip counting.
-        let (data, response): (Data, URLResponse)
-        do {
-            (data, response) = try await transport.send(request)
-        } catch {
-            costGovernor?.recordCall()
-            throw error
+        // attempts that never left the device skip counting. A retried
+        // transport error therefore counts once PER attempt — the retry
+        // is a second billable attempt, exactly as it should be.
+        //
+        // [GEMINI-SOLIDIFY] (2026-09-18) ONE bounded retry, transport
+        // errors only. `isRetryableTransportError` is the whole gate:
+        // quota (`dailyCapReached`), rate limits (HTTP 429), policy
+        // blocks and unusable responses are honest answers — they are
+        // rethrown immediately, never retried, and never pay backoff.
+        // HTTP failures do not reach this loop at all (they throw from
+        // the status check below, past the transport call).
+        // The loop always runs at least once (`attemptBudget >= 1`), but
+        // definite initialization cannot prove that through the
+        // non-constant bound — the defaults below are overwritten on the
+        // first attempt and never observed (any exit without an exchange
+        // throws `lastTransportError` first).
+        var data = Data()
+        var response: URLResponse = URLResponse()
+        var lastTransportError: Error?
+        let attemptBudget = max(0, config.maxTransportRetries) + 1
+        for attempt in 0..<attemptBudget {
+            do {
+                (data, response) = try await transport.send(request)
+                costGovernor?.recordCall()
+                lastTransportError = nil
+                break
+            } catch {
+                costGovernor?.recordCall()
+                lastTransportError = error
+                let canRetry = attempt + 1 < attemptBudget
+                    && Self.isRetryableTransportError(error)
+                    && !Task.isCancelled
+                if canRetry {
+                    if config.retryBackoffSeconds > 0 {
+                        try? await Task.sleep(
+                            nanoseconds: UInt64(config.retryBackoffSeconds * 1_000_000_000))
+                    }
+                    emit("gemini_transport_retry", outcome: "retrying", durationMs: 0)
+                } else {
+                    break
+                }
+            }
         }
-        costGovernor?.recordCall()
+        if let lastTransportError {
+            emit("gemini_transport_failed", outcome: "failure",
+                 durationMs: Int(Date().timeIntervalSince(start) * 1000))
+            throw lastTransportError
+        }
         let durationMs = Int(Date().timeIntervalSince(start) * 1000)
 
         guard let http = response as? HTTPURLResponse else {
@@ -471,6 +545,59 @@ final class GeminiClient {
         }
         emit("gemini_call", outcome: "success", durationMs: durationMs)
         return text
+    }
+
+    /// [GEMINI-SOLIDIFY] (2026-09-18) The retry gate — the CLOSED list of
+    /// transport-shape errors worth ONE repeat. Deliberately absent:
+    /// `.cancelled` (a cancellation is a decision, not a fault),
+    /// `.badURL`/`.unsupportedURL` (configuration), and anything that is
+    /// not a `URLError` at all (quota, rate limits and policy blocks are
+    /// `GeminiClientError` values thrown from OUTSIDE this loop, and are
+    /// never retried). Exhaustive with no default, so a newly-considered
+    /// `URLError` code must be classified deliberately.
+    static func isRetryableTransportError(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .timedOut,
+             .networkConnectionLost,
+             .notConnectedToInternet,
+             .cannotConnectToHost,
+             .cannotFindHost,
+             .dnsLookupFailed,
+             .resourceUnavailable,
+             .secureConnectionFailed,
+             .dataNotAllowed:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// [GEMINI-SOLIDIFY] (2026-09-18) One minimal REAL round-trip for the
+    /// Settings "Test connection" button: a fixed, tiny `generateJSON`
+    /// prompt through the exact same transport chokepoint (auth, timeout,
+    /// cost governor, retry) as every real call — so a green test means
+    /// the key, the model and the network all work. The attempt is
+    /// billable and counted like any other call (the button's caption
+    /// says so). The prompt is a compile-time constant carrying no user
+    /// content, and the returned text is discarded.
+    static let connectionTestPrompt =
+        "Reply with ONLY the JSON object {\"ok\": true} and nothing else."
+
+    /// The test's outcome, in the failure taxonomy's vocabulary — success,
+    /// or the class the Settings card names.
+    enum ConnectionTestOutcome: Equatable {
+        case success
+        case failure(GeminiFailureClass)
+    }
+
+    func testConnection() async -> ConnectionTestOutcome {
+        do {
+            _ = try await generateJSON(prompt: Self.connectionTestPrompt)
+            return .success
+        } catch {
+            return .failure(GeminiFailureClass.classify(error))
+        }
     }
 
     /// Module-internal for the same reason as `send(_:)` — vision calls
@@ -542,6 +669,13 @@ struct GeminiRequest: Encodable {
 
     struct GenerationConfig: Encodable {
         var responseMimeType: String?
+        /// [CNR T-168 / OD-5, design-l1 §9] The explicit cloud chat
+        /// temperature — `0.3` at the one call site that sets it (see
+        /// `generateJSON`). `nil` at every other call site and encodable
+        /// as ABSENT (`encodeIfPresent`), which is what keeps the
+        /// transcription, translation and command-interpretation request
+        /// bodies byte-identical to their shipped shape (FR-CNR-011).
+        var temperature: Double? = nil
     }
 
     struct Tool: Encodable {
@@ -556,6 +690,11 @@ struct GeminiRequest: Encodable {
     let contents: [Content]
     var generationConfig: GenerationConfig?
     var tools: [Tool]?
+    /// [REPLY-POLISH] (2026-10-14) The persona rides the API's own
+    /// system-instruction slot, so the pinned intent prompt stays
+    /// byte-identical — the reply-style contract travels beside it,
+    /// not inside it.
+    var systemInstruction: Content?
 }
 
 struct GeminiResponse: Decodable {

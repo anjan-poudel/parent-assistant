@@ -218,10 +218,20 @@ enum BikramSambat {
         "बिहीबार", "शुक्रबार", "शनिबार"
     ]
 
-    /// Western digits → Devanagari digits ("2083" → "२०८३").
+    /// Western digits → Devanagari digits ("2083" → "२०८३"). A leading
+    /// minus survives as the ASCII sign ("-2" → "-२"): spoken
+    /// temperatures go below zero in mountain places and the weather
+    /// path formats through this helper (weather-wording task,
+    /// 2026-10-14 — the old body force-unwrapped a non-digit and crashed
+    /// on "-").
     static func devanagariDigits(_ value: Int) -> String {
         let digits = ["०", "१", "२", "३", "४", "५", "६", "७", "८", "९"]
-        return String(value).map { digits[Int(String($0))!] }.joined()
+        return String(value).map { character -> String in
+            guard let ascii = character.asciiValue, ascii >= 48, ascii <= 57 else {
+                return String(character)   // the sign, kept as-is
+            }
+            return digits[Int(ascii - 48)]
+        }.joined()
     }
 
     /// "असोज २२, २०८३" — the home-strip/leaf presentation form.

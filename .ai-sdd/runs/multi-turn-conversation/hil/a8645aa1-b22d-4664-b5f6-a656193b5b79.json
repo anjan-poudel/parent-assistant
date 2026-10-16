@@ -1,0 +1,38 @@
+{
+  "id": "a8645aa1-b22d-4664-b5f6-a656193b5b79",
+  "task_id": "final-sign-off",
+  "workflow_id": "multi-turn-conversation",
+  "status": "RESOLVED",
+  "reason": "T2 senior-human sign-off — final gate for multi-turn-conversation (Phase 1). Every stage task stands COMPLETED with the chain at GO/SECURITY-GO and zero blockers: requirements (T1-approved 2026-10-10), design L1/L2 + L2 review GO, security design review SECURITY-GO, the 19-unit plan, seven implementation waves with paired reviews (all GO 0.90), implementation review GO 0.90 (specs/review-implementation.md), security test SECURITY-GO 0.90 (specs/security-test.md). Release gates re-run green on 2026-10-11: release log-safety gate exit 0 (24 cases over 12 rules) with fixtures falsification exit 0 (36 cases, every rule load-bearing); zero new network egress across the 14 changed production files; no code path auto-resolves a human gate. The decision pack is specs/final-sign-off.md (sha256 93d074f3e2b8c842b7f5ffdac51aba2930e0ab1422055bfab7790d2bf1e33fec; reviewer recommendation GO at 0.90, 0 blockers) with the full carried ledger (10 open items, none blocking). The owner is asked to decide four points: (1) the T2 sign-off on the implementation and verification bundle as written; (2) re-confirm OD-M1..OD-M4 (two-probe budget with default on the first probe; curated on-device catalog; Phase 1 first with v17 authoring in parallel; music probe only); (3) device-validation disposition — the pack recommends approving the merge with the DV record remaining the outstanding completion gate (DV-1..DV-5 BLOCKED; step zero, the Phase 0 PR #156 device smoke, OUTSTANDING; FR-MTC-020 keeps the completion claim blocked until the record shows PASS on all five items), rather than holding the merge; (4) integration handling at run end — a PR against master with the 10-file inherited-filename collision (implement-review-w1 through w7, review-implementation.md, security-test.md, final-sign-off.md) resolved deliberately. Context records: branch feat/multi-turn-conversation, records HEAD 433ad07, production content revision 134d77e. Item created by the dispatching session because the task was dispatched directly (not via the ai-sdd run command), which is the path that normally creates it. Left PENDING for the human; the pack is uncommitted in the feature worktree and commit follows the owner decision.",
+  "context": {
+    "task_description": "Final sign-off decision pack (T2) for multi-turn-conversation Phase 1: consolidate the stage chain into change summary, requirements traceability, security posture, release gates verified, device-validation status, open items, rollback plan, compliance checklist, and the owner decision points.",
+    "risk_tier": "T2",
+    "agent": "reviewer",
+    "artifacts": [
+      "specs/final-sign-off.md"
+    ],
+    "artifact_sha256": "93d074f3e2b8c842b7f5ffdac51aba2930e0ab1422055bfab7790d2bf1e33fec",
+    "branch": "feat/multi-turn-conversation",
+    "branch_tip": "433ad07",
+    "content_revision": "134d77e",
+    "reviewer_recommendation": "GO at confidence 0.90, 0 blockers",
+    "open_decisions": [
+      "OD-M1 probe policy — 2 probes max, default offered on the first probe (implemented default)",
+      "OD-M2 option source — curated on-device catalog for the MVP (implemented)",
+      "OD-M3 sequencing — Phase 1 first, v17 data authoring in parallel (implemented posture)",
+      "OD-M4 Phase-3 scope — Phase 3 (reminder/calendar rollover) ships separately (implemented posture)"
+    ],
+    "device_validation": "DV-1..DV-5 BLOCKED; step zero (Phase 0 PR #156 device smoke) OUTSTANDING; no observations recorded (protocol section 7.3).",
+    "decision_points": [
+      "1. T2 sign-off on the bundle as written (recommendation GO)",
+      "2. Re-confirm OD-M1..OD-M4 or record changes",
+      "3. Device-validation disposition (recommendation: approve merge with DV remaining the outstanding completion gate)",
+      "4. Integration handling at run end (PR against master; resolve the inherited-filename collision deliberately)"
+    ],
+    "artifacts_uncommitted": true,
+    "note": "Item created by the dispatching session because the task was dispatched directly (not via the ai-sdd run command), which is the path that normally creates it. Left PENDING for the human. The pack is uncommitted in the feature worktree; commit follows the owner decision."
+  },
+  "created_at": "2026-10-10T19:40:12.284Z",
+  "notes": "Owner-approved T2 (senior-human sign-off) — decision relayed via the coordinator conversation 2026-10-11, recorded per the run's relay convention. Dispositions: (1) T2 sign-off: GO on the implementation and verification bundle (specs/final-sign-off.md sha256 93d074f3e2b8c842b7f5ffdac51aba2930e0ab1422055bfab7790d2bf1e33fec; reviewer GO 0.90, 0 blockers). (2) OD-M1..OD-M4 CONFIRMED as shipped — two-probe budget with default on the first probe; curated on-device catalog (live Spotify search is a later enhancement, never a replacement; M3 refinement recorded — v17 follow-up data authoring may proceed in parallel with synthetic + golden-corpus turns, but pulls real utterances from the Anzaan intent-log after Phase-1 DV); Phase 1 first; Phase 3 (reminder/calendar) out of this release. (3) Device validation: MERGE NOW — DV-1..DV-5 remain BLOCKED, the Phase-0 PR #156 smoke remains OUTSTANDING; FR-MTC-020 keeps the completion claim blocked until the DV record shows PASS; the PR body carries the DV checklist as the merge gate. (4) Integration approved: raise the PR against master with the 10-file inherited-filename collision resolved as prepared. Authorized actions: resolve this gate, close final-sign-off, commit the pack, push the branch, raise the PR.",
+  "resolved_at": "2026-10-10T23:37:44.221Z"
+}

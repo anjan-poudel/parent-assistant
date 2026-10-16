@@ -1,0 +1,1206 @@
+{
+  "calibration": {
+    "appliedAtDefault": 21,
+    "bindingConstraint": "precision_floor",
+    "c3bMaxCleanSurfaceScore": 0.7833,
+    "calibratedFallback": 1.0,
+    "cleanCorpusBound": 0.7833,
+    "contextBonus": 0.1,
+    "corpusRevision": "7f71b8ae",
+    "correctThresholdDefault": 0.8125,
+    "curve": [
+      {
+        "applied": 37774,
+        "precision": 0.1446,
+        "recall": 0.1302,
+        "repaired": 5461,
+        "threshold": 0.15
+      },
+      {
+        "applied": 37741,
+        "precision": 0.1446,
+        "recall": 0.1301,
+        "repaired": 5459,
+        "threshold": 0.2167
+      },
+      {
+        "applied": 37559,
+        "precision": 0.1453,
+        "recall": 0.1301,
+        "repaired": 5459,
+        "threshold": 0.2333
+      },
+      {
+        "applied": 35088,
+        "precision": 0.1475,
+        "recall": 0.1234,
+        "repaired": 5175,
+        "threshold": 0.2375
+      },
+      {
+        "applied": 35031,
+        "precision": 0.1476,
+        "recall": 0.1233,
+        "repaired": 5170,
+        "threshold": 0.25
+      },
+      {
+        "applied": 34385,
+        "precision": 0.1458,
+        "recall": 0.1196,
+        "repaired": 5015,
+        "threshold": 0.2625
+      },
+      {
+        "applied": 28390,
+        "precision": 0.149,
+        "recall": 0.1008,
+        "repaired": 4230,
+        "threshold": 0.2667
+      },
+      {
+        "applied": 28374,
+        "precision": 0.149,
+        "recall": 0.1008,
+        "repaired": 4228,
+        "threshold": 0.2722
+      },
+      {
+        "applied": 27921,
+        "precision": 0.1419,
+        "recall": 0.0944,
+        "repaired": 3961,
+        "threshold": 0.275
+      },
+      {
+        "applied": 27919,
+        "precision": 0.1419,
+        "recall": 0.0944,
+        "repaired": 3961,
+        "threshold": 0.28
+      },
+      {
+        "applied": 24789,
+        "precision": 0.1338,
+        "recall": 0.0791,
+        "repaired": 3318,
+        "threshold": 0.2864
+      },
+      {
+        "applied": 24716,
+        "precision": 0.1321,
+        "recall": 0.0779,
+        "repaired": 3266,
+        "threshold": 0.2875
+      },
+      {
+        "applied": 24705,
+        "precision": 0.1322,
+        "recall": 0.0779,
+        "repaired": 3266,
+        "threshold": 0.29
+      },
+      {
+        "applied": 24672,
+        "precision": 0.1321,
+        "recall": 0.0777,
+        "repaired": 3258,
+        "threshold": 0.2917
+      },
+      {
+        "applied": 22995,
+        "precision": 0.1257,
+        "recall": 0.0689,
+        "repaired": 2891,
+        "threshold": 0.2944
+      },
+      {
+        "applied": 22993,
+        "precision": 0.1257,
+        "recall": 0.0689,
+        "repaired": 2891,
+        "threshold": 0.2962
+      },
+      {
+        "applied": 22972,
+        "precision": 0.1252,
+        "recall": 0.0685,
+        "repaired": 2875,
+        "threshold": 0.3
+      },
+      {
+        "applied": 22541,
+        "precision": 0.1138,
+        "recall": 0.0612,
+        "repaired": 2566,
+        "threshold": 0.3062
+      },
+      {
+        "applied": 22396,
+        "precision": 0.1086,
+        "recall": 0.058,
+        "repaired": 2433,
+        "threshold": 0.31
+      },
+      {
+        "applied": 22185,
+        "precision": 0.1097,
+        "recall": 0.058,
+        "repaired": 2433,
+        "threshold": 0.3111
+      },
+      {
+        "applied": 21257,
+        "precision": 0.1045,
+        "recall": 0.053,
+        "repaired": 2222,
+        "threshold": 0.315
+      },
+      {
+        "applied": 21195,
+        "precision": 0.1029,
+        "recall": 0.052,
+        "repaired": 2182,
+        "threshold": 0.3182
+      },
+      {
+        "applied": 21086,
+        "precision": 0.0985,
+        "recall": 0.0495,
+        "repaired": 2077,
+        "threshold": 0.3208
+      },
+      {
+        "applied": 21020,
+        "precision": 0.0957,
+        "recall": 0.048,
+        "repaired": 2012,
+        "threshold": 0.3231
+      },
+      {
+        "applied": 21015,
+        "precision": 0.0956,
+        "recall": 0.0479,
+        "repaired": 2010,
+        "threshold": 0.325
+      },
+      {
+        "applied": 20664,
+        "precision": 0.0914,
+        "recall": 0.045,
+        "repaired": 1889,
+        "threshold": 0.34
+      },
+      {
+        "applied": 20598,
+        "precision": 0.0917,
+        "recall": 0.045,
+        "repaired": 1889,
+        "threshold": 0.36
+      },
+      {
+        "applied": 20565,
+        "precision": 0.0912,
+        "recall": 0.0447,
+        "repaired": 1876,
+        "threshold": 0.3688
+      },
+      {
+        "applied": 20564,
+        "precision": 0.0912,
+        "recall": 0.0447,
+        "repaired": 1875,
+        "threshold": 0.375
+      },
+      {
+        "applied": 20544,
+        "precision": 0.0913,
+        "recall": 0.0447,
+        "repaired": 1875,
+        "threshold": 0.3833
+      },
+      {
+        "applied": 20399,
+        "precision": 0.0889,
+        "recall": 0.0432,
+        "repaired": 1813,
+        "threshold": 0.395
+      },
+      {
+        "applied": 20398,
+        "precision": 0.0889,
+        "recall": 0.0432,
+        "repaired": 1813,
+        "threshold": 0.4
+      },
+      {
+        "applied": 20298,
+        "precision": 0.0851,
+        "recall": 0.0412,
+        "repaired": 1727,
+        "threshold": 0.4125
+      },
+      {
+        "applied": 18175,
+        "precision": 0.0699,
+        "recall": 0.0303,
+        "repaired": 1271,
+        "threshold": 0.4188
+      },
+      {
+        "applied": 17950,
+        "precision": 0.0705,
+        "recall": 0.0302,
+        "repaired": 1266,
+        "threshold": 0.4222
+      },
+      {
+        "applied": 17930,
+        "precision": 0.0697,
+        "recall": 0.0298,
+        "repaired": 1249,
+        "threshold": 0.43
+      },
+      {
+        "applied": 16690,
+        "precision": 0.0675,
+        "recall": 0.0268,
+        "repaired": 1126,
+        "threshold": 0.4333
+      },
+      {
+        "applied": 16647,
+        "precision": 0.0676,
+        "recall": 0.0268,
+        "repaired": 1126,
+        "threshold": 0.4417
+      },
+      {
+        "applied": 16151,
+        "precision": 0.0555,
+        "recall": 0.0214,
+        "repaired": 896,
+        "threshold": 0.445
+      },
+      {
+        "applied": 16143,
+        "precision": 0.0551,
+        "recall": 0.0212,
+        "repaired": 890,
+        "threshold": 0.45
+      },
+      {
+        "applied": 15364,
+        "precision": 0.048,
+        "recall": 0.0176,
+        "repaired": 737,
+        "threshold": 0.4562
+      },
+      {
+        "applied": 15268,
+        "precision": 0.0432,
+        "recall": 0.0157,
+        "repaired": 660,
+        "threshold": 0.4611
+      },
+      {
+        "applied": 15182,
+        "precision": 0.0412,
+        "recall": 0.0149,
+        "repaired": 626,
+        "threshold": 0.465
+      },
+      {
+        "applied": 15032,
+        "precision": 0.0337,
+        "recall": 0.0121,
+        "repaired": 506,
+        "threshold": 0.4682
+      },
+      {
+        "applied": 15030,
+        "precision": 0.0335,
+        "recall": 0.012,
+        "repaired": 504,
+        "threshold": 0.4708
+      },
+      {
+        "applied": 14976,
+        "precision": 0.0306,
+        "recall": 0.0109,
+        "repaired": 458,
+        "threshold": 0.4731
+      },
+      {
+        "applied": 14974,
+        "precision": 0.0305,
+        "recall": 0.0109,
+        "repaired": 456,
+        "threshold": 0.475
+      },
+      {
+        "applied": 14048,
+        "precision": 0.0317,
+        "recall": 0.0106,
+        "repaired": 445,
+        "threshold": 0.51
+      },
+      {
+        "applied": 12937,
+        "precision": 0.0343,
+        "recall": 0.0106,
+        "repaired": 444,
+        "threshold": 0.5333
+      },
+      {
+        "applied": 11704,
+        "precision": 0.0373,
+        "recall": 0.0104,
+        "repaired": 437,
+        "threshold": 0.55
+      },
+      {
+        "applied": 11587,
+        "precision": 0.0376,
+        "recall": 0.0104,
+        "repaired": 436,
+        "threshold": 0.5625
+      },
+      {
+        "applied": 9708,
+        "precision": 0.0439,
+        "recall": 0.0102,
+        "repaired": 426,
+        "threshold": 0.5722
+      },
+      {
+        "applied": 9108,
+        "precision": 0.0468,
+        "recall": 0.0102,
+        "repaired": 426,
+        "threshold": 0.575
+      },
+      {
+        "applied": 8532,
+        "precision": 0.0499,
+        "recall": 0.0102,
+        "repaired": 426,
+        "threshold": 0.58
+      },
+      {
+        "applied": 8522,
+        "precision": 0.05,
+        "recall": 0.0102,
+        "repaired": 426,
+        "threshold": 0.5864
+      },
+      {
+        "applied": 8467,
+        "precision": 0.0501,
+        "recall": 0.0101,
+        "repaired": 424,
+        "threshold": 0.6333
+      },
+      {
+        "applied": 6707,
+        "precision": 0.0592,
+        "recall": 0.0095,
+        "repaired": 397,
+        "threshold": 0.6625
+      },
+      {
+        "applied": 3127,
+        "precision": 0.0963,
+        "recall": 0.0072,
+        "repaired": 301,
+        "threshold": 0.68
+      },
+      {
+        "applied": 2827,
+        "precision": 0.0775,
+        "recall": 0.0052,
+        "repaired": 219,
+        "threshold": 0.6917
+      },
+      {
+        "applied": 2303,
+        "precision": 0.0643,
+        "recall": 0.0035,
+        "repaired": 148,
+        "threshold": 0.7
+      },
+      {
+        "applied": 2224,
+        "precision": 0.0607,
+        "recall": 0.0032,
+        "repaired": 135,
+        "threshold": 0.7063
+      },
+      {
+        "applied": 2180,
+        "precision": 0.0436,
+        "recall": 0.0023,
+        "repaired": 95,
+        "threshold": 0.7111
+      },
+      {
+        "applied": 2156,
+        "precision": 0.038,
+        "recall": 0.002,
+        "repaired": 82,
+        "threshold": 0.715
+      },
+      {
+        "applied": 2140,
+        "precision": 0.0322,
+        "recall": 0.0016,
+        "repaired": 69,
+        "threshold": 0.7182
+      },
+      {
+        "applied": 2121,
+        "precision": 0.0325,
+        "recall": 0.0016,
+        "repaired": 69,
+        "threshold": 0.7833
+      },
+      {
+        "applied": 21,
+        "precision": 0.9524,
+        "recall": 0.0005,
+        "repaired": 20,
+        "threshold": 0.8125
+      },
+      {
+        "applied": 20,
+        "precision": 1.0,
+        "recall": 0.0005,
+        "repaired": 20,
+        "threshold": 0.83
+      },
+      {
+        "applied": 17,
+        "precision": 1.0,
+        "recall": 0.0004,
+        "repaired": 17,
+        "threshold": 0.8417
+      },
+      {
+        "applied": 16,
+        "precision": 1.0,
+        "recall": 0.0004,
+        "repaired": 16,
+        "threshold": 0.8563
+      },
+      {
+        "applied": 15,
+        "precision": 1.0,
+        "recall": 0.0004,
+        "repaired": 15,
+        "threshold": 0.8611
+      },
+      {
+        "applied": 12,
+        "precision": 1.0,
+        "recall": 0.0003,
+        "repaired": 12,
+        "threshold": 0.865
+      },
+      {
+        "applied": 5,
+        "precision": 1.0,
+        "recall": 0.0001,
+        "repaired": 5,
+        "threshold": 0.8682
+      },
+      {
+        "applied": 0,
+        "precision": 1.0,
+        "recall": 0.0,
+        "repaired": 0,
+        "threshold": 1.0
+      }
+    ],
+    "defaultPoint": {
+      "applications": [
+        {
+          "best": "देखाइदिनुस्",
+          "class": "truncation",
+          "population": "positive",
+          "repaired": true,
+          "score": 0.8682,
+          "target": "देखाइदिनुस्",
+          "token": "देखाइदिनुस",
+          "weight": 5
+        },
+        {
+          "best": "सुन्नुहोस्",
+          "class": "truncation",
+          "population": "positive",
+          "repaired": true,
+          "score": 0.865,
+          "target": "सुन्नुहोस्",
+          "token": "सुन्नुहोस",
+          "weight": 6
+        },
+        {
+          "best": "हाल्दिनुस्",
+          "class": "truncation",
+          "population": "positive",
+          "repaired": true,
+          "score": 0.865,
+          "target": "हाल्दिनुस्",
+          "token": "हाल्दिनुस",
+          "weight": 1
+        },
+        {
+          "best": "गर्दिनुस्",
+          "class": "truncation",
+          "population": "positive",
+          "repaired": true,
+          "score": 0.8611,
+          "target": "गर्दिनुस्",
+          "token": "गर्दिनुस",
+          "weight": 3
+        },
+        {
+          "best": "बजाउनुस्",
+          "class": "truncation",
+          "population": "positive",
+          "repaired": true,
+          "score": 0.8563,
+          "target": "बजाउनुस्",
+          "token": "बजाउनुस",
+          "weight": 1
+        },
+        {
+          "best": "दिनुस्",
+          "class": "truncation",
+          "population": "positive",
+          "repaired": true,
+          "score": 0.8417,
+          "target": "दिनुस्",
+          "token": "दिनुस",
+          "weight": 1
+        },
+        {
+          "best": "परोस्",
+          "class": "truncation",
+          "population": "positive",
+          "repaired": true,
+          "score": 0.83,
+          "target": "परोस्",
+          "token": "परोस",
+          "weight": 3
+        },
+        {
+          "best": "होस्",
+          "class": "deletion",
+          "population": "positive",
+          "repaired": false,
+          "score": 0.8125,
+          "target": "सुन्नुहोस्",
+          "token": "होस",
+          "weight": 1
+        }
+      ],
+      "applicationsTotal": 8,
+      "cleanCorpusApplications": 0,
+      "cleanCorpusRows": [],
+      "falsePositiveWeight": 1,
+      "positiveApplications": 8,
+      "repairedWeight": 20,
+      "threshold": 0.8125,
+      "windowSemantics": "rows whose best candidate's surface score is at or above the shipped threshold — the applications the corrector would make, on the calibration set",
+      "wrongTargets": [
+        {
+          "best": "होस्",
+          "class": "deletion",
+          "population": "positive",
+          "repaired": false,
+          "score": 0.8125,
+          "target": "सुन्नुहोस्",
+          "token": "होस",
+          "weight": 1
+        }
+      ]
+    },
+    "gateRefusedRows": {
+      "ambiguous": 4005,
+      "no_candidate": 7092,
+      "safety_veto": 582
+    },
+    "gateRefusedWeight": {
+      "ambiguous": 14914,
+      "no_candidate": 12154,
+      "safety_veto": 2116
+    },
+    "kneeThreshold": 0.83,
+    "lowerBound": 0.8125,
+    "maxPositiveScore": 0.8682,
+    "mostAggressiveBound": 0.8125,
+    "mostConservativeBound": 1.0,
+    "multiTokenRowsSkipped": 4541,
+    "negativesRows": 508,
+    "negativesWeighted": 25011,
+    "noiseInputSha256": "b26f7460fa24db71845ad1178208b5c70039fc93463152fbe12ae7ed337211c9",
+    "positivesRows": 4583,
+    "positivesRowsWithoutCandidates": 7092,
+    "positivesWeighted": 41947,
+    "precisionAtDefault": 0.9524,
+    "precisionFloor": 0.95,
+    "procedure": "addendum §5.5.1 — argmax recall s.t. precision >= 0.95",
+    "rangeSemantics": "lowerBound = the loosest threshold at which the never-flips-intent invariant still holds (derived here from C-3b, §7 C-9d); upperBound = the inert end, since no achievable score reaches the weight sum. Sliding UP is more conservative; the calibrated default sits at the end the floor demands (see `bindingConstraint`).",
+    "recallAtDefault": 0.0005,
+    "runRevision": "correction-banks/v3#e133253b",
+    "stale": false,
+    "targetMissingRows": 2816,
+    "unreachablePositiveWeight": 29184,
+    "upperBound": 1.0
+  },
+  "calibrationSetPath": "/tmp/tg12-evidence/calibration-set.jsonl",
+  "calibrationSetSha256": "ba0a0a6aa552715f4c726b2cf249cf8306d3aa560a4b85ed5e79089f870b6c2b",
+  "clean_corpus": {
+    "candidate_pairs_at_or_above_half": 18657,
+    "max_clean_surface_score": 0.7833,
+    "rows": 8000
+  },
+  "contextBonus": 0.1,
+  "corpusRevision": "7f71b8ae",
+  "entity_banks": {
+    "app": 4,
+    "appliance": 6,
+    "bhajan": 4,
+    "contact": 18,
+    "medication": 5,
+    "relationship": 20,
+    "time": 7
+  },
+  "excluded_classes": {
+    "numeral_fold": {
+      "events": 15,
+      "reason": "§5.9 — not a transliterator / O-5 builtin covers it"
+    },
+    "script_drift": {
+      "events": 6490,
+      "reason": "§5.9 — not a transliterator / O-5 builtin covers it"
+    }
+  },
+  "lexicon_entity_tagged": 71,
+  "lexicon_size": 1453,
+  "noiseInputSha256": "b26f7460fa24db71845ad1178208b5c70039fc93463152fbe12ae7ed337211c9",
+  "phonetic_fold_conflicts": [
+    {
+      "chosen": "ठ",
+      "chosenCount": 3,
+      "chosenGroup": "voicing",
+      "rejected": [
+        {
+          "count": 1,
+          "group": "aspiration",
+          "representative": "ड"
+        }
+      ],
+      "scalar": "ढ"
+    },
+    {
+      "chosen": "ड",
+      "chosenCount": 32,
+      "chosenGroup": "retroflex_dental",
+      "rejected": [
+        {
+          "count": 22,
+          "group": "voicing",
+          "representative": "त"
+        }
+      ],
+      "scalar": "द"
+    },
+    {
+      "chosen": "द",
+      "chosenCount": 5,
+      "chosenGroup": "aspiration",
+      "rejected": [
+        {
+          "count": 1,
+          "group": "voicing",
+          "representative": "थ"
+        }
+      ],
+      "scalar": "ध"
+    },
+    {
+      "chosen": "प",
+      "chosenCount": 9,
+      "chosenGroup": "aspiration",
+      "rejected": [
+        {
+          "count": 1,
+          "group": "voicing",
+          "representative": "भ"
+        }
+      ],
+      "scalar": "फ"
+    },
+    {
+      "chosen": "ट",
+      "chosenCount": 7,
+      "chosenGroup": "aspiration",
+      "rejected": [
+        {
+          "count": 2,
+          "group": "retroflex_dental",
+          "representative": "थ"
+        }
+      ],
+      "scalar": "ठ"
+    },
+    {
+      "chosen": "ँ",
+      "chosenCount": 37,
+      "chosenGroup": "nasal",
+      "rejected": [
+        {
+          "count": 2,
+          "group": "nasal",
+          "representative": "न"
+        }
+      ],
+      "scalar": "ं"
+    }
+  ],
+  "prior": {
+    "l1_count_floor": 3,
+    "l1_distinct_pairs_seen": 23290,
+    "l1_pairs": 11068,
+    "l1_pmi_max": 11.3808,
+    "l2_frames": 8,
+    "l3_cues": 380,
+    "rows": 8000,
+    "worked_example": {
+      "pair_bholi_mausam": 1,
+      "pair_bholi_mausamko": 0
+    }
+  },
+  "refused_count": 54,
+  "refused_entries": [
+    {
+      "class": "deletion",
+      "clean": "गर",
+      "count": 194,
+      "noisy": "",
+      "reason": "empty_surface"
+    },
+    {
+      "class": "deletion",
+      "clean": "फोन",
+      "count": 162,
+      "noisy": "",
+      "reason": "empty_surface"
+    },
+    {
+      "class": "deletion",
+      "clean": "कल",
+      "count": 147,
+      "noisy": "",
+      "reason": "empty_surface"
+    },
+    {
+      "class": "deletion",
+      "clean": "भिडियो",
+      "count": 134,
+      "noisy": "",
+      "reason": "empty_surface"
+    },
+    {
+      "class": "deletion",
+      "clean": "राम",
+      "count": 97,
+      "noisy": "",
+      "reason": "empty_surface"
+    },
+    {
+      "class": "deletion",
+      "clean": "call",
+      "count": 80,
+      "noisy": "",
+      "reason": "empty_surface"
+    },
+    {
+      "class": "deletion",
+      "clean": "video",
+      "count": 71,
+      "noisy": "",
+      "reason": "empty_surface"
+    },
+    {
+      "class": "deletion",
+      "clean": "वाट्सएपमा",
+      "count": 61,
+      "noisy": "",
+      "reason": "empty_surface"
+    },
+    {
+      "class": "deletion",
+      "clean": "भजन,",
+      "count": 57,
+      "noisy": "",
+      "reason": "empty_surface"
+    },
+    {
+      "class": "deletion",
+      "clean": "सिमालाई",
+      "count": 54,
+      "noisy": "",
+      "reason": "empty_surface"
+    },
+    {
+      "class": "deletion",
+      "clean": "फेसटाइम",
+      "count": 53,
+      "noisy": "",
+      "reason": "empty_surface"
+    },
+    {
+      "class": "deletion",
+      "clean": "अहो,",
+      "count": 51,
+      "noisy": "",
+      "reason": "empty_surface"
+    },
+    {
+      "class": "deletion",
+      "clean": "?",
+      "count": 50,
+      "noisy": "",
+      "reason": "empty_surface"
+    },
+    {
+      "class": "deletion",
+      "clean": "औषधि",
+      "count": 50,
+      "noisy": "",
+      "reason": "empty_surface"
+    },
+    {
+      "class": "deletion",
+      "clean": "खाइसकें",
+      "count": 50,
+      "noisy": "खाइस्",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "insertion",
+      "clean": "न",
+      "count": 223,
+      "noisy": "गर्न",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "insertion",
+      "clean": "९",
+      "count": 84,
+      "noisy": "नौ",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "insertion",
+      "clean": "न",
+      "count": 72,
+      "noisy": "बजाउन",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "insertion",
+      "clean": "न,",
+      "count": 68,
+      "noisy": "गर्न",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "insertion",
+      "clean": "गर",
+      "count": 50,
+      "noisy": "होन",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "insertion",
+      "clean": "न",
+      "count": 46,
+      "noisy": "दिउन",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "merger",
+      "clean": "Help!",
+      "count": 4,
+      "noisy": "आमा मलाई",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "merger",
+      "clean": "सुन्नुहोस्,",
+      "count": 4,
+      "noisy": "सुन्नो होस्",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "merger",
+      "clean": "होइन,",
+      "count": 4,
+      "noisy": "हो एन",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "merger",
+      "clean": "बिर्सेछु",
+      "count": 3,
+      "noisy": "विषेज हो",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "prefix_extension",
+      "clean": "होइन",
+      "count": 55,
+      "noisy": "होइन्",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "prefix_extension",
+      "clean": "गर",
+      "count": 51,
+      "noisy": "गर।",
+      "reason": "noisy_equals_corrected_after_key"
+    },
+    {
+      "class": "prefix_extension",
+      "clean": "हो?",
+      "count": 42,
+      "noisy": "हो।",
+      "reason": "noisy_equals_corrected_after_key"
+    },
+    {
+      "class": "prefix_extension",
+      "clean": "होइन,",
+      "count": 35,
+      "noisy": "होइन्",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "prefix_extension",
+      "clean": "हुनुपर्छ?",
+      "count": 34,
+      "noisy": "हुनुपर्छ।",
+      "reason": "noisy_equals_corrected_after_key"
+    },
+    {
+      "class": "prefix_extension",
+      "clean": "छैन",
+      "count": 33,
+      "noisy": "छैन्",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "prefix_extension",
+      "clean": "देखाइदिनुस्",
+      "count": 29,
+      "noisy": "देखाइदिनुस्।",
+      "reason": "noisy_equals_corrected_after_key"
+    },
+    {
+      "class": "prefix_extension",
+      "clean": "छ?",
+      "count": 28,
+      "noisy": "छ।",
+      "reason": "noisy_equals_corrected_after_key"
+    },
+    {
+      "class": "prefix_extension",
+      "clean": "हुन्छ?",
+      "count": 27,
+      "noisy": "हुन्छ।",
+      "reason": "noisy_equals_corrected_after_key"
+    },
+    {
+      "class": "prefix_extension",
+      "clean": "छ",
+      "count": 24,
+      "noisy": "छ।",
+      "reason": "noisy_equals_corrected_after_key"
+    },
+    {
+      "class": "prefix_extension",
+      "clean": "सम्झाउनुहोस्",
+      "count": 22,
+      "noisy": "सम्झाउनुहोस्।",
+      "reason": "noisy_equals_corrected_after_key"
+    },
+    {
+      "class": "prefix_extension",
+      "clean": "पर्छ?",
+      "count": 21,
+      "noisy": "पर्छ।",
+      "reason": "noisy_equals_corrected_after_key"
+    },
+    {
+      "class": "split",
+      "clean": "गर न",
+      "count": 688,
+      "noisy": "गर्न",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "split",
+      "clean": "बजाऊ न",
+      "count": 87,
+      "noisy": "बजाउन",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "split",
+      "clean": "देखाउ न",
+      "count": 73,
+      "noisy": "देखाउन",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "split",
+      "clean": "बजाउ न",
+      "count": 71,
+      "noisy": "बजाउन",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "split",
+      "clean": "चलाउ न",
+      "count": 51,
+      "noisy": "चलाउन",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "split",
+      "clean": "गर न...",
+      "count": 41,
+      "noisy": "गर्न",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "split",
+      "clean": "गर न,",
+      "count": 36,
+      "noisy": "गर्न",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "split",
+      "clean": "गर्ने न",
+      "count": 36,
+      "noisy": "गर्नेन",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "split",
+      "clean": "खोल न",
+      "count": 33,
+      "noisy": "खोल्न",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "substitution_other",
+      "clean": "खाइसकें",
+      "count": 125,
+      "noisy": "खाइस्के",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "substitution_other",
+      "clean": "फोन",
+      "count": 101,
+      "noisy": "होन",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "truncation",
+      "clean": "खाएँ",
+      "count": 139,
+      "noisy": "खाए",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "truncation",
+      "clean": "छ।",
+      "count": 111,
+      "noisy": "छ",
+      "reason": "noisy_equals_corrected_after_key"
+    },
+    {
+      "class": "truncation",
+      "clean": "खाएँ,",
+      "count": 108,
+      "noisy": "खाए",
+      "reason": "safety_set_touched"
+    },
+    {
+      "class": "truncation",
+      "clean": "गर्छु।",
+      "count": 95,
+      "noisy": "गर्छु",
+      "reason": "noisy_equals_corrected_after_key"
+    },
+    {
+      "class": "truncation",
+      "clean": "भयो।",
+      "count": 57,
+      "noisy": "भयो",
+      "reason": "noisy_equals_corrected_after_key"
+    },
+    {
+      "class": "truncation",
+      "clean": "गर।",
+      "count": 44,
+      "noisy": "गर",
+      "reason": "noisy_equals_corrected_after_key"
+    }
+  ],
+  "runRevision": "correction-banks/v3#e133253b",
+  "scoring": {
+    "cueDominance": 0.5,
+    "cueMinCount": 20,
+    "l1CountFloor": 3,
+    "l1TopPairs": 40000,
+    "l2TopCandidates": 40,
+    "l3TopCandidates": 20,
+    "lengthWindow": 2,
+    "levenshteinBound": 2,
+    "marginThreshold": 0.15,
+    "maxCandidates": 8,
+    "maxPrefixSlack": 4,
+    "prefixPenaltyStep": 0.25
+  },
+  "stageSeconds": {
+    "build lexicon": 0.1,
+    "build pair bank": 0.0,
+    "build paired-keyword priors": 0.6,
+    "calibrate threshold (§5.5.1)": 65.9,
+    "clean-corpus bound (C-3b stand-in)": 7.4,
+    "load evidence": 0.1,
+    "write banks": 0.2
+  },
+  "toolRevision": "correction-banks/v3",
+  "weights": {
+    "frameFit": 0.05,
+    "pairedKeyword": 0.05,
+    "phoneticKey": 0.15,
+    "prefixCompletion": 0.4,
+    "similarity": 0.35
+  },
+  "written": {
+    "calibration_rows": 22448,
+    "landing_bytes": 2600033,
+    "landing_total_entries": 104,
+    "pair_table_entries": 103,
+    "phonetic_bytes": 27940,
+    "phonetic_folds": 39
+  }
+}

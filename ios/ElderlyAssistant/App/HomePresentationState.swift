@@ -41,8 +41,6 @@ struct HomePresentationState: Equatable {
     var notificationCount: Int
     /// The user's quick-access favourites (empty hides the strip).
     var favoriteApps: [AppLauncher.App]
-    /// The top family contact's name, for the dock's call tile avatar.
-    var primaryContactName: String?
     /// The optional-setup strip's inputs.
     var setup: SetupPresentation
     /// The last missed call to surface as an activity tile, or nil when
@@ -54,13 +52,13 @@ struct HomePresentationState: Equatable {
         dateLine: nil,
         notificationCount: 0,
         favoriteApps: [],
-        primaryContactName: nil,
         setup: .hidden,
         lastMissedCall: nil)
 }
 
 /// The Home missed-call activity tile's inputs (call-tracking task,
-/// 2026-09-13) — two resolved lines, exactly what the tile renders.
+/// 2026-09-13; missed-calls fix, 2026-09-18) — two resolved lines,
+/// exactly what the tile renders.
 ///
 /// Resolved at RENDER time from the log entry, never stored: the entry
 /// keeps the raw timestamp and contact, and the strings below are
@@ -68,10 +66,14 @@ struct HomePresentationState: Equatable {
 /// rule `HomeNotificationRow.text` follows for the Updates rows). A tile
 /// that stored "10 minutes ago" would freeze there.
 struct MissedCallPresentation: Equatable {
-    /// "Missed call: बुबा" — the label, plus the contact when the row has
-    /// one. A row the app cannot attribute (iOS masks the caller of calls
-    /// that involve other apps) keeps the label alone rather than
-    /// inventing a name.
+    /// "Missed call: बुबा" — the label, plus the caller's identity: the
+    /// correlated contact name when the number matched a saved contact
+    /// (family first, then the native book — `MissedCallContactResolver`),
+    /// else the row's stored contact, else the RAW NUMBER (the
+    /// missed-calls fix contract: every numbered entry shows its number).
+    /// A row the app cannot attribute AND has no number for (iOS masks
+    /// the caller of calls that involve other apps) keeps the label alone
+    /// rather than inventing an identity.
     var title: String
     /// "१० मिनेट अघि" — the relative line (`HistoryTimeFormat`).
     var time: String
@@ -84,9 +86,10 @@ struct MissedCallPresentation: Equatable {
     static func resolve(_ entry: AppActivityEntry,
                         now: Date,
                         calendar: Calendar = .current,
-                        locale: Locale) -> MissedCallPresentation {
+                        locale: Locale,
+                        correlatedName: String? = nil) -> MissedCallPresentation {
         MissedCallPresentation(
-            title: title(for: entry, locale: locale),
+            title: title(for: entry, locale: locale, correlatedName: correlatedName),
             time: HistoryTimeFormat.relativeString(for: entry.timestamp,
                                                    now: now,
                                                    calendar: calendar,
@@ -96,9 +99,13 @@ struct MissedCallPresentation: Equatable {
     /// The tile's title line alone — shared with the activity rows'
     /// VoiceOver labels so a sighted reader and a screen-reader user hear
     /// the same description of the same row.
-    static func title(for entry: AppActivityEntry, locale: Locale) -> String {
+    static func title(for entry: AppActivityEntry,
+                      locale: Locale,
+                      correlatedName: String? = nil) -> String {
         let label = L10n.str("history.missedCall", locale: locale)
-        return entry.contactName.isEmpty ? label : "\(label): \(entry.contactName)"
+        guard let identity = ActivityRowText.unansweredIdentity(
+            for: entry, correlatedName: correlatedName) else { return label }
+        return "\(label): \(identity)"
     }
 }
 

@@ -1,0 +1,41 @@
+{
+  "id": "e1a9970c-9f66-492c-a8ef-8669b64fe3ab",
+  "task_id": "define-requirements",
+  "workflow_id": "call-dialer-primary-secondary",
+  "status": "RESOLVED",
+  "reason": "T1 human sign-off — feature story for call-dialer-primary-secondary. The requirement set is complete and locked: 19 functional requirements (FR-CDP-001..019) — Settings Primary + Fallback dialer pickers for the four channels (faceTime / phone / messenger / whatsApp) persisted through the AppCoordinator UserDefaults seam (secondaryCallApp, default .phone); the per-channel feasibility contract (Messenger ⇔ handle on file — never gated on the app being installed; WhatsApp ⇔ canOpenURL probed through an injected closure, local-only; FaceTime and phone always feasible); the pure-static chain resolver (preferred → secondary → phone) with equal-pick dedupe, at-most-once attempts, fellBackFrom carried in attempt order for announcements, and the never-dead-ends guarantee; explicit per-contact/family picks winning as the chain's preferred input (an infeasible explicit pick moves to the settings fallback, not the settings primary); every call path routed (address-book rows, family-contact buttons, missed-call dial-back, and voice-initiated calls via MethodResolver's global-default step, mapped CallApp→CallMethod by call type); fallback resolved BEFORE the existing spoken confirmation, which names the actually-routed channel (\"Messenger isn't available — call Syanu via WhatsApp, okay?\") with the override protocol (होइन, फोन नै गर) and near-miss disclosure preserved unchanged; launch-fail fallback hops down the chain announced through the existing spoken-outcome lane (never silent); automatic routing with a spoken announcement — no ask-before-fallback step; ne/en localization for all new strings; preserved behaviours (emergency-contact semantics untouched, no new dialogue flow, no silent failures, no CallRouter service, no per-contact primary/secondary storage); and the DV-1..7 device-validation completion gate. 10 non-functional requirements (NFR-CDP-001..010: exhaustive never-dead-end configuration matrix; 0 new network egress — probes local-only; log safety for numbers/handles incl. check-release-log-safety.sh coverage of the new paths; ≤ 100 ms added resolution latency; persistence round-trip; picker accessibility; ne/en localization parity; deterministic scoped-suite gate; no-regression baselines for the just-shipped voice pipeline, PRs #161–#168; compliance/release gates). 83 Gherkin acceptance scenarios. Open decisions: none — the design was owner-approved and frozen 2026-10-12 (docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md, committed on the feature branch) and the feature constitution records none. The owner is asked to approve the requirement elaboration as written before design work begins.",
+  "context": {
+    "task_description": "Business-analyst requirements pass for the call-dialer-primary-secondary feature: one file per requirement (FR/NFR), indexes at each level, consolidated requirements doc, and a lock file computed last as the drift baseline.",
+    "risk_tier": "T1",
+    "agent": "ba",
+    "artifacts": [
+      "specs/define-requirements.md",
+      "specs/define-requirements.lock.yaml",
+      "specs/define-requirements/index.md",
+      "specs/define-requirements/FR/index.md",
+      "specs/define-requirements/NFR/index.md"
+    ],
+    "artifact_counts": {
+      "functional_requirements": 19,
+      "non_functional_requirements": 10,
+      "acceptance_scenarios": 83
+    },
+    "lock_verified": "All 29 per-file sha256 hashes re-verified against disk; snapshot_sha256 matches specs/define-requirements.md (e0075c30...); lock parses (locked_at 2026-10-11T16:08:08Z).",
+    "branch": "feat/call-dialer-primary-secondary",
+    "branch_tip": "32711b8e",
+    "artifacts_uncommitted": true,
+    "open_decisions": [],
+    "assumptions_recorded": [
+      "Copy wording for the fallback disclosure / announcements is proposal-stage at requirements; the frozen design fixes the naming semantics (routed channel + disclosure), exact ne/en strings resolve at design (l10n-bound) — resolved in design-l1.",
+      "Tap-path announcement trigger point (which tap paths announce vs remain silent) — frozen design's automatic-with-announcement decision; precise trigger resolves in design-l1 / design-l2.",
+      "Launch-fail observation point (how the open outcome is observed across CallLinks and the voice path) resolves in design-l1.",
+      "Resolver file placement (design names the house-seam pattern, e.g. Services/Voice/CallChannelChain.swift) resolves in design-l1.",
+      "≤ 100 ms added-latency figure is an elaboration of the design's \"local probes at call time, user-paced\" — measurable at security-test / DV stage.",
+      "The exhaustive never-dead-end matrix is read as the 4×4×4×4 (preferred × secondary × messenger-handle × whatsApp-installed) = 64-cell space (NFR-CDP-001)."
+    ],
+    "note": "Item created by the dispatching session because the task was dispatched directly (not via the ai-sdd run command), which is the path that normally creates it. Left PENDING for the human. Artifacts are uncommitted in the feature worktree (branch tip 32711b8e); commit follows the owner decision."
+  },
+  "created_at": "2026-10-11T16:08:44.211Z",
+  "notes": "Owner-approved as-is (T1 feature-story sign-off). Decision relayed via the coordinator conversation 2026-10-12, recorded per the run's relay convention: (1) requirement set approved as written — 19 FRs (FR-CDP-001..019), 10 NFRs (NFR-CDP-001..010), 83 Gherkin scenarios, no amendments; (2) open decisions: none (design frozen, owner-approved 2026-10-12); (3) the locked snapshot (all 29 per-file sha256 hashes verified against disk, snapshot_sha256 matches the consolidated doc) is the drift-detection baseline; (4) work continues autonomously through the chain, stopping at genuine owner gates (final-sign-off T2).",
+  "resolved_at": "2026-10-11T16:10:34.877Z"
+}

@@ -30,6 +30,13 @@ final class ApplianceHelperPlugin: AssistantPlugin {
 
     private let cache: ApplianceCache
 
+    /// The app's one shared translation store, handed to the presented view
+    /// so the helper's label seam reads the same dictionary and the same
+    /// persisted layer the live translation path reads (T-013, FR-LCT-020).
+    /// Optional and defaulted: a plugin built without one — every existing
+    /// call site and every test — presents exactly the shipped view.
+    private let labelCache: LabelTranslationCache?
+
     /// Wired by `AppCoordinator.start()` (the speaker is built after the
     /// registry, so it can't be an init parameter). Optional: the feature
     /// works silently without it, and tests never set one.
@@ -57,14 +64,16 @@ final class ApplianceHelperPlugin: AssistantPlugin {
     /// this — the view owns its session from the moment it is built.
     private(set) var lastPresentedSession: ApplianceHelperSession?
 
-    init(storage: EncryptedLocalStorage) {
+    init(storage: EncryptedLocalStorage, labelCache: LabelTranslationCache? = nil) {
         self.cache = ApplianceCache(storage: storage)
+        self.labelCache = labelCache
     }
 
     /// Test seam: the session cache (LRU/keys covered by
     /// `ApplianceCacheTests` directly).
-    init(cache: ApplianceCache) {
+    init(cache: ApplianceCache, labelCache: LabelTranslationCache? = nil) {
         self.cache = cache
+        self.labelCache = labelCache
     }
 
     func isApplicable(locale: Locale) -> Bool { true }   // universal, not geography-gated
@@ -89,11 +98,6 @@ final class ApplianceHelperPlugin: AssistantPlugin {
     }
 
     func handle(_ command: PluginCommand, context: PluginExecutionContext) async -> PluginResult {
-        guard context.geminiClient.isAvailable else {
-            context.observabilityBus.emit(Self.event("appliance_helper_unconfigured"))
-            return .failed(spokenApology: L10n.str("plugin.applianceHelper.notConfigured",
-                                                   locale: context.locale))
-        }
         let question = Self.extractQuestion(from: command)
 
         // A manual the elder already saved for this appliance outranks the
@@ -118,8 +122,13 @@ final class ApplianceHelperPlugin: AssistantPlugin {
                                         geminiClient: context.geminiClient,
                                         observabilityBus: context.observabilityBus,
                                         pendingManualEntryID: nil)
-        context.observabilityBus.emit(Self.event("appliance_helper_presented"))
-        return .spokenAndPresented(L10n.str("plugin.applianceHelper.cameraPrompt",
+        // The same menu as the Home tile: an absent key disables fresh
+        // analysis, not saved/bundled manuals or their presentation.
+        let configured = context.geminiClient.isAvailable
+        context.observabilityBus.emit(Self.event(configured
+            ? "appliance_helper_presented" : "appliance_helper_unconfigured"))
+        return .spokenAndPresented(L10n.str(configured
+            ? "plugin.applianceHelper.cameraPrompt" : "plugin.applianceHelper.notConfigured",
                                             locale: context.locale))
     }
 
@@ -186,7 +195,7 @@ final class ApplianceHelperPlugin: AssistantPlugin {
                                              speaker: speaker,
                                              pendingManualEntryID: request.pendingManualEntryID)
         lastPresentedSession = session
-        return AnyView(ApplianceHelperView(session: session))
+        return AnyView(ApplianceHelperView(session: session, labelCache: labelCache))
     }
 
     private static func event(_ type: String, errorCode: String? = nil) -> ObservabilityEvent {

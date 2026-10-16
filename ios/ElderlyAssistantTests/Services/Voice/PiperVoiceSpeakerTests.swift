@@ -142,6 +142,68 @@ final class PiperVoiceSpeakerTests: XCTestCase {
         XCTAssertTrue(bus.emittedEvents.map(\.eventType).contains("speak"))
     }
 
+    // MARK: - [MIC-CONTINUITY-REGRESSION] playback seam balance
+
+    /// A successful reply playback opens the voice-reply seam EXACTLY
+    /// once and closes it EXACTLY once. This is the regression pin for
+    /// the cut-transcript saga: the seam contract changed twice on
+    /// 2026-10-14 (loud category switch → removed entirely → mode-only
+    /// switch), and each un-pinned change broke either the gap or the
+    /// loudness. Balance here + mode-only pin in AudioSessionPresetTests
+    /// + seam-free pin in AckFastLaneTests = the whole chain is pinned.
+    func testSuccessfulPlaybackBalancesTheSeamExactlyOnce() async throws {
+        try installFakeVoice(ModelCatalog.piperNepali)
+
+        let savedBegin = ResponsePlaybackModeSeam.begin
+        let savedEnd = ResponsePlaybackModeSeam.end
+        var begins = 0
+        var ends = 0
+        ResponsePlaybackModeSeam.begin = { begins += 1 }
+        ResponsePlaybackModeSeam.end = { ends += 1 }
+        defer {
+            ResponsePlaybackModeSeam.begin = savedBegin
+            ResponsePlaybackModeSeam.end = savedEnd
+        }
+
+        await speaker.speak("औषधि खानुहोस्", locale: Locale(identifier: "ne-NP"))
+
+        XCTAssertEqual(begins, 1, "one playback = exactly one seam begin")
+        XCTAssertEqual(ends, 1, "one playback = exactly one seam end — the "
+                       + "session is never left in the playback mode")
+    }
+
+    // MARK: - [AUDIT-SPOKEN] speaker-boundary normalization seam
+
+    /// The shared normalization pass runs INSIDE speak() — the one stop
+    /// every spoken producer funnels through. A raw composition (dose
+    /// unit, percent, prose dash) reaches the engine as spoken words
+    /// without any producer changing: this is the seam contract.
+    func testSpeakNormalizesSpokenTextAtTheSeam() async throws {
+        try installFakeVoice(ModelCatalog.piperNepali)
+
+        await speaker.speak("औषधि Amlodipine 500 mg — 50% छ।",
+                            locale: Locale(identifier: "ne-NP"))
+
+        XCTAssertEqual(engine.calls.count, 1)
+        XCTAssertEqual(engine.calls[0].text,
+                       "औषधि Amlodipine ५०० मिलीग्राम, ५० प्रतिशत छ।")
+        XCTAssertTrue(bus.emittedEvents.map(\.eventType).contains("speak"),
+                      "normalization must not disturb voice resolution")
+    }
+
+    /// The English path: the reported "15c" field case plus percent and
+    /// hostname, normalized in one pass at the seam.
+    func testSeamNormalizesEnglishMechanicals() async throws {
+        try installFakeVoice(ModelCatalog.piperEnglishUS)
+
+        await speaker.speak("It's 15c and 50% off at bbc.com.",
+                            locale: Locale(identifier: "en-US"))
+
+        XCTAssertEqual(engine.calls.count, 1)
+        XCTAssertEqual(engine.calls[0].text,
+                       "It's 15 degrees Celsius and 50 percent off at bbc.")
+    }
+
     // MARK: - Warm-start seam (boot warm phase)
 
     func testWarmPreloadsInstalledVoice() throws {
@@ -184,6 +246,17 @@ final class PiperVoiceSpeakerTests: XCTestCase {
 
     func testCancelDuringPlaybackSettlesPromptly() async throws {
         try installFakeVoice(ModelCatalog.piperEnglishUS)
+        // [COLD-AUDITION WARM-UP] The one-shot voice audition runs inside
+        // the first speak of a process (persisted afterwards): on a cold
+        // first run it outlasts the 1.5 s settle deadline below even
+        // though the cancel itself settles promptly — the full-gate run
+        // and a 5-iteration isolation run both failed ONLY the cold
+        // iteration (~3.0 s) and passed every warm one (~0.4 s). A
+        // throwaway warm-up utterance mirrors production (the first
+        // reply warms the speaker), so the measurement pins the cancel
+        // property, not the audition.
+        engine.secondsOfAudio = 0
+        await speaker.speak("warm", locale: Locale(identifier: "en-US"))
         engine.secondsOfAudio = 44_100   // 2 s of audio — long enough to cancel into
 
         let started = Date()
@@ -199,5 +272,74 @@ final class PiperVoiceSpeakerTests: XCTestCase {
     func testCancelWhenIdleIsHarmless() {
         speaker.cancel()
         XCTAssertTrue(bus.emittedEvents.isEmpty)
+    }
+
+    // MARK: - [PIPELINE-TRACE] the tts hand-off row
+    //
+    // The trace's last stage: the reply handed to the speaker in, the
+    // branch the speaker took out. The stage's duration is the ramp to
+    // audio START (the playback itself is the tracer's `speak_finished`
+    // span), so a cancelled utterance that never began audio leaves the
+    // span unfinished — and the row then reads `off(not_spoken)` rather
+    // than claiming a start that never happened.
+
+    private func makeTracedSpeaker(_ recorder: PipelineTraceRecorder) -> PiperVoiceSpeaker {
+        PiperVoiceSpeaker(
+            fallback: SystemSpeechSpeaker(observabilityBus: bus),
+            observabilityBus: bus,
+            modelStore: store,
+            engine: engine,
+            bundle: Bundle(url: tempRoot)!,   // empty bundle → no bundled voices
+            traceRecorder: recorder)
+    }
+
+    func testTtsRowRecordsTheUtteranceAndAudioStarted() async throws {
+        try installFakeVoice(ModelCatalog.piperNepali)
+        let recorder = PipelineTraceRecorder()
+        let traced = makeTracedSpeaker(recorder)
+
+        recorder.beginTurn()
+        await traced.speak("औषधि खानुहोस्", locale: Locale(identifier: "ne-NP"))
+        let trace = recorder.finishTurn()
+
+        XCTAssertEqual(trace.rows.map(\.stage), PipelineTraceStage.allCases,
+                       "the tts row is one of the full trace's stages")
+        let tts = try XCTUnwrap(trace.rows.first { $0.stage == .tts })
+        XCTAssertTrue(tts.ran)
+        XCTAssertEqual(tts.decision, "spoken")
+        XCTAssertEqual(tts.inputSummary, "औषधि खानुहोस्",
+                       "what was handed to the speaker, on the card's line")
+        XCTAssertGreaterThanOrEqual(tts.durationMs, 0)
+        XCTAssertEqual(trace.ranCount, 1,
+                       "the speaker was this fixture's only traced stage")
+    }
+
+    func testTtsRowRecordsTheFallbackBranchWhenTheVoiceIsMissing() async {
+        let recorder = PipelineTraceRecorder()
+        let traced = makeTracedSpeaker(recorder)
+
+        recorder.beginTurn()
+        await traced.speak("नमस्ते", locale: Locale(identifier: "ne-NP"))
+
+        let tts = recorder.finishTurn().rows.first { $0.stage == .tts }
+        XCTAssertEqual(tts?.ran, true)
+        XCTAssertEqual(tts?.decision, "fallback",
+                       "the branch taken is the row's decision — never a silent fallthrough")
+        XCTAssertTrue(tts?.outputSummary.contains("voice missing") == true)
+    }
+
+    func testTtsRowRecordsASynthesisFailure() async throws {
+        try installFakeVoice(ModelCatalog.piperNepali)
+        engine.fail = true
+        let recorder = PipelineTraceRecorder()
+        let traced = makeTracedSpeaker(recorder)
+
+        recorder.beginTurn()
+        await traced.speak("नमस्ते", locale: Locale(identifier: "ne-NP"))
+
+        let tts = recorder.finishTurn().rows.first { $0.stage == .tts }
+        XCTAssertEqual(tts?.ran, true,
+                       "the stage DID run — it failed, and says so")
+        XCTAssertEqual(tts?.decision, "failed")
     }
 }

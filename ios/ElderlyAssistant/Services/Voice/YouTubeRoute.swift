@@ -132,7 +132,21 @@ enum YouTubeRoute {
         "play", "plays", "playing", "played",
         "youtube", "on", "in", "for", "the", "a", "an", "to", "of",
         "and", "or", "please", "me", "my", "some", "that", "this",
-        "from", "with", "search", "searches", "searching", "searched"
+        "from", "with", "search", "searches", "searching", "searched",
+        // romanized Nepali particles and play-family verbs — device
+        // evidence 2026-10-11: the v6-q6 on-device STT sometimes
+        // transcribes ROMANIZED Nepali, and the transcript for
+        // "युट्युबमा नेपाली गीत लगाऊ" reached the search box as "maa
+        // nepali geet la" — Latin tokens pass the Devanagari/English
+        // drop lists above untouched, so मा and लगाऊ leak through in
+        // Latin script. Whole-token only, like the English entries:
+        // "ma" must not eat "mama".
+        "ma", "maa", "la", "lagau", "lagaau", "lagauu", "lagaunu",
+        "lagaunus", "lagauda", "lagaudai", "lagai", "lagayera",
+        "bajau", "bajaaun", "bajaunu", "bajauda", "bajaai", "bajaunus",
+        "chalaau", "chalau", "chalaunu", "chalauda", "chalaai",
+        "kripa", "kripaya", "hajur", "euta", "eutai", "ani", "ra",
+        "mero", "hamro", "malai", "malaai"
     ]
 
     /// Devanagari trigger/particle words — the verb families and polite
@@ -146,6 +160,11 @@ enum YouTubeRoute {
         "बजाइदिनुहोस्", "बजाइदिनुस्", "बजाइदिनु", "बजाइदेऊ", "बजाइदेऊँ", "बजाइदेउ",
         "लगाऊ", "लगाऊँ", "लगाउ", "लगाउँ", "लगाउनुहोस्", "लगाउनुस्",
         "लगाइदिनुहोस्", "लगाइदिनुस्", "लगाइदिनु", "लगाइदेऊ", "लगाइदेऊँ", "लगाइदेउ",
+        // participial / progressive play forms (device evidence
+        // 2026-10-10: "युट्युबमा नेपाली गीत लगाउँदा" — the -दा/-दै
+        // endings are natural phrasings and must not survive into the
+        // search query)
+        "लगाउँदा", "लगाउँदै", "बजाउँदा", "बजाउँदै", "चलाउँदा", "चलाउँदै",
         // search verbs
         "खोज", "खोज्नुहोस्", "खोज्नुस्", "खोज्नुभयो", "खोज्ने", "खोज्न",
         "खोजेर", "खोजे",

@@ -36,7 +36,26 @@ import Foundation
 /// selects between two brains the router would consult anyway, and it sits
 /// downstream of `CommandRouter`'s keyword safety net like every other
 /// interpreter decision.
-final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
+///
+/// [CORRECTION-ANYBRAIN] The chain is ALSO the local slot's input seam.
+/// `CommandRouter`'s safety net and `IntentRouter`'s band policy read the
+/// transcript the router was handed; the two pre-intent layers — the
+/// STT-error corrector and the dialect canonicalizer — act on the input of
+/// whichever brain serves the local slot, so they are useful regardless of
+/// which of them answers. This chain is that boundary: with an `InputSeam`
+/// attached it runs `sanitise → correct → canonicalize` ONCE per turn,
+/// hands the pair to a brain that consumes it (`PreparedTranscriptInterpreting`
+/// — the encoder, which must NOT run the layers a second time) and the
+/// pair's prepared text to every other brain. `inputSeam: nil` (the
+/// default, and the nested chain's construction) is the byte-identical
+/// pass-through: the transcript reaches the brain exactly as the router
+/// sent it.
+///
+/// Routing, timeouts, escalation reasons and the stand-in selection are
+/// untouched by the seam: it changes the STRING a brain reads, never which
+/// brain is asked or what is done with its answer.
+final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting,
+                             PreparedTranscriptInterpreting, ChatResponding {
 
     /// [ENCODER-RUNTIME-CASCADE] Why a cascade turn left the preferred
     /// brain. Fixed vocabulary for the observability trail — event
@@ -73,15 +92,53 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
         }
     }
 
+    /// [CORRECTION-ANYBRAIN] The local slot's input seam (§4.6's composition,
+    /// relocated from `IntentEncoderInterpreter`): the corrected →
+    /// canonicalized pair for one turn.
+    ///
+    /// `prepare` is handed `InputSanitiser.sanitise(_:level:.quarantine)`
+    /// output — the sanitiser stays the injection boundary and stays FIRST,
+    /// so a table rewrite can never resurrect text the clamp removed — and
+    /// returns the pair `IntentInputCanonicalization.prepare` builds. The
+    /// chain runs it exactly ONCE per turn, whichever brain ends up serving.
+    ///
+    /// The policies are NOT held here: the shipped seam resolves them from
+    /// the stored switches on every call, so flipping either switch in
+    /// Settings acts on the next turn with no re-install (neither layer is a
+    /// brain, and neither is consulted for the slot's shape).
+    struct InputSeam {
+        let prepare: (String) -> IntentTranscriptPair
+
+        init(prepare: @escaping (String) -> IntentTranscriptPair) {
+            self.prepare = prepare
+        }
+    }
+
     private let preferred: CommandInterpreter
     private let standIn: CommandInterpreter
     private let cascade: Cascade?
+
+    /// [CORRECTION-ANYBRAIN] The input seam this chain owns, or nil for the
+    /// byte-identical pass-through. Only the OUTER chain of a local slot
+    /// carries one (`IntentEncoderWiring.localBrainSlot`): the nested chain
+    /// `deferredEncoderPreference` installs in the `preferred` slot receives
+    /// an already-prepared pair, and giving it a seam of its own would run
+    /// the layers a second time on their own output.
+    private let inputSeam: InputSeam?
 
     /// [TURN-TIMING-BREAKDOWN] Turn-scoped stage stopwatch for the
     /// `cascade_decision` stage. Nil (the default, and every non-gated
     /// build) makes the measurement a nil check: no clock read, no lock.
     /// Instrumentation only — the decision itself never reads it.
     private let timingRecorder: TurnTimingRecorder?
+
+    /// [PIPELINE-TRACE] The debug trace's recorder — the same decision the
+    /// timing span above measures, told in full (the preferred brain's
+    /// answer in, the branch taken out, the escalation vocabulary as the
+    /// decision). Nil (the default, and every non-gated build) makes every
+    /// call below a nil check. Instrumentation only: no branch here reads
+    /// a row.
+    private let traceRecorder: PipelineTraceRecorder?
 
     /// Which brain answered the LAST turn (true = preferred), so the
     /// failure reason below describes the brain that actually served —
@@ -94,12 +151,54 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
     init(preferred: CommandInterpreter,
          standIn: CommandInterpreter,
          cascade: Cascade? = nil,
-         timingRecorder: TurnTimingRecorder? = nil) {
+         timingRecorder: TurnTimingRecorder? = nil,
+         inputSeam: InputSeam? = nil,
+         traceRecorder: PipelineTraceRecorder? = nil) {
         self.preferred = preferred
         self.standIn = standIn
         self.cascade = cascade
         self.timingRecorder = timingRecorder
+        self.inputSeam = inputSeam
+        self.traceRecorder = traceRecorder
     }
+
+    /// [MTC] The seam this chain owns, exposed to the ONE other caller that
+    /// must read the same prepared text: `AppCoordinator
+    /// .prepareDialogueAnswerText` (design-l2 §12.1 edit 8) prepares the
+    /// dialogue answer through exactly this seam via
+    /// `IntentTranscriptPreparation.prepare` — one order, two callers
+    /// (L2-D14).
+    ///
+    /// Nil means "this chain has no seam" (a pre-relocation or nested
+    /// construction) and is NOT a production shape: the shipped coordinator
+    /// wires a non-nil seam at `AppCoordinator.swift:1824` (M-3,
+    /// `security-design-review.md`).
+    var transcriptPreparationSeam: InputSeam? { inputSeam }
+
+    /// [CORRECTION-REVIVE] The LAST turn's correction result, stored when
+    /// the seam ran (same order as `transcriptPreparationSeam`: one write
+    /// per turn in `turnInput`). The router's unrecognised path reads it —
+    /// AFTER the interpret that produced it — to run the semantic judge
+    /// and, failing that, the spoken clarification. In-memory only; the
+    /// surfaces inside are the user's own words, never logged, never
+    /// persisted, gone with the process.
+    private(set) var lastCorrection: CorrectionResult?
+
+    /// [JUDGE-PRE-INTERPRET] The pluggable semantic judge the chain
+    /// consults BEFORE the brain interprets, when the banded gate marked
+    /// a token judge-eligible. Nil (the default, and every test
+    /// construction) keeps the pre-judge path off; the shipped
+    /// coordinator wires the resident-4B judge here. The judge contract
+    /// still holds: `isReady` means the brain is ALREADY resident — the
+    /// chain never loads a model to judge.
+    var semanticJudge: SemanticJudge?
+
+    /// [JUDGE-PRE-INTERPRET] True once the judge ran for THIS turn (a
+    /// decisive pick or an abstention) — the router's failure path reads
+    /// it so a turn that was already judged is never judged twice: it
+    /// goes straight to the spoken clarification. Reset with each
+    /// `turnInput`.
+    private(set) var lastCorrectionJudged = false
 
     var isAvailable: Bool {
         preferred.isAvailable || standIn.isAvailable
@@ -118,23 +217,226 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
     func interpret(transcript: String,
                    context: InterpreterContext,
                    completion: @escaping (InterpretedCommand?) -> Void) {
+        interpret(turn: turnInput(for: transcript),
+                  context: context, completion: completion)
+    }
+
+    /// [CORRECTION-ANYBRAIN] The other half of the local slot's input
+    /// contract: an enclosing chain has ALREADY run the seam, so this chain
+    /// forwards the pair it was handed instead of preparing it a second time
+    /// — the nested `preferred` chain `deferredEncoderPreference` installs
+    /// is entered this way, and so is this chain when it is itself nested.
+    ///
+    /// No seam runs here, and none may be attached: the layers ran once, at
+    /// the slot's input, and re-running them on their own output is the
+    /// `correct∘correct` the relocation exists to prevent.
+    func interpret(preparedInput pair: IntentTranscriptPair,
+                   context: InterpreterContext,
+                   completion: @escaping (InterpretedCommand?) -> Void) {
+        interpret(turn: TurnInput(pair: pair,
+                                  plainText: Self.plainText(for: pair,
+                                                            raw: pair.original)),
+                  context: context, completion: completion)
+    }
+
+    /// [CHAT] The local slot's chat entry point (stage 1 of the
+    /// conversational-augmentation plan, 2026-09-23): the free-text reply
+    /// shape, forwarded to the brain that can answer it.
+    ///
+    /// WHICH brain — the CAPABILITY rule, not the availability rule: it is
+    /// `preferred` when `preferred` has a chat shape, else `standIn` when
+    /// `standIn` has one, else an abstention (nil). The distinction
+    /// matters in exactly one configuration: a preferred brain that is
+    /// intent-only (the fine-tuned intent models are precisely that — a
+    /// frozen 12-action surface with no conversational mode) while the
+    /// stand-in is a general generative brain. Asking the intent model a
+    /// chat prompt would be asking it outside its trained surface;
+    /// abstaining would drop every chat turn the moment a fine-tuned GGUF
+    /// ships. Handing the turn to the general brain is the only one of
+    /// the three that answers the user, and it is the same brain the
+    /// command path would fall back to anyway.
+    ///
+    /// The CASCADE is deliberately not consulted: it compares a command's
+    /// confidence against the router's accept band, and a chat reply is
+    /// not banded (`IntentRouter.interpretLocalLadder` documents why).
+    ///
+    /// The turn's seam runs exactly as it does for a command turn (the
+    /// `turnInput(for:)` builder above), and the chat brain reads the
+    /// turn's prepared TEXT: the only pair-consuming brain in this
+    /// codebase is the encoder, which has no chat shape, so a chat turn
+    /// never has a pair consumer to hand the pair to.
+    func respondToChat(transcript: String,
+                       context: InterpreterContext,
+                       completion: @escaping (InterpretedCommand?) -> Void) {
+        respondToChat(turn: turnInput(for: transcript), context: context,
+                      completion: completion)
+    }
+
+    private func respondToChat(turn: TurnInput,
+                               context: InterpreterContext,
+                               completion: @escaping (InterpretedCommand?) -> Void) {
+        guard let brain = chatBrain else {
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+        lastServedPreferred = brain === preferred
+        brain.respondToChat(transcript: turn.plainText, context: context,
+                            completion: completion)
+    }
+
+    /// The brain that answers a chat turn — `preferred` when it has the
+    /// chat shape, else `standIn` when it has one, else nothing (the
+    /// caller abstains and the router's command ladder owns the turn).
+    private var chatBrain: ChatResponding? {
+        if let preferred = preferred as? ChatResponding { return preferred }
+        if let standIn = standIn as? ChatResponding { return standIn }
+        return nil
+    }
+
+    /// One turn's input at the local slot. Built by exactly one of the two
+    /// entry points above, then threaded through the UNCHANGED decision
+    /// logic below.
+    ///
+    /// [CHAT] The chat entry point below is a THIRD builder of the same
+    /// value, for the same reason: a chat turn runs the slot's seam too,
+    /// so the brain that answers it reads the same corrected text a
+    /// command turn would.
+    private struct TurnInput {
+        /// The prepared pair, or nil on a chain with no seam (the
+        /// pass-through shape, and every pre-relocation call site).
+        let pair: IntentTranscriptPair?
+        /// What a brain that does not consume the pair reads.
+        let plainText: String
+    }
+
+    /// The seam, run ONCE — or not at all on a chain that does not own one.
+    ///
+    /// [MTC] The order itself (sanitise → seam → prepared text) lives in
+    /// `IntentTranscriptPreparation.prepare` (design-l2 L2-D14): the dialogue
+    /// answer path runs the same implementation, so there is one source and
+    /// two callers. The rewire is behaviour-preserving byte for byte — a nil
+    /// seam returns the transcript untouched, and the non-nil branch keeps
+    /// its own `plainText(for:raw:)` mapping below (raw-vs-picker equality),
+    /// which is deliberately NOT the helper's `prepared` value.
+    private func turnInput(for transcript: String) -> TurnInput {
+        let preparation = IntentTranscriptPreparation.prepare(transcript,
+                                                             seam: inputSeam)
+        lastCorrectionJudged = false
+        guard let pair = preparation.pair else {
+            lastCorrection = nil
+            return TurnInput(pair: nil, plainText: preparation.prepared)
+        }
+        lastCorrection = pair.correction
+        return TurnInput(pair: pair,
+                         plainText: Self.plainText(for: pair, raw: transcript))
+    }
+
+    /// What a brain that does not consume the pair is handed.
+    ///
+    /// An INERT pair (both layers off, or neither matched anything) passes
+    /// the transcript through byte-identically — the pre-relocation path,
+    /// and the reason the shipped default is unchanged. Once a layer has
+    /// rewritten something, the prepared text is what the brain must read,
+    /// or the switch would appear to do nothing. `raw` is the transcript as
+    /// this chain received it (the nested chain has only the pair, and uses
+    /// its `original` — the sanitised transcript — instead).
+    private static func plainText(for pair: IntentTranscriptPair,
+                                  raw: String) -> String {
+        // [MASTER-REPAIR] Decide by the TEXT, not the bookkeeping flag:
+        // `isIdentity` reflects whether the canonicalization LAYERS ran
+        // (applications/correction), so a hand-built pair whose
+        // `canonical` was rewritten without layer bookkeeping (the seam
+        // tests' RecordingInputSeam shape) read as identity and plain
+        // brains got the raw text — the switch appearing to do nothing.
+        // Compare against `original` (the sanitised transcript), never
+        // `raw` (which may be unsanitised).
+        pair.pickerBrainInput == pair.original ? raw : pair.pickerBrainInput
+    }
+
+    /// [JUDGE-PRE-INTERPRET] The turn entry point the two public
+    /// `interpret`/`respondToChat` paths share: when the banded gate
+    /// marked a token judge-eligible AND a judge is wired and READY, the
+    /// judge runs FIRST — measured on the error corpus to pick the true
+    /// reading 79.5% of the time where the lexicographical scorer picks
+    /// it 2.1%. A confident pick (≥ the shipped floor) re-writes the
+    /// text the brain will read; anything less leaves the text untouched
+    /// and the failure path owns the spoken clarification.
+    private func interpret(turn: TurnInput,
+                           context: InterpreterContext,
+                           completion: @escaping (InterpretedCommand?) -> Void) {
+        if let judge = semanticJudge, judge.isReady,
+           !lastCorrectionJudged,
+           let correction = lastCorrection,
+           correction.mode == .apply,
+           let item = correction.judgeItems.first {
+            lastCorrectionJudged = true
+            let batch = JudgeBatch(source: correction.original,
+                                   items: [item])
+            judge.judge(batch) { [weak self] verdicts in
+                guard let self else {
+                    completion(nil)
+                    return
+                }
+                let reranked = STTCorrector.reRank(correction, judge: verdicts,
+                                                   lexicon: CorrectionLexicon.bundled)
+                if reranked.corrected != correction.original {
+                    // The judge's pick was applied — the brain reads the
+                    // corrected text, and the item is consumed so the
+                    // failure path can never judge it twice.
+                    var consumed = reranked
+                    consumed.judgeItems = []
+                    self.lastCorrection = consumed
+                    self.serve(turn: TurnInput(pair: turn.pair,
+                                               plainText: reranked.corrected),
+                               context: context, completion: completion)
+                } else {
+                    // Abstention or veto — the text is untouched, the
+                    // item is consumed, and the failure path asks the
+                    // spoken clarification instead of re-judging.
+                    var consumed = correction
+                    consumed.judgeItems = []
+                    self.lastCorrection = consumed
+                    self.serve(turn: turn, context: context,
+                               completion: completion)
+                }
+            }
+            return
+        }
+        serve(turn: turn, context: context, completion: completion)
+    }
+
+    /// The dispatch body the pre-interpret hook and the plain path
+    /// share — byte-identical to the pre-hook implementation.
+    private func serve(turn: TurnInput,
+                       context: InterpreterContext,
+                       completion: @escaping (InterpretedCommand?) -> Void) {
         guard preferred.isAvailable else {
             // Availability-only substitution — the rule in every mode.
-            serveFromStandIn(transcript: transcript, context: context,
+            // [PIPELINE-TRACE] The cascade stage did not run: this turn
+            // never reached it (the encoder-first brain is missing), and
+            // the row says which precondition failed rather than
+            // vanishing.
+            traceRecorder?.recordOff([.cascade], reason: "preferred_unavailable")
+            serveFromStandIn(turn: turn, context: context,
                              completion: completion)
             return
         }
         guard let cascade else {
+            // [PIPELINE-TRACE] No cascade configured — the availability
+            // pair only, so the stage is off with the stage's own reason
+            // token (one source, so a reworded token cannot drift).
+            traceRecorder?.recordOff([.cascade],
+                                     reason: PipelineTraceStage.cascade.offReason)
             lastServedPreferred = true
-            preferred.interpret(transcript: transcript, context: context,
-                                completion: completion)
+            dispatch(to: preferred, turn: turn, context: context,
+                     completion: completion)
             return
         }
         // [ENCODER-RUNTIME-CASCADE] Encoder-first: the preferred brain
         // gets the turn; the stand-in gets the SAME turn (one completion,
         // no second prompt) only when the preferred answer is not one the
         // router would have used as-is.
-        preferred.interpret(transcript: transcript, context: context) { [weak self, cascade] command in
+        dispatch(to: preferred, turn: turn, context: context) { [weak self, cascade] command in
             guard let self else { completion(command); return }
             // [TURN-TIMING-BREAKDOWN] `cascade_decision` — the chain's own
             // serve-or-escalate work, from the preferred brain's answer to
@@ -144,8 +446,19 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
             // one duration is recorded per turn. Instrumentation only —
             // no branch below reads the span.
             let decisionSpan = self.timingRecorder?.start(.cascadeDecision)
+            // [PIPELINE-TRACE] The cascade's own row, opened on the same
+            // edge: the preferred brain's answer is the input, the branch
+            // taken is the output, and the escalation vocabulary is the
+            // decision. Finished at EACH branch below, before the
+            // stand-in is dispatched, so the row can never absorb the
+            // stand-in's run; `finish` is one-shot, so exactly one row is
+            // recorded per turn. Instrumentation only.
+            let traceSpan = self.traceRecorder?.start(
+                .cascade,
+                input: Self.answerSummary(of: command, preferred: self.preferred))
             if let command, command.confidence >= cascade.acceptThreshold {
                 decisionSpan?.finish()
+                traceSpan?.finish(output: "served at the band", decision: "served")
                 self.lastServedPreferred = true
                 completion(command)
                 return
@@ -155,20 +468,48 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
                 // brain's own answer stands, so a cascade turn can never
                 // be WORSE than the standalone rule.
                 decisionSpan?.finish()
+                traceSpan?.finish(output: "preferred answer stands — no escalation target",
+                                  decision: "served_no_target")
                 self.lastServedPreferred = true
                 completion(command)
                 return
             }
             self.lastServedPreferred = false
             decisionSpan?.finish()
-            cascade.onEscalated?(Self.escalationReason(for: command,
-                                                       preferred: self.preferred))
-            self.standIn.interpret(transcript: transcript, context: context,
-                                   completion: completion)
+            let reason = Self.escalationReason(for: command, preferred: self.preferred)
+            traceSpan?.finish(output: "escalated to the stand-in",
+                              decision: reason.rawValue)
+            cascade.onEscalated?(reason)
+            // [TRUNCATION-FIX] One turn, one heavy brain: drop the
+            // preferred brain's resident handle BEFORE the stand-in
+            // loads its own — the 1B + 4B pair is what blew the device
+            // budget and got the app jetsam'd. (Cloud stand-ins have
+            // nothing resident and keep the protocol's no-op.)
+            self.preferred.unload()
+            self.dispatch(to: self.standIn, turn: turn, context: context,
+                          completion: completion)
         }
     }
 
-    private func serveFromStandIn(transcript: String,
+    /// Hands one turn's input to one brain: the PAIR to a brain that consumes
+    /// it (and therefore runs no seam of its own), the prepared text to every
+    /// other. Routing is not decided here — the caller has already decided
+    /// which brain serves; this only chooses the input's shape.
+    private func dispatch(to brain: CommandInterpreter,
+                          turn: TurnInput,
+                          context: InterpreterContext,
+                          completion: @escaping (InterpretedCommand?) -> Void) {
+        if let pair = turn.pair,
+           let consumer = brain as? PreparedTranscriptInterpreting {
+            consumer.interpret(preparedInput: pair, context: context,
+                               completion: completion)
+            return
+        }
+        brain.interpret(transcript: turn.plainText, context: context,
+                        completion: completion)
+    }
+
+    private func serveFromStandIn(turn: TurnInput,
                                   context: InterpreterContext,
                                   completion: @escaping (InterpretedCommand?) -> Void) {
         guard standIn.isAvailable else {
@@ -176,8 +517,8 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
             return
         }
         lastServedPreferred = false
-        standIn.interpret(transcript: transcript, context: context,
-                          completion: completion)
+        dispatch(to: standIn, turn: turn, context: context,
+                 completion: completion)
     }
 
     /// Abstention and failure both arrive as nil; only the failure carries
@@ -189,4 +530,50 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
             .lastInferenceFailureReason != nil
         return failed ? .failed : .abstained
     }
+
+    /// [PIPELINE-TRACE] One line describing what the preferred brain
+    /// handed the cascade: the action and confidence when it produced a
+    /// command, or the content-free failure token it produced instead of
+    /// one (the same `InterpreterFailureReporting` reason the
+    /// LAT-EVIDENCE path reads). The action name is a schema token, never
+    /// a slot value — this summary reaches the card, and the RELEASE
+    /// console line beside it carries only the decision.
+    private static func answerSummary(of command: InterpretedCommand?,
+                                      preferred: CommandInterpreter) -> String {
+        if let command {
+            return PipelineTraceSummary.text(
+                "\(command.action.rawValue) \(PipelineTraceSummary.score(command.confidence))")
+        }
+        guard let failure = (preferred as? InterpreterFailureReporting)?
+            .lastInferenceFailureReason else {
+            return "no command"
+        }
+        return PipelineTraceSummary.text("no command (\(failure))")
+    }
+}
+
+/// [CORRECTION-ANYBRAIN] A local brain that consumes the slot's PREPARED
+/// turn input — the corrected → canonicalized pair — instead of a bare
+/// transcript.
+///
+/// The seam (`IntentInputCanonicalization.prepare`) is run ONCE, by the
+/// chain that owns it (`LocalBrainChain.InputSeam`), and handed to whichever
+/// brain serves: a conforming brain reads the pair, every other brain reads
+/// the pair's prepared text. Implementing this protocol is how a brain says
+/// two things at once:
+///
+///  1. it wants the layers' OUTPUT (not the raw transcript), and
+///  2. it will NOT run the layers itself — the pair IS the seam's result, so
+///     the `correct∘correct` a second preparation would produce is
+///     structurally impossible on the shipped path.
+///
+/// `IntentEncoderInterpreter` implements it (it used to run the seam
+/// internally); its `interpret(transcript:)` entry point keeps preparing for
+/// direct callers, but the slot never reaches the encoder that way.
+/// `LocalBrainChain` implements it too, so a nested chain forwards the pair
+/// rather than re-preparing it.
+protocol PreparedTranscriptInterpreting: AnyObject {
+    func interpret(preparedInput pair: IntentTranscriptPair,
+                   context: InterpreterContext,
+                   completion: @escaping (InterpretedCommand?) -> Void)
 }

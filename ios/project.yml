@@ -9,7 +9,7 @@
 
 name: seniOS
 options:
-  bundleIdPrefix: com.elderlyassistant
+  bundleIdPrefix: ai.voicebridge
   deploymentTarget:
     iOS: "16.0"
   createIntermediateGroups: true
@@ -76,6 +76,18 @@ packages:
   sherpa-onnx:
     url: https://github.com/k2-fsa/sherpa-onnx
     exactVersion: 1.13.7
+  # Google sign-in for calendar & family sharing (2026-09-16). The SDK
+  # only does the OAuth dance and holds the tokens in the Keychain; the
+  # Calendar/People REST calls are hand-rolled over URLSession
+  # (`GoogleCalendarGateway`), because the generated Google API client
+  # (GTLR) would add a much larger dependency for four endpoints.
+  #
+  # Graceful degradation is the rule here: with no OAuth client id in
+  # the bundle the app must still build, launch and show the honest "not
+  # configured" card — see `GoogleAccountSession.isConfigured`.
+  GoogleSignIn:
+    url: https://github.com/google/GoogleSignIn-iOS
+    from: 8.0.0
   # Porcupine:
   #   url: https://github.com/Picovoice/porcupine.git
   #   from: 3.0.0
@@ -110,6 +122,14 @@ targets:
       # the file never lands in the app bundle and
       # DialectLexicon.bundled() finds nothing.
       - path: ElderlyAssistant/Resources/DialectLexicon.json
+        buildPhase: resources
+      # Bundled curated dialogue option catalog ([MULTI-TURN] C-MTC-04,
+      # design-l2 §11 — versioned schema, bhajan deity group: label keys /
+      # canonical queries / alias lists; alias lists are data, extendable
+      # without code). Same single-file pattern as DialectLexicon.json:
+      # without this entry the JSON never lands in the app bundle and
+      # DialogueOptionCatalog.load() finds nothing.
+      - path: ElderlyAssistant/Resources/DialogueOptionCatalog.json
         buildPhase: resources
       # Official multicolor logos for the quick-access app catalog
       # (Wikimedia Commons PNGs, 2026-09-07 — sources in the catalog's
@@ -224,7 +244,7 @@ targets:
     # point INFOPLIST_FILE at the plist we maintain by hand.
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.elderlyassistant.app
+        PRODUCT_BUNDLE_IDENTIFIER: ai.voicebridge.senior.assistant
         PRODUCT_NAME: ElderlyAssistant
         INFOPLIST_FILE: ElderlyAssistant/Info.plist
         GENERATE_INFOPLIST_FILE: NO
@@ -233,6 +253,25 @@ targets:
         # Home-screen icon: AppIcon.appiconset (cropped from the user's
         # supplied artwork, 2026-09-08).
         ASSETCATALOG_COMPILER_APPICON_NAME: "AppIcon"
+        # [ENCODER-ALWAYS-ON] The internal-testing intent-encoder path —
+        # runtime files AND the Settings → AI मोडेल encoder card — is
+        # compiled into EVERY build of this target, Debug and Release, so
+        # the UI can never be silently missing because a build forgot
+        # SWIFT_ACTIVE_COMPILATION_CONDITIONS on the command line. This is
+        # the DEFAULT build configuration, not an opt-in.
+        #
+        # Compiling the condition in is not consent to SERVE the encoder:
+        # the persisted enable toggle still defaults OFF
+        # (`IntentEncoderPreferences`) and the 109 MB artifact still has to
+        # be installed, so a household device keeps today's local brain
+        # (`LocalIntentInterpreter`) until a tester flips the switch on the
+        # hidden screen. The keyword safety net (emergency, explicit
+        # med-ack) runs upstream of every interpreter either way — FR-009.
+        #
+        # `$(inherited)` preserves the project-level `DEBUG` that XcodeGen
+        # sets for the Debug configuration, so Debug keeps `DEBUG
+        # INTENT_ENCODER` and Release carries `INTENT_ENCODER` alone.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) INTENT_ENCODER"
     dependencies:
       # vDSP FFT for the spectral-gate denoiser ([NOISE-FILTER] P1
       # front-end, Services/Voice/SpectralGateCore.swift). Declared
@@ -249,6 +288,10 @@ targets:
         product: WhisperKit
       - package: sherpa-onnx
         product: sherpa-onnx
+      # Calendar & family sharing (2026-09-16) — OAuth + Keychain token
+      # storage only; the Calendar/People REST calls are ours.
+      - package: GoogleSignIn
+        product: GoogleSignIn
       # [TIMER-ALARM] (2026-09-10) The widget extension hosting the
       # AlarmKit alarm presentation (ActivityConfiguration for
       # AlarmAttributes<TimerAlarmSystemMetadata>) — the system renders
@@ -294,7 +337,7 @@ targets:
         NSSupportsLiveActivities: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.elderlyassistant.app.TimerAlarmWidget
+        PRODUCT_BUNDLE_IDENTIFIER: ai.voicebridge.senior.assistant.TimerAlarmWidget
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"
         APPLICATION_EXTENSION_API_ONLY: YES
@@ -323,7 +366,7 @@ targets:
         type: folder
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.elderlyassistant.app.tests
+        PRODUCT_BUNDLE_IDENTIFIER: ai.voicebridge.senior.assistant.tests
         GENERATE_INFOPLIST_FILE: YES
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ElderlyAssistant.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ElderlyAssistant"
@@ -337,7 +380,7 @@ targets:
       - path: ElderlyAssistantUITests
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.elderlyassistant.app.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: ai.voicebridge.senior.assistant.uitests
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: ElderlyAssistant

@@ -103,7 +103,7 @@ final class ExternalCalendarService: ObservableObject {
     /// (same shape as `CalendarSyncService`).
     var isEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(isEnabled, forKey: Self.enabledDefaultsKey)
+            defaults.set(isEnabled, forKey: Self.enabledDefaultsKey)
         }
     }
 
@@ -113,7 +113,7 @@ final class ExternalCalendarService: ObservableObject {
     var leadMinutes: Int {
         didSet {
             leadMinutes = min(max(leadMinutes, 0), Self.maxLeadMinutes)
-            UserDefaults.standard.set(leadMinutes, forKey: Self.leadDefaultsKey)
+            defaults.set(leadMinutes, forKey: Self.leadDefaultsKey)
             // Self-assignment inside didSet does not re-trigger the
             // observer, so the clamp above is recursion-free.
             guard isEnabled, leadMinutes != oldValue else { return }
@@ -148,13 +148,19 @@ final class ExternalCalendarService: ObservableObject {
     /// the main queue (observer queue + the async reset below).
     private var isScanning = false
 
+    /// [SETTINGS-PERSIST] The settings seam (keychain-durable with
+    /// a UserDefaults fallback); production default, tests inject
+    /// their own scratch suite.
+    private let defaults: UserDefaults
+
     init(
         scanner: NativeCalendarScanning = EKCalendarScanner(),
         alarmScheduler: ExternalAlarmScheduling = UNExternalReminderScheduler(),
         opener: ExternalItemOpening = SystemExternalItemOpener(),
         observabilityBus: ObservabilityBus,
         now: @escaping () -> Date = Date.init,
-        submitRefreshRequest: @escaping () -> Void = ExternalCalendarService.submitBackgroundRefreshRequest
+        submitRefreshRequest: @escaping () -> Void = ExternalCalendarService.submitBackgroundRefreshRequest,
+        defaults: UserDefaults = SettingsPersistence.shared
     ) {
         self.scanner = scanner
         self.alarmScheduler = alarmScheduler
@@ -162,12 +168,13 @@ final class ExternalCalendarService: ObservableObject {
         self.observabilityBus = observabilityBus
         self.now = now
         self.submitRefreshRequest = submitRefreshRequest
-        let restoredStatus = UserDefaults.standard
+        self.defaults = defaults
+        let restoredStatus = defaults
             .string(forKey: Self.statusDefaultsKey)
             .flatMap(ExternalAccessStatus.init(rawValue:)) ?? .notRequested
         self.status = restoredStatus
-        self.isEnabled = UserDefaults.standard.bool(forKey: Self.enabledDefaultsKey)
-        let storedLead = UserDefaults.standard.object(forKey: Self.leadDefaultsKey) as? Int
+        self.isEnabled = defaults.bool(forKey: Self.enabledDefaultsKey)
+        let storedLead = defaults.object(forKey: Self.leadDefaultsKey) as? Int
             ?? Self.defaultLeadMinutes
         self.leadMinutes = min(max(storedLead, 0), Self.maxLeadMinutes)
     }
@@ -409,6 +416,22 @@ final class ExternalCalendarService: ObservableObject {
         return fire > now ? fire : nil
     }
 
+    /// What the banner for `item` should offer, if anything (rich-events
+    /// task, 2026-09-17; design §4).
+    ///
+    /// Two facts, both required, and both already established upstream:
+    /// the item must be a real `EKEvent` (a Reminders-app item has no
+    /// detail screen to open and no address row), and it must HAVE an
+    /// address — "No address → plain reminder, no action". A whitespace-only
+    /// location counts as none, via the same `hasAddress` rule the detail
+    /// screen's Go button applies.
+    static func action(for item: ExternalReminder) -> ExternalReminderAction? {
+        guard item.source == .event,
+              item.hasAddress,
+              let eventIdentifier = item.nativeEventIdentifier else { return nil }
+        return ExternalReminderAction(eventIdentifier: eventIdentifier)
+    }
+
     static func mapEvents(_ scanned: [ScannedEvent], now: Date) -> [ExternalReminder] {
         scanned.compactMap { event in
             // A declined invitation is not a commitment.
@@ -430,7 +453,9 @@ final class ExternalCalendarService: ObservableObject {
                 startDate: event.startDate,
                 isAllDay: event.isAllDay,
                 hasOwnAlarm: event.hasAlarms,
-                calendarName: event.calendarName
+                calendarName: event.calendarName,
+                nativeEventIdentifier: event.nativeIdentifier,
+                location: event.location
             )
         }
     }
@@ -451,7 +476,12 @@ final class ExternalCalendarService: ObservableObject {
                 startDate: dueDate,
                 isAllDay: reminder.isAllDay,
                 hasOwnAlarm: reminder.hasAlarms,
-                calendarName: reminder.calendarName
+                calendarName: reminder.calendarName,
+                // A Reminders-app item has no EKEvent behind it and no
+                // location row — both stay nil, which is exactly what
+                // "nothing to open" means downstream.
+                nativeEventIdentifier: nil,
+                location: nil
             )
         }
     }
@@ -500,7 +530,7 @@ final class ExternalCalendarService: ObservableObject {
 
     @MainActor
     private func persistStatus(_ value: ExternalAccessStatus) {
-        UserDefaults.standard.set(value.rawValue, forKey: Self.statusDefaultsKey)
+        defaults.set(value.rawValue, forKey: Self.statusDefaultsKey)
         status = value
     }
 
@@ -531,7 +561,8 @@ final class ExternalCalendarService: ObservableObject {
         for (item, fire) in candidates.prefix(Self.maxArmedNotifications) {
             let identifier = ExternalNotificationIdentity.identifier(for: item.id)
             alarmScheduler.scheduleExternalReminder(identifier: identifier, title: title,
-                                                    body: item.title, at: fire)
+                                                    body: item.title, at: fire,
+                                                    action: Self.action(for: item))
             armedIdentifiers.insert(identifier)
             armed += 1
         }

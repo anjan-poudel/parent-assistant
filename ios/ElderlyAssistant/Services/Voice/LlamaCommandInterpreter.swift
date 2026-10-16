@@ -25,6 +25,19 @@ import LLM
 /// router (`ReplySanityGate`) — untrustworthy output is NEVER spoken raw;
 /// it falls back to an honest re-prompt.
 ///
+/// [CHAT-SAMPLING] (2026-10-14, T-167, `conversational-nepali-replies`) The
+/// two shapes this interpreter answers now carry their own DECODE
+/// PARAMETERS, re-asserted per turn on the ONE resident handle
+/// (`ChatSampling`): the command shape keeps temperature 0 + the fixed seed
+/// + the command GBNF schema (the NO-GIBBERISH invariant, FR-CNR-004), the
+/// chat shape decodes at the reviewed chat temperature (~0.3, design-l1
+/// OD-1) at the same fixed seed (reproducible, NFR-CNR-001), and the judge
+/// path re-asserts determinism under its own schema. Every decode path
+/// records its REQUESTED parameters in `lastDecodeParameters` before it
+/// runs, so "a chat turn cannot leak temperature into a command decode" is
+/// an assertion a test (and DV-5 on device) can make without inspecting
+/// llama.cpp.
+///
 /// The interpreter sits BEHIND `CommandRouter`. Router calls it first;
 /// falls back to keyword matching on:
 ///   - interpreter unavailable (model not cached, runtime not linked)
@@ -38,6 +51,43 @@ protocol CommandInterpreter: AnyObject {
     func interpret(transcript: String,
                    context: InterpreterContext,
                    completion: @escaping (InterpretedCommand?) -> Void)
+    /// Drop a resident local model before another brain takes the turn
+    /// ([TRUNCATION-FIX]: an escalated turn must never hold two heavy
+    /// brains — the 1B + 4B pair is what got the device jetsam'd).
+    /// Cloud interpreters have nothing resident and keep the no-op.
+    func unload()
+}
+
+extension CommandInterpreter {
+    func unload() {}
+}
+
+/// [CHAT] Stage 1 of the conversational-augmentation plan (2026-09-23): a
+/// local interpreter that can answer a CHIT-CHAT turn — the free-text
+/// reply shape — as well as the command shape it already answers.
+///
+/// Why a separate protocol rather than a case in the command schema: a
+/// chat turn is not a command with a different label, it is a different
+/// DECODE (no slots, a free-text `reply`) and a different PROMPT. The
+/// router asks for it through this entry point instead, which leaves
+/// `CommandInterpreter` and every existing conformer byte-identical, and
+/// makes "does this brain have a chat shape?" a question the router can
+/// ask at runtime (`as? ChatResponding`).
+///
+/// Contract, mirroring `CommandInterpreter`:
+///   - nil = an ABSTENTION (no chat shape, no model, an unparseable or
+///     empty reply, or a confidence under the interpreter's gate). The
+///     caller keeps its own fallback; an abstention is never an error.
+///   - a non-nil result is an `InterpretedCommand` whose `reply` is the
+///     spoken text. The interpreter's OWN contract is that an action
+///     reachable here is `.chat` — anything else would mean the chat
+///     prompt produced a slot-bearing command, which the caller treats
+///     as unusable (a chat turn must never execute).
+///   - completion runs on the main queue.
+protocol ChatResponding: AnyObject {
+    func respondToChat(transcript: String,
+                       context: InterpreterContext,
+                       completion: @escaping (InterpretedCommand?) -> Void)
 }
 
 /// [LAT-EVIDENCE] (2026-09-12) A local interpreter that distinguishes a
@@ -58,6 +108,26 @@ protocol InterpreterFailureReporting: AnyObject {
 struct InterpreterContext {
     let pendingMedications: [String]   // display names only
     let userLanguageHint: String       // "ne" or "en"
+    /// [PROFILE-INTERVIEW T-094] The GUARDED address-as term for prompt
+    /// composition; nil = un-personalized (absent / unreadable / empty /
+    /// quarantined — FR-PI-011). Read-seam-produced: the value arrives
+    /// already bounded to the prompt bound and neutralised by
+    /// `ProfilePromptTextGuard` (ADR-09 — the prompt side takes the
+    /// guarded term; the spoken side takes the verbatim one). Immutable
+    /// per turn: the context is a value, so the cloud and on-device
+    /// paths can read it without coordination.
+    let addressAs: String?
+
+    /// Explicit initializer (not the memberwise one) so `addressAs`
+    /// carries a default: every pre-feature construction site compiles
+    /// unchanged, and the clause is opt-in per turn.
+    init(pendingMedications: [String],
+         userLanguageHint: String,
+         addressAs: String? = nil) {
+        self.pendingMedications = pendingMedications
+        self.userLanguageHint = userLanguageHint
+        self.addressAs = addressAs
+    }
 }
 
 /// Structured command emitted by the LLM. Matches the GBNF grammar exactly
@@ -84,6 +154,23 @@ struct InterpretedCommand: Equatable, Codable {
         /// single case is the only core change a plugin ever needs
         /// (docs/superpowers/specs/2026-09-05-plugin-architecture-design.md).
         case plugin = "plugin"
+        /// [CHAT] Stage 1 of the conversational-augmentation plan
+        /// (2026-09-23): a FREE-TEXT conversational reply — a greeting,
+        /// thanks, a farewell, small talk. It carries no slots and
+        /// executes nothing: the reply is spoken through the same
+        /// `deliverModelReply` surface a `query` answer uses, and the
+        /// action exists so the observability trail can tell a chat turn
+        /// from a command turn.
+        ///
+        /// NOT a member of the command schema: the 12-action catalog the
+        /// command prompt and `commandJSONSchema` teach is frozen (the
+        /// encoder's `IntentEncoderSchema.actionRawValues` pins the same
+        /// 12), and a chat turn is asked with the SEPARATE
+        /// `LlamaGrammar.chatJSONSchema` instead. This case is reachable
+        /// only through `respondToChat`, never through the command entry
+        /// point — `IntentEncoderSchema.action(forRawValue:)` rejects it
+        /// as an encoder label, and the command grammar cannot emit it.
+        case chat = "chat"
         case none
     }
     let action: Action
@@ -242,6 +329,75 @@ enum LlamaGrammar {
         "pluginEntities"]
     }
     """
+
+    /// [CHAT] Stage 1 of the conversational-augmentation plan (2026-09-23):
+    /// the decode schema for a CHIT-CHAT turn — the free-text reply shape.
+    ///
+    /// Deliberately a SEPARATE schema, not a widened `commandJSONSchema`.
+    /// The command schema is frozen: it is the contract the fine-tuned
+    /// intent brains were trained against, the encoder's 12-action
+    /// allow-list pins the same catalog (`IntentEncoderSchema
+    /// .actionRawValues`), and the shipped tests pin its bytes. A chat
+    /// turn is a different decode, so it gets its own schema and both
+    /// stay readable: three keys, one intent, one free-text reply, no
+    /// slots.
+    ///
+    /// Why there is no slot here, and no `pluginAction` either: a chat
+    /// turn executes NOTHING, so the grammar that constrains its decode
+    /// must not be ABLE to express a slot. That is what makes "a chat
+    /// reply can never run anything" structural rather than a promise the
+    /// router is trusted to keep.
+    ///
+    /// Key order (`intent`, `reply`, `confidence`) is the command schema's
+    /// own order with the payload in `response`'s position, so the
+    /// json-schema→GBNF converter's fixed key order and the training
+    /// labels the chat shape will be fine-tuned on agree by construction.
+    /// The reply is a plain JSON string — the same `string` rule the
+    /// command grammar uses, so no quote, backslash or control character
+    /// can leak into the spoken text.
+    ///
+    /// The single-value `enum` is the structural half of the routing
+    /// contract: a decode through this schema CANNOT claim a command
+    /// intent, so a mis-routed turn abstains (an unparseable label) rather
+    /// than executing something off a prompt that never taught slots.
+    static let chatJSONSchema: String = """
+    {
+      "type": "object",
+      "properties": {
+        "intent": {"type": "string", "enum": ["chat"]},
+        "reply": {"type": "string"},
+        "confidence": {"type": "number"}
+      },
+      "required": ["intent", "reply", "confidence"]
+    }
+    """
+
+    /// [CORRECTION-REVIVE] The semantic judge's decode schema: one pick per
+    /// item — an index into the item's readings (`0|1|2`) plus the model's
+    /// own confidence. No nullable pick: the model MUST pick an index, and
+    /// the caller's confidence floor decides whether that pick counts or
+    /// the turn falls through to the spoken clarification. (A nullable
+    /// `pick` would let the sampler claim abstention, and the same shape
+    /// is expressed more honestly as a low-confidence pick.)
+    static let judgeJSONSchema: String = """
+    {
+      "type": "object",
+      "properties": {
+        "picks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "pick": {"type": "integer", "minimum": 0, "maximum": 2},
+              "confidence": {"type": "number"}
+            },
+            "required": ["pick", "confidence"]
+          }
+        }
+      },
+      "required": ["picks"]
+    }
+    """
 }
 
 /// [NO-GIBBERISH] Deterministic on-device sampling (2026-09-07), shared by
@@ -259,8 +415,12 @@ enum LlamaGrammar {
 /// defaults) so a future LLM.swift default bump cannot silently change
 /// on-device behavior.
 enum OnDeviceSampling {
-    /// Fixed seed — dated so the constant is self-explaining in logs
-    /// ("GNERATING WITH SEEED" debug print in LLM.swift).
+    /// Fixed seed — dated so the constant is self-explaining.
+    ///
+    /// A debug print in LLM.swift used to echo this seed on every generation;
+    /// it was removed on 2026-09-19 (it fired on every Debug build, which is
+    /// the owner's device-test configuration, and told the log nothing the
+    /// constant here does not).
     static let fixedSeed: UInt32 = 20_260_907
     static let temperature: Float = 0
     static let topK: Int32 = 40
@@ -290,7 +450,7 @@ final class NullCommandInterpreter: CommandInterpreter {
 /// The `#if canImport(LLM)` guard keeps the file compilable in Phase 1
 /// without either being present.
 final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
-    InterpreterFailureReporting {
+    InterpreterFailureReporting, JudgingCommandInterpreter {
 
     struct Config {
         let confidenceThreshold: Double
@@ -299,29 +459,86 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         /// interpreter reports nil so the router falls back to keyword
         /// matching — this is a NEW failure path, not preserved behavior.
         let timeoutSeconds: Double
+        /// [CHAT] Stage 1 of the conversational-augmentation plan
+        /// (2026-09-23): the decode-time CONFIDENCE FLOOR for the chat
+        /// shape — read from the decoded object's own `confidence` field,
+        /// the same field `confidenceThreshold` gates commands on.
+        ///
+        /// It stands in `confidenceThreshold`'s place for chat turns,
+        /// because the two shapes want opposite things from an uncertain
+        /// decode. A command below the threshold is DROPPED (nil) so the
+        /// router falls back to keyword matching; a chat turn has no
+        /// keyword fallback to be honest with (the ladder would just ask
+        /// the same brain a different question), so its below-floor
+        /// consequence is a SPOKEN line, not a silent one: the decode
+        /// still completes, carrying its confidence, and the delivery
+        /// layer speaks the honest low-confidence line instead of model
+        /// text it does not trust (`CommandRouter.dispatchInterpreted`).
+        ///
+        /// 0.6, not the command threshold's 0.7: small talk is not an
+        /// instruction, and demanding instruction-grade certainty of it
+        /// would turn *most* chat turns into abstentions. Conversely, an
+        /// answer the brain is only half sure of should say so rather
+        /// than be delivered as fact.
+        ///
+        /// Deliberately here and not in the translate feature's config:
+        /// this is the BRAIN's own threshold (the coordinators asked for
+        /// it "beside the brain's other thresholds"), and it is only
+        /// meaningful where the brain's decoded confidences are read.
+        let chatConfidenceFloor: Double
+        /// [CORRECTION-REVIVE] The judge's own inference budget. The
+        /// device field report (2026-10-12) measured `judge_timeout` at
+        /// 1.5 s on-device — the 4B needs longer for the judge prompt
+        /// (the pipelined judge call + 40-token decode), and a timed-out
+        /// judge silently degrades the whole layer to "ask the user".
+        /// 4.0 s keeps the judge bounded (a hung call never blocks the
+        /// turn forever) while giving the on-device 4B its real budget.
+        let judgeTimeoutSeconds: Double
         // [NO-GIBBERISH] (2026-09-07): sampling temperature/seed are NOT
         // configurable — determinism is a correctness invariant here, so
         // every interpreter samples through `OnDeviceSampling` (temp 0,
         // fixed seed) regardless of configuration.
         static let `default` = Config(confidenceThreshold: 0.7,
                                       maxTokens: 128,
-                                      timeoutSeconds: 10)
+                                      timeoutSeconds: 10,
+                                      chatConfidenceFloor: 0.6,
+                                      judgeTimeoutSeconds: 8.0)
     }
 
     private let modelStore: ModelStore
     private let observabilityBus: ObservabilityBus
     private let config: Config
     /// [TURN-TIMING-BREAKDOWN] Turn-scoped stage stopwatch for the picker
-    /// brain's two stages (prompt build / inference). Nil — every
-    /// configuration except an `INTENT_ENCODER` build — makes each
+    /// brain's two stages (prompt build / inference). Nil — no build
+    /// without `INTENT_ENCODER` ([ENCODER-ALWAYS-ON] the default one has
+    /// it) — makes each
     /// measurement a nil check around the UNCHANGED calls. Instrumentation
     /// only: no prompt byte, no sampling parameter and no decision reads it.
     private let timingRecorder: TurnTimingRecorder?
+    /// [PIPELINE-TRACE] The debug trace's recorder — the picker brain's
+    /// two stages written out in full (the prompt that went in, the JSON
+    /// that came back, the FINAL LLM round-trip's own milliseconds). Nil
+    /// (the default, and every non-gated build) makes every call below a
+    /// nil check. Instrumentation only: no prompt byte, no sampling
+    /// parameter and no decision reads a row.
+    private let traceRecorder: PipelineTraceRecorder?
     /// [LAT-EVIDENCE] The honest reason the LAST inference failed
     /// ("inference_timeout" / "inference_empty_output") — the router
     /// consults it after a nil result to escalate to the cloud instead
     /// of a bare apology. Cleared at the start of each interpret.
     private(set) var lastInferenceFailureReason: String?
+    /// [CHAT-SAMPLING] (T-167) The decode parameters REQUESTED for the last
+    /// decode this interpreter ran — temperature, seed and the GBNF schema
+    /// string — written at the START of every decode path (command, chat and
+    /// the judge; the test seam included), nil before the first decode.
+    ///
+    /// It records what a turn ASKED FOR, not what the handle happened to hold
+    /// (a `setParameters` that never ran would be a mismatch this record
+    /// makes visible), which is what makes "a command decode after a chat
+    /// turn requested temperature 0" — and DV-5 on device — assertable
+    /// without inspecting llama.cpp. Read-only outside: nothing configures a
+    /// turn's sampling through it.
+    private(set) var lastDecodeParameters: ChatSampling.DecodeParameters?
     /// Optional — retained for wiring compatibility (`AppCoordinator`
     /// passes the shared registry). Plugin capability fragments are NOT
     /// composed into the on-device prompt: this runtime's context is
@@ -340,6 +557,12 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// Last requested LoRA — Phase-1 skeleton only.
     private var activeLoRA: ModelID?
 
+    /// [CHAT-SAMPLING] (T-167) Internal (not `private`) so the chat-sampling
+    /// suite can pin the COMMAND shape's system slot byte-for-byte — the
+    /// local persona change applies to the chat shape ONLY, and a constant a
+    /// test cannot read cannot be pinned. (The T-170 mirror script reads the
+    /// source text, so its extraction is unaffected by the access level.)
+    ///
     /// The single template-level system prompt used for BOTH the
     /// `Template(systemPrompt:)` handed to `LLM(from:)` and the manually
     /// formatted chat header in `runInference` — previously duplicated as
@@ -350,10 +573,51 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// schema/entity instructions live in the user turn via
     /// `IntentPrompt.build`; this string only carries identity, the two
     /// operating modes, output discipline, and the reply style.
-    private static let chatSystemPrompt = """
-    You are Sahayak, a voice assistant for an elderly speaker. Reply with \
+    /// [REPLY-POLISH] (2026-10-14) The persona block: the brain is what
+    /// produces the spoken replies, so its system prompt now carries the
+    /// reply-style contract — brevity, the Nepali politeness register,
+    /// and the anti-mechanical rules — while the intent template (the
+    /// parser) stays untouched. Kept SHORT on purpose: the on-device
+    /// context is 1,024 tokens and the intent prompt already spends
+    /// ~640 of them.
+    static let chatSystemPrompt = """
+    You are Sahayak, a warm voice companion for an elderly Nepali speaker \
+    — like a respectful grandchild helping their grandparent. Reply with \
     ONLY one JSON object (no fences, no other text); its "response" must \
-    be a non-empty spoken reply in the user's language.
+    be a non-empty spoken reply in the user's language. Reply style: at \
+    most TWO short sentences, ONE idea per sentence, never a list, never \
+    repeat their words back. In Nepali use the respectful forms (हजुर, \
+    भन्नुभयो, गर्नुभयो); warmth before completeness. Speak units, times, \
+    money and percents as words, never symbols: "15 degrees Celsius", \
+    "8 am", "50 percent", "500 rupees" — never "15°C", "15c", "8:00 AM", \
+    "50%", "Rs. 500".
+    """
+
+    /// [CHAT-PERSONA] (T-167) The CHAT shape's own system slot — the local
+    /// persona, authored from the style spec and nothing else.
+    ///
+    /// `tools/train-intent/seeds/nepali-chat-style-spec` is the single source
+    /// of truth (FR-CNR-001), and this constant carries its canonical
+    /// `persona_clause` byte-identically inside a minimal transport wrapper
+    /// (who is speaking + the JSON wire contract). No style rule is authored
+    /// here: a rule changes in the spec first, and T-170's prompt-mirror
+    /// check fails the build if these bytes and the spec's diverge.
+    ///
+    /// The clause, cited the way the spec's own drift check reads it (run
+    /// `python3 tools/train-intent/src/style_spec.py --check-consumers
+    /// <this file>`):
+    ///
+    /// @style-spec-section: persona_clause
+    /// तपाईं with honorific verbs (हजुर, भन्नुभयो, गर्नुभयो) — never तिमी; at most TWO short sentences, ONE idea each; at most one particle (है, नि, ल, ला, अनि, हुन्छ नि); health and tech nouns stay as spoken in Nepali (प्रेसर, डाक्टर, मेडिसिन); numbers, times, money and percents as words, never symbols; never a list, never repeat their words, never speak as an AI, no canned service phrases.
+    /// @style-spec-section-end: persona_clause
+    ///
+    /// The COMMAND shape keeps `chatSystemPrompt` above byte-untouched (its
+    /// assembled prompt, system included, stays byte-identical → its temp-0
+    /// output stays byte-identical); this text is applied to the chat shape
+    /// only, through `ResponseShape.systemPrompt`.
+    static let chatPersonaSystemPrompt = """
+    You are Sahayak, a voice companion for an elderly Nepali speaker. Reply with ONLY one JSON object (no fences, no other text) whose "reply" is the spoken reply in their language.
+    तपाईं with honorific verbs (हजुर, भन्नुभयो, गर्नुभयो) — never तिमी; at most TWO short sentences, ONE idea each; at most one particle (है, नि, ल, ला, अनि, हुन्छ नि); health and tech nouns stay as spoken in Nepali (प्रेसर, डाक्टर, मेडिसिन); numbers, times, money and percents as words, never symbols; never a list, never repeat their words, never speak as an AI, no canned service phrases.
     """
 
     /// Test seam: replaces the llama.cpp call entirely (same pattern as
@@ -373,12 +637,36 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// it exists to test around.
     var generateOverride: ((String, String) async throws -> String)?
 
+    /// [CHAT-SAMPLING] (T-167) The parameter-carrying variant of the same
+    /// seam: `(prompt, schema, requestedTemperature)`. Set by a test that
+    /// needs to observe what sampling a turn ASKED FOR — the schema it
+    /// decodes against AND the temperature it re-asserts — without a model.
+    ///
+    /// Default compatible: the pre-feature two-argument seam above keeps
+    /// working exactly as before (the judge path and every existing test
+    /// drive it), and when BOTH are set this variant wins — it is the more
+    /// specific observation, and a test that sets it should not be silently
+    /// served by the older closure. `lastDecodeParameters` is written on both
+    /// seam paths, so even the two-argument seam exposes the requested
+    /// temperature.
+    var generateOverrideWithParameters: ((String, String, Float) async throws -> String)?
+
+    /// [MODEL-LIFECYCLE] The residency owner for the brain slot. The brain
+    /// is the model that made the 6 GB devices die: at ~3.4 GB live for a
+    /// 4B it is over the class budget on its own, and until now the only
+    /// way to get its memory back was for the user to pick a different
+    /// model in Settings.
+    private let lifecycle: ModelLifecycleManager
+
     /// Cached LLM handle. Held as `Any?` so this file compiles without
     /// the LLM package present. Casts to `LLM.LLM` inside `#if canImport`.
     private var llmInstance: Any?
 
     var isAvailable: Bool {
         if generateOverride != nil { return true }
+        // [CHAT-SAMPLING] (T-167) …and the parameter-carrying variant stands
+        // in for the runtime just the same.
+        if generateOverrideWithParameters != nil { return true }
         guard modelStore.isCached(preferredBaseId) else { return false }
         #if canImport(LLM)
         return true
@@ -392,13 +680,17 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
          preferredBaseId: ModelID = ModelCatalog.llama3_2_1B,
          config: Config = .default,
          pluginRegistry: PluginRegistry? = nil,
-         timingRecorder: TurnTimingRecorder? = nil) {
+         timingRecorder: TurnTimingRecorder? = nil,
+         traceRecorder: PipelineTraceRecorder? = nil,
+         lifecycle: ModelLifecycleManager = .shared) {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.preferredBaseId = preferredBaseId
         self.config = config
         self.pluginRegistry = pluginRegistry
         self.timingRecorder = timingRecorder
+        self.traceRecorder = traceRecorder
+        self.lifecycle = lifecycle
     }
 
     /// The base model this interpreter currently loads (read-only outside;
@@ -419,6 +711,36 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         preferredBaseId = id
         llmInstance = nil
         activeLoRA = nil
+        // [MODEL-LIFECYCLE] The swap IS an unload; the account has to be
+        // settled or the manager keeps budgeting the old brain's ~3 GB.
+        lifecycle.didUnload(.brain, owner: self)
+    }
+
+    /// [MODEL-LIFECYCLE] Drops the llama.cpp handle so its memory can go to
+    /// another model. Invoked by `ModelLifecycleManager` as the brain
+    /// slot's release path, and public so a caller can do it deliberately.
+    ///
+    /// The reference drop is synchronous, but the free behind it is not:
+    /// `LLM` owns an `LLMCore`, `LLMCore` is an actor, and `llama_free` /
+    /// `llama_model_free` run on that actor's executor when its last
+    /// reference goes. The ledger stays optimistic about that, which is
+    /// safe in the direction that matters — the manager re-reads the probe
+    /// at the next load, so a late free can only make the next gate more
+    /// permissive, never less.
+    ///
+    /// A generation in flight is NOT interrupted (that stays the caller's
+    /// job via the existing timeout + `llm.stop()`): dropping the handle
+    /// under a live generation would pull the context out from under it.
+    func unloadModel() {
+        llmInstance = nil
+        lifecycle.didUnload(.brain, owner: self)
+    }
+
+    /// [TRUNCATION-FIX] `CommandInterpreter.unload()` — the cascade
+    /// drops this brain's handle before a heavier stand-in takes the
+    /// turn.
+    func unload() {
+        unloadModel()
     }
 
     // MARK: - LoRA skeleton
@@ -437,35 +759,332 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
 
     // MARK: - Interpret
 
+    /// The command entry point — byte-identical to what it was before the
+    /// chat shape existed: `runTurn` below is the same body, with the
+    /// prompt and schema supplied by the shape.
     func interpret(transcript: String,
                    context: InterpreterContext,
                    completion: @escaping (InterpretedCommand?) -> Void) {
+        runTurn(transcript: transcript, context: context, shape: .command,
+                completion: completion)
+    }
+
+    /// [CHAT] Stage 1 of the conversational-augmentation plan (2026-09-23):
+    /// the chit-chat entry point — the same turn pipeline asked with the
+    /// chat prompt and decoded against `LlamaGrammar.chatJSONSchema`.
+    ///
+    /// Everything the command path guards, this path guards identically:
+    /// the sanitiser runs before the transcript can reach a prompt string,
+    /// an empty completion is an observable failure rather than a silent
+    /// success, and an unparseable or low-confidence answer ABSTAINS (nil)
+    /// so the router's own fallback owns the turn. A chat ask that the
+    /// brain cannot answer — the expected state until a later stage
+    /// fine-tunes it for this shape — is therefore a graceful nil, never
+    /// an invented command.
+    func respondToChat(transcript: String,
+                       context: InterpreterContext,
+                       completion: @escaping (InterpretedCommand?) -> Void) {
+        runTurn(transcript: transcript, context: context, shape: .chat,
+                completion: completion)
+    }
+
+    // MARK: - Semantic judge ([CORRECTION-REVIVE])
+
+    /// The judge prompt — a FIXED template, deterministic, never model
+    /// text: the sanitised utterance plus, per item, the heard surface and
+    /// its readings. Nepali, like the intent prompt the brain was
+    /// fine-tuned on. The prompt contains the user's own words (on-device
+    /// only; it is never logged, never persisted, never egressed).
+    static func judgePrompt(for batch: JudgeBatch) -> String {
+        var lines = [
+            "तलको वाक्यमा एउटा शब्द गलत सुनिएको हुन सक्छ। प्रत्येक विकल्पमा, "
+                + "वाक्यको अर्थसँग सबैभन्दा मिल्ने पढाइ छान्नुहोस्।",
+            "वाक्य: \(batch.source)",
+        ]
+        for (index, item) in batch.items.enumerated() {
+            let readings = item.top.enumerated()
+                .map { "\($0.offset)) \($0.element)" }
+                .joined(separator: " ")
+            lines.append("विकल्प \(index + 1) — सुनिएको: \(item.surface) "
+                + "पढाइहरू: \(readings)")
+        }
+        lines.append("हरेक विकल्पको लागि pick मा पढाइको नम्बर र confidence मा "
+            + "० देखि १ सम्मको विश्वास देऊ।")
+        return lines.joined(separator: "\n")
+    }
+
+    /// Judges one batch against the RESIDENT handle. NEVER loads a model —
+    /// the judge's contract (a second 3.4 GB load is the [VOICE-OOM] class
+    /// of bug): no resident handle ⇒ abstention verdicts, the same
+    /// fallback the caller takes for an unavailable judge.
+    func judgeCandidates(_ batch: JudgeBatch,
+                         completion: @escaping @Sendable ([JudgeVerdict]) -> Void) {
+        func abstain() {
+            completion(batch.items.map {
+                JudgeVerdict(tokenRange: $0.tokenRange, pick: nil, confidence: 0)
+            })
+        }
+        guard isAvailable else {
+            abstain()
+            return
+        }
+        #if canImport(LLM)
+        // [CHAT-SAMPLING] (T-167) The judge decodes on the same ONE
+        // resident handle, and its verdicts must be as deterministic as a
+        // command — so it re-asserts determinism ITSELF (temperature 0 +
+        // the fixed seed, under its own pick schema) instead of inheriting
+        // whatever the previous turn left behind. Without this, a judge
+        // run following a chat turn would sample at 0.3 — the same leak
+        // the command path's re-assertion exists to close (design-l1
+        // §5.2). Recorded first, like every decode path.
+        let parameters = ChatSampling.deterministicParameters(
+            schema: LlamaGrammar.judgeJSONSchema)
+        lastDecodeParameters = parameters
+        // The seam mirrors the real call: the same prompt and schema reach
+        // the override, so a test observes what llama.cpp is handed.
+        if let seam = decodeSeam() {
+            Task {
+                do {
+                    let output = try await seam(
+                        Self.judgePrompt(for: batch), parameters.schema,
+                        parameters.temperature)
+                    guard !output.isEmpty else {
+                        emit("judge_empty_output", outcome: "failure")
+                        abstain()
+                        return
+                    }
+                    emit("judge_done", outcome: "success")
+                    completion(Self.parseJudgeVerdicts(output, for: batch))
+                } catch {
+                    abstain()
+                }
+            }
+            return
+        }
+        guard let llm = llmInstance as? LLM else {
+            abstain()
+            return
+        }
+        let formattedPrompt = Self.formattedPrompt(
+            prompt: Self.judgePrompt(for: batch),
+            system: Self.judgeSystemPrompt,
+            format: Self.chatFormat(for: preferredBaseId))
+        Task {
+            enum JudgeOutcome { case success(String); case failed; case timedOut }
+            await withTaskGroup(of: JudgeOutcome.self) { group in
+                group.addTask {
+                    do {
+                        self.lifecycle.beginUse(of: .brain)
+                        defer {
+                            self.lifecycle.endUse(of: .brain)
+                            self.lifecycle.noteUse(of: .brain)
+                        }
+                        // [CHAT-SAMPLING] (T-167) Determinism goes back on
+                        // the resident handle, awaited, immediately before
+                        // the judge's own decode (see the note above).
+                        await ChatSampling.apply(parameters, to: llm.core)
+                        let output = try await llm.core.generateWithConstraints(
+                            from: formattedPrompt,
+                            jsonSchema: parameters.schema)
+                        return output.isEmpty ? .failed : .success(output)
+                    } catch {
+                        return .failed
+                    }
+                }
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: UInt64(
+                        self.config.judgeTimeoutSeconds * 1_000_000_000))
+                    llm.stop()
+                    return .timedOut
+                }
+                let result = await group.next() ?? .timedOut
+                group.cancelAll()
+                switch result {
+                case .success(let output):
+                    emit("judge_done", outcome: "success")
+                    completion(Self.parseJudgeVerdicts(output, for: batch))
+                case .failed:
+                    emit("judge_empty_output", outcome: "failure")
+                    abstain()
+                case .timedOut:
+                    emit("judge_timeout", outcome: "failure")
+                    abstain()
+                }
+            }
+        }
+        #else
+        emit("judge_unavailable", outcome: "info")
+        abstain()
+        #endif
+    }
+
+    /// The judge's system line — its own, not the command/chat one, whose
+    /// "spoken reply" instruction would be wrong for a pick. Deliberately
+    /// short: the on-device context is 1,024 tokens.
+    private static let judgeSystemPrompt = """
+    You are Sahayak, checking one misheard word in a sentence. Reply with ONLY \
+    one JSON object (no fences, no other text).
+    """
+
+    /// Decodes the judge's JSON into one verdict per batch item, in order.
+    /// A malformed answer, a missing pick or an out-of-range pick is an
+    /// ABSTENTION for that item — never an invention.
+    static func parseJudgeVerdicts(_ raw: String,
+                                   for batch: JudgeBatch) -> [JudgeVerdict] {
+        guard let data = raw.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any],
+              let picks = object["picks"] as? [[String: Any]] else {
+            return batch.items.map {
+                JudgeVerdict(tokenRange: $0.tokenRange, pick: nil, confidence: 0)
+            }
+        }
+        return batch.items.enumerated().map { index, item in
+            guard index < picks.count,
+                  let rawPick = picks[index]["pick"] as? Int,
+                  item.top.indices.contains(rawPick) else {
+                return JudgeVerdict(tokenRange: item.tokenRange, pick: nil,
+                                    confidence: 0)
+            }
+            let confidence = (picks[index]["confidence"] as? Double) ?? 0
+            return JudgeVerdict(tokenRange: item.tokenRange,
+                                pick: rawPick,
+                                confidence: min(max(confidence, 0), 1))
+        }
+    }
+
+    /// Which of the brain's two response shapes a turn is asked for. A
+    /// shape changes the prompt, the decode schema, the system slot and the
+    /// decode PARAMETERS — every other part of the turn below (sanitise,
+    /// guard, infer, gate, trace, events) is shared, so the two shapes
+    /// cannot drift on the parts that are not the shape itself.
+    private enum ResponseShape {
+        /// The shipped intent-slot contract.
+        case command
+        /// The free-text conversational reply.
+        case chat
+
+        /// [CHAT-SAMPLING] (T-167) The decode parameters this shape's turn
+        /// RE-ASSERTS on the resident handle immediately before it decodes:
+        /// temperature, seed and the GBNF schema, as one value from
+        /// `ChatSampling`'s named constants. Per turn, never set once — the
+        /// handle persists across turns, so the command shape's temperature
+        /// 0 goes back on after a chat turn at 0.3 (FR-CNR-004, design-l1
+        /// §5.2). The command value is the shipped invariant set
+        /// (`OnDeviceSampling` + the command schema); the chat value is the
+        /// reviewed chat temperature at the same fixed seed.
+        var decodeParameters: ChatSampling.DecodeParameters {
+            switch self {
+            case .command: return ChatSampling.commandParameters
+            case .chat: return ChatSampling.chatParameters
+            }
+        }
+
+        /// The temperature this shape's decode asks for (design-l1 OD-1).
+        var temperature: Float { decodeParameters.temperature }
+
+        /// The schema llama.cpp's sampler decodes against — derived from
+        /// `decodeParameters.schema`, so the parameters record always names
+        /// the schema the decode really ran under (one source, no drift).
+        var schema: String { decodeParameters.schema }
+
+        /// [CHAT-PERSONA] (T-167) The system slot for THIS shape. The
+        /// COMMAND shape keeps the shipped `chatSystemPrompt` bytes — its
+        /// assembled prompt stays byte-identical, so its temp-0 output does
+        /// too — while the chat shape carries the spec persona
+        /// (`chatPersonaSystemPrompt`). One shape changes its persona; the
+        /// other is pinned.
+        var systemPrompt: String {
+            switch self {
+            case .command: return LlamaCommandInterpreter.chatSystemPrompt
+            case .chat: return LlamaCommandInterpreter.chatPersonaSystemPrompt
+            }
+        }
+
+        func prompt(transcript: String, context: InterpreterContext) -> String {
+            switch self {
+            case .command: return IntentPrompt.build(transcript: transcript,
+                                                     context: context)
+            case .chat: return IntentPrompt.buildChat(transcript: transcript,
+                                                      context: context)
+            }
+        }
+
+        /// What the trace row calls an ACCEPTED answer of this shape. A
+        /// chat reply is not a command, and the trace is read by humans.
+        var acceptedDecision: String {
+            switch self {
+            case .command: return "command"
+            case .chat: return "chat"
+            }
+        }
+    }
+
+    /// The confidence an answer of `shape` must clear to be ACCEPTED.
+    /// Commands keep `confidenceThreshold` — their gate is untouched.
+    /// The chat shape is gated by its own floor, which is a different
+    /// question from the acceptance gate a command faces: see
+    /// `Config.chatConfidenceFloor` and the completion in `runTurn`.
+    private func acceptanceThreshold(for shape: ResponseShape) -> Double {
+        switch shape {
+        case .command: return config.confidenceThreshold
+        case .chat: return config.chatConfidenceFloor
+        }
+    }
+
+    private func runTurn(transcript: String,
+                         context: InterpreterContext,
+                         shape: ResponseShape,
+                         completion: @escaping (InterpretedCommand?) -> Void) {
         // [LAT-EVIDENCE] A fresh attempt starts clean — the failure
         // reason belongs to the LAST attempt only.
         lastInferenceFailureReason = nil
         guard isAvailable else {
+            // [PIPELINE-TRACE] The picker never ran — no cached brain
+            // model. Both of its stages are marked off (never omitted)
+            // with the reason the row can act on.
+            traceRecorder?.recordOff([.pickerPrompt, .pickerInference],
+                                     reason: "picker_unavailable")
             DispatchQueue.main.async { completion(nil) }
             return
         }
         // Sanitise BEFORE the transcript reaches any prompt string
-        // (NFR-013 / review H3 / spec §5.2).
+        // (NFR-013 / review H3 / spec §5.2). Shared by both shapes — the
+        // chat prompt is a prompt string like any other.
         let clean = InputSanitiser.sanitise(transcript, level: .quarantine)
         guard !clean.isEmpty else {
+            // [PIPELINE-TRACE] Same shape as the encoder's abstention
+            // token for the same condition: there is nothing to prompt
+            // with.
+            traceRecorder?.recordOff([.pickerPrompt, .pickerInference],
+                                     reason: "empty_after_sanitise")
             DispatchQueue.main.async { completion(nil) }
             return
         }
         // Plugin fragments are deliberately NOT composed here — the
         // on-device context (1,024 tokens) cannot fit them (see the
         // pluginRegistry property docs); `IntentPrompt.build` defaults to
-        // no plugins.
+        // no plugins (and the chat shape has none to compose).
         //
         // [TURN-TIMING-BREAKDOWN] `picker_prompt_build` — the prompt
         // construction only (sanitisation above is deliberately outside
         // the span: it is a guard keystone, not prompt assembly, and it
         // runs before the transcript can reach any prompt string).
+        // [PIPELINE-TRACE] The row opens on the sanitised input and
+        // closes with the built prompt's SIZE — an estimate, because no
+        // tokenizer in this process measures the llama.cpp prompt (see
+        // `PipelineTraceSummary.estimatedPromptTokenCount`) — which is
+        // the number that explains an overflow.
+        let promptTrace = traceRecorder?.start(
+            .pickerPrompt,
+            input: PipelineTraceSummary.text(clean))
         let prompt = timingRecorder.measure(.pickerPromptBuild) {
-            IntentPrompt.build(transcript: clean, context: context)
+            shape.prompt(transcript: clean, context: context)
         }
+        promptTrace?.finish(
+            output: PipelineTraceSummary.estimatedPromptTokens(prompt),
+            decision: "built",
+            tokenCount: PipelineTraceSummary.estimatedPromptTokenCount(prompt))
 
         inferenceQueue.async { [weak self] in
             // [TURN-TIMING-BREAKDOWN] `picker_inference` — opened when the
@@ -475,10 +1094,32 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             // llama.cpp model load lands inside this span — the same
             // honest conflation the tracer's coarse `llm` stage carries.
             let inferenceSpan = self?.timingRecorder?.start(.pickerInference)
-            self?.runInference(prompt: prompt) { json in
+            // [PIPELINE-TRACE] The FINAL LLM's own row: same edges as the
+            // timing span above, so the milliseconds the card shows for
+            // `picker LLM` are exactly the ones the breakdown reports.
+            let traceSpan = self?.traceRecorder?.start(
+                .pickerInference,
+                input: PipelineTraceSummary.estimatedPromptTokens(prompt))
+            self?.runInference(prompt: prompt, shape: shape) { json in
                 inferenceSpan?.finish()
                 let parsed = Self.parse(json: json)
-                if let p = parsed, p.confidence < (self?.config.confidenceThreshold ?? 0.7) {
+                let failure = self?.lastInferenceFailureReason
+                let threshold = self?.acceptanceThreshold(for: shape) ?? 0.7
+                // [CHAT] Only the COMMAND shape abstains on low confidence
+                // here. A chat decode always completes — below its floor it
+                // is the delivery layer's honest line, not a fall-through
+                // to the command ladder (see `Config.chatConfidenceFloor`),
+                // so the trace names that outcome rather than reporting an
+                // abstention that did not happen.
+                let chatFloor = shape == .chat ? self?.config.chatConfidenceFloor : nil
+                traceSpan?.finish(
+                    output: Self.traceSummary(of: parsed, failure: failure),
+                    decision: Self.traceDecision(of: parsed, threshold: threshold,
+                                                 failure: failure,
+                                                 accepted: shape.acceptedDecision,
+                                                 chatFloor: chatFloor),
+                    tokenCount: PipelineTraceSummary.estimatedPromptTokenCount(prompt))
+                if let p = parsed, shape == .command, p.confidence < threshold {
                     // Below the threshold — treat as "not confident" so the
                     // router falls back to keyword matching.
                     DispatchQueue.main.async { completion(nil) }
@@ -562,6 +1203,17 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     static let measuredFramings: [ModelID: ChatFormat.Kind] = [
         // — offered picker brains (ModelCatalog.availableBrainEntries) —
         ModelCatalog.intentQwen4BSlotCanon: .raw,   // inherited (see above)
+        // [CNR T-184] The v17 chat-aware retrain of the seed-43 1.7B: the
+        // same `qwen-s43-merged` base lineage and the same training
+        // pipeline (train_qlora.py) as the seed-43 row below, so its row
+        // is INHERITED from that measurement — `.qwen3`, the one fine-tune
+        // the app-faithful check put the official Qwen3 wrap ahead of the
+        // bare shape for. Inherited-row precedent: `intentQwen4BSlotCanon`
+        // above. Re-run `framing_check.py` on the v17 artifact when it is
+        // published and replace this row with its own measurement; the
+        // offered-brain test requires SOME row, and the LLaMA 3.2 fallback
+        // would mis-frame it.
+        ModelCatalog.intentQwenS43ChatV17: .qwen3,  // inherited (see above)
         ModelCatalog.intentQwenS43:   .qwen3,
         ModelCatalog.qwen4BNepali:    .raw,
         ModelCatalog.qwen3_4BInstruct: .qwen3,
@@ -692,7 +1344,10 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             completion(.failed(reason: "model_not_cached"))
             return
         }
-        if generateOverride != nil {
+        // [CHAT-SAMPLING] (T-167) EITHER seam stands in for the whole
+        // runtime — the parameter-carrying variant included — so a seam
+        // test reports `.ready` without touching llama.cpp.
+        if generateOverride != nil || generateOverrideWithParameters != nil {
             completion(.ready)
             return
         }
@@ -702,7 +1357,10 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                 return
             }
             #if canImport(LLM)
-            switch self.loadLLMHandle() {
+            // [MODEL-WARDEN] The warm seam is not a turn: nothing is
+            // waiting, so it reserves as `.warm` and Step 2 may preempt it
+            // without touching a household's answer.
+            switch self.loadLLMHandle(purpose: .warm) {
             case .success:
                 completion(.ready)
             case .failure(let error):
@@ -723,10 +1381,16 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     private enum LLMLoadFailure: Error {
         case modelPathMissing
         case modelLoadFailed
+        /// [MODEL-LIFECYCLE] The residency budget refused the load: the
+        /// brain's non-pageable bytes exceed the app's remaining headroom.
+        /// A distinct reason so the dashboard can tell "we declined to
+        /// OOM" from "the GGUF is broken".
+        case insufficientHeadroom
         var reason: String {
             switch self {
             case .modelPathMissing: return "model_path_missing"
             case .modelLoadFailed: return "model_load_failed"
+            case .insufficientHeadroom: return "insufficient_headroom"
             }
         }
     }
@@ -736,13 +1400,94 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// seam and the first inference — whichever runs first wins the load
     /// and the other reuses the cached handle. Emits the honest failure
     /// event on each failure shape (the caller maps the reason).
-    private func loadLLMHandle() -> Result<LLM, LLMLoadFailure> {
+    ///
+    /// `purpose` is what the reservation is recorded as: `.warm` from the
+    /// warm seam (nothing is waiting), `.voiceTurn` from the first
+    /// inference (the household is). Step 1 only records the difference;
+    /// Step 2's priority ladder is what acts on it.
+    private func loadLLMHandle(purpose: ReservationPurpose = .voiceTurn)
+    -> Result<LLM, LLMLoadFailure> {
         if let existing = llmInstance as? LLM {
             return .success(existing)
         }
         guard let modelURL = modelStore.path(for: preferredBaseId) else {
             emit("model_path_missing", outcome: "failure")
             return .failure(.modelPathMissing)
+        }
+        // [VOICE-OOM] B' (2026-10-10) — the terminal refusal, before
+        // anything is registered or reserved. Under fresh kernel pressure
+        // (or a catastrophically low ceiling), a load whose live bytes
+        // cannot clear the app's CURRENT free memory plus the page-in
+        // margin is refused outright: `available` is the real probe, not
+        // the ledger's class budget — the field device's class said room
+        // while the kernel had ~30 MB left, and that is the load this
+        // hardening exists to stop. `PressureBrainPickResolver` owns the
+        // arithmetic so this gate and the per-turn pick can never
+        // disagree. The caller sees the same `.insufficientHeadroom` a
+        // denied reservation returns, so the router's existing
+        // deterministic-reply fallback applies unchanged.
+        if PressureBrainPickResolver.pressureRefusesLoad(
+            reading: lifecycle.memoryPressureReading(),
+            availableProcessMemoryBytes: MemoryProbe.availableProcessMemoryBytes,
+            liveBytes: ModelLifecycleInventory.footprint(
+                for: .brain, modelID: preferredBaseId).liveBytes) {
+            emit("model_load_denied:pressure_low_headroom", outcome: "failure")
+            return .failure(.insufficientHeadroom)
+        }
+        // [MODEL-LIFECYCLE] The gate, at the single construction site.
+        // Reached from the warm seam AND the first inference (whichever
+        // runs first), both on `inferenceQueue` — so an eviction this
+        // triggers fires the OTHER slots' release paths off the main
+        // thread, which is why every registered release is documented
+        // queue-agnostic.
+        //
+        // This is the load the whole mechanism exists for: a 4B brain at
+        // ~3.4 GB live is over the 6 GB class budget on its own, and
+        // before this gate it could be constructed on top of a resident
+        // ~1.0 GB of non-pageable ANE STT weights — the exact pairing that
+        // killed the devices.
+        lifecycle.register(
+            slot: .brain,
+            modelID: preferredBaseId,
+            owner: self
+        ) { [weak self] in
+            self?.unloadModel()
+        }
+        //
+        // [MODEL-WARDEN] Step 1 — the gate is a two-phase reservation, not
+        // an admission. `prepareLoad` returned a decision and the ledger
+        // only counted `.brain` at `didLoad`, i.e. after this method had
+        // already built the handle; between the two the bytes were
+        // unaccounted for, which is how a second load on another slot was
+        // admitted against the same budget. The reservation holds the
+        // incoming `liveBytes` in the transient term for exactly that
+        // interval, and is retired by `commit` (handle built) or
+        // `abandon` (any failure below — the defer).
+        //
+        // The refusal contract is unchanged and still fail-fast: a load
+        // that cannot be reserved returns synchronously, before `LLM(...)`
+        // allocates anything, with the reason token the dashboard already
+        // reads. The token vocabulary is wider than the old
+        // `LoadDenialReason` — `budget_exhausted`, `load_in_flight` and
+        // `already_reserved` name why the bytes were not available — but
+        // every one of them still maps to the same caller-visible
+        // `.insufficientHeadroom`.
+        let reservation: ModelReservation
+        switch lifecycle.reserve(ModelLoadRequest(slot: .brain,
+                                                  modelID: preferredBaseId,
+                                                  owner: self,
+                                                  purpose: purpose)) {
+        case .success(let granted):
+            reservation = granted
+        case .failure(let denial):
+            emit("model_load_denied:" + denial.token, outcome: "failure")
+            return .failure(.insufficientHeadroom)
+        }
+        var committed = false
+        defer {
+            if !committed {
+                lifecycle.abandon(reservation, reason: .loadFailed)
+            }
         }
         // 1024-token context (default 2048): our prompts are ~150
         // tokens + 128 output, and the smaller n_batch halves
@@ -789,26 +1534,69 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             return .failure(.modelLoadFailed)
         }
         llmInstance = created
+        lifecycle.commit(reservation)
+        committed = true
+        lifecycle.didLoad(.brain, owner: self)
         emit("model_loaded", outcome: "success")
         return .success(created)
     }
     #endif
 
+    /// [CHAT-SAMPLING] (T-167) The decode seam a turn runs on, if one is
+    /// set. The parameter-carrying variant wins when BOTH are set — it is
+    /// the more specific observation, and a test that sets it must not be
+    /// silently served by the older two-argument closure; the legacy seam
+    /// (every pre-feature test and the judge suite) is adapted with the
+    /// turn's requested temperature, so its callers compile and behave
+    /// unchanged.
+    private func decodeSeam() -> ((String, String, Float) async throws -> String)? {
+        if let generateOverrideWithParameters { return generateOverrideWithParameters }
+        if let generateOverride {
+            return { prompt, schema, _ in try await generateOverride(prompt, schema) }
+        }
+        return nil
+    }
+
+    /// [CHAT-SAMPLING] (T-167) `shape` supplies THIS turn's whole decode
+    /// contract: the schema, the system slot and the sampling parameters.
+    /// The parameters are RECORDED in `lastDecodeParameters` first — before
+    /// the seam and before any real decode — and re-asserted on the
+    /// resident handle immediately before `generateWithConstraints`. Both
+    /// the schema and the parameters reach the seam and the real sampler
+    /// call alike, so what the seam observes is what llama.cpp is handed.
+    ///
+    /// `shape.systemPrompt` (not one fixed constant) picks the system slot:
+    /// the command shape's bytes are unchanged, the chat shape's carries
+    /// the spec persona (FR-CNR-002).
     private func runInference(prompt: String,
+                              shape: ResponseShape,
                               completion: @escaping (String?) -> Void) {
+        // [CHAT-SAMPLING] The record of what this turn ASKS FOR, written at
+        // the START of every decode path — the seam included, so a test
+        // sees the requested parameters with no model present. The command
+        // value here is the re-assertion the determinism guarantee rests
+        // on: whatever the previous turn left on the handle, this turn's
+        // record (and the handle write below) put its own parameters back.
+        let parameters = shape.decodeParameters
+        lastDecodeParameters = parameters
         // Test seam — mirrors `LocalIntentInterpreter.generateOverride`.
         // The returned string still runs through the SAME empty-output
         // guard as the real runtime below, so the seam cannot mask the
         // overflow failure mode it exists to test around.
-        if let generateOverride {
+        if let seam = decodeSeam() {
             Task {
                 do {
                     // [NO-GIBBERISH] (2026-09-07) The seam receives the
                     // same schema the real runtime call receives below, so
                     // the grammar-wiring tests can assert the schema
                     // reaches the point of the llama.cpp call.
-                    let out = try await generateOverride(prompt,
-                                                         LlamaGrammar.commandJSONSchema)
+                    // [CHAT-SAMPLING] (T-167) The parameter-carrying seam
+                    // also observes the temperature the turn REQUESTED, so
+                    // "the chat turn asked for 0.3, and the command turn
+                    // after it asked for 0 again" is assertable without a
+                    // handle in the test process.
+                    let out = try await seam(prompt, parameters.schema,
+                                             parameters.temperature)
                     if out.isEmpty {
                         emit("inference_empty_output", outcome: "failure")
                         completion(nil)
@@ -848,16 +1636,21 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         // per-model template — LLaMA 3.2 and Qwen3 schemes both live
         // here). The runtime's `generateWithConstraints` consumes the raw
         // string, exactly like `getCompletion(from:)` did.
+        // [CHAT-PERSONA] (T-167) The system slot comes from the SHAPE: the
+        // command shape formats the shipped constant (unchanged bytes), the
+        // chat shape the spec persona.
         let formattedPrompt = Self.formattedPrompt(
             prompt: prompt,
-            system: Self.chatSystemPrompt,
+            system: shape.systemPrompt,
             format: format
         )
 
         Task {
             // [NO-GIBBERISH] (2026-09-07) Grammar-constrained generation:
-            // `LlamaGrammar.commandJSONSchema` is converted by llama.cpp to
-            // a GBNF grammar and the sampler is chained through it (see
+            // the turn's decode schema (`parameters.schema` — the canonical
+            // command schema, or the chat schema on a chat turn) is converted by
+            // llama.cpp to a GBNF grammar and the sampler is chained
+            // through it (see
             // `LLMCore.generateWithConstraints`) — the canonical JSON
             // contract is STRUCTURALLY enforced at decode time, and the
             // reply text is constrained to a JSON string (no quotes,
@@ -874,9 +1667,34 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             await withTaskGroup(of: InferenceOutcome.self) { group in
                 group.addTask {
                     do {
+                        // [TRUNCATION-FIX] Pin the resident handle for
+                        // the whole generation — a memory-pressure sweep
+                        // must never pull it out from under the live
+                        // decode (the pinning seam existed, nothing
+                        // production ever called it).
+                        self.lifecycle.beginUse(of: .brain)
+                        defer {
+                            self.lifecycle.endUse(of: .brain)
+                            self.lifecycle.noteUse(of: .brain)
+                        }
+                        // [CHAT-SAMPLING] (T-167) THIS turn's parameters
+                        // go back on the ONE resident handle, AWAITED,
+                        // immediately before the decode — the actor runs
+                        // the write and `generateWithConstraints` in
+                        // order, so no other path can interleave a field
+                        // change mid-decode. This is the re-assertion a
+                        // command turn performs after a chat turn at 0.3
+                        // (FR-CNR-004); it is deliberately NOT skipped
+                        // when the values look unchanged (see
+                        // `ChatSampling.apply`). The write also rebuilds
+                        // the sampler chain, which restarts the dist RNG
+                        // at the fixed seed — the same prompt therefore
+                        // decodes byte-identically on turn N and turn 1
+                        // (NFR-CNR-001).
+                        await ChatSampling.apply(parameters, to: llm.core)
                         let output = try await llm.core.generateWithConstraints(
                             from: formattedPrompt,
-                            jsonSchema: LlamaGrammar.commandJSONSchema)
+                            jsonSchema: parameters.schema)
                         return output.isEmpty ? .failed : .success(output)
                     } catch {
                         return .failed
@@ -925,6 +1743,56 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         emit("inference_unavailable", outcome: "info")
         completion(nil)
         #endif
+    }
+
+    // MARK: - Pipeline trace ([PIPELINE-TRACE]) summaries
+
+    /// `set_reminder 0.82 reply=…` — the FINAL LLM's answer, action and
+    /// confidence first and the spoken reply behind it (bounded by
+    /// `PipelineTraceSummary.text`). The card may name the reply — it is
+    /// the same on-device posture as the "Last correction" line — while
+    /// the RELEASE console line beside it carries the decision only.
+    static func traceSummary(of command: InterpretedCommand?,
+                             failure: String?) -> String {
+        guard let command else {
+            guard let failure else { return "no command" }
+            return PipelineTraceSummary.text("no command (\(failure))")
+        }
+        var text = "\(command.action.rawValue) "
+            + "\(PipelineTraceSummary.score(command.confidence))"
+        if !command.reply.isEmpty { text += " reply=\(command.reply)" }
+        return PipelineTraceSummary.text(text)
+    }
+
+    /// `command` / `abstained(low_confidence)` / `failed(<reason>)` —
+    /// closed vocabulary: the picker's own threshold gate applied, or the
+    /// runtime's failure token when nothing parsed. Token-only, because a
+    /// Release console prints this field.
+    /// `accepted` names what an accepted answer of THIS turn's shape is —
+    /// "command" (the default, and every pre-chat caller) or "chat". A
+    /// chat reply reported as a "command" in the trace card would misread
+    /// the turn; the abstention and failure vocabulary is shared, because
+    /// those outcomes are the same for both shapes.
+    /// `chatFloor` — non-nil only on a CHAT turn (the shape's floor).
+    /// A chat decode below it is not an abstention: the router speaks the
+    /// honest low-confidence line, so the trace names that instead of
+    /// `abstained(low_confidence)`, which would send whoever reads the row
+    /// looking for a command-ladder fallback that never ran. Command turns
+    /// pass nil and keep the labels they have always had.
+    static func traceDecision(of command: InterpretedCommand?,
+                              threshold: Double,
+                              failure: String?,
+                              accepted: String = "command",
+                              chatFloor: Double? = nil) -> String {
+        if let command {
+            if let chatFloor, command.confidence < chatFloor {
+                return "low_confidence(honest_line)"
+            }
+            return command.confidence < threshold
+                ? "abstained(low_confidence)" : accepted
+        }
+        guard let failure else { return "abstained(no_command)" }
+        return "failed(\(failure))"
     }
 
     // MARK: - Parse
@@ -1066,3 +1934,24 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         ))
     }
 }
+
+#if canImport(LLM)
+/// [CHAT-SAMPLING] (T-167) The resident handle IS llama.cpp's `LLMCore`
+/// actor, and that is what makes the per-turn override both safe and
+/// ordered: the awaited write rides the actor's serialized execution and is
+/// completed before `generateWithConstraints` is enqueued on the same actor
+/// (design-l1 §5.2). The wrapper's `LLM.temp` setter is the
+/// `configure {}`-chained, fire-and-forget alternative and is deliberately
+/// NOT used — it cannot be awaited before the decode.
+///
+/// `setParameters` rebuilds the sampler chain (penalties → top-k → top-p →
+/// temp → dist(seed)) on every write, which is also what makes a repeated
+/// prompt decode byte-identically: each turn's decode restarts the dist RNG
+/// at the fixed seed instead of continuing the previous turn's stream
+/// (NFR-CNR-001).
+extension LLMCore: ChatSampling.ParameterHandle {
+    func setDecodeParameters(temperature: Float, seed: UInt32) async {
+        setParameters(seed: seed, temp: temperature)
+    }
+}
+#endif

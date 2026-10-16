@@ -20,16 +20,18 @@ import AVFoundation
 //     caller: no audio IO, no session touches — unit-testable with a
 //     fake engine.
 //  3. `AckFastLanePlayer` — plays the cached WAV directly through
-//     AVAudioPlayer. Session handling is the same world as the bell
-//     player's (TimerAlarmBellPlayer): begin a playback-optimized mode
-//     before playing, restore exactly once when playback settles.
-//     Deliberately the VOICE-reply seam (`ResponsePlaybackModeSeam`)
-//     rather than the bell's save/restore-category switch: the bell
-//     owns the phone (mic unavailable is fine), while an ack is a voice
-//     reply inside the always-on loop — switching the shared session to
-//     `.playback` mid-turn would strand the mic. The seam is
-//     depth-counted (AudioSessionManager), so an ack overlapping the
-//     result utterance's playback nests safely.
+//     AVAudioPlayer ON THE CAPTURE PRESET. The voice-reply seam
+//     (`ResponsePlaybackModeSeam`) is deliberately NOT opened around
+//     the ack ([ACK-MIC-CONTINUITY], 2026-10-14): the seam's restore
+//     became a full deactivate → voice-processing re-enable → engine
+//     restart cycle when the loud-reply category switch shipped, and
+//     around a ~500 ms ack that cost is a live gap between "हजुर दाई"
+//     and listening mode — the elder speaks inside the gap and the
+//     head of the utterance is cut off. The ack plays quieter (the
+//     capture preset's voice gain staging vs the `.playback`
+//     category), but the sample-level gain boost still applies, and
+//     the mic never closes. The result utterance keeps the seam — its
+//     restore cost hides behind the reply itself.
 //
 // Warm-time build: after the warm-start plan's TTS step settles (the
 // engine exists), `AppCoordinator` asks the speaker seam
@@ -46,15 +48,23 @@ import AVFoundation
 //  - A locale switch after warm misses the same way. English-variant
 //    acks on a Nepali UI (or vice versa) are not pre-built (active
 //    locale only, per the plan).
-//  - If the ack is still playing when the result utterance's synthesis
-//    begins, PiperVoiceSpeaker's per-utterance cancel ends the playback
-//    seam; the depth counter restores the capture mode for the ack's
-//    tail. The window is bounded by the LLM round-trip (seconds), so
-//    the overlap is vanishing in practice.
+//  - [ACK-MIC-CONTINUITY] The ack plays outside the seam, so an ack
+//    still playing when the result utterance starts can no longer
+//    disturb the depth-counted seam — the reply owns the seam alone.
+//    PiperVoiceSpeaker's per-utterance cancel ends only its own
+//    playback seam.
 //  - Cache files are regenerated per warm; orphaned files from old
 //    voices/locales are inert (a miss, not a wrong-voice ack) — the
 //    cache is keyed, so a stale file can never play for the wrong
 //    voice.
+//  - [VOLUME-BOOST] The spoken-reply volume setting applies to the ack
+//    as well (it is the assistant speaking): at any non-100 % setting
+//    the player transforms the cached WAV into a temp copy before
+//    playing it — a file read + write on a path whose budget is ~200 ms,
+//    single-digit milliseconds for the short ack clips, and 0 for the
+//    default 100 % setting. The cached file itself is never rewritten
+//    (it is shared with later turns), and a transform failure plays the
+//    unprocessed file rather than a missed fast lane.
 
 // MARK: - Router seam
 
@@ -268,17 +278,28 @@ final class AckFastLanePlayer: NSObject, PreAckPlaying, AVAudioPlayerDelegate {
     private let observabilityBus: ObservabilityBus
     /// Injectable for tests; production builds the real AVAudioPlayer.
     private let playerFactory: (URL) throws -> AVAudioPlayer
+    /// [VOLUME-BOOST] Source of the spoken-reply output volume. Injected
+    /// so tests can pin a value; production reads the persisted setting
+    /// AT PLAYBACK TIME (a Settings change applies from the next ack).
+    private let gainPercentProvider: () -> Int
     private var player: AVAudioPlayer?
     private var playbackPending = false
+    /// [VOLUME-BOOST] The gained temp copy this playback owns (nil when
+    /// the ack played at 100 % — the default path never makes one).
+    private var gainedFile: URL?
 
     init(cache: AckAudioCache,
          observabilityBus: ObservabilityBus,
          playerFactory: @escaping (URL) throws -> AVAudioPlayer = {
              try AVAudioPlayer(contentsOf: $0)
+         },
+         gainPercentProvider: @escaping () -> Int = {
+             VoiceOutputVolume.percent()
          }) {
         self.cache = cache
         self.observabilityBus = observabilityBus
         self.playerFactory = playerFactory
+        self.gainPercentProvider = gainPercentProvider
         super.init()
     }
 
@@ -291,24 +312,48 @@ final class AckFastLanePlayer: NSObject, PreAckPlaying, AVAudioPlayerDelegate {
         // A second ack while one still plays: the previous settles
         // first (its finished note fires), then the new one starts.
         cancel()
+        // [VOLUME-BOOST] A pre-ack is the assistant speaking too, so it
+        // gets the same gain + limiter as the reply that follows — an
+        // ack that stayed at 100 % while the reply boomed would read as a
+        // defect to the hard-of-hearing user this setting exists for.
+        // 100 % (the default) hands the cached file straight to the
+        // player: no temp copy, no extra IO — the fast lane's latency
+        // budget is untouched for everyone who has not moved the slider.
+        // A processing failure plays the cached file as-is (never worse).
+        let playbackURL = gainAdjusted(url)
+        gainedFile = playbackURL == url ? nil : playbackURL
         do {
             let setupStart = CFAbsoluteTimeGetCurrent()
-            let newPlayer = try playerFactory(url)
+            let newPlayer = try playerFactory(playbackURL)
             newPlayer.delegate = self
             newPlayer.volume = 1.0
             newPlayer.prepareToPlay()
             let setupMs = Int((CFAbsoluteTimeGetCurrent() - setupStart) * 1000)
             player = newPlayer
             playbackPending = true
-            // [LAT-M2] Voice-reply playback mode for the ack's duration
-            // (depth-counted — nests with the result utterance's own
-            // begin/end).
-            ResponsePlaybackModeSeam.begin()
-            newPlayer.play()
+            // [ACK-MIC-CONTINUITY] (2026-10-14) The ack deliberately does
+            // NOT open the voice-reply playback seam. The seam's restore
+            // is a full deactivate → voice-processing re-enable → engine
+            // restart cycle (added for the loud-reply category switch),
+            // and around a ~500 ms ack that cost shows up as a live gap
+            // between "हजुर दाई" and listening mode — the elder starts
+            // speaking inside the gap and the utterance's head is cut
+            // off. The ack therefore plays on the capture preset (the
+            // mic never closes); the sample-level gain boost still
+            // applies. The loud-category benefit is kept for the result
+            // utterance, where the gap hides behind the reply itself.
+            if !newPlayer.play() {
+                // play() can return false (broken file, session race):
+                // no delegate callback ever fires, so settle here — the
+                // fast lane must not hang the turn.
+                settle()
+                return false
+            }
             emit("ack_cache_hit", outcome: "success",
                  durationMs: setupMs, spec: spec)
             return true
         } catch {
+            discardGainedFile()
             emit("ack_player_failed", outcome: "failure",
                  errorCode: "\((error as NSError).domain)", spec: spec)
             return false
@@ -326,8 +371,31 @@ final class AckFastLanePlayer: NSObject, PreAckPlaying, AVAudioPlayerDelegate {
     private func settle() {
         guard playbackPending else { return }
         playbackPending = false
-        ResponsePlaybackModeSeam.end()
+        discardGainedFile()
+        // [ACK-MIC-CONTINUITY] No seam teardown — the ack never left the
+        // capture preset, so the mic is already live the moment the
+        // finished note fires (see playCachedAck).
         onPlaybackFinished?()
+    }
+
+    /// [VOLUME-BOOST] The URL this ack plays from: the cached file at
+    /// 100 % (the default — identical to the pre-task behavior), else a
+    /// gained+limited temp copy. Honest failure: if the transform fails
+    /// the cached file plays unprocessed — a quieter ack, never a silent
+    /// one, and never a missed fast lane.
+    private func gainAdjusted(_ url: URL) -> URL {
+        let percent = gainPercentProvider()
+        // [VOLUME-BASELINE] Every setting processes (the fold removed
+        // the raw reference); the processor's own gain==1 guard is
+        // unreachable, so the cached file is always gained+limited.
+        return (try? SpokenReplyGainProcessor.playbackURL(for: url, percent: percent)) ?? url
+    }
+
+    /// Removes the gained temp copy (idempotent; a no-op at 100 %).
+    private func discardGainedFile() {
+        guard let gainedFile else { return }
+        try? FileManager.default.removeItem(at: gainedFile)
+        self.gainedFile = nil
     }
 
     // MARK: AVAudioPlayerDelegate

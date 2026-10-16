@@ -11,7 +11,6 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 DERIVED="build/DerivedDataCli"
-BUNDLE_ID="com.elderlyassistant.app"
 
 echo "=== Elderly Assistant — build + install to iPhone ==="
 
@@ -48,6 +47,20 @@ if [ ! -d "$APP_PATH" ]; then
     echo "ERROR: build product not found at $APP_PATH"
     exit 1
 fi
+
+# The artifact is the source of truth for its own identity: launch exactly
+# what was just installed. A hardcoded id went stale when the product was
+# rebranded (`com.elderlyassistant.app` → `ai.voicebridge.senior.assistant`):
+# the install used the built app and succeeded, the launch asked for the old
+# id and died with CoreDeviceError 10002 "not installed" (Anzaan deploy,
+# 2026-10-10 — the same failure a hardcoded NEW id would repeat at the next
+# rename).
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP_PATH/Info.plist")"
+if [ -z "$BUNDLE_ID" ]; then
+    echo "ERROR: could not read CFBundleIdentifier from $APP_PATH/Info.plist"
+    exit 1
+fi
+echo "      bundle id: $BUNDLE_ID"
 
 echo "[4/4] Installing and launching..."
 xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH"

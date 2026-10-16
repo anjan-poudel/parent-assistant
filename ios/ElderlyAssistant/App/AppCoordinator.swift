@@ -2,6 +2,10 @@ import Foundation
 import AVFoundation
 import BackgroundTasks
 import Combine
+// CryptoKit (T-157): the face token is a sha256 prefix of resolved
+// system photo bytes — same hashing shape as
+// `SystemContactLinkService.photoCacheKey`, one prefix length.
+import CryptoKit
 import UserNotifications
 import UIKit
 import MessageUI
@@ -9,6 +13,311 @@ import SwiftUI
 // [TIMER-ALARM] AlarmKit (iOS 26) — used only inside `@available`-gated
 // code; the import itself is inert on older deployment targets.
 import AlarmKit
+
+// MARK: - Medication acknowledgement clarification walk (C4, IF-8)
+//
+// [MED-ACK-WALK] The state half of the clarification walk (T-013; T-014
+// wires the router to it). When the resolver (T-004) answers an
+// acknowledgement with `.ambiguous(ordered:)` — the elder's words did not
+// identify exactly ONE pending reminder — the walk asks, in the sanctioned
+// copy, until the elder's own answer identifies one entrance or the walk
+// ends. The container contract this file's walk half must uphold:
+//
+// - The walk RECORDS NOTHING. It never calls `acknowledge`,
+//   `acknowledgeWithConfirmation` or `startConfirmationChallenge`; a
+//   resolving answer only ends the walk and HANDS the entry id back
+//   (`AckClarifyOutcome.resolved(entryId:)`), and the caller continues the
+//   shipped safety sequence (challenge → double-dose gate → record).
+// - The walk ALWAYS ends deterministically: an explicit `endAckClarification`,
+//   the response window expiring, or the walk's candidate set changing
+//   under it (a pending reminder it asks about disappearing) — every end
+//   path clears the state and cancels the timer.
+// - The copy is the sanctioned set only ("did you mean X?" / "did you mean
+//   X or Y?" / "OK, nothing was recorded." — the W0 catalog keys): never a
+//   leading question, never a numbered list, in either language.
+// - The walk mints no vocabulary: name matching reuses the resolver's
+//   `MedicationAckVocabulary` table, and yes/no arrives as booleans the
+//   router's SHIPPED classifiers already computed (`CommandRouter`
+//   `isYesResponse` / `isNoResponse`) — the walk never re-parses "हो" or
+//   "yes" itself.
+// - Main-confined, like every other pending-confirmation seam on the
+//   coordinator: the ops are called from the router's route (main) and
+//   the timer runs on the main queue.
+
+/// One in-flight clarification walk (design-l2 §C4).
+///
+/// `@Published private(set) var pendingAckClarification` on the coordinator
+/// holds this value; non-nil IS "a walk is open". The candidate list is the
+/// walk's question set, in the fixed order (`scheduledAt`, canonical
+/// medication name, entry id) — the same order `AckResolution.ambiguous`
+/// carries and `MedicationAckResolver` produces, never firing order,
+/// pending order or recency.
+struct AckClarificationState: Equatable {
+    /// The walk's candidates, in the fixed order. Filtered at
+    /// `beginAckClarification` to what was still pending at that instant;
+    /// never mutated afterwards (a candidate vanishing mid-walk ends the
+    /// walk — see `ackClarificationResponse`).
+    let candidates: [MedicationAckCandidate]
+
+    /// 0-based position of the single-form question ("did you mean X?").
+    var cursor: Int
+
+    /// True while the opening PAIR question ("did you mean X or Y?") is the
+    /// live one — only ever set for exactly two candidates. A "yes" falls
+    /// to the single form at cursor 0 (`pairAsked := false`); a "no" ends
+    /// the walk.
+    var pairAsked: Bool
+
+    /// When the response window closes (from `AckClarificationConfig`, the
+    /// one named home — never a literal). The expiry work item carries this
+    /// value and compares it against the live state, so a superseded or
+    /// already-ended walk's scheduled block can never end a newer walk.
+    let deadline: Date
+}
+
+/// How a walk ended (design-l2 §IF-8, closed set).
+///
+/// `.resolved` is the one end that leads anywhere: the caller continues
+/// the shipped safety sequence for the entry. Every other end records
+/// nothing, leaves the reminders untouched, and is reported honestly —
+/// `.rejected` / `.expired` also speak the ended line, `.denied` and
+/// `.bargedIn` stay silent because the utterance's own path (the refusal
+/// ladder / the acknowledgement path) speaks next.
+enum AckClarifyEndReason: Equatable {
+    /// The elder said "no" through the walk (the pair's "no", a single
+    /// form's "no", or the last candidate's "no" after advancing).
+    case rejected
+    /// The router's denial guard fired: the utterance is a refusal, it
+    /// falls through to the shipped ladder, which speaks its own line.
+    case denied
+    /// The response window closed with the walk unresolved.
+    case expired
+    /// A new acknowledgement barged in and ended the walk before being
+    /// handled by the shipped ack path.
+    case bargedIn
+    /// The elder's answer identified one candidate: the walk ends SILENT
+    /// (the caller speaks the challenge prompt) and the entry id travels
+    /// back in `AckClarifyOutcome.resolved(entryId:)`.
+    case resolved
+
+    /// The observability outcome for `medication_ack_clarify_ended`.
+    /// `.resolved` never reaches the emit seam (resolved ends through the
+    /// resolved path — design-l2 §5.2), but keeps a total mapping.
+    var observationOutcome: String {
+        switch self {
+        case .rejected: return "rejected"
+        case .denied: return "denied"
+        case .expired: return "expired"
+        case .bargedIn: return "bargedIn"
+        case .resolved: return "resolved"
+        }
+    }
+}
+
+/// What one `ackClarificationResponse` did, for the caller (T-014) and
+/// the suite. The walk has already spoken its own line when it spoke one:
+/// nothing here asks the caller to say anything except on `.resolved`,
+/// where the caller continues the shipped sequence
+/// (`startVoiceAckConfirmation(for:)` and its prompt).
+enum AckClarifyOutcome: Equatable {
+    /// The answer identified exactly one candidate; the walk ended
+    /// (silently) and the caller continues the shipped safety sequence
+    /// for this entry.
+    case resolved(entryId: UUID)
+    /// The pair answer "yes" narrowed the walk to the single form at
+    /// cursor 0; the single question was asked.
+    case narrowed
+    /// Three-or-more walk: "no" advanced the cursor and asked the next
+    /// candidate.
+    case advanced
+    /// The walk ended on this response; nothing was recorded.
+    case ended(reason: AckClarifyEndReason)
+    /// Neither a walk candidate's name nor a yes/no: the current
+    /// sanctioned question was asked again. Also the honest answer when
+    /// no walk is open (nothing to re-ask, nothing spoken).
+    case unanswered
+}
+
+// MARK: - Medication save plumbing (C12, IF-21) [MED-SLOT]
+//
+// T-017 (design-l2 C12/D1/D2/m-2): the slot-model save's request value.
+// The view half (C8) builds it from `MedicationEditorDraft.storedRows` —
+// `MedicationDoseRow` is declared in `MedicationEditorDraft.swift`
+// (T-009), this request is its first consumer — and the coordinator
+// resolves slot rows through the household mapping (C1), composes the
+// dose line (C2) and persists through the shipped `loadSchedule` path.
+// File scope, the T-013 walk-types convention: a value the save API
+// speaks, not coordinator state.
+
+/// One medication save request (design-l2 IF-21).
+///
+/// `rows` is the dose list in row order, all `.time` (the shipped clock
+/// model) or all `.slot` (the slot model). The MIXED shape is refused by
+/// the save gate (`settings.meds.slotRequired`) — one medicine's doses
+/// are stated in one model at a time, never resolved cell by cell. A
+/// slot-row request carries NO clock time: the row is a slot, the
+/// household mapping resolves it at save (never the view, never a raw
+/// time smuggled beside it).
+///
+/// `quantity` and `mealRelation` are the family's own statements
+/// (NFR-MSR-006 — nothing is inferred from them, and nothing else fills
+/// them): `quantity` feeds the stored dose line through `DoseLine` (C2)
+/// and is stored structured beside it; `mealRelation` is context the
+/// dose screen renders. `strength` is the free-text dose ("500 mg", the
+/// scan target). `photo` is the scan flow's picture — written to the
+/// medication `VisualAidStore` under each new entry's id, fail-soft,
+/// never a path and never bytes in the model.
+struct MedicationSaveRequest: Equatable {
+    var name: String
+    var strength: String?
+    var purpose: String?
+    var quantity: MedicationQuantity?
+    var mealRelation: MealRelation?
+    var rows: [MedicationDoseRow]
+    var photo: UIImage?
+}
+
+/// The honest outcome of one "Medicine times" save — the household
+/// mapping's ONE write path (`saveMedicationSlotClock`, IF-9; T-020).
+///
+/// A flat value, not a rule-carrying one: by the time this is built the
+/// coordinator has already judged everything (validate, then persist,
+/// then re-arm), so the settings card renders the fields and re-derives
+/// nothing.
+///
+/// The fields mirror IF-9's three outcomes and IF-12's report, losing no
+/// fact between the scheduler and the screen:
+///
+///  - `persisted == false` with `invalidSlot != nil`: validation (IF-2)
+///    refused the mapping BEFORE any write — the offending slot rides
+///    along, nothing was stored and nothing re-armed;
+///  - `persisted == false` with `persistenceFailed == true`: the store
+///    (IF-4) refused or failed the write — the stored mapping is
+///    unchanged and no re-arm ran;
+///  - `persisted == true`: the mapping is stored and
+///    `rearmForSlotClockChange` (IF-12) ran; its four facts travel back
+///    verbatim (m-1).
+///
+/// `lineKeys` is the honest line set for the settings card, as CATALOG
+/// KEYS (the house convention: the view resolves them in the active
+/// locale, and the tests pin the keys, never a rendered string) — one
+/// line per fact, failure first:
+///
+///  - `saveFailedLineKey` for a refused save or a failed re-arm write;
+///  - `unresolvedLineKey` when the re-arm left slots unresolved;
+///  - `savedLineKey` (exactly alone) for a clean commit.
+///
+/// Catalog gaps, flagged as T-012 follow-ups: no key exists for a
+/// count-bearing "saved and re-armed N" line, so the counts stay in the
+/// fields above and the line stays the plain saved key — this type never
+/// claims a number the catalog cannot speak — and the T-012
+/// `unresolvedLineKey` value carries NO placeholder, so no slot name is
+/// interpolated into its sentence; the unresolved slots ride the field
+/// for the caller and are deliberately not re-worded here.
+struct SlotClockSaveResult: Equatable {
+
+    /// True when the mapping itself was validated and persisted through
+    /// the C1 store. False covers both refusal points.
+    let persisted: Bool
+
+    /// The slot validation (IF-2) refused, or nil when validation passed.
+    let invalidSlot: MedicationSlot?
+
+    /// IF-12 report facts, verbatim — all zero/false when no re-arm ran.
+    let rearmedCount: Int
+    let keptLiveCount: Int
+    let unresolvedSlots: [MedicationSlot]
+    let persistenceFailed: Bool
+
+    /// The honest lines for the settings card, as catalog keys — never
+    /// empty (a save always says something).
+    let lineKeys: [String]
+
+    /// The failure line: a refused save, or a re-arm write that failed.
+    static let saveFailedLineKey = "settings.meds.times.saveFailed"
+    /// The unresolved line: the re-arm left slots without a determinate
+    /// time under the new mapping.
+    static let unresolvedLineKey = "settings.meds.times.unresolved"
+    /// The clean acknowledgment. Catalog gap (T-012 follow-up): the
+    /// closest existing key; a `settings.meds.times.saved` key is the
+    /// eventual home.
+    static let savedLineKey = "profile.saved"
+
+    /// The line set one re-arm report surfaces (m-1). Pure, so the suite
+    /// pins all four report shapes without staging device states: a
+    /// failed write is the failure line, a non-empty unresolved list the
+    /// unresolved line, and a clean pass the plain saved line.
+    static func lineKeys(for report: SlotClockRearmReport) -> [String] {
+        var keys: [String] = []
+        if report.persistenceFailed { keys.append(saveFailedLineKey) }
+        if !report.unresolvedSlots.isEmpty { keys.append(unresolvedLineKey) }
+        if keys.isEmpty { keys.append(savedLineKey) }
+        return keys
+    }
+}
+
+// MARK: - Medication evidence capture (IF-14, IF-24; T-021)
+
+/// What a photo being taken as evidence is FOR (design-l2 IF-14). The two
+/// cases are the whole safety model of the capture path: there is no
+/// `.create` case, so no photo can ever bring a record into existence —
+/// the record exists because the acknowledgement and confirmation chain
+/// completed, and a capture only ever HOLDS for or ATTACHES to one.
+enum EvidenceCaptureContext: Equatable {
+    /// The fired-dose screen: the elder photographs the dose BEFORE the
+    /// chain finalizes. The capture is held (IF-15) and the finalize that
+    /// writes the record claims it under the SAME identity (R-1(a)).
+    case pendingDose(entryId: UUID)
+    /// The record surface ("Taken today"): the record already exists —
+    /// the capture attaches to that log and to nothing else. An unknown
+    /// log id is declined, never created (safety delta (c)).
+    case recordedDose(logId: UUID)
+}
+
+/// What one capture produced (design-l2 IF-14). Every path out of the
+/// capture seam ends in exactly one of these — a store failure is a
+/// typed, surfaced outcome, never a silent claim that a photo was saved
+/// (FR-MSR-018).
+enum EvidenceCaptureOutcome: Equatable {
+    /// The capture is stored on-device and held for `entryId`; the
+    /// finalize that writes the dose's record attaches it (IF-15). The
+    /// hold is in-memory only: a process kill loses it honestly — the
+    /// record ends up evidence-free, and nothing was ever claimed.
+    case held(entryId: UUID)
+    /// The photo is stored and attached to the EXISTING record at
+    /// `logId`. The record's own identity mints the file name
+    /// (`<logId>.jpg`) — the same R-1(a) scheme the held path uses.
+    case attached(logId: UUID)
+    /// No bound record context exists for this capture: the pending
+    /// dose's chain already finalized (R-3 late hold) or the record log
+    /// id is unknown. The capture is discarded — nothing stored, nothing
+    /// recorded, nothing claimed.
+    case declinedNoContext
+    /// The photo could not be stored; the typed store error says what
+    /// was true on disk. Never presented as evidence.
+    case failed(EvidenceStoreError)
+}
+
+/// One confirmed intake of today, as the record surface ("Taken today")
+/// draws it (IF-24). Pure values snapshotted at read time: the surface
+/// never re-derives a name or a time while it draws, and the `id` is the
+/// ADHERENCE-LOG id — the identity the record-surface capture attaches
+/// its evidence under.
+struct TakenDoseRow: Identifiable, Equatable {
+    /// The adherence-log id — `Identifiable` so the row can drive a
+    /// `ForEach`, and the `.recordedDose(logId:)` the row's capture
+    /// attaches through.
+    let id: UUID
+    let entryId: UUID
+    let medicationName: String
+    /// When the dose was scheduled for (the record's own `scheduledAt`).
+    let scheduledAt: Date
+    /// Whether the record already claims an evidence photo
+    /// (`evidencePhotoFileName` set). A claim is what the record holds;
+    /// the reader loads the file honestly and shows "no photo" if it
+    /// has gone missing.
+    let hasEvidence: Bool
+}
 
 /// Central coordinator that wires all services together.
 /// Starts safety-critical services first (medication scheduler, health monitor),
@@ -44,6 +353,15 @@ final class AppCoordinator: ObservableObject {
         }
         return .other
     }
+    /// [AUDIO-REACTIVE-HERO] (2026-10-14) The Talk hero's live level
+    /// model (see AudioVisualization.swift) — ONE instance for the whole
+    /// app. `buildAndStartVoicePipeline` attaches it to the pipeline
+    /// (the mic feed) and `start()` attaches it to `PiperVoiceSpeaker`
+    /// (the reply feed); Home reads it straight into the hero. Created
+    /// at declaration because the UI may render before `start()` runs —
+    /// the model simply reports "no signal" (rest) until one exists.
+    let audioVisualization = AudioLevelPublisher()
+
     /// Catalog KEY naming the active STT — resolved in the UI's locale
     /// (spec §3.2; no hardcoded English labels).
     @Published var activeSTTNameKey: String = "stt.name.sfs"
@@ -68,6 +386,37 @@ final class AppCoordinator: ObservableObject {
     /// The locale every piece of non-View code (router speech, formatters)
     /// resolves against.
     var activeLocale: Locale { appLanguage.locale }
+
+    /// [LIVE-TRANSLATE T-015] The consent prompt/control state, shared by the
+    /// session view's prompt and the Settings leaf so both drive the one gate
+    /// above. Built on first use, on the main actor, against the language in
+    /// force at that moment; the locale is refreshed when the surfaces appear.
+    @MainActor
+    func liveTranslateConsentController() -> ConsentPromptController {
+        if let existing = consentController { return existing }
+        let controller = ConsentPromptController(gate: liveTranslateConsentGate,
+                                                 observabilityBus: observabilityBus,
+                                                 locale: activeLocale)
+        consentController = controller
+        return controller
+    }
+
+    /// [LIVE-TRANSLATE T-014] The consent gate itself — the decision the cloud
+    /// tier must ask for. Read-only for callers: recording and revocation go
+    /// through the prompt/control, which is the only pair of writers the
+    /// design sanctions.
+    var liveTranslateConsentDecision: LiveTranslateConsentGate.Decision {
+        liveTranslateConsentGate.currentDecision()
+    }
+
+    /// [POINT-ASK] The point-ask consent decision — the photo-egress
+    /// counterpart of the accessor above, for the Settings leaf's
+    /// revocation surface (Phase 2). Read-only here: recording and
+    /// revocation go through the session's prompt and the future control,
+    /// the only pair of writers the design sanctions.
+    var pointAskConsentDecision: PointAskConsentGate.Decision {
+        pointAskConsentGate.currentDecision()
+    }
 
     /// The region-qualified app locale — the Settings locale row's
     /// binding (encoder-branch SettingsView, 2026-09-14). Bridged to
@@ -132,6 +481,14 @@ final class AppCoordinator: ObservableObject {
     /// memory is written only by the Settings picker (`remember`), never
     /// by this automatic switch.
     ///
+    /// [MODEL-MEMORY 2026-09-16] The STT and brain re-picks now prefer the
+    /// language's remembered pick the same way (`ModelPreferenceMemory`,
+    /// PR 1 of the settings/models reorg): before this, the single stored
+    /// STT/brain preference was flattened to the per-language default on
+    /// every switch, so a ne→en→ne round trip destroyed an explicit engine
+    /// choice. That memory too is written ONLY by the Settings pickers —
+    /// this switch reads it, never writes it.
+    ///
     /// Note this deliberately does NOT run at launch: the init-time
     /// restore assigns the preferences directly (house pattern), and a
     /// launch-time reconciliation — a language stored in a previous
@@ -140,12 +497,16 @@ final class AppCoordinator: ObservableObject {
     private func syncModelPreferencesToLanguage() {
         let language = appLanguage.rawValue
         if let resolved = LanguageModelResolver.resolvedPreference(
-            current: sttModelPreference, language: language),
+            current: sttModelPreference,
+            language: language,
+            remembered: ModelPreferenceMemory.rememberedSTT()),
            resolved != sttModelPreference {
             sttModelPreference = resolved
         }
         if let resolved = LanguageModelResolver.resolvedPreference(
-            current: brainModelPreference, language: language),
+            current: brainModelPreference,
+            language: language,
+            remembered: ModelPreferenceMemory.rememberedBrain()),
            resolved != brainModelPreference {
             brainModelPreference = resolved
         }
@@ -166,6 +527,27 @@ final class AppCoordinator: ObservableObject {
     /// to the main queue (this class routes every published mutation
     /// through `DispatchQueue.main.async` — review H1).
     let voiceSession = VoiceSessionStateMachine()
+
+    /// [MTC] The dialogue frame's single owner (design-l2 §8/§15 edit 1,
+    /// FR-MTC-001): one bounded frame, one funnel, one answer window.
+    /// Constructed in `init` — before it existed there was no place a
+    /// `let` could be assigned once the router wiring moved into
+    /// `start()`. The answer window is injected from the session
+    /// machine's own instance config (review-l2 C-1): 45 s stays
+    /// single-sourced at
+    /// `VoiceSessionStateMachine.Config.confirmationTimeoutSeconds`, and
+    /// neither this file nor the manager re-declares it. `private` — the
+    /// router only ever reaches it through the six
+    /// `VoiceCommandCoordinating` members below.
+    private let dialogueManager: DialogueManager
+
+    /// [MTC] The session-exit observer's subscription (design-l2 §15,
+    /// FR-MTC-001): ANY legal exit out of `.awaitingSlotAnswer` with a
+    /// frame still held resolves it through the funnel, so a session
+    /// that left the window (error, stop, a reset) can never leave a
+    /// frame armed with no window behind it. Weakly held self; retained
+    /// for the coordinator's lifetime.
+    private var dialogueSessionExitCancellable: AnyCancellable?
 
     /// [STARTUP-PERF] Progressive startup progress — the Home spinner's
     /// honest stage labels and failure degradation. Injected into the
@@ -194,13 +576,18 @@ final class AppCoordinator: ObservableObject {
     /// re-entrancy would queue a second useless copy attempt).
     private var bundledSTTInstallInFlight = false
 
+    /// [STT-RESTORE] Watches `ModelDownloadService` for a landed ANE
+    /// artifact so the restored engine reaches the live pipeline (see
+    /// `observeSTTArtifactCompletion`).
+    private var sttArtifactCompletionCancellable: AnyCancellable?
+
     /// User's STT model pick from the UI. Nil = automatic selection.
     /// Persisted in UserDefaults (a UI preference, not a secret) and
     /// pushed to WhisperSpeechRecognizer so it survives restarts.
     /// (Spec §4.4.4 — the Settings AI मोडेल section is this picker's home.)
     @Published var sttModelPreference: ModelID? {
         didSet {
-            UserDefaults.standard.set(sttModelPreference?.rawValue,
+            SettingsPersistence.shared.set(sttModelPreference?.rawValue,
                                       forKey: Self.sttPreferenceKey)
             whisperSpeechRecognizer.setPreferredModel(sttModelPreference)
             // [STT-SWITCHER] The ANE (WhisperKit) recognizer takes the pick
@@ -227,18 +614,28 @@ final class AppCoordinator: ObservableObject {
     private static let sttPreferenceKey = "sttModelPreference"
     private static let noiseFilterEnabledKey = "noiseFilterEnabled"
 
-    /// The app-wide background theme (skinnable home, 2026-09-07) — a UI
-    /// preference, not a secret, persisted in UserDefaults the same way as
-    /// `sttModelPreference`. Every screen draws its background from this
-    /// through the `Color(theme:)` helper, so one change re-skins the
-    /// whole app at once. didSet persists; the init-time restore assigns
-    /// directly (house pattern — didSet does not fire there).
+    /// Colour and surface treatment are independent, non-secret preferences.
+    /// Restore only at launch; rendering consumes the root environment value.
     @Published var appTheme: AppTheme {
         didSet {
-            UserDefaults.standard.set(appTheme.rawValue, forKey: Self.themeKey)
+            SettingsPersistence.shared.set(appTheme.rawValue, forKey: Self.themeKey)
         }
     }
     private static let themeKey = "appTheme"
+
+    @Published var appVisualStyle: AppVisualStyle {
+        didSet {
+            SettingsPersistence.shared.set(appVisualStyle.rawValue, forKey: Self.visualStyleKey)
+        }
+    }
+    private static let visualStyleKey = "appVisualStyle"
+
+    @Published var appTextSize: AppTextSize {
+        didSet {
+            SettingsPersistence.shared.set(appTextSize.rawValue, forKey: Self.textSizeKey)
+        }
+    }
+    private static let textSizeKey = "appTextSize"
 
     /// The app an ADDRESS-BOOK row's call button opens when the row has no
     /// per-contact channel pick saved — per-row picks live in
@@ -250,10 +647,27 @@ final class AppCoordinator: ObservableObject {
     /// not fire there).
     @Published var defaultCallApp: CallApp {
         didSet {
-            UserDefaults.standard.set(defaultCallApp.rawValue, forKey: Self.defaultCallAppKey)
+            SettingsPersistence.shared.set(defaultCallApp.rawValue, forKey: Self.defaultCallAppKey)
         }
     }
     private static let defaultCallAppKey = "defaultCallApp"
+
+    /// The fallback dialer (call-dialer-primary-secondary, 2026-10-12):
+    /// the chain's second step, persisted under its own key with the
+    /// shipped `defaultCallApp` pattern. An absent or unknown stored
+    /// value restores `.phone` (GSM) — exactly the frozen default for
+    /// existing installs. `secondary == primary` is legal; the chain
+    /// dedupes at routing time, never at storage. A UI preference, not a
+    /// secret — persisted in UserDefaults the same way as `appTheme`.
+    /// didSet persists; the init-time restore assigns directly (house
+    /// pattern — didSet does not fire there).
+    @Published var secondaryCallApp: CallApp {
+        didSet {
+            SettingsPersistence.shared.set(secondaryCallApp.rawValue,
+                                      forKey: Self.secondaryCallAppKey)
+        }
+    }
+    private static let secondaryCallAppKey = "secondaryCallApp"
 
     /// Which map surface voice navigation opens (directions task,
     /// 2026-09-07) — Settings → Places. `.auto` (the default) opens
@@ -267,7 +681,7 @@ final class AppCoordinator: ObservableObject {
     /// not fire there).
     @Published var navigationMapApp: NavigationMapApp {
         didSet {
-            UserDefaults.standard.set(navigationMapApp.rawValue, forKey: Self.navigationMapAppKey)
+            SettingsPersistence.shared.set(navigationMapApp.rawValue, forKey: Self.navigationMapAppKey)
         }
     }
     private static let navigationMapAppKey = "navigationMapApp"
@@ -281,7 +695,7 @@ final class AppCoordinator: ObservableObject {
     /// a fresh pick works immediately).
     @Published var brainModelPreference: ModelID? {
         didSet {
-            UserDefaults.standard.set(brainModelPreference?.rawValue,
+            SettingsPersistence.shared.set(brainModelPreference?.rawValue,
                                       forKey: Self.brainPreferenceKey)
             applyBrainModel()
         }
@@ -298,7 +712,7 @@ final class AppCoordinator: ObservableObject {
     /// holds its interpreter as an immutable `private let`).
     @Published var voiceEngineStack: VoiceEngineStack {
         didSet {
-            UserDefaults.standard.set(voiceEngineStack.rawValue, forKey: Self.voiceEngineStackKey)
+            SettingsPersistence.shared.set(voiceEngineStack.rawValue, forKey: Self.voiceEngineStackKey)
             applyVoiceEngineStack()
         }
     }
@@ -319,7 +733,7 @@ final class AppCoordinator: ObservableObject {
     /// same instant-apply rule as the engine toggle itself).
     @Published var cloudFallbackEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(cloudFallbackEnabled, forKey: Self.cloudFallbackKey)
+            SettingsPersistence.shared.set(cloudFallbackEnabled, forKey: Self.cloudFallbackKey)
             applyVoiceEngineStack()
         }
     }
@@ -397,7 +811,7 @@ final class AppCoordinator: ObservableObject {
     @Published var noiseFilterEnabled: Bool {
         didSet {
             guard noiseFilterEnabled != oldValue else { return }
-            UserDefaults.standard.set(noiseFilterEnabled,
+            SettingsPersistence.shared.set(noiseFilterEnabled,
                                       forKey: Self.noiseFilterEnabledKey)
             applyNoiseFilterChange()
         }
@@ -413,10 +827,41 @@ final class AppCoordinator: ObservableObject {
     /// a second provider exists to switch between).
     @Published var cloudProvider: CloudProvider {
         didSet {
-            UserDefaults.standard.set(cloudProvider.rawValue, forKey: Self.cloudProviderKey)
+            SettingsPersistence.shared.set(cloudProvider.rawValue, forKey: Self.cloudProviderKey)
         }
     }
     private static let cloudProviderKey = "cloudProvider"
+
+    /// [CLOUD-CASCADE] (2026-09-16) The cloud cascade tier's confidence
+    /// threshold — the internal Settings card's ± row, shown as a
+    /// percentage (97 % ↔ 0.97). When the large local brain answers BELOW
+    /// this while an online provider is configured, the turn goes to the
+    /// cloud (with the spoken hold cue first). Persisted through
+    /// `CloudCascadeSettings` (UserDefaults, clamped on read AND write —
+    /// a UI preference, not a secret). didSet persists AND re-arms the
+    /// tier, so a ± press in Settings takes effect on the NEXT utterance
+    /// (the same instant-apply rule `cloudFallbackEnabled` follows).
+    /// Init-time restore assigns the property directly (house pattern —
+    /// didSet does not fire there).
+    @Published var cloudCascadeThreshold: Double {
+        didSet {
+            guard cloudCascadeThreshold != oldValue else { return }
+            CloudCascadeSettings.setThreshold(cloudCascadeThreshold)
+            applyCloudCascadeConfiguration()
+        }
+    }
+
+    /// [CLOUD-CASCADE] The internal card's switch — ON by default (the
+    /// tier's rule is the requested behaviour and it stays inert on its
+    /// own wherever no provider is configured), OFF to hold the ladder
+    /// local-first on purpose. Persisted through `CloudCascadeSettings`.
+    @Published var cloudCascadeEnabled: Bool {
+        didSet {
+            guard cloudCascadeEnabled != oldValue else { return }
+            CloudCascadeSettings.setEnabled(cloudCascadeEnabled)
+            applyCloudCascadeConfiguration()
+        }
+    }
 
     /// The user's favourite apps for the Home quick-access row
     /// (quick-access-apps task, 2026-09-06), in stored order.
@@ -427,7 +872,7 @@ final class AppCoordinator: ObservableObject {
     /// the didSet always sees the new value.
     @Published private(set) var favoriteAppIDs: [String] {
         didSet {
-            UserDefaults.standard.set(favoriteAppIDs, forKey: Self.quickAccessAppsKey)
+            SettingsPersistence.shared.set(favoriteAppIDs, forKey: Self.quickAccessAppsKey)
         }
     }
     private static let quickAccessAppsKey = "quickAccessApps"
@@ -554,15 +999,43 @@ final class AppCoordinator: ObservableObject {
     /// Encrypted, bounded (100-entry) log of what THIS app itself
     /// called/messaged — the Recent activity leaf's source of truth.
     /// Never the system call log, never other apps' messages (iOS
-    /// platform wall). The ONE exception is the anonymous unanswered-call
-    /// row (missed-calls task, 2026-09-07): a presence-only fact the
+    /// platform wall). The ONE exception is the unanswered-call row
+    /// (missed-calls task, 2026-09-07): a presence-only fact the
     /// live-call observer saw — a call ended without ever connecting —
-    /// recorded with no name and no number, never the identity the
-    /// system call log would carry (iOS does not expose it). Lazy like
-    /// `chatHistoryStore`: `storage` is assigned at the top of `init`,
-    /// long before any call/message path can record. Main-queue confined
-    /// by contract.
+    /// recorded with no name and no number when iOS masked the caller,
+    /// never the identity the system call log would carry (iOS does not
+    /// expose it). Since the call-tracking task (2026-09-13) that row is
+    /// ATTRIBUTED when it can honestly be: if the app itself opened a
+    /// call moments earlier and no call ever connected in between, the
+    /// row carries the contact AND NUMBER the app dialed
+    /// (`openedCallAttributor` below) — the missed-calls fix
+    /// (2026-09-18) wired this seam, so new entries for the app's own
+    /// dials always carry their number. Everything else stays anonymous.
+    /// Lazy like `chatHistoryStore`: `storage` is assigned at the top of
+    /// `init`, long before any call/message path can record. Main-queue
+    /// confined by contract.
     private(set) lazy var activityLog = AppActivityLog(storage: storage)
+
+    /// Matches the app's OWN call opens to the anonymous unanswered events
+    /// the live-call observer reports (call-tracking task, 2026-09-13;
+    /// wired by the missed-calls fix, 2026-09-18 — a merge regression had
+    /// dropped the wiring, so every unanswered row stored an empty number
+    /// even for calls the app dialed itself), so a call the app placed
+    /// that was never picked up is recorded as a missed call WITH its
+    /// contact and number instead of an anonymous row. The decision
+    /// itself — window, connect-clears, consume-once — is the pure
+    /// `OpenedCallAttributor`; this property is only the wiring.
+    /// Main-queue confined, like every other piece of activity recording.
+    private let openedCallAttributor = OpenedCallAttributor()
+
+    /// Missed-call row id → correlated display name (missed-calls fix,
+    /// 2026-09-18) — the read side of `MissedCallContactResolver`: the
+    /// family-correlation is synchronous, the native-address-book half
+    /// lands asynchronously (and only with Contacts access granted).
+    /// Views resolve the name line through this map; a row whose id is
+    /// absent falls back to its stored name, then its raw number, then
+    /// the honest "Unanswered call" label.
+    @Published private(set) var missedCallDisplayNames: [UUID: String] = [:]
 
     /// Published window over `activityLog`, newest first — the leaf's
     /// read side. Mirrors the `conversationHistory` window pattern:
@@ -578,8 +1051,10 @@ final class AppCoordinator: ObservableObject {
     /// ever delivered, so this flag says "a call is in progress" and the
     /// app never learns (or claims) whose. The observer's ONLY other
     /// output is the unanswered event (missed-calls task, 2026-09-07),
-    /// recorded by `recordUnansweredCall` — one anonymous "ended without
-    /// connecting" row, still no identity or number.
+    /// recorded by `recordUnansweredCall` — an anonymous "ended without
+    /// connecting" row when iOS masked the caller, or the app's own
+    /// contact and number when the app placed the dial that ended
+    /// unanswered (`OpenedCallAttributor`).
     @Published private(set) var liveCallActive = false
 
     /// Edge-triggered detector; armed (constructed) in `start()`. Lazy
@@ -588,6 +1063,22 @@ final class AppCoordinator: ObservableObject {
     private(set) lazy var liveCallDetector = makeLiveCallDetector()
 
     @Published var lastOutcome: OutcomeSummary?
+
+    /// [VOICE-OOM] F (2026-10-10) — the degraded-mode status for the turn
+    /// in force, published per turn by `applyPressureBrainPickForTurn`.
+    /// Home renders it as a small, low-contrast status pill (or nothing
+    /// for `.normal`, which is both the default and the recovered state).
+    @Published private(set) var degradedVoiceMode: DegradedVoiceMode = .normal
+
+    /// [PICK-HYSTERESIS] (2026-10-14) The per-process latch that gives
+    /// `applyPressureBrainPickForTurn` its hysteresis: the resolver's
+    /// answer is a raw per-turn sample, and this holds a change back
+    /// until it repeats (2 turns down / 4 turns up — see
+    /// `PressureBrainPickLatch` for why the pair is asymmetric).
+    /// In-memory only, on purpose: the degraded tier is a property of
+    /// THIS process's pressure history, so a relaunch starts clean
+    /// rather than restoring a step-down against stale evidence.
+    private var pressureBrainPickLatch = PressureBrainPickLatch()
 
     /// [DESIGN-REVIEW] Explicit outcome dismissal — clears the published
     /// outcome so Home's feedback region hands the strip back to the
@@ -693,25 +1184,172 @@ final class AppCoordinator: ObservableObject {
     /// and cannot tell which channel it is on.
     private let storage: MigratingEncryptedStorage
     private let observabilityBus: ObservabilityBus
+    /// [PROFILE-INTERVIEW T-092] The app's ONE profile store — the only
+    /// writer of the encrypted five-field record (design-l2 §5.6;
+    /// FR-PI-003). Composed in init next to the storage it writes
+    /// through; construction is a lock and a cache, no I/O — nothing is
+    /// read until the first `load()`. The wizard and the Settings editor
+    /// reach it only through `saveProfile` / `currentProfileSnapshot`
+    /// (single writer by contract).
+    private let profileStore: UserProfileStore
+    /// [PROFILE-INTERVIEW T-092] The read seam the interpreters and the
+    /// wake acknowledgment consume (design-l2 §5.6). Created in init();
+    /// nil means "not wired" (a test-configured coordinator) and is
+    /// consumed nil-safe everywhere.
+    private(set) var profilePersonalization: ProfilePersonalizationReading?
+    /// [LIVE-TRANSLATE T-013] The app's ONE label-translation store: the
+    /// live camera-translation pipeline resolves and records through it, and
+    /// the appliance helper's label seam reads the same instance, which is
+    /// what makes "a translation cached on one surface is reused by the
+    /// other with no network call" (FR-LCT-020) true by construction rather
+    /// than by convention. Constructed in init — that is an empty dictionary
+    /// and a lock, no I/O; the payload is read lazily on the first lookup —
+    /// and never a second one anywhere.
+    private let labelTranslationCache: LabelTranslationCache
+    /// [LIVE-TRANSLATE T-015] The app's ONE consent gate: the cloud tier
+    /// asks it for permission, and the only things that ever write it are the
+    /// consent prompt and the revocation control — both of which drive THIS
+    /// instance, so a decision made in Settings is the decision in force over
+    /// the session view, with no restart and no second record. Constructed in
+    /// init (a lock and a closure, no I/O; nothing is read until a decision
+    /// is asked for) and never a second one anywhere.
+    private let liveTranslateConsentGate: LiveTranslateConsentGate
+    /// [POINT-ASK] The app's ONE point-ask consent gate — the photo-egress
+    /// counterpart of the live-translate gate above, with its own key
+    /// (`plugin.point_ask.consent.v1`) and its own disclosure version
+    /// (design: docs/superpowers/specs/2026-09-19-point-tap-ask-design.md
+    /// §5, constitution OD-14). The session's prompt and (Phase 2) the
+    /// Settings revocation control drive THIS instance; no other writer
+    /// exists. Constructed in init over the same cipher store, so both
+    /// consent records ride the encrypted file channel.
+    private let pointAskConsentGate: PointAskConsentGate
+    /// [POINT-ASK] The point-ask master-switch store (cloud default OFF —
+    /// design §1 item 2). A plain `UserDefaults` preference, read by the
+    /// session at every attempt decision.
+    private let pointAskSettings = PointAskSettings()
+
+    // MARK: - [CNR T-177] Cloud-chat wiring state (2026-10-14)
+
+    /// [CNR T-177] The cloud-chat consent gate — the feature's ONE consent
+    /// writer and the routing decision's consent input (design-l1 §8.3:
+    /// reuse of the shipped consent shape, not a fork). Constructed in
+    /// init over the same cipher storage as the two gates above, one
+    /// instance for the process lifetime; every reachable path that puts a
+    /// chat turn on the wire reads THIS decision per turn (never cached),
+    /// and the Settings row, the voice revoke and the consent question's
+    /// answers all write through it.
+    private let cloudChatConsentGate: CloudChatConsentGate
+    /// [CNR T-177] The chat lane's reachability input (T-173 `Inputs.online`)
+    /// — the same `NetworkReachability` discipline the LiveTranslate tier
+    /// uses (conservative: false until the first path update). One
+    /// instance, constructed in init.
+    private let cloudChatReachability: NetworkReachability
+    /// [CNR T-177] The provenance of the reply being dispatched: true when
+    /// the wrapped responder settled a `.chat` command from the cloud this
+    /// turn. Written at the attempt's settle, read once by the chat
+    /// guard's `servingPath` (T-174), cleared at every attempt's begin,
+    /// every window close and every chat-turn decide — so no turn can
+    /// inherit a previous turn's provenance.
+    private var cloudChatReplyServedFromCloud = false
+    /// [CNR T-177] Whether the badge window is open (design-l1 §8.5: the
+    /// routing decision of a cloud turn until its reply is spoken). One
+    /// open site (the attempt's begin), four close funnels (speech end,
+    /// revocation, the next chat-turn decide, and a decision change).
+    private var cloudChatIndicatorWindowOpen = false
+    /// [CNR T-177] Whether the attempt that opened the window has settled
+    /// (its completion ran). The window may close only after both the
+    /// settle and the reply's speech end have happened.
+    private var cloudChatAttemptSettled = false
+    /// [CNR T-177] The once-per-session flag of the first cloud-active
+    /// turn's spoken notice (design-l1 §8.5; FR-CNR-008): the elder hears
+    /// it at the first turn and never again in this app session.
+    private var cloudChatNoticeSpoken = false
+    /// [CNR T-177] Whether the consent question's spoken answer is pended:
+    /// true while the question is on screen and the shipped spoken yes/no
+    /// capture owns the next yes/no (the router's confirmation path). The
+    /// flag is cleared by an answer, by a decision change, and by the
+    /// window's own timeout (which re-offers rather than expires).
+    private var pendingCloudChatConsentCapture = false
+    /// [CNR T-177] The badge's model — view state, born on the main actor
+    /// on first use (the `liveTranslateConsentController` pattern), one
+    /// instance. Its publishes are forwarded through the coalescing seam
+    /// so the status slot and the Settings leaf re-render.
+    private var cloudChatIndicatorModelStorage: CloudChatActivityIndicatorModel?
+    /// [CNR T-177] The consent question's state (T-176) — view state, born
+    /// on the main actor on first use, one instance. Its publishes are
+    /// forwarded through the coalescing seam (the question appearing or
+    /// closing must invalidate every HomeView observer).
+    private var cloudChatConsentPromptStorage: CloudChatConsentPrompt?
+    private var cloudChatPromptCancellable: AnyCancellable?
+    private var cloudChatIndicatorCancellable: AnyCancellable?
+    /// [CNR T-177] The wrapped cloud chat responder — the ONE instance the
+    /// lane's cloud leg (T-175) and the guard's escalation (T-174) share,
+    /// so every cloud attempt, whichever door issued it, drives the same
+    /// badge window and the same once-per-session notice. Nil until the
+    /// router wiring runs.
+    private var cloudChatCloudResponder: CloudChatIndicatorResponder?
+    /// [LIVE-TRANSLATE T-015] The prompt/control state shared by the session
+    /// view's prompt and the Settings leaf. Created on the main actor on
+    /// first use — it is view state, so it is born where views live.
+    private var consentController: ConsentPromptController?
     /// [TURN-TIMING] Turn-scoped stage tracer — created in init (after
     /// the bus) and injected into the pipeline/router/speaker composition
     /// in `start()` and the recognizers below.
     private let turnTracer: VoiceTurnLatencyTracer
 
     /// [TURN-TIMING-BREAKDOWN] The per-turn stage stopwatch behind the
-    /// intent-model timing breakdown. Non-nil ONLY on a build that
+    /// intent-model timing breakdown. Non-nil only on a build that
     /// compiles `INTENT_ENCODER` in (`IntentEncoderFeature.isEnabled` is
-    /// a compile-time constant, so a shipped build constructs neither the
-    /// recorder nor the reporter and every instrumented call site sees
-    /// nil — the zero-cost requirement). Injected into the encoder, the
-    /// picker brain, the cascade chain and the speaker; the coordinator
-    /// itself never reads a stage.
+    /// a compile-time constant, so a build that drops the condition
+    /// constructs neither the recorder nor the reporter and every
+    /// instrumented call site sees nil). [ENCODER-ALWAYS-ON] Every build
+    /// of this target carries the condition by default, so the
+    /// instrumentation is live here — the same compile-time gate that
+    /// makes the encoder card render, and the card's "Last turn"
+    /// breakdown is what reads it. Injected into the encoder, the picker
+    /// brain, the cascade chain and the speaker; the coordinator itself
+    /// never reads a stage.
     private let turnTimingRecorder: TurnTimingRecorder?
+    /// [PIPELINE-TRACE] The full-width debug trace's recorder: one row per
+    /// pipeline gate (input, output, decision, ms) for the LAST turn,
+    /// in memory only. Gated exactly like the timing recorder above (the
+    /// same compile-time condition, so a build without `INTENT_ENCODER`
+    /// constructs neither), and injected into every gate that can describe
+    /// its own step: the pipeline (STT), the encoder (its three stages),
+    /// the cascade chain, the picker brain, the router's band policy and
+    /// the speaker. The coordinator only PUBLISHES the assembled trace
+    /// (`lastPipelineTrace`) — it never reads a row.
+    private let pipelineTraceRecorder: PipelineTraceRecorder?
     /// [TURN-TIMING-BREAKDOWN] The breakdown's single emission point —
     /// attached to `turnTracer` in `composePostFirstFrame()`, where the
     /// tracer's handlers are wired. Nil exactly when the recorder is.
     private let turnLatencyReporter: TurnLatencyReporter?
     private let medicationScheduler: MedicationScheduler
+    /// [MED-ACK-WALK] (T-013, design-l2 C4/D4) The clarification walk's
+    /// response-window configuration. The default composes from
+    /// `ConfirmationChallenge.defaultChallengeTimeoutSeconds` (the ONE
+    /// named home, T-006); tests and harnesses inject a shorter window
+    /// through the initializer. The walk reads this value at `begin` and
+    /// never reads a literal.
+    private let ackClarificationConfig: AckClarificationConfig
+    /// [MED-SLOT] (T-017, design-l2 C1/IF-21) The household mapping's read
+    /// seam the save gate resolves slot rows through. Defaulted to a store
+    /// composed over the SAME storage seam the scheduler writes through:
+    /// the store is stateless, so two instances read the ONE stored record
+    /// and the coordinator can never hold a second, divergent clock (the
+    /// `MedicationScheduler.init` precedent, T-008). Tests inject a store
+    /// over an in-memory seam. Construction reads nothing — the mapping is
+    /// read at save time only, and it is never cached between saves.
+    private let slotClockStore: MedicationSlotClockStore
+    /// [MED-SLOT] (T-017, design-l2 C12/IF-13) The on-device evidence store
+    /// the `removeMedication` cascade drops an entry's whole photo folder
+    /// through — beside `medicationVisualAidStore` and for the same
+    /// reason: a photo that documented an intake of a medicine the
+    /// household no longer takes must not outlive the entry, and nothing
+    /// else can find those files afterwards. Construction resolves a path
+    /// and performs NO disk IO (the `NoIOInInitTests` boot contract); the
+    /// directory appears on the first write, and the cascade is fail-soft.
+    private let medicationEvidenceStore: MedicationEvidenceStore
     private let alarmScheduler: UNNotificationScheduler
     private let familyNotifier: APNsFamilyNotifier
     /// [CAREGIVER-EVENTS] (2026-09-13) Per-event-type caregiver
@@ -738,10 +1376,92 @@ final class AppCoordinator: ObservableObject {
     /// constant-time startup contract forbids).
     private let routineStore: RoutineStore
 
+    /// Reminder photo store (photo-visual-aids task, 2026-09-16) —
+    /// `Application Support/VisualAids/<entryId>/<file>.jpg`. One shared
+    /// instance: the view layer renders from it, the routine scheduler
+    /// reads attachments out of it, and deleting a reminder clears its
+    /// folder through it. Stateless (a directory URL plus JPEG helpers),
+    /// and its `init` performs NO disk IO — a path lookup only, so
+    /// building it here keeps the constant-time boot contract
+    /// (`NoIOInInitTests`). The directory appears on the first save.
+    let visualAidStore = VisualAidStore()
+
+    /// The MEDICATION photo store (medication-visual-aids task,
+    /// 2026-09-16) — the same `VisualAidStore`, built with the medication
+    /// directory prefix so dose photos land at
+    /// `Application Support/VisualAids/med-<entryId>/<file>.jpg` and can
+    /// never resolve into a routine entry's folder. A second INSTANCE, not
+    /// a second implementation: compression, the picker's cap and the
+    /// failure-soft file handling are one code path for both systems.
+    /// Like its sibling, `init` is a path lookup with no disk IO.
+    let medicationVisualAidStore =
+        VisualAidStore(directoryPrefix: VisualAidStore.medicationDirectoryPrefix)
+
     /// The curated "Family and friends" list (spec §4.4.2) — persisted
     /// encrypted, feeds the notifier whenever the list changes.
+    ///
+    /// T-156 (design-l2 §1.9, §3.6): this assignment is THE roster
+    /// choke point — boot restore, add, update and remove all assign
+    /// here, so the derived index is rebuilt and the verified-link
+    /// refresh is triggered from one place and the published pair can
+    /// never drift from the roster it was derived from.
     let familyContactStore: FamilyContactStore
-    @Published private(set) var familyContacts: [FamilyContact]
+    @Published private(set) var familyContacts: [FamilyContact] {
+        didSet {
+            // Wholesale rebuild: the index derives ONLY from the roster
+            // it was handed, so it cannot disagree with it (a rebuild
+            // swaps a whole value — no torn read is even representable).
+            familyIndex = FamilyContactIndex(family: familyContacts)
+            // Then the link refresh — a no-op unless some contact
+            // carries a stored link, so an unlinked roster never reads
+            // the address book at all (design-l2 §3.6).
+            refreshVerifiedLinks()
+        }
+    }
+
+    /// The derived identity index over the roster (T-151, design-l2
+    /// §1.2/§3.6) — rebuilt wholesale inside `familyContacts.didSet`,
+    /// never persisted, never mutated in place. Consumers: the voice
+    /// resolver's `indexProvider` below, the unified search tiers, the
+    /// face surfaces.
+    @Published private(set) var familyIndex: FamilyContactIndex = .empty
+
+    /// The VERIFIED-link snapshot (T-149, design-l2 §1.3/§3.6) — starts
+    /// `.empty` ⇒ today's unlinked behaviour exactly. Published only by
+    /// `refreshVerifiedLinks`' completion, and only when the incoming
+    /// generation is newer than the published one; a stored link that
+    /// failed verification is simply absent (FR-FCU-006: stale links
+    /// degrade to unlinked, they are never presented).
+    @Published private(set) var verifiedLinks: VerifiedLinksSnapshot = .empty
+
+    /// Identity/face epoch (design-l2 §4.4): bumps exactly once per
+    /// identity change — a publish whose links differ from the
+    /// published set, a successful link write/clear (T-158) and every
+    /// foreground activation (the only way an EXTERNAL contact edit
+    /// surfaces). Face consumers (T-157) key their caches on it.
+    @Published private(set) var faceEpoch: UInt64 = 0
+
+    /// Last-resolved system photo hash prefixes, per contact id
+    /// (design-l2 §4.4) — the token half of the face identity. Written
+    /// ONLY inside the `@MainActor` face methods (T-157 owns them;
+    /// declared here because it is part of this identity-state block).
+    private var systemPhotoTokens: [UUID: String] = [:]
+
+    /// The verified-link service this coordinator consumes (T-149; the
+    /// single owner of the snapshot drain and the photo cache — a second
+    /// instance would mean two truths).
+    ///
+    /// `lazy` ([BOOT-REVIEW P0-1] first use, not `init()`: building it
+    /// constructs a `CNContactStore`, and a launch whose roster carries
+    /// no link must never need an address-book handle). Resolved on the
+    /// caller's context before any Task captures it, never inside one.
+    private lazy var linkService: SystemContactLinkReading =
+        injectedLinkService ?? SystemContactLinkService(observabilityBus: observabilityBus)
+
+    /// Test seam (T-156): the scripted link service `linkService` hands
+    /// out in place of the real actor. nil — the app's own construction —
+    /// builds the real one at first use. Set once in `init`.
+    private var injectedLinkService: SystemContactLinkReading? = nil
 
     /// Saved places for voice navigation (directions task, 2026-09-07) —
     /// see `SavedPlaceStore` for the cap and the default-home rules.
@@ -775,7 +1495,7 @@ final class AppCoordinator: ObservableObject {
     /// pattern — didSet does not fire there).
     @Published var appointmentsToCalendar: Bool {
         didSet {
-            UserDefaults.standard.set(appointmentsToCalendar,
+            SettingsPersistence.shared.set(appointmentsToCalendar,
                                       forKey: Self.appointmentsToCalendarKey)
             appointmentStore.calendarWritesEnabled = appointmentsToCalendar
         }
@@ -789,11 +1509,37 @@ final class AppCoordinator: ObservableObject {
     /// confined to `dismissAppointmentSmsNote`.
     @Published private(set) var appointmentSmsNoteDismissed: Bool {
         didSet {
-            UserDefaults.standard.set(appointmentSmsNoteDismissed,
+            SettingsPersistence.shared.set(appointmentSmsNoteDismissed,
                                       forKey: Self.appointmentSmsNoteDismissedKey)
         }
     }
     private static let appointmentSmsNoteDismissedKey = "appointmentSmsNoteDismissed.v1"
+
+    /// One-shot retime-refused note (IF-10, m-5; T-020): a slot entry's
+    /// retime was refused, so the medication settings leaf's "Medicine
+    /// times" section explains the slot-model rule once. The persist half
+    /// is exactly the `appointmentSmsNoteDismissed` precedent above —
+    /// dismissal is a preference, not a secret: persisted on every write
+    /// through the property's own didSet, allow-listed in
+    /// `SettingsPersistence` so a reinstall keeps it, and read back in
+    /// init. Dismissal is confined to `dismissMedicationRetimeNote`.
+    @Published private(set) var medicationRetimeNoteDismissed: Bool {
+        didSet {
+            SettingsPersistence.shared.set(medicationRetimeNoteDismissed,
+                                      forKey: Self.medicationRetimeNoteDismissedKey)
+        }
+    }
+    private static let medicationRetimeNoteDismissedKey = "medicationRetimeNoteDismissed.v1"
+
+    /// The note's PRESENTATION state — transient and deliberately not
+    /// persisted (the dismissal above is the durable half): a refusal
+    /// surfaces the note unless it was dismissed, and the note stays up
+    /// until dismissed once. `surfaceMedicationRetimeNote` is its only
+    /// setter of true and `dismissMedicationRetimeNote` the only clearer.
+    /// Not read back in init: a relaunch between a refusal and its
+    /// dismissal does not resurrect the note — the NEXT refusal brings it
+    /// back for a household that never dismissed it.
+    @Published private(set) var medicationRetimeNotePresented: Bool = false
 
     // Voice
     private let audioEngine: AVAudioEngine
@@ -873,6 +1619,12 @@ final class AppCoordinator: ObservableObject {
     private var voiceStateCancellable: AnyCancellable?
     private var geminiSwapCancellable: AnyCancellable?
     private var speaker: Speaker?
+    /// [PROFILE-INTERVIEW T-096] The wake-acknowledgment seam (C05,
+    /// design-l2 §5.4/§5.6): built in `start()` on the BASE speaker
+    /// instance, handed to the pipeline that same boot. Nil until then —
+    /// and in any construction that never starts the coordinator, the
+    /// pipeline's seam stays nil (today's synchronous capture path).
+    private var wakeAcknowledgmentService: WakeAcknowledgmentService?
 
     // Voice-OS shell v1 (composition — built in `start()`, nil until then
     // like `speaker` itself): the speak queue that now owns all speech,
@@ -956,13 +1708,46 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var feedTranslatingIDs: Set<String> = []
     @Published private(set) var feedTranslationFailedIDs: Set<String> = []
 
-
+    // Feeds read-aloud (feeds readaloud task, 2026-09-19): which items
+    // the elder has HEARD, and which item the reading path is on (the
+    // full-article voice command's subject). The store is built on first
+    // use like the two above — nothing on the first frame renders it.
+    private lazy var feedReadStateStore = FeedReadStateStore(storage: storage)
+    /// Item ids that have been read aloud to completion — the card's
+    /// unread badge is the absence of an id here, so this must be
+    /// published.
+    @Published private(set) var feedReadIDs: Set<String> = []
+    /// The item a read-aloud last touched (UI button or voice command) —
+    /// "read the full article" continues from here rather than guessing
+    /// from the whole feed. Cleared implicitly when the item leaves the
+    /// feed (the id no longer resolves).
+    private var feedActiveItemID: String?
+    /// True once the read state has been loaded for this launch (the
+    /// store read is once-per-launch, not per card).
+    private var feedReadStateLoaded = false
+    /// The speak-queue source id for feed readings — a feature-owned id
+    /// (not the generic `coordinator_reply`) so the feed's utterances are
+    /// addressable as a group, exactly as live-translate's are.
+    private static let feedReadingSourceID = "feeds_readaloud"
 
     /// Voice-session derivation state (spec §3.3): the last pipeline state
     /// plus how many `speak()` calls are currently in flight. `speaking`
     /// is derived, not a pipeline state.
     private var lastPipelineState: VoicePipeline.State = .stopped
     private var speakingCount = 0
+    /// [HERO-STATES] (2026-10-13) Published overlays for the hero. The
+    /// slot window keeps the session machine in `.awaitingSlotAnswer`
+    /// through three visually different moments — the probe speaking,
+    /// the auto-listen capture live, and the closed-capture wait — which
+    /// the raw state cannot tell apart. `isSpeaking` is true exactly
+    /// while any reply audio plays (the machine state is untouched: the
+    /// transition table stays the contract); `slotAnswerCaptureActive`
+    /// is true exactly while the auto-listen capture is live, so a
+    /// closed-capture window shows the talk affordance instead of a
+    /// false "listening". Both settable by the wiring tests via
+    /// @testable; the coordinator owns their lifecycle.
+    @Published var isSpeaking = false
+    @Published var slotAnswerCaptureActive = false
     private var voiceWatchdog: DispatchWorkItem?
     /// Guards `VoicePipeline.start`: its only async gap is the
     /// mic-permission callback, which can silently never fire — leaving
@@ -1015,7 +1800,13 @@ final class AppCoordinator: ObservableObject {
     }()
     lazy var modelDownloadService = ModelDownloadService(
         store: modelStore,
-        observabilityBus: observabilityBus
+        observabilityBus: observabilityBus,
+        // [MODEL-WARDEN 2026-09-20] The download path asks the same ledger
+        // the Settings rows are rendered from, so no floor value can admit a
+        // download the class budget refuses. `ModelLifecycleManager.shared`
+        // is what `resolvedBrainModelID` and the rows already consult; the
+        // closure is lazy, so the ledger is not forced at construction.
+        availabilityProvider: { ModelLifecycleManager.shared.availability(of: $0) }
     )
     /// [BOOT-REVIEW P0-1] FIRST USE, not `init()`: constructing either
     /// recognizer forces `modelStore` (filesystem) and, for WhisperKit,
@@ -1052,12 +1843,17 @@ final class AppCoordinator: ObservableObject {
     /// factory runs). Safe by construction: nothing in `init()` (or in any
     /// other stored property's initializer) touches this lazy, so the
     /// first evaluation is the boot's voice phase — provably after the
-    /// restore. `nil` (never picked) keeps the engine's own default.
+    /// restore. `nil` (never picked) falls back to the engine's own
+    /// default ([VOICE-OOM] `whisperKitMediumV6`, the language default —
+    /// mirrored EXPLICITLY here; this expression shadows the init default
+    /// at the only production construction site, so leaving the old
+    /// `whisperKitNepaliMedium` here would re-introduce the v3 trap on
+    /// never-picked devices).
     private lazy var whisperKitSpeechRecognizer: WhisperKitSpeechRecognizer = {
         let recognizer = WhisperKitSpeechRecognizer(
             observabilityBus: observabilityBus,
             modelStore: modelStore,
-            preferredModelID: sttModelPreference ?? ModelCatalog.whisperKitNepaliMedium
+            preferredModelID: sttModelPreference ?? ModelCatalog.whisperKitMediumV6
         )
         // [TURN-TIMING] Both whisper recognizers mark `asr_loaded` with
         // their measured load ms when a load happens inside a live turn.
@@ -1092,9 +1888,12 @@ final class AppCoordinator: ObservableObject {
         storage: storage,
         observabilityBus: observabilityBus
     )
-    private lazy var geminiClient = GeminiClient(configStore: geminiConfigStore,
-                                                 observabilityBus: observabilityBus,
-                                                 costGovernor: geminiCostGovernor)
+    /// [GEMINI-SOLIDIFY] `private(set)` (was `private`): the Gemini
+    /// settings leaf's "Test connection" button calls
+    /// `testConnection()` on the SAME client every real call uses.
+    private(set) lazy var geminiClient = GeminiClient(configStore: geminiConfigStore,
+                                                      observabilityBus: observabilityBus,
+                                                      costGovernor: geminiCostGovernor)
     private lazy var geminiSpeechRecognizer = GeminiSpeechRecognizer(
         client: geminiClient,
         observabilityBus: observabilityBus
@@ -1156,6 +1955,58 @@ final class AppCoordinator: ObservableObject {
     /// read it.
     private(set) lazy var newsSourceStore = NewsSourceStore(storage: storage)
 
+    /// [SPOTIFY] (2026-10-07) T-119 — the one encrypted Spotify record
+    /// (`spotify.session`, C-SP-02): the Keychain-backed encrypted
+    /// channel's single item, the same one-key pattern as the search and
+    /// YouTube credential stores above.
+    ///
+    /// [BOOT-REVIEW P0-1] FIRST USE, not `init()`: the store's constructor
+    /// reads its record from the encrypted channel — pre-first-frame work
+    /// nothing on the first frame needs. The Settings leaf (T-120) and the
+    /// plugin/router composition are its first uses.
+    ///
+    /// The type is `@MainActor` (design-l2 §concurrency: all Spotify-path
+    /// mutable state is main-confined), so the lazy getter builds on the
+    /// main actor — which every first-use path already is by construction
+    /// (the registry build in `start()`'s main composition, the Settings
+    /// surface). `assumeIsolated`, not a hop: a future off-main first use
+    /// traps rather than racing the published record — the assume-where-it-
+    /// holds stance the live-translate settings-view seam below states; that
+    /// seam can run off-main and pre-checks `Thread.isMainThread`, while
+    /// these first-use paths are main by construction, so the assumption
+    /// here is unconditional by intent.
+    private(set) lazy var spotifyCredentialStore = MainActor.assumeIsolated {
+        SpotifyCredentialStore(storage: storage)
+    }
+
+    /// [SPOTIFY] (2026-10-07) T-119 — the account session (C-SP-03): the
+    /// link/unlink state machine, the single token path and the
+    /// `spotify_link` / `spotify_unlink` events. ONE instance serves every
+    /// consumer — the plugin registered in `makePluginRegistry()`, the
+    /// router's music seams and (T-120) the Settings surface — so the
+    /// surfaces and the routing can never observe two different accounts.
+    ///
+    /// Lazily beside the store above for the same reason: constructing it
+    /// reads the record and touches nothing remote ([BOOT-REVIEW P0-1]).
+    ///
+    /// The presenter closure is resolved at PRESENT time, never captured
+    /// (the `calendarShareSession` precedent): the composition root runs
+    /// before any window exists, and a controller captured then would be a
+    /// detached one.
+    ///
+    /// [W2-review D1, 2026-10-07] `observabilityBus: observabilityBus` is
+    /// mandatory, never decoration: the session's initializer defaults the
+    /// bus to a dropping sink, so omitting the argument silently loses
+    /// `spotify_link`/`spotify_unlink` (ADR-SP-14). Pinned with an
+    /// event-delivery test in `AppCoordinatorSpotifyWiringTests`.
+    private(set) lazy var spotifyAccountSession: SpotifyAccountSession = MainActor.assumeIsolated {
+        let session = SpotifyAccountSession(store: spotifyCredentialStore,
+                                            flow: ASWebSpotifyAuthSession(),
+                                            observabilityBus: observabilityBus)
+        session.presenter = { [weak self] in self?.topPresentingViewController() }
+        return session
+    }
+
     /// Persisted "listen for ये कान्छी" UI preference — UserDefaults
     /// (not a secret), same shape as `sttModelPreference` /
     /// `voiceEngineStack`. Defaults ON: with the sherpa model bundled,
@@ -1181,7 +2032,7 @@ final class AppCoordinator: ObservableObject {
     /// from the next launch (the Settings copy says so).
     @Published var warmStartEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(warmStartEnabled,
+            SettingsPersistence.shared.set(warmStartEnabled,
                                       forKey: Self.warmStartEnginesKey)
         }
     }
@@ -1224,12 +2075,23 @@ final class AppCoordinator: ObservableObject {
         preferredBaseId: resolvedBrainModelID,
         config: LlamaCommandInterpreter.Config(confidenceThreshold: 0.4,
                                                maxTokens: 128,
-                                               timeoutSeconds: 10),
+                                               timeoutSeconds: 10,
+                                               // [CHAT] The chat shape's own
+                                               // floor — deliberately NOT the
+                                               // 0.4 above: a command the brain
+                                               // is 40% sure of is worth trying,
+                                               // a conversational answer it is
+                                               // 40% sure of is not worth
+                                               // stating as fact.
+                                               chatConfidenceFloor: 0.6,
+                                               judgeTimeoutSeconds: 8.0),
         pluginRegistry: pluginRegistry,
         // [TURN-TIMING-BREAKDOWN] Nil on every build but an
         // `INTENT_ENCODER` one — the picker brain's prompt-build and
         // inference spans cost a nil check there.
-        timingRecorder: turnTimingRecorder
+        timingRecorder: turnTimingRecorder,
+        // [PIPELINE-TRACE] …and the picker brain's two trace rows.
+        traceRecorder: pipelineTraceRecorder
     )
     /// [ENCODER-RUNTIME-TOGGLE] Settings → AI मोडेल (hidden) → the
     /// internal-testing switch that lets the encoder take the local-brain
@@ -1279,6 +2141,74 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// [CORRECTION-TOGGLES] Settings → AI मोडेल (hidden) → the SAME internal
+    /// card, third switch: the STT-error corrector, the layer that runs
+    /// FIRST at the intent seam (§6.1 `sanitise → correct → canonicalize →
+    /// tokenize`). Persisted under
+    /// `IntentEncoderPreferences.correctorKey` ("intentEncoder.corrector").
+    ///
+    /// [CORRECTION-DEFAULT-ON] An ABSENT key is the shipped apply arm
+    /// (owner decision 2026-10-11) — writing the key is a deliberate
+    /// pin: true keeps the default on, false switches the layer off.
+    /// `isCorrectionEnabledEffective` is what surfaces show.
+    ///
+    /// Unlike the two switches above there is no slot to re-install and no
+    /// `didSet` sequencing: the corrector is not a brain, and it resolves
+    /// its policy from the stored key on EVERY turn
+    /// (`STTCorrector.Policy.runtime` through the local slot's input seam,
+    /// `IntentEncoderWiring.localSlotInputSeam`), so the flip acts on the
+    /// next turn by itself. The didSet persists and stops.
+    ///
+    /// ON rewrites the LOCAL BRAIN'S input only: nothing downstream branches
+    /// on the result (A-14 — no band, no cache, no route, and the chain's
+    /// routing decisions and `CommandRouter` are untouched), and the keyword
+    /// safety net keeps reading the ORIGINAL transcript
+    /// (`IntentTranscriptPair.safetyNetInput`, D-1).
+    ///
+    /// [CORRECTION-ANYBRAIN] The row is NOT gated on the encoder switch: the
+    /// layer acts at the local slot's input, so it corrects what the picker
+    /// brain reads too — which is what lets a tester run the corrector alone
+    /// against the 1.7B. The layer's own compile gate still applies
+    /// (`STTCorrector.Policy.runtime`), so a build without `INTENT_ENCODER`
+    /// stays inert whatever this switch says.
+    @Published var intentCorrectorEnabled: Bool = false {
+        didSet { intentEncoderPreferences.setCorrectorEnabled(intentCorrectorEnabled) }
+    }
+
+    /// [CORRECTION-DEFAULT-ON] The layer's EFFECTIVE user-facing state:
+    /// a never-written key reads ON (the shipped apply default), a stored
+    /// false is the user's deliberate pin-off. Bound by the voice-settings
+    /// switch and read by the internal-testing card, so neither surface
+    /// can show "off" while the layer is applying corrections.
+    var isCorrectionEnabledEffective: Bool {
+        !intentEncoderPreferences.isCorrectorToggleSet
+            || intentEncoderPreferences.isCorrectorEnabled
+    }
+
+    /// [CORRECTION-TOGGLES] …and the card's fourth switch: the dialect
+    /// canonicalizer, which runs SECOND — on the CORRECTOR's output, never
+    /// on the raw transcript. Same key shape
+    /// (`IntentEncoderPreferences.canonicalizerKey`,
+    /// "intentEncoder.canonicalizer"), same default OFF, and the same
+    /// per-turn resolution through `DialectCanonicalizer.Policy.runtime`.
+    ///
+    /// Deliberately a SEPARATE switch from the corrector's: the two layers
+    /// are independently observable, and the card has to be able to run the
+    /// whole matrix — corrector only, canonicalizer only, both, neither —
+    /// each combination exercising the real seam in the intended order.
+    /// Safety is unchanged in every one of them: `original` (what the
+    /// safety net, the emergency path and the med-ack path read) is the
+    /// sanitised transcript, untouched by either layer.
+    ///
+    /// [CORRECTION-ANYBRAIN] Same rule as the corrector's row: it acts at the
+    /// local slot's input, so it is not gated on the encoder switch, and with
+    /// the encoder off it canonicalizes what the picker brain reads (in the
+    /// matrix's intended order — on the CORRECTOR's output, never on the raw
+    /// transcript).
+    @Published var intentCanonicalizerEnabled: Bool = false {
+        didSet { intentEncoderPreferences.setCanonicalizerEnabled(intentCanonicalizerEnabled) }
+    }
+
     /// [TURN-TIMING-BREAKDOWN] The LAST finalized turn's stage breakdown,
     /// behind the internal-testing card's "Last turn" readout: each stage
     /// the turn actually spent time in, with its milliseconds.
@@ -1292,6 +2222,35 @@ final class AppCoordinator: ObservableObject {
     /// finalizes — and permanently nil on a non-gated build, where no
     /// reporter exists to fill it.
     @Published private(set) var lastTurnTimingBreakdown: TurnTimingBreakdown?
+
+    /// [PIPELINE-TRACE] The LAST finalized turn's full pipeline trace,
+    /// behind the internal-testing card's "Pipeline trace" section: one row
+    /// per gate — STT, corrector, canonicalizer, the encoder's three
+    /// stages, the band policy, the cascade, the picker brain's prompt and
+    /// its FINAL LLM round-trip, and the TTS start — each with its input
+    /// summary, output summary, decision token and milliseconds.
+    ///
+    /// IN MEMORY ONLY — never persisted, never written to the encrypted
+    /// stores. Unlike the breakdown above, the rows MAY name words (the
+    /// recognised text, a corrected form, a decoded slot, the spoken
+    /// reply): the card is the debugger's view on the device, the same
+    /// disclosure posture the "Last correction" line above already ships,
+    /// and the value disappears with the process. The observability
+    /// events are the count-only half — see `PipelineTrace.eventMetadata`.
+    @Published private(set) var lastPipelineTrace: PipelineTrace?
+
+    /// [TG-12] The LAST turn's correction readout, behind the
+    /// internal-testing card's "Last correction" line — the same shape and
+    /// the same rules as `lastTurnTimingBreakdown` above.
+    ///
+    /// IN MEMORY ONLY — never persisted, never written to the encrypted
+    /// stores, never logged, and NOT what the `turn_correction` event carries
+    /// (the event carries `CorrectionResult.observabilityMetadata`, which is
+    /// count-only and PII-free; this is the debugger's view and it may name
+    /// the words being rewritten, to the person holding the device). Nil
+    /// until a turn runs with the corrector switched on — and permanently
+    /// nil on a non-gated build, where no interpreter and no card exist.
+    @Published private(set) var lastCorrectionReadout: CorrectionReadout?
 
     /// Both internal-testing switches act through here. Non-gated builds
     /// never reach it (no UI exposes the switches), but the guard keeps
@@ -1322,7 +2281,7 @@ final class AppCoordinator: ObservableObject {
     /// so the shipped behaviour is unchanged.
     private lazy var intentEncoderInterpreter: IntentEncoderInterpreter = {
         let resources = IntentEncoderRuntime.load()
-        return IntentEncoderInterpreter(
+        let interpreter = IntentEncoderInterpreter(
             modelStore: modelStore,
             observabilityBus: observabilityBus,
             modelId: ModelCatalog.intentEncoderSpike,
@@ -1331,17 +2290,35 @@ final class AppCoordinator: ObservableObject {
             config: .default,
             artifactInstaller: IntentEncoderSpikeInstaller(
                 modelStore: modelStore,
-                observabilityBus: observabilityBus),
+                observabilityBus: observabilityBus,
+                downloadService: modelDownloadService),
             // [TURN-TIMING-BREAKDOWN] The encoder's three stage spans
             // (tokenizer / CoreML forward / decode). Non-nil exactly when
             // this build compiles `INTENT_ENCODER` in — the encoder is
             // only ever constructed on such a build anyway.
-            timingRecorder: turnTimingRecorder
+            timingRecorder: turnTimingRecorder,
+            // [PIPELINE-TRACE] …and the same three stages' trace rows
+            // (token count / decoded intent+slots / decision).
+            traceRecorder: pipelineTraceRecorder
         )
+        // [TG-12] The corrector's readout for the card's "Last correction"
+        // line, wired at construction exactly as the turn-timing reporter is
+        // (see `turnLatencyReporter?.onReported` below): the interpreter hands
+        // it over on the calling thread and the publish hops to main. In
+        // memory only — see `lastCorrectionReadout`.
+        interpreter.onCorrection = { [weak self] readout in
+            DispatchQueue.main.async {
+                self?.lastCorrectionReadout = readout
+            }
+        }
+        return interpreter
     }()
     /// Level-2 memory-warning observer for the encoder (nil unless the
     /// internal-testing gate is on).
     private var intentEncoderMemoryObserver: NSObjectProtocol?
+    /// [MODEL-LIFECYCLE] Level-2 observer for the residency ledger (STT +
+    /// brain eviction). Installed in every build.
+    private var modelLifecycleObserver: NSObjectProtocol?
 
     /// True once the encoder has actually been OFFERED the slot, i.e. the
     /// lazy instance exists. A/B means a tester can switch the encoder on
@@ -1364,12 +2341,14 @@ final class AppCoordinator: ObservableObject {
     /// so the shipped call site is what the wiring tests exercise.
     ///
     /// [ENCODER-RUNTIME-READY] Readiness is requested at the moment the
-    /// encoder is OFFERED the local-brain slot: with
-    /// INTENT_ENCODER_SPIKE_ZIP set (the tester's own copy of the pinned
-    /// zip) this starts a background install through ModelStore's strict
-    /// sha256 path; unset, it is an explicit no-op decision. No UI, no
-    /// network, and nothing here runs on a non-gated build — or with the
-    /// toggle off, which is why switching the encoder ON is also what
+    /// encoder is OFFERED the local-brain slot: this resolves the tester's
+    /// own copy of the pinned zip (the app's `Documents/` copy by default —
+    /// no environment variable needed — or the `INTENT_ENCODER_SPIKE_ZIP`
+    /// path when one is set) and starts a background install through
+    /// ModelStore's strict sha256 path. A missing file is an explicit
+    /// `zip_missing` failure; only an explicitly blanked override is a
+    /// no-op decision. No UI, no network — and with the toggle off nothing
+    /// here runs at all, which is why switching the encoder ON is also what
     /// starts its install.
     ///
     /// The slot itself is the DEFERRED pair, so an install that lands
@@ -1391,6 +2370,11 @@ final class AppCoordinator: ObservableObject {
         }
         if let offeredEncoder {
             intentEncoderOffered = true
+            // [MODEL-LIFECYCLE] The encoder now exists, so its bytes are
+            // real: give the residency ledger a row for them. Placed here
+            // (not in `start()`) so a launch that never builds the encoder
+            // never declares it.
+            registerEncoderSlotIfNeeded()
             offeredEncoder.requestReadiness()
         }
         // "Can it serve now?" — decides the selection event, unchanged
@@ -1427,9 +2411,60 @@ final class AppCoordinator: ObservableObject {
             // [TURN-TIMING-BREAKDOWN] The cascade's decision span rides
             // the chain that owns the decision; nil on non-gated builds.
             timingRecorder: turnTimingRecorder,
+            // [CORRECTION-ANYBRAIN] The slot's input seam: the corrector and
+            // the canonicalizer run HERE, once per turn, so the two layer
+            // switches act whichever brain answers — including the picker
+            // brain with the encoder off. Unconditional: the seam is inert
+            // while both switches read OFF (the shipped default), and it is
+            // what makes those switches independent of the encoder switch.
+            //
+            // [PIPELINE-TRACE] The trace recorder rides the seam it
+            // traces: the corrector and canonicalizer rows are opened
+            // inside `IntentInputCanonicalization.prepare`, which moved
+            // here with the seam — handing the recorder to the chain
+            // alone would leave both rows off on every production turn.
+            inputSeam: IntentEncoderWiring.localSlotInputSeam(
+                traceRecorder: pipelineTraceRecorder),
+            // [PIPELINE-TRACE] …and the cascade's trace row.
+            traceRecorder: pipelineTraceRecorder,
             onEscalated: { [weak self] reason in
+                // [CASCADE-RESIDENCY] THIS closure is the pre-picker seam:
+                // `LocalBrainChain` calls `cascade.onEscalated` BEFORE it
+                // dispatches to the stand-in brain, so releasing the
+                // encoder's weights here happens BEFORE the picker brain's
+                // multi-GB handle is allocated. The encoder's answer for
+                // the turn is already final (the chain escalates only
+                // after its completion), so its weights are pure residency
+                // cost from this point on — and the phone OOMs (signal 9)
+                // with Whisper + encoder + picker brain all resident.
+                self?.releaseEncoderWeightsForCascadeEscalation()
                 self?.emitEncoderEscalatedToPickerBrain(reason)
             })
+        // [JUDGE-PRE-INTERPRET] DELIBERATELY NOT WIRED (device field
+        // report 2026-10-12): the pre-interpret judge serialised TWO 4B
+        // inferences per uncertain turn and its short budget timed out
+        // on-device, so every such turn landed in the mechanical
+        // question. The judge now runs ONLY on the failure path
+        // (`CommandRouter.attemptCorrectionRescue`), where the turn has
+        // already failed and the 8 s budget is free latency — the same
+        // silent correction, one inference, no double wait. The chain
+        // hook stays for a future faster judge model.
+        _ = (router.localBrain as? LocalBrainChain)
+    }
+
+    /// [CASCADE-RESIDENCY] The cascade's residency policy, in one place:
+    /// the encoder's CoreML weights go back BEFORE the picker brain's
+    /// handle is allocated (see `onEscalated`'s call site), and the encoder
+    /// stays AVAILABLE — its own `isAvailable`/`runnerForPrediction` reload
+    /// path brings the weights back on the next turn that needs them.
+    ///
+    /// `intentEncoderOffered` is checked FIRST: touching the lazy
+    /// `intentEncoderInterpreter` would CONSTRUCT it on a configuration
+    /// that never offered it (no encoder artifact, the toggle off) — the
+    /// same guard the slot installation uses.
+    private func releaseEncoderWeightsForCascadeEscalation() {
+        guard intentEncoderOffered else { return }
+        intentEncoderInterpreter.unloadForCascadeEscalation()
     }
 
     /// [ENCODER-RUNTIME-CASCADE] The A/B evidence for a cascade turn: the
@@ -1485,11 +2520,26 @@ final class AppCoordinator: ObservableObject {
     // MARK: - Intent layer services (spec 2026-09-05)
     /// Deterministic slot resolution + learning stores. Lazy so `storage`
     /// and `familyContacts` exist before first use.
-    private lazy var contactResolver = ContactResolver { [weak self] in self?.familyContacts ?? [] }
+    ///
+    /// T-156: the resolver reads the PUBLISHED index (T-151) instead of
+    /// building a throwaway one per call — the coordinator's index is
+    /// rebuilt at the roster choke point, so the resolver and the search
+    /// tiers judge one projection. The resolver's own nil-fallback keeps
+    /// it whole (test-parity) if the index has not been published yet.
+    private lazy var contactResolver = ContactResolver(
+        contactsProvider: { [weak self] in self?.familyContacts ?? [] },
+        indexProvider: { [weak self] in self?.familyIndex ?? .empty })
     private lazy var callMethodPreferences = CallMethodPreferenceStore(storage: storage)
     private lazy var confirmedMethodHistory = ConfirmedMethodHistoryStore(storage: storage)
-    private lazy var methodResolver = MethodResolver(preferenceStore: callMethodPreferences,
-                                                     historyStore: confirmedMethodHistory)
+    private lazy var methodResolver = MethodResolver(
+        preferenceStore: callMethodPreferences,
+        historyStore: confirmedMethodHistory,
+        // FR-CDP-012: the settings primary, mapped by call type — a
+        // video-word call versus a plain call (design-l2 §8). Read per
+        // resolution, so a settings change applies from the next call.
+        globalDefault: { [weak self] isVideo in
+            CallChannelChain.method(for: self?.defaultCallApp ?? .phone, isVideo: isVideo)
+        })
     private lazy var intentCache = IntentCommandCache(storage: storage)
     private lazy var repetitionGuard = RepetitionGuard(storage: storage)
     /// Numbers this app has genuinely dialed, newest first — the ranking
@@ -1512,6 +2562,14 @@ final class AppCoordinator: ObservableObject {
     /// Phase 2, §4.3) — FaceTime video/audio, WhatsApp text, tel:.
     /// Stateless, so no lazy needed; tests fake it via `CallLinkOpening`.
     private let callLinks = CallLinks()
+
+    /// The GSM floor's dialer (callkit-gsm, 2026-10-14): every GSM call
+    /// goes through CallKit's `CXStartCallAction` so the ONLY
+    /// confirmation the user sees is the app's own localized yes/no
+    /// seam — never the system `tel:` sheet (owner report). Stateless
+    /// across calls; `tel:` opens survive strictly as its failure
+    /// fallback (and the family paths' numberless honest line).
+    private let callKitDialer = CallKitDialer()
 
     /// Per-contact Messenger handles for ADDRESS-BOOK people, keyed by
     /// normalized phone (Messenger deep-link fix, 2026-09-07) — Messenger
@@ -1554,16 +2612,84 @@ final class AppCoordinator: ObservableObject {
     /// selectability (2026-09-06) the Settings "AI मोडेल" screen offers
     /// every `ModelCatalog.availableBrainEntries` model; the LIVE
     /// choice is `resolvedBrainModelID`.
-    // The Qwen 1.7B intent fine-tune (v12, seed 42) is the default
-    // brain — the legacy LLaMA 1B is hidden from the picker now.
-    static let defaultBrainModelID = ModelCatalog.intentQwen4BS43
+    // [DEFAULT-BRAIN 2026-09-16] The gate-passing slot-canonical Qwen 4B
+    // (v16) is the default brain — the same model the curated brain list
+    // leads with and the per-language ne pick names, so the value no longer
+    // straddles a superseded entry (`intentQwen4BS43`, kept in the catalog
+    // for devices that cached it). The pre-Qwen LLaMA 1B this comment used
+    // to describe is hidden from the picker.
+    //
+    // [MODEL-WARDEN 2026-09-18] This is the CATALOG-level default: the
+    // answer when no device is in the question (the artifact the catalogue
+    // and the hosted release are judged by, which is why the tests pin it).
+    // What a given phone should actually RUN under "Automatic" is
+    // `resolveBrainModelID` below — on a 6 GB class this entry is
+    // `over_class_budget` beside a warm ANE STT, so the automatic path steps
+    // down to the 1.7B while this constant stays the catalogue's claim.
+    // [ON-DEVICE-LATENCY] The 1.7B slim brain, not the 4B (device field
+    // report 2026-10-12): the 4B slotcanon takes 15-30 s per turn on the
+    // 14 Pro Max — every turn timed out of the 10 s budget and fell to
+    // the correction question. The 1.7B (closed 0.941 / emergency 1.000,
+    // "best available on-device brain" per the catalog) fits the same
+    // turns into ~5-8 s on Metal. The 4B stays pickable in Settings for
+    // anyone who prefers its quality over the latency.
+    static let defaultBrainModelID = ModelCatalog.intentQwenS43
 
     /// The brain model the interpreter actually uses: the stored
-    /// preference when it names a real catalog entry, else the default.
-    /// (A stale stored value — model removed from the catalog — falls
-    /// back rather than wedge the picker.)
+    /// preference when it names a real catalog entry, else what
+    /// "Automatic" resolves to on THIS device. (A stale stored value —
+    /// model removed from the catalog — falls back rather than wedge the
+    /// picker.)
     var resolvedBrainModelID: ModelID {
-        brainModelPreference.flatMap { ModelCatalog.entry(for: $0) != nil ? $0 : nil }
+        Self.resolveBrainModelID(storedPreference: brainModelPreference,
+                                 language: appLanguage.rawValue,
+                                 ledger: ModelLifecycleManager.shared)
+    }
+
+    /// [MODEL-WARDEN] The resolution above as a pure function of (stored
+    /// preference, language, device), the house static seam — testable
+    /// without an `AppCoordinator` instance, like
+    /// `shouldAutoDownloadAssistantBrain`.
+    ///
+    /// Two rules, in order:
+    ///
+    ///  1. **An explicit pick wins, unconditionally.** A stored id that is
+    ///     still in the catalog is returned even when the class refuses it —
+    ///     that is the `soloOverBudget` contract (a resident is never
+    ///     unloadable), and the policy gates the automatic path only. A
+    ///     stored id the catalog no longer has is not a pick any more, so it
+    ///     falls through to rule 2 exactly as `nil` ("Automatic") does.
+    ///  2. **Otherwise the policy decides**
+    ///     (`LanguageModelResolver.resolvedAutomaticPick`), asked with the
+    ///     LEDGER's inputs — the same class and the same registered warm STT
+    ///     the Settings rows are rendered from — so a row that says "not for
+    ///     this phone" can never be the model Automatic runs. The
+    ///     catalogue's `defaultBrainModelID` remains the floor for the case
+    ///     the resolution has nothing to say (a kind with no curated entry).
+    ///
+    /// [CNR T-184] Both rules see the promotion record. Rule 1 is the
+    /// explicit-selection path and deliberately does not gate: a household
+    /// that picked the v17 entry BY HAND is served it (that is what
+    /// "selectable" means — the entry's name quotes its gate state). Rule 2
+    /// threads `ModelCatalog.chatVariantPromotionRecord` into the resolver,
+    /// which is where a record-blocked chat variant is refused every
+    /// automatic rung: it neither becomes the default nor wins the
+    /// largest-fitting step. The record is reference data; this call site
+    /// names it so the wiring is one grep, not a default argument away.
+    static func resolveBrainModelID(storedPreference: ModelID?,
+                                    language: String,
+                                    ledger: ModelLifecycleManager) -> ModelID {
+        if let stored = storedPreference, ModelCatalog.entry(for: stored) != nil {
+            return stored
+        }
+        let inputs = ledger.availabilityInputs
+        return LanguageModelResolver.resolvedAutomaticPick(
+            kind: .llamaBase,
+            language: language,
+            policy: inputs.policy,
+            physicalMemoryBytes: inputs.physicalMemoryBytes,
+            warmSTTLiveBytes: inputs.warmSTTLiveBytes,
+            promotionRecord: ModelCatalog.chatVariantPromotionRecord)?.entry.id
             ?? Self.defaultBrainModelID
     }
 
@@ -1578,7 +2704,15 @@ final class AppCoordinator: ObservableObject {
         let resolved = resolvedBrainModelID
         llamaCommandInterpreter.switchBaseModel(to: resolved)
         if !modelStore.isCached(resolved) {
-            modelDownloadService.start(resolved)
+            // `deliveringStoredPreference`: this is the didSet of a preference
+            // the household picked, and rule 1 of `resolveBrainModelID` is that
+            // an explicit pick outranks the class verdict (`soloOverBudget`).
+            // The warden gate in `ModelDownloadService` therefore stands aside
+            // here — refusing it would leave the pick stored, the row's button
+            // hidden (the card hides Download on a refusal) and the artifact
+            // never arriving: a silent no-op where the contract promises
+            // delivery.
+            modelDownloadService.start(resolved, deliveringStoredPreference: true)
         }
     }
 
@@ -1603,21 +2737,82 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Resolves which channel an ADDRESS-BOOK row's call button opens
-    /// (Phone-tab redesign, 2026-09-07): the row's explicit per-contact
-    /// pick wins, else the global default (`defaultCallApp`). One hard
-    /// rule on top of the fallback chain — never resolve to a channel
-    /// the row cannot open: a `.messenger` result needs an on-file
-    /// handle (Messenger addresses people by username, not number), so
-    /// without one the result drops to `.phone` rather than dead-ending
-    /// the tap. Pure static so the whole matrix is unit-testable without
-    /// an AppCoordinator instance (same seam as
+    /// (Phone-tab redesign, 2026-09-07; chain seam: call-dialer-primary-
+    /// secondary, 2026-10-12). The row's explicit per-contact pick is the
+    /// chain's PREFERRED (explicit-pick-wins), else the global default
+    /// (`defaultCallApp`). The chain is preferred → secondary → phone,
+    /// deduped, each channel attempted at most once, with `.phone`
+    /// always IN the order — so the shipped one-hard-rule form is now
+    /// one case of the chain: a `.messenger` preference with no on-file
+    /// handle is skipped and the route falls to the secondary or the
+    /// phone floor instead of dead-ending the tap. The returned `Result`
+    /// carries `fellBackFrom` — the skipped channels in attempt order —
+    /// the single provenance source the announcements compose from.
+    /// Pure static so the whole matrix is unit-testable without an
+    /// AppCoordinator instance (same seam as
     /// `shouldAutoDownloadAssistantBrain`).
     static func resolvedCallChannel(explicit: CallApp?,
                                     defaultApp: CallApp,
-                                    messengerHandleAvailable: Bool) -> CallApp {
-        let resolved = explicit ?? defaultApp
-        if resolved == .messenger && !messengerHandleAvailable { return .phone }
-        return resolved
+                                    secondaryApp: CallApp,
+                                    messengerHandleAvailable: Bool,
+                                    whatsAppInstalled: Bool,
+                                    vocabulary: CallChannelVocabulary = .anyChannel)
+                                    -> CallChannelChain.Result {
+        resolveChannel(order: CallChannelChain.attemptOrder(
+            preferred: explicit ?? defaultApp,
+            secondary: secondaryApp),
+            messengerHandleAvailable: messengerHandleAvailable,
+            whatsAppInstalled: whatsAppInstalled,
+            vocabulary: vocabulary)
+    }
+
+    /// [PER-CONTACT-OVERRIDE] (2026-10-14) The seam for a contact's
+    /// explicit dialer override: the chain is [override, (override ==
+    /// secondary ? primary : secondary), phone] — the override is
+    /// attempted exactly once, and its fallback is never a repeat of
+    /// itself (the owner's rule: an override that IS the secondary
+    /// falls back to the PRIMARY).
+    static func resolvedCallChannelWithOverride(override: CallApp,
+                                                defaultApp: CallApp,
+                                                secondaryApp: CallApp,
+                                                messengerHandleAvailable: Bool,
+                                                whatsAppInstalled: Bool,
+                                                vocabulary: CallChannelVocabulary = .anyChannel)
+                                                -> CallChannelChain.Result {
+        resolveChannel(order: CallChannelChain.attemptOrderForOverride(
+            override: override,
+            primary: defaultApp,
+            secondary: secondaryApp),
+            messengerHandleAvailable: messengerHandleAvailable,
+            whatsAppInstalled: whatsAppInstalled,
+            vocabulary: vocabulary)
+    }
+
+    /// The shared seam algorithm (ADR-CDP-03 steps 1–3), one
+    /// implementation for both public seams: normalize the preferred
+    /// input through the surface vocabulary — SILENT, exactly like the
+    /// shipped `guard resolved.supportsAudio else { return .phone }`,
+    /// which also substituted without a word — then run the pure chain
+    /// and substitute an out-of-vocabulary routed channel with the
+    /// vocabulary terminal. The substitution never fabricates
+    /// provenance: `fellBackFrom` keeps only the feasibility-skipped
+    /// channels and is unchanged by it. The terminal is always feasible,
+    /// so the seam is total and the route never dead-ends.
+    private static func resolveChannel(order: [CallApp],
+                                       messengerHandleAvailable: Bool,
+                                       whatsAppInstalled: Bool,
+                                       vocabulary: CallChannelVocabulary)
+                                       -> CallChannelChain.Result {
+        var normalized = order
+        normalized[0] = vocabulary.normalized(normalized[0])
+        let routed = CallChannelChain.route(
+            in: normalized,
+            feasibility: CallChannelChain.Feasibility(
+                messengerHandleAvailable: messengerHandleAvailable,
+                whatsAppInstalled: whatsAppInstalled))
+        guard !vocabulary.permits(routed.channel) else { return routed }
+        return CallChannelChain.Result(channel: vocabulary.terminal,
+                                       fellBackFrom: routed.fellBackFrom)
     }
 
     /// Compile-time: is the vendored LLM.swift runtime linked into THIS
@@ -1664,13 +2859,364 @@ final class AppCoordinator: ObservableObject {
     private func makePluginRegistry() -> PluginRegistry {
         let registry = PluginRegistry(observabilityBus: observabilityBus)
         registry.register(NepaliCalendarPlugin(storage: storage))
-        registry.register(ApplianceHelperPlugin(storage: storage))
+        registry.register(ApplianceHelperPlugin(storage: storage,
+                                                labelCache: labelTranslationCache))
         registry.register(routinePlugin)
         // [YOUTUBE] (2026-09-08) The interpreter-side twin of the
         // router's deterministic YouTube stage — same `YouTubeTool`
         // behavior (shared config store + transport + opener seams).
         registry.register(YouTubePlugin(configStore: youtubeConfigStore))
+        // [SPOTIFY] (2026-10-07) T-119 — the interpreter-side Spotify
+        // plugin (T-118), registered beside the YouTube twin it mirrors.
+        // The coordinator's ONE credential store and account session are
+        // handed over, so the plugin's `spotify.play` path and the
+        // router's deterministic music path read the same account state —
+        // and cannot diverge (L2-R2). Registration is compile-time and
+        // exactly once; the plugin constructs nothing here beyond holding
+        // its seams.
+        registry.register(SpotifyPlugin(accountSession: spotifyAccountSession,
+                                        credentialStore: spotifyCredentialStore))
+        // [LIVE-TRANSLATE T-027] The live-camera-translation plugin. It is
+        // registered with a *factory* and nothing else: no camera session,
+        // no detector, no client and no session model is built here, so
+        // registering at launch costs nothing and an app that never opens
+        // the feature never creates any of them (NFR-LCT-012). The factory
+        // runs on the one path that opens it — the voice entry inside
+        // `handle`, the Home tile inside `presentLiveTranslate()`.
+        registry.register(LiveTranslatePlugin(
+            observabilityBus: observabilityBus,
+            makeDependencies: { [weak self] locale in
+                self?.makeLiveTranslateDependencies(locale: locale)
+            },
+            // [MASTER-SWITCH] (Workstream B) The Settings leaf, for the one
+            // path that needs it: the refusal. Built **here** rather than in
+            // the plugin because the leaf draws the app's own consent
+            // controller, and a plugin that minted a second one would be a
+            // second consent surface to keep honest.
+            //
+            // The main-queue hop is part of the seam's contract exactly as it
+            // is for `AppLauncherPlugin` above: the router dispatches plugins
+            // inside a `Task`, so `handle` can run off the main thread, while
+            // `liveTranslateConsentController()` and the leaf's own
+            // `@Published` state are main-confined. The view must come back
+            // synchronously, so this is a sync hop rather than an async one.
+            //
+            // `nil` when the coordinator is gone: the app is tearing down and
+            // nothing will be presented. The plugin turns that into the
+            // shipped apology rather than an empty screen (see
+            // `LiveTranslatePlugin.disabledRefusal`).
+            //
+            // The language is not read here: the leaf draws the controller's
+            // own locale, so the factory's argument is deliberately ignored
+            // rather than a second source of the same truth.
+            makeSettingsView: { [weak self] _ in
+                // `assumeIsolated`, not a plain call: this closure is
+                // nonisolated, while the consent controller is main-confined.
+                // Both branches below are on the main thread **by
+                // construction** — the direct one by the check, the dispatched
+                // one because `DispatchQueue.main.sync` runs there — so the
+                // assumption is made exactly where it holds, and a future
+                // caller who breaks that gets a trap rather than a data race.
+                let buildOnMain = { [weak self] () -> AnyView? in
+                    MainActor.assumeIsolated {
+                        guard let self else { return nil }
+                        return AnyView(LiveTranslateConsentSettingsView(
+                            controller: self.liveTranslateConsentController(),
+                            settings: LiveTranslateSettings()))
+                    }
+                }
+                return Thread.isMainThread ? buildOnMain()
+                                           : DispatchQueue.main.sync(execute: buildOnMain)
+            }))
+        // [APP-LAUNCHER] (2026-09-16) "क्यामेरा खोल" / "open WhatsApp":
+        // the plugin resolves the entity against the catalog and asks this
+        // coordinator to pend the launch — the confirmation machinery, the
+        // 45 s window and the open all live here, where the call and
+        // calendar-event confirmations already do (wired weak so the
+        // registry never keeps the coordinator alive).
+        //
+        // The hop is part of the seam's contract: the router dispatches
+        // plugins inside a `Task`, so `handle` — and this closure — can run
+        // off the main thread, while the pending launch, its @Published
+        // state and the session's confirmation window are all
+        // main-confined (every other `request…Confirmation` here is called
+        // synchronously from `route`, i.e. already on main). The line must
+        // come back synchronously, so this is a sync hop rather than an
+        // async one; `isMainThread` keeps it deadlock-free if the dispatch
+        // context ever changes.
+        registry.register(AppLauncherPlugin { [weak self] appID, confidence in
+            let requestOnMain = { [weak self] () -> String in
+                self?.requestAppLaunch(appID: appID, confidence: confidence)
+                    ?? L10n.str("router.pluginUnavailable",
+                                locale: self?.activeLocale ?? Locale(identifier: "ne-NP"))
+            }
+            return Thread.isMainThread ? requestOnMain()
+                                       : DispatchQueue.main.sync(execute: requestOnMain)
+        })
         return registry
+    }
+
+    // MARK: - [TRANSLATE-TEST] The hidden dev screen's dependencies (2026-09-21)
+
+    /// The translate-test screen's dependencies: the app's OWN instances,
+    /// not fresh ones.
+    ///
+    /// Sharing the store, the consent gate, the cost governor and the bus is
+    /// the point rather than a shortcut. A second consent gate would be a
+    /// second consent record to keep honest (and the screen exists to show
+    /// what the SHIPPED path does); a second cost governor would let the
+    /// screen spend a budget nothing else in the app can see. Sharing also
+    /// means anything the screen records is what the camera session would
+    /// have recorded.
+    ///
+    /// The cloud switch and the key are read live, through closures, because
+    /// both can change while the screen is open — the household can flip the
+    /// switch in Settings, and a key can be entered there.
+    ///
+    /// The speech half is `startSearchPhraseCapture`, the shipped one-shot
+    /// mic the Phone and Directions leaves use. It suspends the voice
+    /// pipeline for the capture's duration and restarts it afterwards, which
+    /// is what makes this reuse safe: the shared engine has ONE tap slot, and
+    /// every shipped recogniser is push-mode. A screen that captured audio
+    /// itself would either fight the always-on pipeline for the tap or wait
+    /// forever for buffers nobody feeds it.
+    @MainActor
+    func makeTranslateTestDependencies() -> TranslateTestDependencies {
+        // One settings instance over `UserDefaults`, the same store the
+        // Settings leaf writes through, so the switch read here is the
+        // switch the household set.
+        let settings = LiveTranslateSettings()
+        // The dropdown's ladder, read from the SAME config the tiers are
+        // given below — one instance read twice rather than two constants
+        // free to drift apart. The screen never spells a model id, so a
+        // catalog swap that reorders or retires translation models changes
+        // what it offers without a line of it changing.
+        let config = LiveTranslateConfig.default
+        return TranslateTestDependencies(
+            cache: labelTranslationCache,
+            consentGate: liveTranslateConsentGate,
+            costGovernor: geminiCostGovernor,
+            client: geminiClient,
+            observabilityBus: observabilityBus,
+            modelStore: modelStore,
+            modelSource: TranslateTestModelSource(
+                // The TRANSLATION rungs of the ladder, by the tier's own rule
+                // ([MODEL-SWITCH], 2026-09-21 review): the config's ladder
+                // carries the assistant's intent brains in its tail as
+                // fallbacks for the tier's own resolution, and a picker that
+                // offered them would send a translation prompt to a
+                // slot-filling brain. Asked of the tier rather than filtered
+                // here, so the rows the screen offers and the names the tier
+                // refuses are one predicate.
+                ladder: LocalBrainTranslationTier.translationModelIDs(from: config.brainTranslationModelIDs),
+                // The catalog's localized name; the raw id when this build
+                // carries no entry for it (a config ahead of the catalog is
+                // exactly what a mid-swap ladder looks like). The locale is
+                // read per call rather than captured, so a language change
+                // is reflected the next time the menu is drawn.
+                displayName: { [weak self] id in
+                    let locale = self?.activeLocale ?? Locale(identifier: "en")
+                    return ModelCatalog.entry(for: id)?.displayName(locale: locale) ?? id.rawValue
+                },
+                // The tier's RUN GATE's question, and the screen's ONE
+                // predicate ([MODEL-SWITCH], 2026-09-21 review): `attempt`
+                // resolves `modelStore.path(for:)` — non-nil only when the
+                // artifact is on disk — so the row's marker, the readiness
+                // line and the install card all answer it the way a run
+                // would. (`installedModel()` asks `isAvailable`, the file
+                // plus its declared dependencies; every ladder entry is a
+                // `.llamaBase` with no dependencies, so the two agree on all
+                // of them — and where they could differ, this is the one the
+                // run would use.)
+                isInstalled: { [weak self] id in
+                    self?.modelStore.path(for: id) != nil
+                },
+                // The warden's verdict, asked of the same manager the
+                // AI-models rows ask: a model this device class refuses is
+                // not "Ready" here either, and the reason token is the one
+                // the ledger and the Settings row use.
+                unavailabilityReason: { id in
+                    guard let entry = ModelCatalog.entry(for: id) else { return nil }
+                    return ModelLifecycleManager.shared.availability(of: entry).reason
+                }),
+            isProviderConfigured: { [weak self] in
+                self?.geminiConfigStore.isConfigured ?? false
+            },
+            isCloudEnabled: { settings.geminiCloudEnabled },
+            startCapture: { [weak self] completion in
+                // A shell that is gone reports rather than hangs: the
+                // screen leaves its mic button in `.listening` until a
+                // completion arrives, so dropping it would strand the
+                // button lit with nothing coming.
+                guard let self else {
+                    completion(.failure(.audioUnavailable))
+                    return
+                }
+                self.startSearchPhraseCapture(completion: completion)
+            },
+            cancelCapture: { [weak self] in
+                self?.cancelSearchPhraseCapture()
+            },
+            config: config,
+            targetLanguage: LiveTranslationPipeline.defaultTargetLanguage)
+    }
+
+    /// [LIVE-TRANSLATE T-027] Assembles one live-translation session (C13).
+    ///
+    /// Called only when the feature is opened, and it is the only place a
+    /// capture session, a detector, a recognition request or a tier is built
+    /// for this feature. The two stores it hands over are the process's own
+    /// instances (`labelTranslationCache`, `liveTranslateConsentGate`, both
+    /// built in `init` over the same cipher) — the session never constructs
+    /// storage and never constructs a second gate.
+    ///
+    /// `nil` when the shell's speech queue does not exist yet. That queue is
+    /// built in `start()`; both entry points are downstream of it, so this is
+    /// the pre-`start()` state and is not reachable from either. Returning
+    /// `nil` rather than a session without speech is deliberate: the plugin
+    /// turns it into the spoken apology the design's failure table specifies,
+    /// instead of a session that silently cannot talk.
+    private func makeLiveTranslateDependencies(locale: Locale) -> LiveTranslateSessionDependencies? {
+        guard let queue = speakQueue else { return nil }
+        // [POINT-ASK] The hosted point-ask session's dependencies: the
+        // process's own gate, settings, cache and client, plus per-session
+        // engines — the saliency engine the tap hit-test reads boxes from
+        // (the shipped `VisionObjectDetectionEngine`, bounded to the
+        // resolver's object limit) and the OCR engine the analysis reads.
+        // The mask engine is wired behind the config's opt-in
+        // (`maskEngineEnabled`) and, since [MASK-OBSERVABILITY], carries
+        // the bus so a pass that fails or answers "background" is visible
+        // in the capture instead of silently degrading every tap to a pad.
+        let pointAskConfig = PointAskConfig.default
+        let pointAsk = PointAskSessionDependencies(
+            locale: locale,
+            consentGate: pointAskConsentGate,
+            settings: pointAskSettings,
+            cache: labelTranslationCache,
+            client: geminiClient,
+            objectEngine: VisionObjectDetectionEngine(maximumObjects: pointAskConfig.resolverObjectLimit),
+            maskEngine: pointAskConfig.maskEngineEnabled
+                ? PointAskMaskEngine(observabilityBus: observabilityBus)
+                : nil,
+            // [YOLO] The real object detector behind the tap box: YOLO11n
+            // on the Neural Engine, auto-installed on first point-ask use
+            // (the engine's availability probe kicks the catalog download
+            // when the artifact is absent — the standard downloader
+            // fetches the zip, verifies the strict sha256 and unpacks the
+            // `.mlmodelc` directory).
+            yoloEngine: PointAskYOLOEngine(modelStore: modelStore,
+                                           provisioner: modelDownloadService,
+                                           observabilityBus: observabilityBus),
+            ocrEngine: VisionTextRecognitionEngine(),
+            observabilityBus: observabilityBus,
+            config: pointAskConfig,
+            // The shell's own speak path: the answer is the assistant's
+            // speech, on the same lane every other reply takes. Spoken,
+            // never logged.
+            speak: { [weak self] line in self?.speak(text: line) })
+        let cameraSession = LiveCameraSession(observabilityBus: observabilityBus)
+        // [CAMERA-BUDGET] (2026-09-20) The session profile drives the
+        // warden's model budget for exactly the interval the camera is
+        // drawing its 1.4 GB working set: with the profile active, the
+        // warm STT resident is the first thing over the lowered budget,
+        // so the translation brain's load evicts it instead of dying
+        // beside it (the owner's 06:23 capture: brain admitted, committed,
+        // pressure-evicted 0.7 s later). The trade — first talk after
+        // camera costs a load — was the owner's call.
+        // The session itself is handed over as the profile's **owner**: the
+        // lease is held weakly, so a session that goes away without clearing
+        // its profile (a torn-down coordinator, a transition that never
+        // arrived) stops lowering the budget on the next read instead of
+        // lowering it for the process's life — and a *stale* session's late
+        // `false` cannot take a live session's profile down ([CAMERA-BUDGET]
+        // lease, review finding on #99). Captured weakly for the obvious
+        // reason: the closure lives on the session it would otherwise retain.
+        cameraSession.onSessionActiveChanged = { [weak cameraSession] active in
+            ModelLifecycleManager.shared.setSessionProfile(active ? .cameraLive : nil,
+                                                          owner: cameraSession)
+        }
+
+        return LiveTranslateSessionDependencies(
+            locale: locale,
+            camera: cameraSession,
+            detector: LiveTextDetector(observabilityBus: observabilityBus),
+            cache: labelTranslationCache,
+            consentGate: liveTranslateConsentGate,
+            costGovernor: geminiCostGovernor,
+            client: geminiClient,
+            // The shell's one queue, through the feature's own protocol: the
+            // session's speech is the assistant's speech, on the interactive
+            // lane, and T-025's microphone gate can see it (C12).
+            speechPath: queue,
+            // The shipped one-shot microphone, the same instance the Phone
+            // leaf's search uses: one mic stack, one arbitration.
+            captureDevice: searchPhraseCapture,
+            audioSession: audioSessionManager,
+            // A struct over `UserDefaults`: one store, so the session's
+            // toggle and Settings read and write the same preference.
+            settings: LiveTranslateSettings(),
+            observabilityBus: observabilityBus,
+            pointAsk: pointAsk)
+    }
+
+    /// [LIVE-TRANSLATE T-027] The Home feature tile's entry (FR-LCT-001).
+    ///
+    /// Like the appliance tile, the tap IS the intent: no encoder round trip,
+    /// no question, just the session. It goes through the plugin rather than
+    /// building the view here, so the tile and the voice entry cannot end up
+    /// presenting two different sessions.
+    @MainActor
+    func presentLiveTranslate() {
+        let locale = activeLocale
+        guard let plugin = pluginRegistry.plugins.compactMap({ $0 as? LiveTranslatePlugin }).first else {
+            // Unreachable: the registry always registers it (see
+            // `makePluginRegistry`). Reported rather than swallowed, because
+            // a tile that does nothing is the one outcome nobody can debug.
+            observabilityBus.emit(ObservabilityEvent(
+                component: "plugin_live_translate",
+                eventType: "live_translate_open_failed",
+                durationMs: nil,
+                outcome: "failure",
+                errorCode: "plugin_not_registered",
+                metadata: [:]
+            ))
+            speak(text: L10n.str(LiveTranslatePlugin.unavailableKey, locale: locale))
+            return
+        }
+        // **[MASTER-SWITCH] The household's switch, before anything is built**
+        // (Workstream B, owner directive 2026-09-21). The tile is the one entry
+        // that owns its own speaking, so it cannot read the line off a
+        // `PluginResult` — it asks the plugin for the refusal instead, which is
+        // the *same* refusal the voice entry gives, from the same method. That
+        // is what makes "the two entries cannot refuse differently" true
+        // rather than intended.
+        //
+        // A refusal, not a failure: someone chose this, so the observability
+        // event is the plugin's own disabled type — and it is **recorded by the
+        // refusal itself** (`disabledRefusal`), not here (review finding 10):
+        // this branch used to speak the line and present the leaf without
+        // emitting anything, so the tile's refusal left no trace while the
+        // voice entry's did. One ceremony, so one record, whichever entry made
+        // the refusal. Ordered before `tileView` because a feature that is off
+        // must not assemble a capture session, a detector or a client on its way
+        // to saying so (NFR-LCT-012).
+        guard plugin.isEnabled else {
+            guard let refusal = plugin.disabledRefusal(locale: locale) else {
+                // No leaf, so no promise: the shipped apology is the only
+                // sentence here that is true — and the failure is already
+                // recorded, in the same ceremony that could not build the leaf.
+                speak(text: L10n.str(LiveTranslatePlugin.unavailableKey, locale: locale))
+                return
+            }
+            speak(text: refusal.spoken)
+            presentPluginView(refusal.view)
+            return
+        }
+        guard let view = plugin.tileView(locale: locale) else {
+            speak(text: L10n.str(LiveTranslatePlugin.unavailableKey, locale: locale))
+            return
+        }
+        presentPluginView(view)
     }
 
     /// [ACCENT-ADAPT] per-user decode-biasing terms (doc
@@ -1701,13 +3247,70 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    init() {
+    /// - Parameters:
+    ///   - profileStorage: the encrypted channel the profile store writes
+    ///     through. nil (the app's own construction) = the real
+    ///     `MigratingEncryptedStorage`; tests inject an in-memory fake.
+    ///   - wireProfilePersonalization: whether the personalization seam is
+    ///     built. The app always wires it (the wizard needs it); a test
+    ///     exercising the nil-safe consumers passes false and reads
+    ///     `profilePersonalization` as nil (design-l2 §5.6).
+    ///   - systemContactLinkService: the verified-link service the
+    ///     coordinator consumes (T-156). nil (the app's own construction)
+    ///     = the real `SystemContactLinkService` actor, built at FIRST
+    ///     USE, not here; the coordinator suites inject a scripted fake
+    ///     through this seam so no `CNContactStore` ever enters a test.
+    ///   - systemContactPhotoWriter: the system-photo write seam
+    ///     `syncSystemPhoto` delegates to (T-158). nil (the app's own
+    ///     construction) = the real `SystemContactPhotoWriter` actor,
+    ///     built at FIRST USE, not here; the coordinator suites inject
+    ///     the T-154 `FakeSystemContactPhotoWriter` through this seam.
+    ///   - ackClarificationConfig: the clarification walk's response
+    ///     window (T-013; design-l2 C4/D4). Defaults to the composed
+    ///     `AckClarificationConfig()` — the window derived from
+    ///     `ConfirmationChallenge.defaultChallengeTimeoutSeconds` — and is
+    ///     only overridden by a shorter injected window in tests.
+    ///   - slotClockStore: the household mapping's read seam the save gate
+    ///     resolves slot rows through (T-017; design-l2 C1/IF-21). nil
+    ///     (the app's own construction) composes a store over the SAME
+    ///     storage seam the scheduler writes through — the store is
+    ///     stateless, so both instances read the ONE stored record (the
+    ///     T-008 default). The save-plumbing suite injects a store over an
+    ///     in-memory seam, which is how a mapping and a corrupt mapping
+    ///     are pinned deterministically.
+    ///   - medicationEvidenceStore: the on-device evidence store the
+    ///     `removeMedication` cascade drops an entry's photo folder
+    ///     through (T-017; design-l2 C12/IF-13). nil (the app's own
+    ///     construction) = the real store under Application Support; the
+    ///     save-plumbing suite injects one rooted at a scratch directory
+    ///     so the cascade can be observed without touching real evidence.
+    init(profileStorage: ProfilePayloadStorage? = nil,
+         wireProfilePersonalization: Bool = true,
+         systemContactLinkService: SystemContactLinkReading? = nil,
+         systemContactPhotoWriter: SystemContactPhotoWriting? = nil,
+         ackClarificationConfig: AckClarificationConfig = AckClarificationConfig(),
+         slotClockStore: MedicationSlotClockStore? = nil,
+         medicationEvidenceStore: MedicationEvidenceStore? = nil) {
         // [BOOT-REVIEW P0 item 1] `bootstrap-init` — the composition root's
         // own cost, measured separately from every other startup metric:
         // this is what runs before the app exists at all (the App struct's
         // `@StateObject` initializer), so it can never include work that
         // only happens after the first frame.
         StartupSignposts.begin(.bootstrapInit)
+        // [MTC] The dialogue frame's one owner (design-l2 §15 edit 1): the
+        // answer window is READ from the session machine's instance config
+        // (C-1, review-l2) so the frame deadline and the slot timer share
+        // one source — no new literal, and no type-level access (the
+        // machine's `Config` is a private instance field; the additive
+        // `answerWindowSeconds` accessor is what carries the value here).
+        // Constructed at the TOP of the body on purpose: `dialogueManager`
+        // has no default, and the init below reaches properties with
+        // observers (`wakeWordEnabled`), whose assignments require every
+        // stored property already initialized — a later construction would
+        // compile the rest of the body against a half-initialized self and
+        // trips phase-1 rules (red gate 2026-10-10 17:41).
+        self.dialogueManager = DialogueManager(
+            answerWindowSeconds: voiceSession.answerWindowSeconds)
         // Core infrastructure. Storage is encrypted at rest at Data
         // Protection class Complete, per constitution §Security — the
         // Keychain for small secrets, encrypted files under Application
@@ -1716,8 +3319,86 @@ final class AppCoordinator: ObservableObject {
         // `MigratingEncryptedStorage`). Observability goes through the
         // log sanitiser so no PII leaks into device logs.
         let bus = ConsoleObservabilityBus(sanitiser: LogSanitiser())
-        self.storage = MigratingEncryptedStorage()
+        let storage = MigratingEncryptedStorage()
+        self.storage = storage
         self.observabilityBus = bus
+        // [PROFILE-INTERVIEW T-092] Store → guard → seam, composed here
+        // next to the storage they write through (design-l2 §5.6): the
+        // wizard runs BEFORE start(), so the seam must exist the moment
+        // init returns; only the ack service (which needs the speaker) is
+        // built in start(). Construction performs no I/O.
+        let profileStore = UserProfileStore(
+            storage: profileStorage ?? storage,
+            observabilityBus: bus)
+        self.profileStore = profileStore
+        self.profilePersonalization = wireProfilePersonalization
+            ? ProfilePersonalization(storage: profileStore,
+                                     promptGuard: ProfilePromptTextGuard(),
+                                     observabilityBus: bus)
+            : nil
+        // [MED-ACK-WALK] (T-013) The clarification walk's window — a value
+        // composed from the ONE named home (`AckClarificationConfig` wraps
+        // `ConfirmationChallenge.defaultChallengeTimeoutSeconds`), stored
+        // before anything can begin a walk. No I/O, no side effects.
+        self.ackClarificationConfig = ackClarificationConfig
+        // [MED-SLOT] (T-017) The save gate's mapping read seam: composed
+        // here exactly as `MedicationScheduler.init` composes its own (the
+        // store is stateless over the storage seam, so two instances read
+        // the ONE stored record — never a second, divergent clock). No
+        // I/O: the store reads only when resolution asks, at save time.
+        self.slotClockStore = slotClockStore ?? MedicationSlotClockStore(storage: storage)
+        // [MED-SLOT] (T-017) The remove cascade's evidence store, beside
+        // the visual-aid store and with the same no-IO construction rule
+        // (path resolution only; the directory appears on the first
+        // write). The cascade itself is a fail-soft Void call.
+        //
+        // [MED-EVIDENCE] (T-021) Resolved ONCE into a local and then
+        // stored AND handed to the scheduler below: the capture path
+        // (IF-14) stores through this instance and the hold/attach path
+        // (IF-15) deletes orphans through the scheduler's — two
+        // instances would mean the late-hold cleanup could miss files
+        // one of them wrote. One composition, one instance, both
+        // consumers (the `no evidence store = held files leak`
+        // obligation the scheduler's init doc states).
+        let resolvedEvidenceStore = medicationEvidenceStore ?? MedicationEvidenceStore()
+        self.medicationEvidenceStore = resolvedEvidenceStore
+        // [LIVE-TRANSLATE T-032] The feature's two payloads (the translation
+        // cache and the consent record) are sealed with AES-GCM before they
+        // reach the file channel — Data Protection Complete alone is "locked
+        // device", not "a cipher" (security review, AM-10). The decorator is
+        // applied HERE and to these two consumers only, so every other
+        // feature's on-disk format is unchanged and no migration is needed.
+        let liveTranslateStorage = LiveTranslateCipherStorage(wrapping: storage)
+        // [LIVE-TRANSLATE T-013] The shared store is built here, next to the
+        // storage it writes through, so exactly one instance exists for the
+        // process lifetime (see the property doc). Construction performs no
+        // I/O; nothing is read until a label is actually resolved.
+        self.labelTranslationCache = LabelTranslationCache(storage: liveTranslateStorage,
+                                                           observabilityBus: bus)
+        // [LIVE-TRANSLATE T-015] The consent gate lives next to the store it
+        // writes through: one instance, for the process lifetime. It is the
+        // only thing in the app that records or revokes consent.
+        self.liveTranslateConsentGate = LiveTranslateConsentGate(storage: liveTranslateStorage,
+                                                                 observabilityBus: bus)
+        // [POINT-ASK] The point-ask consent gate, on the same encrypted
+        // channel under its own key: one instance for the process lifetime,
+        // the only thing in the app that records or revokes the photo-egress
+        // consent (design §5 / OD-14).
+        self.pointAskConsentGate = PointAskConsentGate(storage: liveTranslateStorage,
+                                                       observabilityBus: bus)
+        // [CNR T-177] (2026-10-14) The cloud-chat consent gate, on the
+        // same encrypted consent channel under its own key
+        // (`plugin.cloud_chat.consent.v1`, T-172): one instance for the
+        // process lifetime, the only thing in the app that records or
+        // revokes cloud-chat consent. Construction performs no I/O — the
+        // record is read per turn, never held.
+        self.cloudChatConsentGate = CloudChatConsentGate(storage: liveTranslateStorage,
+                                                         observabilityBus: bus)
+        // [CNR T-177] The chat lane's reachability input, constructed here
+        // like the other long-lived inputs. `PathMonitorReachability` is
+        // conservative (false until the first path update), which is the
+        // fail-closed reading the routing decision expects.
+        self.cloudChatReachability = PathMonitorReachability()
         // [TURN-TIMING] The turn tracer lives as long as the app: every
         // voice component (pipeline, router, speaker, recognizers) shares
         // it. Its finalize callback (the transcript caption) is wired in
@@ -1732,8 +3413,16 @@ final class AppCoordinator: ObservableObject {
         let timingRecorder: TurnTimingRecorder? =
             IntentEncoderFeature.isEnabled ? TurnTimingRecorder() : nil
         self.turnTimingRecorder = timingRecorder
+        // [PIPELINE-TRACE] The debug trace's recorder, gated by the same
+        // flag and handed to the reporter below so its turn edges ride the
+        // SAME attach point the timing recorder's do — the two can never
+        // disagree about where a turn began.
+        let traceRecorder: PipelineTraceRecorder? =
+            IntentEncoderFeature.isEnabled ? PipelineTraceRecorder() : nil
+        self.pipelineTraceRecorder = traceRecorder
         self.turnLatencyReporter = timingRecorder.map {
-            TurnLatencyReporter(observabilityBus: bus, recorder: $0)
+            TurnLatencyReporter(observabilityBus: bus, recorder: $0,
+                                traceRecorder: traceRecorder)
         }
         self.alarmScheduler = UNNotificationScheduler()
         // [STARTUP-PERF] The keychain-backed stores below are CREATED
@@ -1745,6 +3434,16 @@ final class AppCoordinator: ObservableObject {
         // SAME `load()` calls run, just off-main.
         let contactStore = FamilyContactStore(storage: storage)
         self.familyContactStore = contactStore
+        // T-156: the identity-state seam, armed before the roster's first
+        // assignment below (whose `didSet` — when this init runs late
+        // enough for observers to fire — rebuilds the index and runs the
+        // link refresh; on an empty roster that refresh early-returns
+        // before touching the service, so no address-book handle is ever
+        // built here).
+        self.injectedLinkService = systemContactLinkService
+        // T-158: the write-seam injection, same pattern — armed before the
+        // roster's first assignment. The lazy writer is never built here.
+        self.injectedSystemContactPhotoWriter = systemContactPhotoWriter
         self.familyContacts = []
         self.familyNotifier = APNsFamilyNotifier(
             contacts: [],
@@ -1808,11 +3507,18 @@ final class AppCoordinator: ObservableObject {
         // store's calendar gate is synced by hand (same rule as
         // `appTheme` above).
         let appointmentsToCalendarValue =
-            UserDefaults.standard.object(forKey: Self.appointmentsToCalendarKey) as? Bool ?? true
+            SettingsPersistence.shared.object(forKey: Self.appointmentsToCalendarKey) as? Bool ?? true
         self.appointmentsToCalendar = appointmentsToCalendarValue
         appointmentStore.calendarWritesEnabled = appointmentsToCalendarValue
         self.appointmentSmsNoteDismissed =
-            UserDefaults.standard.bool(forKey: Self.appointmentSmsNoteDismissedKey)
+            SettingsPersistence.shared.bool(forKey: Self.appointmentSmsNoteDismissedKey)
+        // [MED-SLOT] (T-020) The retime note's persisted half — the
+        // construction read, the precedent's exact shape (this is the
+        // property's ONLY initial assignment, so its didSet does not
+        // fire). The transient presentation half keeps its declaration
+        // default (false).
+        self.medicationRetimeNoteDismissed =
+            SettingsPersistence.shared.bool(forKey: Self.medicationRetimeNoteDismissedKey)
 
         // Safety-critical service (no LLM dependency)
         self.medicationScheduler = MedicationScheduler(
@@ -1820,7 +3526,33 @@ final class AppCoordinator: ObservableObject {
             alarmScheduler: alarmScheduler,
             observabilityBus: bus,
             familyNotifier: familyNotifier,
-            caregiverNotifySettings: caregiverNotifySettings
+            caregiverNotifySettings: caregiverNotifySettings,
+            // [MED-PHOTO-AIDS] Two jobs, matching the routine scheduler's:
+            // arming a dose notification with the entry's first photo as a
+            // banner attachment (the Lock Screen case), and clearing the
+            // entry's photo folder when the medication is deleted. Built
+            // with the MEDICATION prefix, so dose photos never resolve
+            // into a routine entry's folder.
+            visualAidStore: medicationVisualAidStore,
+            // [MED-EVIDENCE] (T-021) The shared on-device evidence store
+            // — the SAME instance this coordinator resolves at :3212 for
+            // the remove cascade and the capture path (IF-14 stores
+            // through it; IF-15's late-hold and failed-attach cleanup
+            // deletes through it). A nil here would let held captures
+            // register while their discarded files leak.
+            evidenceStore: resolvedEvidenceStore,
+            // [MED-SLOT] (T-020) The mapping store flows to the scheduler
+            // VERBATIM from this initializer's seam. In the app the
+            // argument is nil and the scheduler composes its own store
+            // over the SAME storage seam — byte-identical to the T-017
+            // composition (the store is stateless, so both instances read
+            // the ONE record). Where a store IS injected, the scheduler,
+            // the IF-9 save gate and `currentMedicationSlotClock` are now
+            // the SAME instance: an injected mapping governs the re-arm
+            // and the arming feed exactly as it governs the save, and no
+            // composition can persist through one seam while arming
+            // through another.
+            slotClockStore: slotClockStore
         )
 
         // Routine reminders (v2 pivot Phase 1): the medication path's
@@ -1843,7 +3575,11 @@ final class AppCoordinator: ObservableObject {
             // notification path at all; `markDelivered` is where the
             // alert now fires from.
             familyNotifier: familyNotifier,
-            caregiverNotifySettings: caregiverNotifySettings
+            caregiverNotifySettings: caregiverNotifySettings,
+            // [PHOTO-AIDS] Two jobs: arming a notification with the
+            // entry's first photo as a banner attachment, and clearing
+            // the entry's photo folder when the entry is deleted.
+            visualAidStore: visualAidStore
         )
         self.routineScheduler = routineScheduler
         self.routinePlugin = RoutinePlugin(scheduler: routineScheduler)
@@ -1900,13 +3636,12 @@ final class AppCoordinator: ObservableObject {
         // pilot language (spec §3.2).
         self.appLanguage = AppLanguage.persisted()
 
-        // Theme — restore the persisted background theme (skinnable home,
-        // 2026-09-07). Unknown/missing raw values fall back to `.cream`
-        // (`AppTheme(rawOrDefault:)`). This is the property's ONLY initial
-        // assignment, so its didSet does not fire here — nothing needs to
-        // react to the restored value (same rule as `voiceEngineStack`).
         self.appTheme = AppTheme(rawOrDefault:
-            UserDefaults.standard.string(forKey: Self.themeKey))
+            SettingsPersistence.shared.string(forKey: Self.themeKey))
+        self.appVisualStyle = AppVisualStyle(rawOrDefault:
+            SettingsPersistence.shared.string(forKey: Self.visualStyleKey))
+        self.appTextSize = AppTextSize(rawOrDefault:
+            SettingsPersistence.shared.string(forKey: Self.textSizeKey))
 
         // Calendar display (calendar-display task, 2026-09-09) — the
         // default calendar + overlay toggles behind the Home top bar's
@@ -1933,8 +3668,18 @@ final class AppCoordinator: ObservableObject {
         // every row. This is the property's ONLY initial assignment, so
         // its didSet does not fire here (same rule as `appTheme` above) —
         // nothing needs to react to the restored value.
-        self.defaultCallApp = UserDefaults.standard
+        self.defaultCallApp = SettingsPersistence.shared
             .string(forKey: Self.defaultCallAppKey)
+            .flatMap(CallApp.init(rawValue:)) ?? .phone
+
+        // Fallback dialer (call-dialer-primary-secondary, 2026-10-12) —
+        // restore the persisted secondary call app with the primary's
+        // exact shape; missing/unknown raw values fall back to `.phone`,
+        // the GSM floor every route contains. This is the property's
+        // ONLY initial assignment, so its didSet does not fire here
+        // (same rule as `defaultCallApp` above).
+        self.secondaryCallApp = SettingsPersistence.shared
+            .string(forKey: Self.secondaryCallAppKey)
             .flatMap(CallApp.init(rawValue:)) ?? .phone
 
         // Default map surface (directions task, 2026-09-07) — restore
@@ -1943,7 +3688,7 @@ final class AppCoordinator: ObservableObject {
         // installed at request time. This is the property's ONLY initial
         // assignment, so its didSet does not fire here (same rule as
         // `appTheme` above) — nothing reacts to the restored value.
-        self.navigationMapApp = UserDefaults.standard
+        self.navigationMapApp = SettingsPersistence.shared
             .string(forKey: Self.navigationMapAppKey)
             .flatMap(NavigationMapApp.init(rawValue:)) ?? .auto
 
@@ -2009,7 +3754,7 @@ final class AppCoordinator: ObservableObject {
         // every on-device brain runs deterministic temp-0 + fixed-seed
         // sampling through `OnDeviceSampling` ([NO-GIBBERISH] 2026-09-07).
         let restoredBrain: ModelID?
-        if let raw = UserDefaults.standard.string(forKey: Self.brainPreferenceKey) {
+        if let raw = SettingsPersistence.shared.string(forKey: Self.brainPreferenceKey) {
             let stored = ModelID(rawValue: raw)
             restoredBrain = ModelCatalog.entry(for: stored) != nil ? stored : nil
         } else {
@@ -2026,7 +3771,7 @@ final class AppCoordinator: ObservableObject {
         // `applyVoiceEngineStack()`. This is the property's ONLY initial
         // assignment, so (like `appLanguage` above) its didSet does not
         // fire here.
-        self.voiceEngineStack = UserDefaults.standard.string(forKey: Self.voiceEngineStackKey)
+        self.voiceEngineStack = SettingsPersistence.shared.string(forKey: Self.voiceEngineStackKey)
             .flatMap(VoiceEngineStack.init(rawValue:)) ?? .gemini
 
         // Restore the persisted cloud-fallback opt-in (default OFF — the
@@ -2035,9 +3780,18 @@ final class AppCoordinator: ObservableObject {
         // didSets do not fire here (same rule as `voiceEngineStack`
         // above); `applyVoiceEngineStack()` — which runs once in the
         // startup callback — applies the restored opt-in for real.
-        self.cloudFallbackEnabled = UserDefaults.standard.bool(forKey: Self.cloudFallbackKey)
-        self.cloudProvider = UserDefaults.standard.string(forKey: Self.cloudProviderKey)
+        self.cloudFallbackEnabled = SettingsPersistence.shared.bool(forKey: Self.cloudFallbackKey)
+        self.cloudProvider = SettingsPersistence.shared.string(forKey: Self.cloudProviderKey)
             .flatMap(CloudProvider.init(rawValue:)) ?? .gemini
+
+        // Restore the persisted cloud-cascade tier settings ([CLOUD-CASCADE],
+        // 2026-09-16 — default threshold 0.97, default ON). These are the
+        // properties' ONLY initial assignments, so their didSets do not fire
+        // here (same rule as `voiceEngineStack` above); the tier itself is
+        // armed by `applyCloudCascadeConfiguration()`, reached from
+        // `applyVoiceEngineStack()` once `start()` has built the pipeline.
+        self.cloudCascadeThreshold = CloudCascadeSettings.threshold()
+        self.cloudCascadeEnabled = CloudCascadeSettings.isEnabled()
 
         // Restore the persisted Voice Processing I/O preset mirror
         // (voice-personalisation P0, slice C — default OFF, the A/B
@@ -2053,7 +3807,7 @@ final class AppCoordinator: ObservableObject {
         // assignment (didSet does not fire here); the restored stage is
         // attached to the pipeline at its construction below.
         self.noiseFilterEnabled =
-            UserDefaults.standard.bool(forKey: Self.noiseFilterEnabledKey)
+            SettingsPersistence.shared.bool(forKey: Self.noiseFilterEnabledKey)
 
         // Restore the persisted quick-access favourites (quick-access-apps
         // task, 2026-09-06). Pure prune — dedupe, drop ids naming no
@@ -2063,7 +3817,7 @@ final class AppCoordinator: ObservableObject {
         // `voiceEngineStack` above) — nothing else needs to react to the
         // restored list.
         self.favoriteAppIDs = AppLauncher.validatedFavouriteIDs(
-            UserDefaults.standard.stringArray(forKey: Self.quickAccessAppsKey) ?? []
+            SettingsPersistence.shared.stringArray(forKey: Self.quickAccessAppsKey) ?? []
         )
 
         // Restore the persisted wake-word listening preference (default
@@ -2079,9 +3833,9 @@ final class AppCoordinator: ObservableObject {
         // above); the boot's warm phase reads the restored value. Must
         // land before the wake-word restore below, which reads `self`.
         self.warmStartEnabled =
-            UserDefaults.standard.object(forKey: Self.warmStartEnginesKey) == nil
+            SettingsPersistence.shared.object(forKey: Self.warmStartEnginesKey) == nil
             ? true
-            : UserDefaults.standard.bool(forKey: Self.warmStartEnginesKey)
+            : SettingsPersistence.shared.bool(forKey: Self.warmStartEnginesKey)
 
         self.wakeWordEnabled = wakeWordPreferences.isEnabled
         wakeWordActivityGate.setEnabled(wakeWordEnabled)
@@ -2097,23 +3851,23 @@ final class AppCoordinator: ObservableObject {
         // switch is off: the value is irrelevant in that state, and the
         // tester's choice must survive an off/on round trip.
         self.intentEncoderCascadeEnabled = intentEncoderPreferences.isCascadeEnabled
+        // [CORRECTION-TOGGLES] …and the two pre-intent layers' switches on
+        // that same card (same default OFF, same restore rule). Neither
+        // touches the local-brain slot, so nothing else has to be
+        // re-installed for them to act: the policies they gate are resolved
+        // per turn.
+        self.intentCorrectorEnabled = intentEncoderPreferences.isCorrectorEnabled
+        self.intentCanonicalizerEnabled = intentEncoderPreferences.isCanonicalizerEnabled
 
         // Restore the persisted STT model choice. The didSet observer
         // pushes it to the recognizer and refreshes the label. Unknown
         // IDs (a model removed from the catalog, or a bad stored value)
         // are ignored so a stale preference can't wedge the picker.
-        // Migration: the mid-training distill is superseded by the
-        // stage-4 fine-tune.
-        if let raw = UserDefaults.standard.string(forKey: Self.sttPreferenceKey),
+        // Superseded ids migrate forward through `migratedSTTPreference`.
+        if let raw = SettingsPersistence.shared.string(forKey: Self.sttPreferenceKey),
            ModelCatalog.entry(for: ModelID(rawValue: raw)) != nil {
-            let stored = ModelID(rawValue: raw)
-            // Superseded models migrate forward to the current default:
-            // mid-training distill → stage-4 fine-tune → medium fine-tune.
-            self.sttModelPreference =
-                (stored == ModelCatalog.whisperSmallNepali
-                 || stored == ModelCatalog.whisperFinetunedNepali)
-                ? ModelCatalog.whisperMediumFinetunedNepali
-                : stored
+            self.sttModelPreference = Self.migratedSTTPreference(
+                ModelID(rawValue: raw))
         }
 
         // C12: the confirmation challenge expires — clear the pending entry
@@ -2126,12 +3880,128 @@ final class AppCoordinator: ObservableObject {
                 // a verdict too — the one that says "this question was
                 // too hard / too slow to answer", which is what the
                 // accept-band and the 45 s budget are tuned against.
+                //
+                // [CNR T-177] The cloud-chat consent question's capture
+                // is read BEFORE the clears below: if it was the pended
+                // flow, the window lapsed but the QUESTION did not (T-176:
+                // "the capture's window can lapse unanswered — that
+                // lapses the window, never the question"), so the answer
+                // is re-offered instead of the generic timeout line, and
+                // nothing here records a verdict (the consent capture
+                // records nothing — `recordConfirmationTimeout`'s own
+                // contract).
+                let reofferCloudChatConsent = self.pendingCloudChatConsentCapture
+                self.pendingCloudChatConsentCapture = false
                 self.recordConfirmationTimeout()
                 self.pendingConfirmationEntryId = nil
                 self.pendingRephrase = nil
-                self.speak(key: "router.confirmationTimeout")
+                // [APP-LAUNCHER] (2026-09-16) An unanswered launch question
+                // is DISMISSED, never launched late (design §Error
+                // handling: "Confirmation timeout → auto-dismiss; never
+                // launch"). Clearing the pending launch here is what makes
+                // that true — a later "यो" would otherwise still find it
+                // pended once the session had returned to idle — and the
+                // timeout line says plainly that nothing was opened
+                // (the medication-flavored "I'll remind you again" would be
+                // a promise about an app launch that nobody keeps).
+                let pendedLaunchID = self.pendingAppLaunch?.appID
+                self.pendingAppLaunch = nil
+                // [APP-LAUNCHER F13] A launch question that expired is a
+                // terminal outcome like every other one, so it gets the
+                // same two treatments the tap paths get: an observability
+                // event (`launch_timeout`) and a card that says what
+                // happened. Before this, the timeout spoke a line and left
+                // the question card — "Should I open Camera?" — sitting on
+                // screen as if it were still pending, with no record on the
+                // bus that the question had ever been asked. The card is
+                // replaced rather than cleared because the elder must still
+                // be able to see WHAT was not opened after the speech has
+                // faded.
+                if let appID = pendedLaunchID {
+                    self.emitAppLaunch(eventType: Self.LaunchTimeout.eventType,
+                                       outcome: Self.LaunchTimeout.outcome(appID: appID))
+                    self.setOutcome(icon: Self.LaunchTimeout.icon,
+                                    text: L10n.str(Self.LaunchTimeout.speechKey,
+                                                   locale: self.activeLocale))
+                }
+                if reofferCloudChatConsent {
+                    // [CNR T-177] The question is still on screen; the
+                    // generic "I didn't hear an answer" line would speak
+                    // about a request that is still live. Listen again
+                    // instead — the elder answers by saying yes or no.
+                    self.reofferCloudChatConsentAfterTimeout()
+                } else {
+                    self.speak(key: pendedLaunchID != nil ? Self.LaunchTimeout.speechKey
+                                                          : "router.confirmationTimeout")
+                }
             }
         }
+
+        // [MTC] The slot answer window's arrival (FR-MTC-013, ADR-MTC-08):
+        // SILENT by contract. The resolve travels the ONE funnel — frame,
+        // timer and window all close there — and nothing here speaks: no
+        // `speak`, never `recordConfirmationTimeout()` (that recorder is
+        // the medication challenge's own window, and the machine has
+        // already returned the session to idle before this fires).
+        voiceSession.onSlotAnswerTimeout = { [weak self] in
+            self?.resolveDialogueFrame(.timedOut)
+        }
+
+        // [MTC] M-2's exit half (design-l2 §15, FR-MTC-001): a frame is
+        // only ever armed WITH a window, so any legal exit out of
+        // `.awaitingSlotAnswer` while a frame is still held resolves it —
+        // through the same funnel, emitting the closed-vocabulary
+        // `superseded` outcome. The hop defers the read until the
+        // publishing setter has settled and lets a resolve that runs in
+        // the SAME main block as the exit land first (the timer's own
+        // block transitions to idle and then resolves `.timedOut`), so a
+        // timeout is never mis-recorded as a supersession. Observer
+        // checks are cheap no-ops whenever no frame is live, which is
+        // almost every session transition.
+        dialogueSessionExitCancellable = voiceSession.$state
+            .removeDuplicates()
+            .sink { [weak self] newState in
+                // [HERO-STATES] Leaving the slot window closes the
+                // auto-listen claim in the same hop that the exit is
+                // published — the hero can never keep showing "listening"
+                // once the window has resolved.
+                if newState != .awaitingSlotAnswer {
+                    self?.slotAnswerCaptureActive = false
+                }
+                DispatchQueue.main.async {
+                    self?.resolveDialogueFrameOnSessionExit()
+                }
+            }
+
+        // [APP-LAUNCHER] (2026-09-16) The camera capture flow (T4): the
+        // system picker + the add-only photo write, plus the channel
+        // closures that put the flow's words on the same three surfaces
+        // every other reply uses (speech, the outcome card, the
+        // observability bus). Built here — the cost is three object
+        // allocations and no I/O — so the flow is ready before the first
+        // "क्यामेरा खोल"; the presenter resolves its host at presentation
+        // time, not now.
+        cameraCapture = makeCameraCaptureFlow()
+
+        // [MED-OCR] (2026-09-18) The medication-label scan and the purpose
+        // lookup — the two Settings-side seams of the camera/lookup feature.
+        // Built here for the same reason as the camera flow above: a handful
+        // of allocations and no I/O (Vision's request object is inert until
+        // it runs, and the presenter resolves its host at presentation
+        // time), so the buttons work the first time they are tapped.
+        medicationLabelScanner = makeMedicationLabelScanner()
+        medicationPurposeLookup = makeMedicationPurposeLookup()
+
+        // [MED-EVIDENCE] (T-021) The evidence capture's camera seam —
+        // the SAME `PhotoCameraPresenter` the label scanner and the voice
+        // launcher present through, so the permission flow (asked at
+        // point of use) and the no-camera / permission-denied /
+        // cannot-present guidance are the shipped ones and no second
+        // camera plumbing exists. A stored, assignable property so a
+        // test can put a scripted presenter in its place; built here
+        // because construction resolves no window and asks no permission
+        // (the presenter probes both at presentation time).
+        evidenceCameraPresenter = PhotoCameraPresenter()
 
         // All stored properties are initialised — push the restored
         // language into services that build user-facing strings.
@@ -2156,6 +4026,82 @@ final class AppCoordinator: ObservableObject {
         // Reminders leaf toggles alike.
         routineScheduler.onScheduleChanged = { [weak self] in
             self?.calendarSync.syncNow(entries: self?.routineScheduler.entries() ?? [])
+            // [CALENDAR-SHARE] (2026-09-16) Same seam, second consumer: the
+            // routine schedule's shared twins. Enqueue-only and cheap when
+            // sharing is off (the service gates before it touches storage),
+            // so no toggle check is needed here — and reading the toggle
+            // here would be one more place to get the gate wrong.
+            if let entries = self?.routineScheduler.entries() {
+                self?.calendarShareService.reconcileRoutines(entries)
+            }
+        }
+        // [CALENDAR-SHARE] (2026-09-16) Medication needed its own seam:
+        // `MedicationScheduler` had no change notification at all, so its
+        // shared twins were added along with one (`onScheduleChanged`,
+        // fired at the end of `loadSchedule`) — the single funnel every
+        // medication write path already goes through.
+        medicationScheduler.onScheduleChanged = { [weak self] entries in
+            self?.calendarShareService.reconcileMedication(entries)
+            // [RICH-EVENTS] (2026-09-17) Same seam, second consumer: the
+            // Sahayak mirror of the dose times (design §3). `syncNow`
+            // reads the medication list back through the provider wired
+            // below rather than taking it here, so there is exactly one
+            // path that decides what the mirror should contain.
+            self?.calendarSync.syncNow(entries: self?.routineScheduler.entries() ?? [])
+            // [T-023] Third consumer, the medication surfaces' redraw
+            // signal: this seam fires ONLY for a committed write (the
+            // payload persisted, the reminders armed), so bumping the
+            // revision here is the exact moment the list's answer to
+            // "what is scheduled" changed. The manage list reads it in
+            // its body; a failed persist never reaches this line.
+            //
+            // The main hop follows the shipped `refreshActiveNotificationCount`
+            // pattern: the save paths call this on main and bump
+            // synchronously (the list is correct by the time the save
+            // call returns), while the calendar-driven retime relay — the
+            // one caller that can arrive off-main — hops instead of
+            // publishing from a background thread.
+            guard let self else { return }
+            if Thread.isMainThread {
+                self.medicationScheduleRevision += 1
+            } else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.medicationScheduleRevision += 1
+                }
+            }
+        }
+        // [MED-SLOT] (T-020) The medication scheduler's two remaining
+        // composition hooks (T-016's seams). Attached here, with the
+        // schedule seam above, because the closures capture self — legal
+        // only after every stored property holds its initial value.
+        //
+        //  - `onSignificantEvent` → the shared calendar's one-off write
+        //    path (T-015): the three at-risk events (missed dose, blocked
+        //    double dose, escalation started) additionally surface on the
+        //    family calendar. The MAIN HOP runs first — the hook may fire
+        //    off-main, and hopping keeps the LAZY `calendarShareService`
+        //    constructed on main. The write's result is deliberately
+        //    discarded HERE and only here: the service reports its own
+        //    honest outcome through observability, and a failure must
+        //    never affect the scheduler's local behaviour. NOTHING in
+        //    this wiring consults the caregiver notification toggle: the
+        //    calendar channel is consent-gated inside the service
+        //    (`canShare`), and gating it on the notify preference would
+        //    silently drop the at-risk alert types the preference was
+        //    never about (T-016's flag).
+        //  - `onSlotEntryRetimeRefused` → the one-shot settings note
+        //    (IF-10, m-5) through the same main hop. The entry id is
+        //    deliberately dropped: the note names no medication
+        //    (NFR-MSR-002).
+        medicationScheduler.onSignificantEvent = { [weak self] event, entry in
+            DispatchQueue.main.async { [weak self] in
+                _ = self?.calendarShareService.writeSignificantEvent(event, entry: entry)
+            }
+        }
+        medicationScheduler.onSlotEntryRetimeRefused = { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                self?.surfaceMedicationRetimeNote()
+            }
         }
         // Forward the external calendar service's publishes (Settings
         // status/lead, scan results reaching the Reminders + Calendar
@@ -2298,10 +4244,10 @@ final class AppCoordinator: ObservableObject {
         NewsSourceEditorSeam.makeEditor = { [newsSourceStore] in
             AnyView(NewsSourcesSettingsView(store: newsSourceStore))
         }
-        // [LOUD-TTS] Response-playback loudness seam: while the assistant
-        // speaks, the shared session switches to .voicePrompt (loud,
-        // speech-optimized playback) and returns to the capture preset
-        // the moment playback settles.
+        // [LOUD-TTS-CATEGORY] Response-playback loudness seam: while the
+        // assistant speaks, the shared session switches to the bell's
+        // loud .playback configuration (media-volume gain staging) and
+        // returns to the capture preset the moment playback settles.
         ResponsePlaybackModeSeam.begin = { [weak self] in
             self?.audioSessionManager.beginResponsePlayback()
         }
@@ -2389,6 +4335,10 @@ final class AppCoordinator: ObservableObject {
         // [T-037-a] Encoder memory-pressure lifecycle (no-op unless the
         // internal-testing INTENT_ENCODER gate is compiled in).
         observeIntentEncoderMemoryPressure()
+        // [MODEL-LIFECYCLE] The residency ledger: light-slot registration,
+        // the level-2 observer that evicts heavy models, and the idle
+        // sweep. Installed post-first-frame like every other observer.
+        startModelLifecycle()
 
         // Restore and re-arm any outstanding medication reminders
         medicationScheduler.scheduleAll()
@@ -2425,13 +4375,6 @@ final class AppCoordinator: ObservableObject {
         // when the family already enabled + granted access), then the
         // hourly BGAppRefresh keeps it current while backgrounded.
         Task { await externalCalendar.startIfEnabled() }
-        // Mirror staleness fix: re-mirror at launch when enabled (the
-        // restored status survives relaunches now), so the family's
-        // calendar view of the routine is current from a fresh start.
-        if calendarSync.isEnabled {
-            calendarSync.syncNow(entries: routineScheduler.entries())
-        }
-
         // Two-way mirroring (calendar-driven task, 2026-09-07): the
         // coordinator relays native edits — family changes made in the
         // Calendar app on Sahayak mirror events — back into
@@ -2440,15 +4383,46 @@ final class AppCoordinator: ObservableObject {
         // Sahayak calendar id (restored from the link store) is
         // excluded from the read-only import: those events ARE the
         // routine, whose alarms fire in-app already.
+        //
+        // [RICH-EVENTS] (2026-09-17) Wired BEFORE the launch pass below
+        // rather than after it: the pass reads both providers, and one
+        // that ran without the medication one would judge every dose
+        // mirror undesired and prune its link.
         calendarSync.entriesProvider = { [weak self] in
             self?.routineScheduler.entries() ?? []
         }
         calendarSync.onNativeChanges = { [weak self] mutations in
             self?.applyNativeCalendarMutations(mutations)
         }
+        // Medications ride the same mirror (design §3): one recurring
+        // event per dose in the Sahayak calendar, reconciled in both
+        // directions. The provider is the scheduler's own list, so the
+        // mirror can never describe a dose the app would not fire.
+        calendarSync.medicationEntriesProvider = { [weak self] in
+            self?.medicationScheduler.medicationEntries() ?? []
+        }
+        calendarSync.onMedicationNativeChanges = { [weak self] mutations in
+            self?.applyMedicationCalendarMutations(mutations)
+        }
         if let sahayakIdentifier = calendarSync.sahayakCalendarIdentifier {
             externalCalendar.excludedCalendarIdentifiers.insert(sahayakIdentifier)
         }
+
+        // Mirror staleness fix: re-mirror at launch when enabled (the
+        // restored status survives relaunches now), so the family's
+        // calendar view of the routine is current from a fresh start.
+        // [RICH-EVENTS] (2026-09-17) The SEAMS are wired first, a few
+        // lines up, precisely so this first pass already knows about
+        // medications — a pass that cannot see them would judge their
+        // mirror events undesired and would prune their links.
+        if calendarSync.isEnabled {
+            calendarSync.syncNow(entries: routineScheduler.entries())
+        }
+        // [CALENDAR-SHARE] (2026-09-16) Launch pass for the share layer —
+        // after the medication restore above (it reads the restored
+        // entries) and post-first-frame like everything else here, so no
+        // network work delays the first paint.
+        syncCalendarShare()
 
         // Voice pipeline is built lazily here so the CommandRouter can hold a
         // weak ref back to this fully-initialised coordinator.
@@ -2477,13 +4451,22 @@ final class AppCoordinator: ObservableObject {
                 self?.lastTurnTimingBreakdown = breakdown
             }
         }
+        // [PIPELINE-TRACE] The trace's readout, published on the same
+        // hop: the reporter assembles it on the finalizing thread and this
+        // hands it to the "Pipeline trace" section (in-memory only — see
+        // `lastPipelineTrace`).
+        turnLatencyReporter?.onTraceReported = { [weak self] trace in
+            DispatchQueue.main.async {
+                self?.lastPipelineTrace = trace
+            }
+        }
         turnLatencyReporter?.attach(to: turnTracer)
         // [LAT-M2] Ack fast lane: one shared file-backed pre-ack cache —
         // the speaker pre-synthesizes the ack variants into it at warm
         // time (see `maybeStartAckCacheWarm`), the player below reads
         // the cached WAVs on the ack path. Files are the shared state.
         let ackAudioCache = AckAudioCache()
-        let speaker: Speaker = PiperVoiceSpeaker(
+        let piperSpeaker = PiperVoiceSpeaker(
             fallback: systemSpeaker,
             observabilityBus: observabilityBus,
             modelStore: modelStore,
@@ -2491,8 +4474,16 @@ final class AppCoordinator: ObservableObject {
             // [TURN-TIMING-BREAKDOWN] The speaker's `tts_start` ramp
             // (handed-to-speaker → audio start). Nil on non-gated builds.
             timingRecorder: turnTimingRecorder,
+            // [PIPELINE-TRACE] …and the trace's `tts` row.
+            traceRecorder: pipelineTraceRecorder,
             ackCache: ackAudioCache
         )
+        // [AUDIO-REACTIVE-HERO] (2026-10-14) The reply side of the hero's
+        // live meter: Piper playbacks feed it metering + a played-file
+        // band track; its system-speech fallbacks report the meterless
+        // (no-signal) path so the UI keeps honest idle motion there.
+        piperSpeaker.audioVisualization = audioVisualization
+        let speaker: Speaker = piperSpeaker
         let ackFastLanePlayer = AckFastLanePlayer(cache: ackAudioCache,
                                                   observabilityBus: observabilityBus)
         self.speaker = speaker
@@ -2516,6 +4507,29 @@ final class AppCoordinator: ObservableObject {
         } onEnded: { [weak self] in
             self?.noteSpeakingEnded()
         }
+        // [PROFILE-INTERVIEW T-096] The wake acknowledgment (C05): built
+        // here on the BASE speaker instance — never the forwarding
+        // `speechNoter` wrapper (§6) — so its begin/end notes reach the
+        // same coordinator hooks reply speech uses: the wake gate closes
+        // and the session shows `.speaking` while the greeting plays. The
+        // term and locale are read per-utterance; the guarded prompt term
+        // is a different accessor (`addressAsForPrompt`).
+        self.wakeAcknowledgmentService = WakeAcknowledgmentService(
+            speaker: speaker,
+            termProvider: { [weak self] in
+                self?.profilePersonalization?.addressAsVerbatim
+            },
+            localeProvider: { [weak self] in
+                self?.activeLocale ?? Locale(identifier: "ne-NP")
+            },
+            onSpeakingStarted: { [weak self] in
+                self?.noteSpeakingStarted()
+            },
+            onSpeakingEnded: { [weak self] in
+                self?.noteSpeakingEnded()
+            },
+            observabilityBus: observabilityBus
+        )
         let queue = SpeakQueue(speaker: speechNoter, observability: observabilityBus)
         let notificationReader = NotificationReader(queue: queue, observability: observabilityBus)
         let briefing = MorningBriefing(
@@ -2568,7 +4582,59 @@ final class AppCoordinator: ObservableObject {
             },
             observability: observabilityBus
         )
-        let facade = NotificationFacade(handlers: [timerAlarmEngine, notificationReader, caregiverEventHandler],
+        // [PHOTO-AIDS] The reminder's photos at the moment it fires: a
+        // routine notification whose entry carries a visual aid presents
+        // the full-screen elder-facing view. Registered beside the reader
+        // and the caregiver handler and claims nothing, so delivery and
+        // read-aloud are untouched (see the handler's own contract).
+        let routineVisualAidFireHandler = RoutineVisualAidFireHandler(
+            entryLookup: { [weak routineScheduler] entryId in
+                routineScheduler?.entry(for: entryId)
+            },
+            onFire: { [weak self] entry in
+                self?.presentRoutineVisualAids(for: entry)
+            }
+        )
+        // [MED-PHOTO-AIDS] The dose's photos at the moment it fires
+        // (medication-visual-aids task, 2026-09-16): a medication
+        // notification whose entry carries a photo presents the
+        // full-screen dose screen. Claims nothing (delivery and read-aloud
+        // unchanged), exactly like its routine sibling — but it MUST be
+        // registered BEFORE `notificationReader`: "MEDICATION_REMINDER" is
+        // the one category the reader allowlists, and the facade stops
+        // consulting handlers at the first claim, so a dose reaching this
+        // handler at all depends on this position in the array.
+        let medicationVisualAidFireHandler = MedicationVisualAidFireHandler(
+            entryLookup: { [weak medicationScheduler] entryId in
+                medicationScheduler?.medicationEntry(for: entryId)
+            },
+            onFire: { [weak self] entry in
+                self?.presentMedicationVisualAids(for: entry)
+            }
+        )
+        // [RICH-EVENTS] The free-form event's own reminder (rich-events
+        // task, 2026-09-17; design §4): an event with a photo presents the
+        // app's event detail at fire time, and the banner's Open action (or
+        // a plain tap) deep-links to the same screen. Claims nothing —
+        // delivery, read-aloud and the caregiver alert are untouched —
+        // and needs no position rule of its own: its category
+        // ("EVENT_REMINDER") is not on the reader's allowlist, so no other
+        // handler can claim a notification before this one sees it. The
+        // lookups run through the coordinator's LAZY service, so wiring
+        // this handler still constructs nothing at launch.
+        let freeFormEventFireHandler = FreeFormEventFireHandler(
+            eventLookup: { [weak self] eventId in
+                self?.freeFormEventService.event(withId: eventId)
+            },
+            onFire: { [weak self] eventId in
+                self?.openEventDetail(eventId: eventId)
+            }
+        )
+        let facade = NotificationFacade(handlers: [timerAlarmEngine,
+                                                   medicationVisualAidFireHandler,
+                                                   notificationReader, caregiverEventHandler,
+                                                   routineVisualAidFireHandler,
+                                                   freeFormEventFireHandler],
                                          observability: observabilityBus)
         UNUserNotificationCenter.current().delegate = facade
         // [TIMER-ALARM] Foreground driver: evaluates the ringing engine
@@ -2618,7 +4684,11 @@ final class AppCoordinator: ObservableObject {
             pluginRegistry: pluginRegistry
         )
         self.geminiCommandInterpreter = geminiInterpreter
-        let router3 = IntentRouter(cache: intentCache, observabilityBus: observabilityBus)
+        let router3 = IntentRouter(cache: intentCache, observabilityBus: observabilityBus,
+                                   // [PIPELINE-TRACE] The band policy's own
+                                   // row (score in, branch out); nil on
+                                   // non-gated builds.
+                                   traceRecorder: pipelineTraceRecorder)
         // Local brain = the fine-tuned intent model while its GGUF is
         // cached (spec §8), else the LLaMA interpreter as the spec's
         // "LLaMA today" stand-in. Installing the fine-tuned model bare
@@ -2678,12 +4748,43 @@ final class AppCoordinator: ObservableObject {
             self?.geminiCostGovernor.allowsCall() ?? false
         }
         self.intentRouter = router3
+        // [CNR T-177] (2026-10-14) The chat lane's seam (T-175), filled
+        // here AFTER construction with the coordinator's per-turn reads —
+        // the same post-construction fill the key/cost closures above use.
+        // Every input is READ PER TURN and none is cached (T-173's
+        // discipline): the consent closure reads the gate on each call,
+        // which is also where the consent question's one precise trigger
+        // lives (a chat-classified turn whose missing answer is the
+        // reason — never a launch, never Settings).
+        router3.cloudChatLane.routingInputs = CloudChatRouting.Inputs(
+            consent: { [weak self] in self?.cloudChatConsentInput() },
+            online: { [weak self] in self?.cloudChatReachability.isReachable },
+            keyConfigured: { [weak self] in self?.geminiConfigStore.isConfigured ?? false },
+            costAllows: { [weak self] in self?.geminiCostGovernor.allowsCall() ?? false }
+        )
+        // [CNR T-177] The ONE wrapped cloud responder: the lane's cloud
+        // leg and the guard's escalation share this instance, so every
+        // cloud attempt — whichever door issued it — opens the badge
+        // window, speaks the once-per-session notice and records the
+        // served-path provenance through the same two hooks.
+        let cloudChatResponder = CloudChatIndicatorResponder(
+            wrapping: geminiInterpreter,
+            onAttemptBegan: { [weak self] in self?.cloudChatCloudAttemptBegan() },
+            onAttemptSettled: { [weak self] command in
+                self?.cloudChatCloudAttemptSettled(command)
+            })
+        cloudChatCloudResponder = cloudChatResponder
+        router3.cloudChatLane.cloudResponder = cloudChatResponder
         // Collapse #1 (spec §4): when the Gemini recognizer is the active
         // STT, ONE understand call does STT + intent; the command half is
         // waiting in `intentRouter` when the transcript half routes.
         geminiSpeechRecognizer.collapseContextProvider = { [weak self] in
+            // [PROFILE-INTERVIEW T-094] Same guarded term as the text path
+            // (design-l2 §5.5): the collapse provider reads the seam
+            // directly; nil grows the clause out of the prompt entirely.
             InterpreterContext(pendingMedications: [],
-                               userLanguageHint: self?.activeLocale.languageCode ?? "ne")
+                               userLanguageHint: self?.activeLocale.languageCode ?? "ne",
+                               addressAs: self?.profilePersonalization?.addressAsForPrompt)
         }
         geminiSpeechRecognizer.onUnderstanding = { [weak self] transcript, command in
             self?.intentRouter?.noteCloudPreparsed(transcript: transcript, command: command)
@@ -2721,10 +4822,45 @@ final class AppCoordinator: ObservableObject {
             youtubeConfigStore: youtubeConfigStore,
             youtubeTransport: URLSession.shared,
             youtubeLinkOpener: SystemCallLinkOpener(),
+            // [SPOTIFY] (2026-10-07) T-119 — the music-path seams (T-116,
+            // §13): the coordinator's ONE account session (the same object
+            // the plugin is registered with — never a rebuild), URLSession
+            // for the search/play requests (each request carries its own
+            // timeout; see SpotifyTool) and the same call-link opener seam
+            // the call/message/YouTube flows use for the canOpenURL probe
+            // + open (spotify: hand-offs).
+            spotifyAccountSession: spotifyAccountSession,
+            spotifyTransport: URLSession.shared,
+            spotifyLinkOpener: SystemCallLinkOpener(),
             // [LAT-M2] Ack fast lane: cached-WAV playback on the pre-ack
             // path (miss → synthesis fallback + `ack_cache_miss`).
             preAckPlayer: ackFastLanePlayer,
-            turnTracer: turnTracer
+            turnTracer: turnTracer,
+            // [CNR T-177] (2026-10-14) The chat dispatch's guard seam
+            // (T-174), filled from the coordinator's live sources:
+            // `servingPath` reports the provenance the wrapped responder
+            // recorded at this turn's attempt settle (the design's
+            // path field, §7.5), `cloudAllowed` asks T-173's `decide`
+            // through the SAME lane inputs the chat lane consults —
+            // the one chokepoint, so consent can never be bypassed at
+            // the escalation door — and `respondToChat` is the cloud
+            // chat call, through the same wrapped responder, with the
+            // turn's context built here (the escalation has no caller
+            // to build it for it).
+            chatGuard: ChatGuardSeam(
+                servingPath: { [weak self] in self?.cloudChatServingPath() ?? .onDevice },
+                cloudAllowed: { [weak self] in self?.cloudChatGuardAllowsCloud() ?? false },
+                respondToChat: { [weak self] transcript, completion in
+                    guard let self else {
+                        // The completion contract is exactly-once: a
+                        // teardown must settle the attempt, not strand
+                        // the guard's pending-reply token.
+                        completion(nil)
+                        return
+                    }
+                    self.cloudChatGuardRespondToChat(transcript: transcript,
+                                                     completion: completion)
+                })
         )
         // [STARTUP-PERF] Retained for the boot's pipeline build.
         commandRouter = router
@@ -2738,6 +4874,10 @@ final class AppCoordinator: ObservableObject {
             .sink { [weak self] _ in
                 self?.trySwapToGemini()
             }
+        // [STT-RESTORE] Companion subscription for the ANE auto-restore:
+        // a landed artifact re-applies the stack (see
+        // `observeSTTArtifactCompletion`).
+        observeSTTArtifactCompletion()
 
         // [STARTUP-PERF] The voice pipeline (which needs the KWS engine
         // the boot builds off-main) is constructed and started in the
@@ -2781,6 +4921,15 @@ final class AppCoordinator: ObservableObject {
     /// `SecItemCopyMatching` + decode with empty-on-error semantics);
     /// the published windows are assigned on main afterwards.
     private func bootRestoreData() {
+        // [SETTINGS-PERSIST] One-time migration of owner-facing
+        // preferences still living only in UserDefaults (an install
+        // that predates the seam) into the durable Keychain store.
+        // Idempotent — a copied key makes the Keychain hold it, so
+        // later launches (and the second boot path) skip it — and
+        // deliberately AFTER the init-time restores: this launch has
+        // already read the old values, and every later read sees the
+        // Keychain copy instead.
+        SettingsPersistence.shared.backfillFromUserDefaults()
         let batch = StartupDataBatch.load(
             contactStore: familyContactStore,
             placeStore: placeStore,
@@ -3235,7 +5384,22 @@ final class AppCoordinator: ObservableObject {
                 ?? ModelCatalog.piperNepali,
             llamaAvailable: llamaCommandInterpreter.isAvailable,
             wakeWordEnabled: wakeWordEnabled,
-            isSimulator: Self.isSimulator
+            isSimulator: Self.isSimulator,
+            // [VOICE-OOM] C (2026-10-10) — the warm headroom gate's
+            // inputs, resolved HERE on main from the same probes the
+            // post-turn policy uses. A warm that would leave < 1 GB free
+            // is skipped by the planner (reason `low_headroom`): on a
+            // device already near its ceiling, boot-time page-in of the
+            // ~1 GB ANE weights or the multi-GB brain is the spike that
+            // gets the app killed before the user says anything. The
+            // skipped warm costs only the head start — STT re-arms via
+            // the first-use prewarm and the brain loads on first
+            // inference (exactly the no-warm behavior).
+            availableProcessMemoryBytes: MemoryProbe.availableProcessMemoryBytes,
+            sttWarmFootprintBytes: whisperFootprintBytes,
+            brainWarmFootprintBytes: ModelLifecycleInventory.footprint(
+                for: .brain,
+                modelID: llamaCommandInterpreter.baseModelID).liveBytes
         )
         let plan = WarmStartPlanner.plan(for: config)
         let bootPlan = plan.filter { $0.phase == .boot }
@@ -3505,11 +5669,26 @@ self.noteTalkContractChanged()
             voiceActivityDetector: voiceActivityDetector,
             router: router,
             observabilityBus: observabilityBus,
-            turnTracer: turnTracer
+            turnTracer: turnTracer,
+            // [PIPELINE-TRACE] The pipeline is the one place the
+            // recognizer's result exists, so the `.stt` row is recorded
+            // there; nil on non-gated builds.
+            traceRecorder: pipelineTraceRecorder
         )
         // [NOISE-FILTER] Attach the restored A/B stage (nil when OFF —
         // the hot-swap seam emits the honest engine name either way).
         voicePipeline?.setNoiseSuppressor(makeNoiseSuppressor())
+        // [AUDIO-REACTIVE-HERO] (2026-10-14) The hero's live meter: the
+        // capture fan-out slices the enhanced frames it already produces
+        // and pushes them to this model (VoicePipeline.feedVisualization).
+        voicePipeline?.audioVisualization = audioVisualization
+        // [PROFILE-INTERVIEW T-096] Hand the wake ack to the pipeline it
+        // belongs to (C05, §5.4). This is the pipeline's single
+        // construction site, and the service exists by the time this
+        // runs (`start()` builds it before any boot phase); nil in
+        // constructions that never started the coordinator leaves the
+        // synchronous path byte-identical.
+        voicePipeline?.wakeAcknowledger = wakeAcknowledgmentService
         voiceStateCancellable = voicePipeline.$state
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
@@ -3649,19 +5828,45 @@ self.noteTalkContractChanged()
     /// Maps pipeline states onto the UI session machine. `speaking` is
     /// derived from the speaker lifecycle; `awaitingConfirmation` owns the
     /// UI until yes/no/timeout (pipeline events don't clobber it).
-    private func handlePipelineState(_ state: VoicePipeline.State) {
+    ///
+    /// [MTC] M-1 (security-design-review): BOTH answer windows own the UI
+    /// until they resolve — `.awaitingSlotAnswer` joins the early-return
+    /// guard, or a pipeline event arriving mid-frame would legally bridge
+    /// through `.idle` (the transition table allows it), silently
+    /// cancelling the 45 s slot timer and leaving a live frame with no
+    /// window: the half-open state the whole funnel exists to make
+    /// impossible. Internal (not `private`), like the router's
+    /// `executeDialogueCandidate`, so the M-1 mid-window guard is driven
+    /// directly by `DialogueCoordinatorWiringTests`.
+    func handlePipelineState(_ state: VoicePipeline.State) {
         lastPipelineState = state
         voiceState = state
         // Idle drives deferred KWS eligibility only; manual Talk readiness
         // is published directly by the pipeline start callback.
         updateVoiceReadiness()
-        guard voiceSession.state != .awaitingConfirmation else { return }
+        guard voiceSession.state != .awaitingConfirmation,
+              voiceSession.state != .awaitingSlotAnswer else {
+            // [HERO-STATES] The auto-listen capture has closed (or never
+            // opened) once the pipeline settles back to idle mid-window
+            // — the hero stops claiming "listening" for the remainder of
+            // the 45 s window. The re-open hook in `noteSpeakingEnded`
+            // re-arms the flag right after (its call order is
+            // handlePipelineState first, hook second).
+            if voiceSession.state == .awaitingSlotAnswer, state == .idle {
+                slotAnswerCaptureActive = false
+            }
+            return
+        }
         switch state {
         case .stopped:
             voiceSession.transition(to: .stopped)
             cancelVoiceWatchdog()
         case .idle:
-            voiceSession.transition(to: speakingCount > 0 ? .speaking : .idle)
+            // [LAUNCH-TRANSITION-FIX] `.error → .speaking` has no direct
+            // edge (pipeline error at boot, then `.idle` while push
+            // speech plays); the machine bridges through `.idle`, where
+            // both edges are legal.
+            voiceSession.transitionViaIdle(to: speakingCount > 0 ? .speaking : .idle)
             cancelVoiceWatchdog()
             cancelVoiceStartWatchdog()
             // [VAD-RT] A deferred KWS build that dodged a live capture
@@ -3701,12 +5906,32 @@ self.noteTalkContractChanged()
             // (2026-09-06 field report).
             lastTranscript = nil
             livePartialTranscript = nil
-            voiceSession.transition(to: .listening)
+            // [LAUNCH-TRANSITION-FIX] A capture event can land while the
+            // session is still `.stopped`/`.error` (recycle + immediate
+            // capture); `→ .listening` has no direct edge from either —
+            // bridge through `.idle`, where both edges are legal.
+            voiceSession.transitionViaIdle(to: .listening)
             armVoiceWatchdog()
         case .processing:
-            voiceSession.transition(to: .transcribing)
+            // [AUTO-LISTEN LATE-EVENT FIX] (2026-10-11, device crash
+            // ElderlyAssistant-2026-10-11-223011.ips, 17 Pro Max) The
+            // mid-cycle events are legality-checked, not asserted: the
+            // answer interception resolves the dialogue frame back to
+            // `.idle` INSIDE the turn, while this same turn's
+            // `.processing`/`.routing` emissions still travel the
+            // main-queue sink behind it — an `.idle → .transcribing`
+            // edge is not in the transition table, and the debug
+            // assertion crash only surfaced on the 12 GB device (on the
+            // 6 GB devices the OOM kill masked the same bug). A late
+            // event whose edge is illegal is the tail of a turn whose
+            // session side already closed — skip it.
+            if voiceSession.state.canTransition(to: .transcribing) {
+                voiceSession.transition(to: .transcribing)
+            }
         case .routing:
-            voiceSession.transition(to: .understanding)
+            if voiceSession.state.canTransition(to: .understanding) {
+                voiceSession.transition(to: .understanding)
+            }
         case .error:
             voiceSession.transition(to: .error)
             cancelVoiceWatchdog()
@@ -4060,6 +6285,7 @@ self.noteTalkContractChanged()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.speakingCount += 1
+            self.isSpeaking = true
             self.wakeWordActivityGate.setSpeaking(true)
             // Promote straight to .speaking when TTS starts during the
             // busy pre-speech states (call-ui fix, 2026-09-07): the old
@@ -4094,9 +6320,63 @@ self.noteTalkContractChanged()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.speakingCount = max(0, self.speakingCount - 1)
+            self.isSpeaking = self.speakingCount > 0
             self.wakeWordActivityGate.setSpeaking(self.speakingCount > 0)
             self.handlePipelineState(self.lastPipelineState)
+            self.openAnswerCaptureIfProbeJustSpoken()
+            // [CNR T-177] The badge window's speech-end funnel: a cloud
+            // turn's window closes when its reply (or the notice that
+            // rode the wait) is the last utterance and the attempt has
+            // settled — the design's "until its reply is spoken". A
+            // local-only turn's speech never closes anything: no window
+            // exists to close.
+            self.cloudChatCloseWindowIfSpeechEnded()
         }
+    }
+
+    /// [MULTI-TURN AUTO-LISTEN] (2026-10-11, owner-confirmed) When the
+    /// probe's speech ends — and only then — the answer window opens the
+    /// mic itself, so the elder answers the question without tapping Talk
+    /// or saying the wake word. The conditions are the window contract:
+    /// nothing still speaking, the session inside `.awaitingSlotAnswer`
+    /// (the early-return guard in `handlePipelineState` keeps the 45 s
+    /// timer intact while the pipeline captures), a live frame, and an
+    /// idle pipeline (a racing Talk press that already opened a capture
+    /// owns the epoch — `beginAnswerCapture`'s generation guard drops the
+    /// loser). One auto-open per probe: an invalid answer re-speaks the
+    /// retry probe, whose speech end re-arms this path the same way; the
+    /// answer turn's own execution speech cannot re-trigger it because
+    /// the frame is resolved before that speech starts.
+    /// The pure auto-listen predicate (testable without `start()`, which
+    /// the witness strategy never calls): the window contract's four
+    /// conditions — nothing still speaking, the session inside the slot
+    /// answer window, a live frame, and an idle pipeline.
+    static func shouldAutoOpenAnswerCapture(speakingCount: Int,
+                                            sessionState: VoiceSessionState,
+                                            frameLive: Bool,
+                                            pipelineState: VoicePipeline.State?) -> Bool {
+        speakingCount == 0
+            && sessionState == .awaitingSlotAnswer
+            && frameLive
+            && pipelineState == .idle
+    }
+
+    private func openAnswerCaptureIfProbeJustSpoken() {
+        guard Self.shouldAutoOpenAnswerCapture(
+            speakingCount: speakingCount,
+            sessionState: voiceSession.state,
+            frameLive: dialogueManager.liveFrame != nil,
+            pipelineState: voicePipeline?.state) else { return }
+        voicePipeline?.beginAnswerCapture()
+        slotAnswerCaptureActive = true
+        observabilityBus.emit(ObservabilityEvent(
+            component: "app_coordinator",
+            eventType: "dialogue_answer_capture",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: [:]
+        ))
     }
 
     /// Called by `CommandRouter` with the text being spoken so the Home
@@ -4108,13 +6388,446 @@ self.noteTalkContractChanged()
         }
     }
 
+    // MARK: - [CNR T-177] Cloud-chat surfaces, indicator and revocation (2026-10-14)
+
+    /// [CNR T-177] The badge's surface for the status slot (design-l1
+    /// §8.5): the model's window AND the gate's current decision, both
+    /// re-read per render — the badge "also reflects the enabled state in
+    /// Settings", so a revoked device shows nothing even if a window were
+    /// still open, and nothing here is cached. Main-confined (every
+    /// reader is a view body).
+    var cloudChatIndicatorSurface: CloudChatActivityIndicatorSurface {
+        MainActor.assumeIsolated {
+            CloudChatActivityIndicatorSurface(
+                isActive: cloudChatIndicatorModel().isActive,
+                cloudChatEnabled: cloudChatConsentGate.currentDecision().allowsEgress,
+                locale: activeLocale)
+        }
+    }
+
+    /// [CNR T-177] Whether the consent question is on screen. Never builds
+    /// the prompt: an unbuilt prompt is an unasked question.
+    var cloudChatConsentPromptIsPresented: Bool {
+        MainActor.assumeIsolated {
+            cloudChatConsentPromptStorage?.isPromptPresented ?? false
+        }
+    }
+
+    /// [CNR T-177] The consent sheet's content, in the active language
+    /// (T-176's surface; every string is a T-171 catalogue key).
+    var cloudChatConsentSheetSurface: CloudChatConsentSheetSurface {
+        MainActor.assumeIsolated { cloudChatConsentPrompt().sheetSurface }
+    }
+
+    /// [CNR T-177] The Settings row's state: whether cloud chat is enabled
+    /// — the gate's current decision, read fresh (T-177: "the enabled
+    /// state is read from the gate's current decision"), never a mirrored
+    /// preference.
+    var cloudChatEnabled: Bool {
+        cloudChatConsentGate.currentDecision().allowsEgress
+    }
+
+    /// [CNR T-177] The Settings row's write path (design-l1 §8.6: the row
+    /// toggles cloud chat off "through the gate's one writer"). ON is the
+    /// explicit re-enable — the gate records a grant, which is how a
+    /// withdrawn record goes back to "not decided" without a reset; OFF
+    /// is the revocation itself (`revoke()`, deny-first and verified). The
+    /// write is SILENT, like every other Settings control: the surfaces
+    /// are the feedback — the badge stops appearing (or resumes), the
+    /// next chat turn routes accordingly, and a failed write leaves the
+    /// gate denying, so the toggle reads back off rather than showing a
+    /// state that is not on disk.
+    func setCloudChatEnabledFromSettings(_ enabled: Bool) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.setCloudChatEnabledFromSettings(enabled)
+            }
+            return
+        }
+        if enabled {
+            _ = cloudChatConsentGate.record(granted: true)
+        } else {
+            _ = cloudChatConsentGate.revoke()
+        }
+        cloudChatDecisionDidChange()
+    }
+
+    /// [CNR T-177] The sheet's two controls — the same answer path the
+    /// spoken capture uses, so both surfaces write through one gate call.
+    func answerCloudChatConsentFromSheet(_ kind: CloudChatConsentAction.Kind) {
+        switch kind {
+        case .allow: answerCloudChatConsent(granted: true)
+        case .notNow: answerCloudChatConsent(granted: false)
+        }
+    }
+
+    // MARK: The routing seam (T-173's Inputs / T-174's guard inputs)
+
+    /// [CNR T-177] The lane's consent input (T-173's `Inputs.consent`) —
+    /// the gate's decision, read per call — and the ONE precise trigger
+    /// of the consent question. Called once per chat-classified turn
+    /// (consent is the decision's first input, so a `.notRecorded` read
+    /// is by construction the reason the turn is local), and again by the
+    /// guard's re-decide for the same turn, where the prompt's own
+    /// idempotence keeps the question singular. Never at launch, never in
+    /// Settings, never speculatively: no chat turn, no call.
+    ///
+    /// The pending turn's local-answer seam is the EMPTY closure, and
+    /// that is a declaration, not a stub: this call happens INSIDE the
+    /// routing evaluation, before the lane has chosen its branch, and the
+    /// lane's `.local` arm answers the turn on-device through its own
+    /// `answerChatOnDevice` — running anything here would serve the turn
+    /// twice. The turn's answer is owned one frame below, by the lane.
+    private func cloudChatConsentInput() -> CloudChatConsentGate.Decision {
+        let decision = cloudChatConsentGate.currentDecision()
+        // The routing decision is main-confined by construction (the
+        // lane runs inside `CommandRouter.route`); the window reset and
+        // the question trigger are main-actor work. The explicit check
+        // makes a hypothetical off-main read degrade to the fail-closed
+        // decision instead of a trap — and the question is never raised
+        // off-main.
+        guard Thread.isMainThread else { return decision }
+        // A fresh chat-turn decision supersedes any open window and any
+        // stale provenance: whatever the previous turn left behind, this
+        // turn's routing starts clean.
+        cloudChatCloseIndicatorWindow()
+        if decision == .notRecorded {
+            MainActor.assumeIsolated {
+                cloudChatConsentPrompt().consentNeedDetected(
+                    answerPendingTurnLocally: {})
+            }
+        }
+        return decision
+    }
+
+    /// [CNR T-177] The guard's cloud-permission read (T-174): T-173's
+    /// `decide` over the lane's own inputs, so the escalation door asks
+    /// the identical question the lane asked — one chokepoint, one
+    /// answer, no second consent path to keep in sync.
+    private func cloudChatGuardAllowsCloud() -> Bool {
+        let inputs = intentRouter?.cloudChatLane.routingInputs ?? CloudChatRouting.Inputs()
+        return CloudChatRouting.decide(inputs) == .cloud
+    }
+
+    /// [CNR T-177] The provenance read (T-174's `servingPath`): the
+    /// wrapped responder recorded whether this turn's settled attempt
+    /// produced a `.chat` reply from the cloud.
+    private func cloudChatServingPath() -> ChatGuardSeam.ServingPath {
+        cloudChatReplyServedFromCloud ? .cloud : .onDevice
+    }
+
+    /// [CNR T-177] The escalation's cloud chat call (T-174's
+    /// `respondToChat`): the SAME wrapped responder the lane uses, with
+    /// the turn's context built here — the guard seam carries no context,
+    /// and this is the router's own context shape (empty pending
+    /// medications, the language hint, the guarded address-as term).
+    private func cloudChatGuardRespondToChat(
+        transcript: String,
+        completion: @escaping (InterpretedCommand?) -> Void) {
+        guard let responder = cloudChatCloudResponder else {
+            // No wired responder: settle the attempt honestly (nil = no
+            // reply) so the guard's exactly-once contract resolves.
+            completion(nil)
+            return
+        }
+        let context = InterpreterContext(
+            pendingMedications: [],
+            userLanguageHint: activeLocale.languageCode ?? "en",
+            addressAs: profilePersonalization?.addressAsForPrompt)
+        responder.respondToChat(transcript: transcript,
+                                context: context,
+                                completion: completion)
+    }
+
+    // MARK: The attempt lifecycle (the badge window's one open site)
+
+    /// [CNR T-177] A cloud attempt has begun — the ONE site that opens the
+    /// badge window (design-l1 §8.5: presented from the routing decision
+    /// of a cloud turn). A turn that routes local never reaches this
+    /// hook, which is what makes "the badge never shows for a local-only
+    /// turn" structural rather than a rendering condition. The
+    /// once-per-session notice rides the wait here, committed before the
+    /// network call is awaited (the `speakPreAck` discipline): the elder
+    /// hears it during the wait, the reply — committed later on the
+    /// router's own lane — is never delayed by it, and if the answer
+    /// arrives mid-notice the answer takes the speaker.
+    private func cloudChatCloudAttemptBegan() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.cloudChatCloudAttemptBegan()
+            }
+            return
+        }
+        cloudChatReplyServedFromCloud = false
+        cloudChatAttemptSettled = false
+        cloudChatIndicatorWindowOpen = true
+        MainActor.assumeIsolated { cloudChatIndicatorModel().requestBegan() }
+        cloudChatSpeakNoticeOnce()
+    }
+
+    /// [CNR T-177] The attempt settled (its completion ran). Records the
+    /// provenance and marks the settle; the window closes later — at the
+    /// reply's speech end, or at the next decide that supersedes it. A
+    /// nil command (failure/abstention) settles with no provenance: the
+    /// fallback line that follows is served on-device.
+    private func cloudChatCloudAttemptSettled(_ command: InterpretedCommand?) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.cloudChatCloudAttemptSettled(command)
+            }
+            return
+        }
+        cloudChatAttemptSettled = true
+        cloudChatReplyServedFromCloud = (command?.action == .chat)
+    }
+
+    /// [CNR T-177] The speech-end funnel, run at every speech end
+    /// (`noteSpeakingEnded`): the window closes when the attempt has
+    /// settled AND nothing is speaking any more — the badge belongs to
+    /// the window that ends with the reply's utterance. A notice or
+    /// pre-ack still playing keeps the window open; the funnel simply
+    /// asks again at that utterance's end.
+    private func cloudChatCloseWindowIfSpeechEnded() {
+        guard cloudChatIndicatorWindowOpen, cloudChatAttemptSettled,
+              speakingCount == 0 else { return }
+        cloudChatCloseIndicatorWindow()
+    }
+
+    /// [CNR T-177] Closes the badge window if open, clears the turn's
+    /// provenance and settle marks, and drops the model's registration —
+    /// the one close, shared by every funnel.
+    private func cloudChatCloseIndicatorWindow() {
+        cloudChatAttemptSettled = false
+        cloudChatReplyServedFromCloud = false
+        guard cloudChatIndicatorWindowOpen else { return }
+        cloudChatIndicatorWindowOpen = false
+        MainActor.assumeIsolated { cloudChatIndicatorModel().requestEnded() }
+    }
+
+    /// [CNR T-177] The first cloud-active turn's notice (FR-CNR-008,
+    /// design-l1 §8.5): one short sentence in the elder's language, from
+    /// T-171's `cloud.chat.indicatorSpoken` — no technical terminology,
+    /// no format slot, no content from the turn. Spoken exactly once per
+    /// app session; a local turn never reaches this (its only caller is
+    /// the attempt's own begin), and it never replaces the reply: it
+    /// rides the wait.
+    private func cloudChatSpeakNoticeOnce() {
+        guard !cloudChatNoticeSpoken, speaker != nil else { return }
+        cloudChatNoticeSpoken = true
+        speak(key: "cloud.chat.indicatorSpoken")
+    }
+
+    // MARK: The voice controls (design-l1 §8.6)
+
+    /// [CNR T-177] A deterministic cloud-chat voice control resolved by
+    /// the router's keyword family. The coordinator owns every
+    /// consequence — the withdrawal through the gate's ONE writer, or the
+    /// truthful state answer read from that gate — and every spoken line;
+    /// the router only reports what the keywords matched (no model, no
+    /// NLU, no classifier widening).
+    func handleCloudChatVoiceRequest(_ request: KeywordIntentRule.CloudChatVoiceRequest) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.handleCloudChatVoiceRequest(request)
+            }
+            return
+        }
+        switch request {
+        case .revoke:
+            // The withdrawal, through the one writer — deny-first, so a
+            // failed write still denies this session, and a failure is
+            // never reported as success (the gate's own rule). The line
+            // that follows is the truth of the state either way:
+            // "answers come from this phone now" holds for a landed
+            // revoke, a failed one (the deny mirror is in force) and a
+            // repeat revoke (idempotent).
+            _ = cloudChatConsentGate.revoke()
+            cloudChatDecisionDidChange()
+            replyHonestly(key: "cloud.chat.revoke.done")
+        case .stateQuery:
+            // Answered truthfully from the gate's decision, in the
+            // elder's language: the ON line exactly when egress is in
+            // force for the current record, the OFF line otherwise (a
+            // revoked record, a decline, an unreadable store — the
+            // fail-closed reading is "answers come from this phone").
+            let key = cloudChatConsentGate.currentDecision().allowsEgress
+                ? "cloud.chat.state.spoken.on"
+                : "cloud.chat.state.spoken.off"
+            replyHonestly(key: key)
+        }
+    }
+
+    /// [CNR T-177] Shared aftermath of a decision change (any writer): the
+    /// badge window closes, the consent capture stops being the pended
+    /// flow, the question refreshes against the gate (T-176's rule: a
+    /// question with an answer is closed, and presentation has exactly
+    /// one entry), and the Settings leaf re-renders.
+    private func cloudChatDecisionDidChange() {
+        cloudChatCloseIndicatorWindow()
+        pendingCloudChatConsentCapture = false
+        MainActor.assumeIsolated {
+            cloudChatConsentPromptStorage?.refreshAfterDecisionChange()
+        }
+        if !isAwaitingConfirmation, voiceSession.state == .awaitingConfirmation {
+            DispatchQueue.main.async { [weak self] in
+                self?.voiceSession.transition(to: .idle)
+            }
+        }
+        noteForwardedStateChanged()
+    }
+
+    // MARK: The consent question's spoken answer
+
+    /// [CNR T-177] Whether the consent question's spoken answer is
+    /// pended — the router's `isAwaitingCloudChatConsentConfirmation`.
+    /// Lowest-priority confirmation flow: the router widens the yes/no
+    /// path for it, and the coordinator's `handleConfirmationResponse`
+    /// block yields to a simultaneous dose challenge.
+    var isAwaitingCloudChatConsentConfirmation: Bool {
+        pendingCloudChatConsentCapture
+    }
+
+    /// [CNR T-177] The spoken capture's arming — the prompt's
+    /// `startSpokenCapture` seam (called when the question appears and
+    /// again on every re-offer) and nothing else's: the question's
+    /// lifetime is the prompt's, the CAPTURE's window is the shipped 45 s
+    /// confirmation window, and a lapsed window re-offers rather than
+    /// expiring the question.
+    private func beginCloudChatConsentCapture() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.beginCloudChatConsentCapture()
+            }
+            return
+        }
+        pendingCloudChatConsentCapture = true
+        openConfirmationWindow()
+    }
+
+    /// [CNR T-177] The one answer path both surfaces share (the sheet's
+    /// controls and the spoken yes/no): hands the answer to the prompt,
+    /// speaks the state line read from the gate AFTER the write — the
+    /// truthful state, never the requested one — and resolves the
+    /// capture. An answer outside a live question is not an answer: no
+    /// write happens, nothing is said, and the capture resolves.
+    private func answerCloudChatConsent(granted: Bool) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.answerCloudChatConsent(granted: granted)
+            }
+            return
+        }
+        MainActor.assumeIsolated {
+            let prompt = cloudChatConsentPrompt()
+            let outcome = prompt.submitSpokenAnswer(granted ? .yes : .no)
+            if case .questionNotLive = outcome {
+                // Nothing was written and nothing is said (T-176's own
+                // reading: a yes/no outside the live question was
+                // addressed to something else). The capture is resolved
+                // below.
+            } else {
+                let key = cloudChatConsentGate.currentDecision().allowsEgress
+                    ? "cloud.chat.state.spoken.on"
+                    : "cloud.chat.state.spoken.off"
+                replyHonestly(key: key)
+            }
+        }
+        cloudChatCloseConsentCaptureIfResolved()
+    }
+
+    /// [CNR T-177] Resolves the capture after an answer (or a decision
+    /// change): a question still on screen (a failed grant) keeps the
+    /// capture pended and re-offers the spoken answer — the retry is
+    /// never more than saying yes again; a resolved one clears the flag
+    /// and closes the 45 s window when nothing else claims it (the
+    /// `resolveLaunchQuestion` close rule, stated once).
+    private func cloudChatCloseConsentCaptureIfResolved() {
+        let stillPresented = MainActor.assumeIsolated {
+            cloudChatConsentPromptStorage?.isPromptPresented ?? false
+        }
+        if stillPresented {
+            pendingCloudChatConsentCapture = true
+            MainActor.assumeIsolated {
+                cloudChatConsentPromptStorage?.reofferSpokenAnswer()
+            }
+            noteForwardedStateChanged()
+            return
+        }
+        pendingCloudChatConsentCapture = false
+        if !isAwaitingConfirmation, voiceSession.state == .awaitingConfirmation {
+            DispatchQueue.main.async { [weak self] in
+                self?.voiceSession.transition(to: .idle)
+            }
+        }
+        noteForwardedStateChanged()
+    }
+
+    /// [CNR T-177] The confirmation window's timeout landed while the
+    /// consent question's capture was the pended flow: the WINDOW lapses,
+    /// never the QUESTION (T-176's contract) — the spoken answer is
+    /// re-offered and the medication-flavored generic timeout line is
+    /// suppressed (there is no unanswered request to give up on; the
+    /// question is still on screen, so the honest next step is to listen
+    /// again).
+    private func reofferCloudChatConsentAfterTimeout() {
+        MainActor.assumeIsolated {
+            cloudChatConsentPromptStorage?.reofferSpokenAnswer()
+        }
+    }
+
+    // MARK: The main-actor factories (view state, born where views live)
+
+    /// [CNR T-177] The badge's model — one instance, main-confined, built
+    /// on first use with its publishes forwarded through the coalescing
+    /// seam (installed at the first build, before any window can open).
+    private func cloudChatIndicatorModel() -> CloudChatActivityIndicatorModel {
+        MainActor.assumeIsolated {
+            if let model = cloudChatIndicatorModelStorage { return model }
+            let model = CloudChatActivityIndicatorModel()
+            cloudChatIndicatorModelStorage = model
+            cloudChatIndicatorCancellable = model.objectWillChange
+                .sink { [weak self] _ in
+                    self?.noteForwardedStateChanged()
+                }
+            return model
+        }
+    }
+
+    /// [CNR T-177] The consent question's state (T-176) — one instance,
+    /// main-confined, built on first use. The locale is re-applied on
+    /// every access, so a language change re-resolves every string the
+    /// question and its sheet show; the publishes are forwarded through
+    /// the coalescing seam (the question appearing or closing must
+    /// invalidate every HomeView observer). The spoken-capture seam
+    /// handed to it is this coordinator's own arming.
+    private func cloudChatConsentPrompt() -> CloudChatConsentPrompt {
+        MainActor.assumeIsolated {
+            if let prompt = cloudChatConsentPromptStorage {
+                prompt.updateLocale(activeLocale)
+                return prompt
+            }
+            let prompt = CloudChatConsentPrompt(
+                gate: cloudChatConsentGate,
+                locale: activeLocale,
+                startSpokenCapture: { [weak self] in
+                    self?.beginCloudChatConsentCapture()
+                })
+            cloudChatConsentPromptStorage = prompt
+            cloudChatPromptCancellable = prompt.objectWillChange
+                .sink { [weak self] _ in
+                    self?.noteForwardedStateChanged()
+                }
+            return prompt
+        }
+    }
+
     // MARK: - Turn timing ([TURN-TIMING], 2026-09-09)
 
     /// Whether the transcript shows the per-stage timing caption. Read
     /// live from UserDefaults (the Voice personalization toggle's key) so
     /// the sheet always sees the current setting.
     var voiceTimingDebugEnabled: Bool {
-        UserDefaults.standard.bool(forKey: VoiceSettingsModel.timingDebugKey)
+        SettingsPersistence.shared.bool(forKey: VoiceSettingsModel.timingDebugKey)
     }
 
     /// Main-queue entry point of the tracer's finalize callback: derives
@@ -4286,12 +6999,72 @@ self.noteTalkContractChanged()
             // applied from the boot's voice-start callback (or a Settings
             // toggle), never from `init`.
             installBundledSTTModelIfNeeded()
+            // [STT-RESTORE] …and the ANE artifact a fresh container wiped
+            // is restored the same way: a background download of the
+            // language default, so the on-device stack climbs back to the
+            // ANE path without a Settings trip (2026-09-16 device bug).
+            restoreWhisperKitArtifactIfNeeded()
         }
+        // [CLOUD-CASCADE] Last: (re-)arm the cascade tier on the fresh
+        // stack. It reads the provider seam + the two persisted settings,
+        // so it belongs to the same "apply the stack" pass as
+        // `cloudEnabled` above — one place decides what the ladder may
+        // reach, and this call can never arm a tier the stack just
+        // declined (it is gated on the same `cloudEnabled`).
+        applyCloudCascadeConfiguration()
+    }
+
+    /// [CLOUD-CASCADE] (2026-09-16) Arms the cloud cascade tier on
+    /// `intentRouter` from the SAME inputs the rest of the app consults:
+    /// the Gemini interpreter the boot built, `GeminiConfigStore.isConfigured`
+    /// (the key) and `GeminiCostGovernor.allowsCall()` (the day's budget) —
+    /// so a Settings promise can never outrun what the tier would do, and
+    /// an unconfigured household gets a nil tier (no cue, no event, no log,
+    /// no activity row: silent, exactly as the ladder behaved before the
+    /// tier existed).
+    ///
+    /// Called from `applyVoiceEngineStack()` (once at startup, and again on
+    /// every stack / opt-in / threshold / switch change). No-ops before
+    /// `start()` has built the pipeline and the interpreter — the same
+    /// tolerance `applyVoiceEngineStack()` itself holds.
+    ///
+    /// The tier is inert unless the cloud is REACHABLE at all
+    /// (`cloudEnabled`, which `applyVoiceEngineStack()` has just decided
+    /// from the stack + the opt-in), so this can never be the one path that
+    /// puts a cloud on the wire behind the household's back (OD-12's
+    /// consent posture is decided there, not here).
+    private func applyCloudCascadeConfiguration() {
+        guard let router = intentRouter, let gemini = geminiCommandInterpreter else {
+            return
+        }
+        let providers = CloudBrainProviders(gemini: CloudBrainRegistration(
+            interpreter: gemini,
+            isConfigured: { [weak self] in self?.geminiConfigStore.isConfigured ?? false },
+            costAllows: { [weak self] in self?.geminiCostGovernor.allowsCall() ?? false }
+        ))
+        // Resolved through the seam — the coordinator never names a cloud
+        // interpreter for a provider id; the registry does (adding a
+        // provider is a case + a registration, not a branch here).
+        guard let endpoint = providers.endpoint(for: cloudProvider) else {
+            router.cloudCascade = nil
+            return
+        }
+        router.cloudCascade = CloudCascadeConfiguration(
+            endpoint: endpoint,
+            threshold: cloudCascadeThreshold,
+            isEnabled: cloudCascadeEnabled,
+            holdCue: { [weak self] in
+                self?.commandRouter?.speakCloudCascadeHoldCue()
+            },
+            onEscalated: { [weak self] escalation in
+                self?.recordCloudCascadeEscalation(escalation)
+            }
+        )
     }
 
     /// [BOOT-REVIEW P1-5] Installs the ONE app-bundled STT model (the
-    /// default Nepali medium — the only catalog entry with a
-    /// `bundledResourceName`) the first time the on-device stack actually
+    /// Nepali medium ggml — the only catalog entry with a
+    /// `bundledResourceName`) the first time the household's OWN pick
     /// needs it, so a normal launch copies NOTHING. The old boot loop
     /// copied the 586 MB ggml into Application Support on every launch,
     /// gating `.ready` behind a multi-second disk write.
@@ -4299,6 +7072,13 @@ self.noteTalkContractChanged()
     /// Gates, in order:
     ///  - the on-device stack is ACTIVE (a Gemini household never pays
     ///    for a model it will not use),
+    ///  - [CPU-SAFETY 2026-09-16] the bundled medium is the household's
+    ///    EXPLICIT pick (`sttModelPreference`). It is no longer part of
+    ///    the automatic whisper.cpp order — running it on a CPU-only
+    ///    fresh install is the ~1 GB cold load that SIGKILLed the app
+    ///    (2026-09-16) — so copying it for any other reason buys nothing
+    ///    and costs 586 MB. The bundled copy stays the offline-friendly
+    ///    install path for the one household that asks for it.
     ///  - whisper.cpp is what the pure selection table would pick once a
     ///    model IS present (an ANE device with WhisperKit installed runs
     ///    WhisperKit — no copy),
@@ -4314,7 +7094,8 @@ self.noteTalkContractChanged()
     private func installBundledSTTModelIfNeeded() {
         guard voiceEngineStack == .onDevice else { return }
         let bundled = ModelCatalog.whisperMediumFinetunedNepali
-        guard !modelStore.isCached(bundled),
+        guard sttModelPreference == bundled,
+              !modelStore.isCached(bundled),
               !bundledSTTInstallInFlight,
               bundledSTTModelIsTheNextChoice() else { return }
         bundledSTTInstallInFlight = true
@@ -4362,6 +7143,136 @@ self.noteTalkContractChanged()
             return true
         }
         return false
+    }
+
+    // MARK: - Missing ANE artifact (PR 3, 2026-09-16)
+
+    /// [STT-RESTORE] A fresh install (or an app update, which gives the
+    /// app a new container) has no WhisperKit ANE artifact, and the
+    /// artifact is a DOWNLOAD: without this, the on-device stack would
+    /// sink to whisper.cpp — the 2026-09-16 device report, where the
+    /// bundled medium's ~1 GB CPU cold load SIGKILLed the app — and stay
+    /// there until someone walked into Settings. Kicks the standard
+    /// `ModelDownloadService` download at first voice readiness instead.
+    ///
+    /// The decision itself is the pure table
+    /// (`OnDeviceSTTSelection.restoreAction`): simulator, an installed
+    /// artifact, an explicit whisper.cpp pick, an in-flight download and
+    /// a language with no ANE build (`en`) all answer `.none`. Called
+    /// from `applyVoiceEngineStack()` — once at the boot's voice start,
+    /// and again on every stack / language change — so it is deliberately
+    /// cheap and idempotent: the in-flight set comes straight from the
+    /// service's published states, and a completed install short-circuits
+    /// on `isAvailable` before the table is even consulted.
+    private func restoreWhisperKitArtifactIfNeeded() {
+        switch OnDeviceSTTSelection.restoreAction(
+            whisperKitAvailable: whisperKitSpeechRecognizer.isAvailable,
+            preferredModel: sttModelPreference,
+            isSimulator: Self.isSimulator,
+            inFlight: downloadsInFlight,
+            language: appLanguage.rawValue,
+            iOS18OrLater: Self.isIOS18OrLater
+        ) {
+        case .none:
+            break
+        case .download(let id):
+            // [STT-RESTORE] Point the ANE engine at what it is about to
+            // receive BEFORE the bytes move, or the landed artifact would
+            // change nothing: `WhisperKitSpeechRecognizer.isAvailable` and
+            // `loadDescriptor()` resolve `directoryURL(for:
+            // preferredModelID)`, and with no stored pick that pref is the
+            // engine's init default — the v3 medium, NOT PR 1's per-language
+            // default. A restored v6 would land on disk and stay invisible,
+            // leaving the household on the fallback forever. With an
+            // explicit ANE pick the recognizer already holds this id (the
+            // adoption rule), so this call is a no-op; a ggml pick never
+            // reaches this branch (the table answers `.none` for it), so no
+            // engine is ever repointed away from a model it can run. Only
+            // the engine's target moves — `sttModelPreference` stays nil
+            // ("Automatic"), so the picker keeps saying Automatic rather
+            // than claiming a pick the household never made.
+            whisperKitSpeechRecognizer.setPreferredModel(id)
+            observabilityBus.emit(ObservabilityEvent(
+                component: "model_download",
+                eventType: "stt_ane_restore_started",
+                durationMs: nil,
+                outcome: "info",
+                errorCode: nil,
+                metadata: ["state": id.rawValue]
+            ))
+            print("[AppCoordinator] ANE STT artifact missing — restoring \(id.rawValue)")
+            modelDownloadService.start(id)
+        }
+    }
+
+    /// The downloads `ModelDownloadService` currently owns, as the
+    /// restore table's "do not re-kick" set: `queued` → `completed` is an
+    /// attempt that is live or done, while `notStarted` / `failed` /
+    /// `cancelled` is an attempt that is OVER — a transient failure is
+    /// retried on the next stack apply instead of being abandoned for the
+    /// life of the install.
+    private var downloadsInFlight: Set<ModelID> {
+        Self.inFlightModels(from: modelDownloadService.states)
+    }
+
+    /// Pure form of the set above — a static seam so the retry semantics
+    /// are pinned by a test rather than by the comment alone.
+    static func inFlightModels(from states: [ModelID: ModelDownloadState]) -> Set<ModelID> {
+        Set(states.compactMap { entry -> ModelID? in
+            switch entry.value {
+            case .queued, .downloading, .verifying, .completed: return entry.key
+            case .notStarted, .failed, .cancelled: return nil
+            }
+        })
+    }
+
+    /// [STT-RESTORE] Re-applies the stack when an ANE artifact lands, so
+    /// the restore actually reaches the live pipeline: nothing else
+    /// re-applies on a download completion (the Settings screen's own
+    /// `$states` observer only recomputes the caption), so a restored
+    /// artifact used to need a relaunch to take effect. The selection
+    /// table decides whether the completion changes the engine, so a
+    /// download for an unrelated WhisperKit model costs one idempotent
+    /// pass.
+    private func observeSTTArtifactCompletion() {
+        sttArtifactCompletionCancellable = modelDownloadService.$states
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] states in
+                guard let self, self.started else { return }
+                let landed = states.contains {
+                    $0.value == .completed
+                        && WhisperKitSpeechRecognizer.isWhisperKitArtifact($0.key)
+                }
+                guard landed else { return }
+                self.applyVoiceEngineStack()
+            }
+    }
+
+    /// Whether this OS can load the CoreML spec-v9 (palettized) ANE
+    /// builds — the same gate `ModelDownloadService` applies before
+    /// spending ~767 MB on one, so the auto-restore never picks an
+    /// artifact the service would refuse on this device.
+    private static let isIOS18OrLater: Bool = ProcessInfo.processInfo
+        .isOperatingSystemAtLeast(
+            OperatingSystemVersion(majorVersion: 18, minorVersion: 0, patchVersion: 0))
+
+    /// The stored STT pick this build runs, migrating superseded ids
+    /// forward.
+    ///
+    /// [CPU-SAFETY 2026-09-16] The small fine-tunes migrate to their q8_0
+    /// SIBLING (same checkpoint, better quality), never to the medium
+    /// fine-tune they used to map to: the medium is no longer
+    /// auto-runnable on CPU (see
+    /// `OnDeviceSTTSelection.whisperCppAutomaticOrder`), and a migration
+    /// that writes it into `sttModelPreference` would both install the
+    /// 586 MB bundled copy and hand the household a model it never chose.
+    /// A migration stays inside the class the household picked.
+    static func migratedSTTPreference(_ stored: ModelID?) -> ModelID? {
+        if stored == ModelCatalog.whisperSmallNepali
+            || stored == ModelCatalog.whisperFinetunedNepali {
+            return ModelCatalog.whisperFinetunedNepaliQ8
+        }
+        return stored
     }
 
     /// Re-applies the audio-session preset after `voiceProcessingEnabled`
@@ -4506,12 +7417,120 @@ self.noteTalkContractChanged()
     /// brain is live (nothing needs it).
     private func ensureAssistantBrainDownloadIfNeeded() {
         guard Self.isLLMRuntimeLinked else { return }
+        recordAutomaticBrainResolutionIfMoved()
+        // [CNR T-184] The promotion verdict rides the same once-per-launch
+        // reporting seam: while the v17 chat variant's record is blocked
+        // (the shipped state), the capture says so and names the block.
+        recordChatVariantPromotionIfBlocked()
         guard Self.shouldAutoDownloadAssistantBrain(
             modelCached: modelStore.isCached(resolvedBrainModelID),
             cloudEnabled: intentRouter?.cloudEnabled ?? false,
             cloudBrainAvailable: geminiCommandInterpreter?.isAvailable ?? false
         ) else { return }
+        // [MODEL-WARDEN 2026-09-20] The warden's verdict, consulted BEFORE
+        // `start()`: a model this device class refuses is not one to spend a
+        // household's data on. Silent on purpose, and on top of the service's
+        // own gate (`ModelDownloadService.start`) rather than instead of it:
+        // this path runs on every launch, so a refusal that only the service
+        // reported would re-emit `download_policy_rejected` every boot, while
+        // the paths a person actually taps still record it. `resolvedBrainModelID`
+        // may be a stored preference (rule 1), which is why the verdict is
+        // asked of the ledger rather than inferred from the id.
+        guard let entry = ModelCatalog.entry(for: resolvedBrainModelID),
+              ModelLifecycleManager.shared.availability(of: entry).isAvailable
+        else { return }
         modelDownloadService.start(resolvedBrainModelID)
+    }
+
+    /// [MODEL-WARDEN 2026-09-18] Records the automatic brain resolution when
+    /// the class policy had to move it off the catalogue's language default —
+    /// the one fact a field capture needs to explain why this phone is
+    /// running the lighter brain, emitted once per launch and ONLY when the
+    /// choice moved.
+    ///
+    /// Nothing here identifies a model: the payload is this ledger's slot
+    /// name and the closed-vocabulary reason (`over_class_budget` /
+    /// `requires_evicting_warm_stt`), both already in
+    /// `LogSanitiser.allowedKeys`. Which artifact the pick landed on is a
+    /// catalogue fact the reader can look up; what the capture could not
+    /// otherwise say is *why* it is not the one the language asked for.
+    ///
+    /// [CNR T-184] The payload also carries the TIER the decision was made
+    /// for (`compact` / `standard` / `roomy` — `AutomaticPick.deviceClass`,
+    /// the resolver's own record of the class it resolved against), so the
+    /// sentence "this phone's class could not hold what the language asked
+    /// for" is readable from the line without re-deriving the class from
+    /// the probe. The `tier` key is the shipped `LogSanitiser.allowedKeys`
+    /// entry ([CASCADE-PROVENANCE]); its values here are the device-class
+    /// tokens, disjoint from the translation tier's, closed either way.
+    ///
+    /// Silent for an explicit pick: that is the household's own choice, not
+    /// an automatic resolution, and `recordedReason` is nil whenever the
+    /// resolution simply agreed with the language default.
+    private func recordAutomaticBrainResolutionIfMoved() {
+        if let stored = brainModelPreference, ModelCatalog.entry(for: stored) != nil {
+            return
+        }
+        let inputs = ModelLifecycleManager.shared.availabilityInputs
+        guard let pick = LanguageModelResolver.resolvedAutomaticPick(
+            kind: .llamaBase,
+            language: appLanguage.rawValue,
+            policy: inputs.policy,
+            physicalMemoryBytes: inputs.physicalMemoryBytes,
+            warmSTTLiveBytes: inputs.warmSTTLiveBytes,
+            promotionRecord: ModelCatalog.chatVariantPromotionRecord),
+              let reason = pick.recordedReason else { return }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "model_lifecycle",
+            eventType: "automatic_brain_pick",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: ["slot": ModelSlot.brain.rawValue,
+                       "tier": pick.deviceClass.rawValue,
+                       "reason": reason.rawValue]))
+    }
+
+    /// [CNR T-184] The launch record for a BLOCKED v17 chat-variant
+    /// promotion — FR-CNR-022's "the violation is reported" side. Emitted
+    /// once per launch while the shipped record is blocked (the shipped
+    /// state: no full-gate report exists until a green run lands), so a
+    /// field capture can answer "why is this phone not on the chat-aware
+    /// brain yet" with one line; silent the moment the record promotes.
+    ///
+    /// Static and pure so the payload is unit-testable without an
+    /// AppCoordinator instance (the `resolveBrainModelID` seam's own
+    /// convention). The payload is this ledger's slot name and the block's
+    /// closed-vocabulary `reasonCode` — never a gate-report path, a gate
+    /// name or a digest: which evidence is missing is a catalogue fact
+    /// (`chatVariantPromotionRecord`), and the record's own doc is where
+    /// it is read. Both keys are shipped `LogSanitiser.allowedKeys`
+    /// entries.
+    static func chatVariantPromotionEvent(
+        block: ModelCatalog.ChatVariantPromotionBlock) -> ObservabilityEvent {
+        ObservabilityEvent(
+            component: "model_lifecycle",
+            eventType: "chat_variant_promotion",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: ["slot": ModelSlot.brain.rawValue,
+                       "reason": block.reasonCode])
+    }
+
+    /// Emits the promotion verdict's block, if there is one, on the launch
+    /// path beside `recordAutomaticBrainResolutionIfMoved` — same
+    /// once-per-launch discipline, same silence when there is nothing to
+    /// say. It reports the CATALOG state, not the household's pick:
+    /// whether this device runs v17 is the resolution's business (rule 1 /
+    /// rule 2 above), and that record already exists.
+    private func recordChatVariantPromotionIfBlocked() {
+        switch ModelCatalog.promotionVerdict(for: ModelCatalog.chatVariantPromotionRecord) {
+        case .promoted:
+            return
+        case .blocked(let block):
+            observabilityBus.emit(Self.chatVariantPromotionEvent(block: block))
+        }
     }
 
     /// A newly-configured Gemini key makes the local brain model redundant
@@ -4622,8 +7641,20 @@ self.noteTalkContractChanged()
     /// behavior) when the policy does not apply. The warm-start
     /// preference is NOT consulted — it gates the BOOT warm only;
     /// post-turn residency is the invariance contract.
+    ///
+    /// [VOICE-OOM] The hold/release gate counts the REAL residents: a
+    /// resident brain's ledger bytes + a 512 MB margin, and an
+    /// over-budget brain (`soloOverBudget`) releases the weights
+    /// outright — holding beside it is the per-turn page-in ping-pong
+    /// the jetsam logs show.
     func recordTranscript(_ text: String) {
         applyPostTranscriptWhisperPolicy()
+        // [VOICE-OOM] B' (2026-10-10) — the pressure-tiered brain pick for
+        // THIS turn, applied BEFORE the router reaches the brain's load
+        // (the router calls `recordTranscript` first and only later
+        // `interpreter.interpret`), so a warned device runs the smaller
+        // installed brain instead of walking into the load.
+        applyPressureBrainPickForTurn()
         DispatchQueue.main.async { [weak self] in
             self?.livePartialTranscript = nil
             self?.lastTranscript = text
@@ -4633,12 +7664,52 @@ self.noteTalkContractChanged()
 
     // MARK: - Post-turn whisper weights ([LAT-M1])
 
-    /// The catalog whisper footprint the hold/probe arithmetic uses —
-    /// the medium-class model's declared size (the weights the boot warm
-    /// actually loads).
-    private static let whisperFootprintBytes: UInt64 = UInt64(
-        ModelCatalog.entry(for: ModelCatalog.whisperKitNepaliMedium)?.sizeBytes
-            ?? 1_600_000_000)
+    /// The whisper weights' live footprint, read from the LEDGER — the one
+    /// place that knows which artifact the recognizer actually loads.
+    ///
+    /// [MODEL-WARDEN] Step 0, closing H5. This used to be a `static let`
+    /// resolving `ModelCatalog.whisperKitNepaliMedium` — the *superseded
+    /// fp16 v3* entry, 1.6 GB — while the shipping recognizer loads
+    /// `whisperKitMediumV6` (800 MB on disk, 1.00 GB live: weights + KV +
+    /// overhead). Every hold and re-warm decision in this file was therefore
+    /// made against 1.6× the real number, which is why the field log shows
+    /// `post_transcript outcome=released (ram_critical)` on a device that
+    /// had room to keep the weights — the exact reload the invariance
+    /// contract exists to prevent.
+    ///
+    /// The ledger resolved the real model id when the recognizer registered
+    /// the slot, so asking it removes the second, drifting copy of the
+    /// number rather than correcting it to a third value that can drift
+    /// again.
+    private var whisperFootprintBytes: UInt64 {
+        if let registered = ModelLifecycleManager.shared
+            .footprint(of: .speechToText)?.liveBytes, registered > 0 {
+            return registered
+        }
+        // Nothing registered yet — a launch where the recognizer has not
+        // been constructed. Resolve the same way the registration will,
+        // from the inventory and the recognizer's own preferred model id.
+        return ModelLifecycleInventory.footprint(
+            for: .speechToText,
+            modelID: whisperKitSpeechRecognizer.preferredModelID).liveBytes
+    }
+
+    /// [VOICE-OOM] The active brain's residency for the post-turn policy —
+    /// LEDGER facts only, so the hold/re-warm arithmetic counts the real
+    /// resident instead of a constant. A brain admitted past its class
+    /// budget (an explicit 4B pick, `soloOverBudget`) makes the weights
+    /// yield every turn: holding them beside it is what forced the
+    /// per-turn page-in ping-pong the jetsam logs show.
+    private var activeBrainResidency: WhisperPostTurnPolicy.ActiveBrain {
+        let manager = ModelLifecycleManager.shared
+        guard manager.isResident(.brain),
+              let live = manager.footprint(of: .brain)?.liveBytes,
+              live > 0 else { return .none }
+        let classBudget = manager.snapshot().classBudgetBytes
+        return WhisperPostTurnPolicy.ActiveBrain(
+            liveBytes: live,
+            isOverClassBudget: classBudget > 0 && live > classBudget)
+    }
 
     /// True while WhisperKit is the STT the on-device selection table
     /// would actually run — the only recognizer whose weights can be
@@ -4670,7 +7741,8 @@ self.noteTalkContractChanged()
                 whisperKitAvailable: whisperKitSpeechRecognizer.isAvailable,
                 isModelLoaded: whisperKitSpeechRecognizer.isModelLoaded),
             availableBytes: MemoryProbe.availableProcessMemoryBytes,
-            whisperFootprintBytes: Self.whisperFootprintBytes)
+            whisperFootprintBytes: whisperFootprintBytes,
+            activeBrain: activeBrainResidency)
         switch action {
         case .hold:
             // The probe allows the weights to stay resident across the
@@ -4681,14 +7753,18 @@ self.noteTalkContractChanged()
             emitWhisperWeightsEvent(
                 eventType: "post_transcript", outcome: "held",
                 metadata: ["ttl_s": "\(Int(WhisperPostTurnPolicy.ttlSeconds))"])
-        case .releaseOnly:
-            // Critically tight: release and stay released — a reload
-            // would endanger the app. The next turn pays the load.
+        case .releaseOnly(let reason):
+            // [VOICE-OOM] Release and stay released. Three honest cases
+            // ride `reason`: an over-budget brain (holding beside it is
+            // the page-in ping-pong — the TTL re-warm must NOT fire
+            // while it stays resident), too little headroom for
+            // weights + brain + margin, or the weights alone not
+            // fitting. The next turn pays only the ~1.0 GB weights load.
             whisperResidencyCycle.cancel()
             whisperKitSpeechRecognizer.releaseModel()
             emitWhisperWeightsEvent(
                 eventType: "post_transcript", outcome: "released",
-                metadata: ["reason": "ram_critical"])
+                metadata: ["reason": reason.rawValue])
         case .notApplicable:
             // Not the on-device WhisperKit stack, or nothing loaded (a
             // fallback STT served the turn) — today's release applies.
@@ -4706,20 +7782,31 @@ self.noteTalkContractChanged()
     }
 
     /// [LAT-EVIDENCE] The background re-warm (runs when the TTL hold
-    /// lapses, main-confined): re-probes at execution time — only a
-    /// critical ceiling skips it (the safety valve), and the warm-start
-    /// preference NEVER gates it. On success the re-warmed weights
-    /// re-arm the same TTL hold, so the residency cycle repeats and the
-    /// next turn is warm.
+    /// lapses, main-confined): re-probes at execution time — a critical
+    /// ceiling skips it (the safety valve), and the warm-start preference
+    /// NEVER gates it. On success the re-warmed weights re-arm the same
+    /// TTL hold, so the residency cycle repeats and the next turn is warm.
+    ///
+    /// [VOICE-OOM] The re-probe is the SAME generalized gate the hold
+    /// used (`WhisperPostTurnPolicy.decide`): an over-budget brain or a
+    /// ceiling that cannot take weights + brain + margin skips the
+    /// re-warm — re-warming the weights would evict the brain the next
+    /// turn has to page back in at ~3.4 GB, the exact ping-pong this
+    /// hardening exists to stop.
     private func runBackgroundWhisperReWarm() {
         guard voiceEngineStack == .onDevice,
               whisperKitIsActiveSTT,
               whisperKitSpeechRecognizer.isAvailable else { return }
-        guard MemoryProbe.availableProcessMemoryBytes
-                >= Self.whisperFootprintBytes else {
+        switch WhisperPostTurnPolicy.decide(
+            availableBytes: MemoryProbe.availableProcessMemoryBytes,
+            whisperFootprintBytes: whisperFootprintBytes,
+            activeBrain: activeBrainResidency) {
+        case .hold:
+            break
+        case .releaseOnly(let reason):
             emitWhisperWeightsEvent(
                 eventType: "rewarm", outcome: "skipped",
-                metadata: ["reason": "ram_critical"])
+                metadata: ["reason": reason.rawValue])
             return
         }
         emitWhisperWeightsEvent(eventType: "rewarm", outcome: "started")
@@ -4755,6 +7842,171 @@ self.noteTalkContractChanged()
             errorCode: nil,
             metadata: metadata
         ))
+    }
+
+    // MARK: - Pressure-tiered brain pick ([VOICE-OOM] B', 2026-10-10)
+
+    /// The per-turn pressure-tiered brain pick, applied at the top of
+    /// every turn. `recordTranscript` runs before the router reaches the
+    /// brain (`CommandRouter.route` records the transcript first and only
+    /// later calls `interpreter.interpret`), so the swap below is always
+    /// in force before the load — the warned device runs the smaller
+    /// installed brain instead of walking into the 4B's page-in.
+    ///
+    /// The decision itself lives in `PressureBrainPickResolver` (pure);
+    /// this function resolves its inputs and applies the outcome through
+    /// the interpreter's existing `switchBaseModel` seam. The stored
+    /// preference is NEVER touched: Settings keeps showing the household's
+    /// pick, and a recovered device swaps back to it — since
+    /// [PICK-HYSTERESIS] after the latch's sustained-headroom window
+    /// rather than on the first clean sample.
+    ///
+    /// Gated on `llamaCommandInterpreter.isAvailable` only — wherever the
+    /// local brain can load, the pick must be able to protect that load.
+    /// That is BOTH stacks: the .gemini stack is local-first hybrid (the
+    /// local brain answers what it can, Gemini takes the rest), so its
+    /// first tier is the same load.
+    ///
+    /// [PICK-HYSTERESIS] (2026-10-14) The resolver's answer is a RAW
+    /// per-turn sample; it is now fed through `PressureBrainPickLatch`
+    /// before anything is applied, so a sample that disagrees with the
+    /// pick in force must repeat (2 turns down / 4 turns up) before it
+    /// flips a model — the audit's finding 3C/15, the fix for the
+    /// per-turn eviction ping-pong the owner's 2026-10-14 console shows.
+    /// Everything below reads the LATCHED pick, which is what keeps
+    /// `DegradedVoiceMode` a statement about the turn actually running.
+    /// A change the latch suppressed this turn emits a `held` event, so
+    /// the next console can count suppressed swaps directly.
+    private func applyPressureBrainPickForTurn() {
+        guard llamaCommandInterpreter.isAvailable else {
+            // No local brain can load this turn — nothing to pick, and no
+            // degradation is in force.
+            publishDegradedVoiceMode(.normal)
+            return
+        }
+        let remembered = resolvedBrainModelID
+        let raw = PressureBrainPickResolver.resolve(
+            reading: ModelLifecycleManager.shared.memoryPressureReading(),
+            availableProcessMemoryBytes: MemoryProbe.availableProcessMemoryBytes,
+            language: appLanguage.rawValue,
+            rememberedPick: remembered,
+            installedModelIDs: installedBrainModelIDs)
+        let pick = pressureBrainPickLatch.decide(raw: raw,
+                                                 rememberedPick: remembered)
+        if pick != raw {
+            // The sample disagrees with the pick in force and the latch
+            // has not accepted it yet — observability only; the apply
+            // below stays on the latched pick.
+            emitPressureBrainPickHeldEvent(raw: raw, kept: pick)
+        }
+        switch pick {
+        case .keep:
+            if llamaCommandInterpreter.baseModelID != remembered {
+                // Recovery — pressure eased (or the remembered pick fits
+                // again) after an earlier turn stepped down. Swapping
+                // back is also what hides the pill on the next publish.
+                llamaCommandInterpreter.switchBaseModel(to: remembered)
+            }
+        case .stepDown(let id):
+            if llamaCommandInterpreter.baseModelID != id {
+                llamaCommandInterpreter.switchBaseModel(to: id)
+            }
+            emitPressureBrainPickEvent(pick: pick, remembered: remembered)
+        case .lightweight:
+            // No installed brain fits. Drop any resident handle so the
+            // load-site refusal (`loadLLMHandle`) is real — the router
+            // then answers from its deterministic path this turn.
+            llamaCommandInterpreter.unloadModel()
+            emitPressureBrainPickEvent(pick: pick, remembered: remembered)
+        }
+        publishDegradedVoiceMode(DegradedVoiceMode.resolved(from: pick))
+    }
+
+    /// The brains the resolver may choose from: the curated on-disk set —
+    /// the same pool the Settings picker offers, so a hidden/legacy
+    /// artifact can never be picked by pressure, and a candidate that is
+    /// not installed is invisible (never downloaded under pressure).
+    private var installedBrainModelIDs: Set<ModelID> {
+        Set(ModelCatalog.curatedEntries(kind: .llamaBase)
+            .map(\.id)
+            .filter { modelStore.isCached($0) })
+    }
+
+    /// Publishes the degraded-mode state Home renders as its status pill.
+    /// `recordTranscript` is main-confined on the production path (the
+    /// STT completion hops to main before routing); the guard is cheap
+    /// insurance for any other caller.
+    private func publishDegradedVoiceMode(_ mode: DegradedVoiceMode) {
+        if Thread.isMainThread {
+            degradedVoiceMode = mode
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.degradedVoiceMode = mode
+            }
+        }
+    }
+
+    /// One event per non-normal pick: component `pressure_brain_pick`,
+    /// catalog ids only — never audio or transcripts. No event for
+    /// `.keep` (the healthy path must stay silent).
+    ///
+    /// [PICK-HYSTERESIS] The pick passed here is the LATCHED pick — one
+    /// event per turn the state in force is non-normal, exactly as
+    /// before; raw samples the latch held back ride their own event
+    /// (`emitPressureBrainPickHeldEvent`).
+    private func emitPressureBrainPickEvent(pick: PressureBrainPick,
+                                            remembered: ModelID) {
+        var metadata: [String: String] = ["from": remembered.rawValue]
+        let outcome: String
+        switch pick {
+        case .keep:
+            return
+        case .stepDown(let id):
+            outcome = "step_down"
+            metadata["to"] = id.rawValue
+        case .lightweight:
+            outcome = "lightweight"
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "pressure_brain_pick",
+            eventType: "turn",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: metadata
+        ))
+    }
+
+    /// [PICK-HYSTERESIS] (2026-10-14) One event per HELD turn: the raw
+    /// pick disagreed with the pick in force and the latch has not
+    /// accepted the change yet (either direction — a held step-down and
+    /// a held recovery both land here). Outcome `held`, metadata
+    /// `kept`/`raw` naming the two picks by catalog id (or the two
+    /// content-free tokens), so the next field console can count
+    /// suppressed swaps — the number the owner's 2026-10-14 measurement
+    /// had no way to see.
+    private func emitPressureBrainPickHeldEvent(raw: PressureBrainPick,
+                                                kept: PressureBrainPick) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "pressure_brain_pick",
+            eventType: "turn",
+            durationMs: nil,
+            outcome: "held",
+            errorCode: nil,
+            metadata: ["kept": pressurePickToken(kept),
+                       "raw": pressurePickToken(raw)]
+        ))
+    }
+
+    /// A pick's observability token: the catalog id for a stepped-down
+    /// model, or the content-free word for the two model-less outcomes
+    /// — the same vocabulary rule every other event follows.
+    private func pressurePickToken(_ pick: PressureBrainPick) -> String {
+        switch pick {
+        case .keep: return "keep"
+        case .stepDown(let id): return id.rawValue
+        case .lightweight: return "lightweight"
+        }
     }
 
     // MARK: - Family & friends — curated contacts (spec §4.4.2)
@@ -4801,15 +8053,508 @@ self.noteTalkContractChanged()
     /// Photo thumbnails for curated contacts (family-and-friends task,
     /// 2026-09-07). Lazy like the intent-layer stores: nothing touches
     /// Application Support paths before launch completes. Photos are
-    /// best-effort visuals — the store is non-throwing, and every call
-    /// site below tolerates a nil filename.
+    /// best-effort visuals — the store is non-throwing, and every face
+    /// call site below tolerates a nil filename.
     lazy var contactPhotoStore = ContactPhotoStore()
 
-    /// The stored thumbnail for a curated contact, or nil when none is
-    /// on file (or the file vanished) — the single lookup every row
-    /// renders through, so the Photo-tab UI needs nothing but a contact.
-    func contactPhoto(for contact: FamilyContact) -> UIImage? {
-        contactPhotoStore.load(named: contact.photoFilename)
+    // MARK: - Faces (T-157; design-l1 §10.1, design-l2 §1.9, §4.4)
+
+    /// The stable `.task(id:)` identity of a contact's face (design-l2
+    /// §4.4): `"<id>:<token>:<filename|->:<faceEpoch>"`.
+    ///
+    /// Token = `systemPhotoTokens[contact.id]` — the 16-hex sha256
+    /// prefix of the last-resolved system photo bytes — or `"-"`
+    /// (linked, not yet resolved) or `"link-nil"` (no verified link).
+    /// The filename component is `"-"` when the contact has no
+    /// app-local photo.
+    ///
+    /// Stable: repeated derivation without an identity change returns
+    /// the identical string. Versioned: any link, filename or epoch
+    /// change — or a freshly resolved system photo — yields a
+    /// different string, so a `.task(id:)` keyed on it re-runs exactly
+    /// when a face could differ, and a UI cache keyed on it rotates
+    /// with it (no stale image is ever served under the new identity).
+    ///
+    /// Reads ONLY main-confined state (`verifiedLinks`, the token map,
+    /// `familyContacts`-derived values, `faceEpoch`) — @MainActor, like
+    /// the two resolvers below, is what makes every read atomic per
+    /// contact: a publish swaps whole values, so no torn identity (an
+    /// id from one revision next to a hash from another) is even
+    /// representable.
+    @MainActor
+    func faceIdentity(for contact: FamilyContact) -> String {
+        let token = verifiedLinks.links[contact.id] != nil
+            ? (systemPhotoTokens[contact.id] ?? "-")
+            : "link-nil"
+        return "\(contact.id.uuidString):\(token):\(contact.photoFilename ?? "-"):\(faceEpoch)"
+    }
+
+    /// The contact's face at its stored size TOGETHER WITH its source —
+    /// the ONE precedence resolver (design-l1 §10.1, FR-FCU-007) plus
+    /// the attribution the editor's `family.photo.sourceSystem` caption
+    /// needs (family-contacts-unify T-160, design-l2 §2.4: rendered
+    /// exactly when the displayed photo is the resolved SYSTEM one).
+    /// The pair comes out of ONE pass, so the image and its source can
+    /// never disagree — and `faceImage` is this same call with the
+    /// source dropped, never a second precedence expression to drift
+    /// from (design-l2 §8.1's two-paths hazard).
+    ///
+    /// Order: (1) a VERIFIED link whose record holds readable photo
+    /// bytes → the SYSTEM photo, `isSystemPhoto` true; (2) the app-local
+    /// `photoFilename` file, false; (3) `(nil, false)` — the caller
+    /// draws the existing initials avatar. Any failure at a step
+    /// degrades to the next; never throws (a tile is never blank and
+    /// never crashes).
+    ///
+    /// "Readable access" is the link service's own gate: its
+    /// `photoImageData` answers nil without touching the store when
+    /// access is not readable, so bytes only ever come back through a
+    /// readable door. System bytes are bounded to
+    /// `ContactPhotoStore.maxDimension` before returning — the same
+    /// 512px envelope a stored family thumbnail lives in — so a
+    /// phone-book full-size photo cannot round into the UI unbounded.
+    @MainActor
+    func faceImageWithSource(for contact: FamilyContact) async
+        -> (image: UIImage?, isSystemPhoto: Bool) {
+        if let system = await resolvedSystemPhoto(for: contact) { return (system, true) }
+        return (contactPhotoStore.load(named: contact.photoFilename), false)
+    }
+
+    /// The contact's face at its stored size — `faceImageWithSource`
+    /// with the source dropped (the two are the same resolution, by
+    /// construction).
+    @MainActor
+    func faceImage(for contact: FamilyContact) async -> UIImage? {
+        await faceImageWithSource(for: contact).image
+    }
+
+    /// The contact's face thumbnail at `diameter`, through the shared
+    /// bounded downsampling cache — the `sysphoto:` key family
+    /// (`"sysphoto:<identifier>:<token>"`) for system photos, the
+    /// existing `"contact:<filename>"` key for app-local ones, so the
+    /// two sources can never collide (design-l2 §1.9). The token in
+    /// the key IS the bytes' version: new bytes ⇒ new token ⇒ a cache
+    /// miss, never a stale serve.
+    @MainActor
+    func faceThumbnail(for contact: FamilyContact, diameter: CGFloat,
+                       displayScale: CGFloat) async -> UIImage? {
+        if let system = await resolvedSystemPhoto(for: contact),
+           let link = verifiedLinks.links[contact.id],
+           let token = systemPhotoTokens[contact.id] {
+            let thumbnail = DownsampledImageCache.shared.thumbnail(
+                forKey: Self.systemPhotoCacheKey(identifier: link.identifier, token: token),
+                pointSize: diameter,
+                displayScale: displayScale,
+                load: { system })
+            if let thumbnail { return thumbnail }
+        }
+        return DownsampledImageCache.shared.contactFace(
+            for: contact,
+            diameter: diameter,
+            displayScale: displayScale
+        ) { contactPhotoStore.load(named: contact.photoFilename) }
+    }
+
+    /// The verified link's system photo, decoded and bounded to
+    /// `ContactPhotoStore.maxDimension` — nil when the contact has no
+    /// VERIFIED link, the record holds no readable photo, or the bytes
+    /// do not decode.
+    ///
+    /// The ONE system-byte resolver both face methods run, and the only
+    /// writer of `systemPhotoTokens` (design-l2 §4.4: the token map is
+    /// written ONLY from the @MainActor face path, never from a
+    /// background Task): the token is the sha256 prefix of the bytes
+    /// that were just resolved, recorded only on a successful resolve —
+    /// an unresolvable system photo leaves the link's token at `"-"`
+    /// and the identity stable.
+    @MainActor
+    private func resolvedSystemPhoto(for contact: FamilyContact) async -> UIImage? {
+        guard let link = verifiedLinks.links[contact.id], !link.identifier.isEmpty else {
+            return nil
+        }
+        let service = linkService
+        guard let data = await service.photoImageData(forIdentifier: link.identifier),
+              let image = UIImage(data: data) else { return nil }
+        systemPhotoTokens[contact.id] = Self.systemPhotoToken(of: data)
+        return DownsampledImageCache.downsampled(image,
+                                                 maxPixelEdge: ContactPhotoStore.maxDimension)
+    }
+
+    /// The token half of a face identity: the first 16 hex characters
+    /// of sha256 over the resolved system photo bytes (design-l2 §4.4).
+    /// The SAME hashing shape as `SystemContactLinkService.photoCacheKey`,
+    /// through one shared prefix length — and a hash by construction,
+    /// so no identifier or byte content can leave the app through an
+    /// identity string or a cache key (NFR-FCU-002).
+    static func systemPhotoToken(of data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return String(hex.prefix(SystemContactLinkService.photoKeyHashPrefixLength))
+    }
+
+    /// The `sysphoto:` thumbnail cache key: record identifier plus the
+    /// resolved bytes' token (design-l1 §10.1). Never collides with a
+    /// `contact:<filename>` key — the two families share one bounded
+    /// cache, not one key space.
+    static func systemPhotoCacheKey(identifier: String, token: String) -> String {
+        "sysphoto:\(identifier):\(token)"
+    }
+
+    // MARK: - Identity: verified links and the family index (T-156; design-l2 §1.9, §3.6)
+
+    /// Refresh entry point for VERIFIED links (design-l2 §1.9, §3.6).
+    ///
+    /// Early-returns — no fetch, no generation bump — unless some roster
+    /// contact carries a stored link, so a roster with no links never
+    /// touches the address book at all (the unlinked-parity anchor: this
+    /// feature is invisible until the first link exists).
+    ///
+    /// Otherwise: one Task, a roster captured BY VALUE (the published
+    /// array stays main-confined; the task reads its own snapshot), and
+    /// the actor's drain does the verification. The result publishes on
+    /// main only when its generation is NEWER than the published one —
+    /// the counter orders publication, so a slow refresh that finished
+    /// after a newer one is discarded, never published (FR-FCU-006:
+    /// stale serves; no flap). The epoch bumps once per identity change
+    /// and never on a no-op refresh.
+    ///
+    /// No retries, no backoff, no delays (L1 §13.4): a failed or
+    /// unreadable pass leaves the previous snapshot in place and the
+    /// next trigger — a roster mutation, a foreground activation, an
+    /// access change, a write outcome — re-runs this.
+    func refreshVerifiedLinks() {
+        guard familyContacts.contains(where: { $0.systemContact != nil }) else { return }
+        let roster = familyContacts
+        // Resolve the seam HERE, on the caller's (main) context: the lazy
+        // seam is built at first use, never inside the Task.
+        let service = linkService
+        Task { [weak self] in
+            let snapshot = await service.refresh(contacts: roster)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                guard snapshot.generation > self.verifiedLinks.generation else {
+                    return   // an older generation never overwrites a newer snapshot
+                }
+                if snapshot.links != self.verifiedLinks.links {
+                    self.faceEpoch += 1   // identity changed — exactly once per change
+                }
+                self.verifiedLinks = snapshot
+            }
+        }
+    }
+
+    /// Foreground identity hook (design-l2 §4.5), wired into
+    /// `handleScenePhase(.active)`: wholesale photo-cache invalidation +
+    /// one epoch bump — the only way an EXTERNAL contact edit (photos
+    /// changed in Contacts.app while this app was backgrounded) can
+    /// surface — then the ordinary link refresh.
+    ///
+    /// Both steps are await-free from the caller's seat. The Task's
+    /// internal ORDER is what matters: invalidate FIRST, bump SECOND, so
+    /// by the time a face consumer re-resolves under the new epoch the
+    /// cache is already cold (a bump that outran its invalidation could
+    /// serve the bytes it was meant to drop).
+    func refreshContactsIdentity() {
+        let service = linkService
+        Task { [weak self] in
+            await service.invalidate(identifier: nil)
+            await MainActor.run { [weak self] in self?.faceEpoch += 1 }
+        }
+        refreshVerifiedLinks()
+    }
+
+    /// Whether `claim` names a record ANOTHER roster contact's stored link
+    /// already owns (design-l2 §1.9 clause 4; L1 §6.1) — the duplicate-
+    /// claim guard's whole rule, pure and static so both write paths and
+    /// the suites judge by the SAME expression. An empty identifier is
+    /// "no linkable record" (§3.5), never a claim.
+    static func isDuplicateLinkClaim(_ claim: SystemContactLink?,
+                                     in roster: [FamilyContact],
+                                     excluding id: UUID?) -> Bool {
+        guard let identifier = claim?.identifier, !identifier.isEmpty else { return false }
+        return roster.contains { $0.id != id && $0.systemContact?.identifier == identifier }
+    }
+
+    /// One reason-coded event for a write REFUSED by the duplicate-claim
+    /// guard: the `command_router` rejection shape — closed vocabulary
+    /// (`rejected` / `duplicate_claim`), `metadata: [:]`, and nothing
+    /// about the person, the number or the identifier in any field
+    /// (NFR-FCU-002, design-l2 §5.2).
+    private func emitDuplicateLinkClaimRefusal() {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "family_contacts",
+            eventType: "family_contact_write_refused",
+            durationMs: nil,
+            outcome: "rejected",
+            errorCode: "duplicate_claim",
+            metadata: [:]
+        ))
+    }
+
+    // MARK: - Link / unlink seam (T-158; design-l2 §1.9, design-l1 §6.4)
+
+    /// The photo consequence an unlink books (design-l2 §1.9, design-l1
+    /// §6.4; FR-FCU-005). Every mode leaves BOTH records intact — an
+    /// unlink only ever clears this coordinator's own stored claim and
+    /// NEVER writes to the system record (the system contact is not
+    /// edited, not deleted, not touched).
+    enum SystemContactUnlinkMode: Equatable {
+        /// Default: the stored link is cleared; the app-local photo file
+        /// is untouched.
+        case unlinkKeepingLocalAsIs
+        /// The displayed photo IS the linked record's system photo and no
+        /// app-local file exists: copy those bytes into the app-local
+        /// store FIRST, assign the copied file to `photoFilename`, and
+        /// clear the link only after that assignment persisted. A copy
+        /// that produced no file does NOT clear (F3; the never-lose rule
+        /// wins over the unlink).
+        case unlinkKeepingDisplayedPhotoLocally
+        /// Explicit "remove everything": the link and the app-local photo
+        /// file are both cleared (the system record is still untouched).
+        case unlinkAndClearAppLocalPhoto
+    }
+
+    /// The pure mode rule the wizard applies BEFORE calling
+    /// `setFamilyContactLink` (design-l2 §1.9): an app-local file exists →
+    /// keep it as is; otherwise, when the displayed photo is the linked
+    /// system one, copy it locally first; else nothing displayed would be
+    /// lost → keep as is. Static and total so the wizard's choice and the
+    /// suites judge by the SAME expression.
+    static func unlinkMode(appLocalFileExists: Bool,
+                           displayedPhotoIsSystem: Bool) -> SystemContactUnlinkMode {
+        if appLocalFileExists { return .unlinkKeepingLocalAsIs }
+        return displayedPhotoIsSystem ? .unlinkKeepingDisplayedPhotoLocally
+                                      : .unlinkKeepingLocalAsIs
+    }
+
+    /// The ONLY unlink path (design-l2 §1.9, design-l1 §6.4; FR-FCU-005,
+    /// FR-FCU-006). Clears the stored link, books the photo consequence
+    /// per `mode`, bumps the face epoch and republishes the roster (whose
+    /// `didSet` triggers the verified-link refresh). Never writes to the
+    /// system record.
+    ///
+    /// `true` = cleared, or already absent (no stored link to clear);
+    /// `false` = no such contact, or a consequence that could not be
+    /// booked — in which case the link is NOT cleared (the never-lose
+    /// rule wins over the unlink) and the refusal is reason-coded on the
+    /// bus, never silent.
+    ///
+    /// F3 (security advisory): `.unlinkKeepingDisplayedPhotoLocally`
+    /// copies the displayed system bytes BEFORE any record write, then
+    /// assigns the copied file to `photoFilename` in the SAME store write
+    /// that clears the link — so the displayed photo survives the unlink,
+    /// both records stay intact, and a failure leaves neither a dangling
+    /// `photoFilename` nor an orphaned copy.
+    @discardableResult
+    @MainActor
+    func setFamilyContactLink(id: UUID, mode: SystemContactUnlinkMode) async -> Bool {
+        guard let contact = familyContacts.first(where: { $0.id == id }) else { return false }
+
+        let oldFilename = contact.photoFilename
+        var newFilename = oldFilename
+
+        // (1) Book the photo consequence — the COPY runs first, before any
+        // record write, so a failure can refuse the unlink without having
+        // touched the stored record.
+        switch mode {
+        case .unlinkKeepingLocalAsIs:
+            break   // app-local file untouched
+        case .unlinkKeepingDisplayedPhotoLocally:
+            guard let link = contact.systemContact, !link.identifier.isEmpty else {
+                // No stored link = nothing is displayed from the system
+                // record: nothing to copy, and the unlink is a plain
+                // clear (design-l2 §1.9: `true` = "already absent").
+                break
+            }
+            newFilename = await copyDisplayedSystemPhotoLocally(forIdentifier: link.identifier)
+            if newFilename == nil {
+                emitUnlinkRefusal(reasonCode: "copy_failed")
+                return false   // never-lose: the link is NOT cleared
+            }
+        case .unlinkAndClearAppLocalPhoto:
+            newFilename = nil
+        }
+
+        // (2) ONE record write: the photoFilename consequence and the
+        // cleared link land together, so no window exists where a cleared
+        // link sits next to a stale filename (or the reverse). From a
+        // fresh store read — the roster snapshot may be a beat older.
+        var all = familyContactStore.load()
+        guard let index = all.firstIndex(where: { $0.id == id }) else {
+            if let newFilename, newFilename != oldFilename {
+                contactPhotoStore.delete(named: newFilename)   // never orphan a file
+            }
+            emitUnlinkRefusal(reasonCode: "save_failed")
+            return false
+        }
+        all[index].photoFilename = newFilename
+        all[index].systemContact = nil
+        guard familyContactStore.save(all) else {
+            if let newFilename, newFilename != oldFilename {
+                contactPhotoStore.delete(named: newFilename)   // never orphan a file
+            }
+            emitUnlinkRefusal(reasonCode: "save_failed")
+            return false
+        }
+
+        // (3) The commit point passed — the replaced/cleared app-local
+        // file can go now (the `updateFamilyContact` sequencing: the
+        // record is the commit point, the old file only follows it).
+        if let oldFilename, oldFilename != newFilename {
+            contactPhotoStore.delete(named: oldFilename)
+        }
+
+        // (4) Republish (didSet: wholesale index rebuild + link refresh —
+        // the stale claim disappears from the next snapshot, FR-FCU-006)
+        // and bump the epoch (design-l2 §4.4: an unlink is an identity
+        // change). The system record was never touched.
+        familyContacts = familyContactStore.load()
+        familyNotifier.updateContacts(Self.emergencyContacts(from: familyContacts,
+                               defaultCallApp: defaultCallApp))
+        faceEpoch += 1
+        emitUnlinkEvent(mode)
+        return true
+    }
+
+    /// The displayed system photo bytes copied into the app-local store as
+    /// the processed JPEG the app holds everywhere (design-l1 §6.4: "one
+    /// encode via `processedJPEG`") — the copied file's name, or nil when
+    /// nothing could be copied (no bytes, undecodable bytes, or a rejected
+    /// store write), which the unlink reads as "refuse to clear".
+    ///
+    /// Reads through the one link-reading seam: the same readable-access
+    /// gate the face resolver uses, so no byte ever comes back through an
+    /// unreadable door.
+    @MainActor
+    private func copyDisplayedSystemPhotoLocally(forIdentifier identifier: String) async -> String? {
+        let service = linkService
+        guard let data = await service.photoImageData(forIdentifier: identifier),
+              let image = UIImage(data: data) else { return nil }
+        return contactPhotoStore.save(image)
+    }
+
+    /// The §5.2 unlink row: `contacts_link` / `unlink`, outcome = the
+    /// booked mode consequence, no error code on success. Reason-code
+    /// only — no name, number, identifier, filename or byte anywhere in a
+    /// field (NFR-FCU-002).
+    private func emitUnlinkEvent(_ mode: SystemContactUnlinkMode) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "contacts_link",
+            eventType: "unlink",
+            durationMs: nil,
+            outcome: Self.unlinkOutcomeToken(mode),
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+
+    /// The closed §5.2 outcome vocabulary of the unlink event.
+    static func unlinkOutcomeToken(_ mode: SystemContactUnlinkMode) -> String {
+        switch mode {
+        case .unlinkKeepingLocalAsIs: return "keeping_local_as_is"
+        case .unlinkKeepingDisplayedPhotoLocally: return "keeping_displayed_photo_locally"
+        case .unlinkAndClearAppLocalPhoto: return "clear_app_local_photo"
+        }
+    }
+
+    /// One reason-coded event for an unlink REFUSED by the never-lose
+    /// rule — the §5.2 `claim_refused` row's shape (component
+    /// `contacts_link`, outcome `refused`, a specific fixed error code)
+    /// for the class of failure that row does not cover: the promise the
+    /// mode booked could not be kept, so the link stayed. The codes are
+    /// fixed strings — `copy_failed` (the displayed-photo copy produced
+    /// no local file) and `save_failed` (the record write could not
+    /// persist the consequence) — and the metadata is empty, so no name,
+    /// number, identifier, filename or byte can reach an event field
+    /// (NFR-FCU-002; F7).
+    private func emitUnlinkRefusal(reasonCode: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "contacts_link",
+            eventType: "unlink_refused",
+            durationMs: nil,
+            outcome: "refused",
+            errorCode: reasonCode,
+            metadata: [:]
+        ))
+    }
+
+    // MARK: - Post-save system photo step (T-158; design-l2 §1.9, §2.6, §4.4, §4.5)
+
+    /// The verified-link write seam `syncSystemPhoto` delegates to (T-154;
+    /// the ONE place that can write a system record — this coordinator
+    /// never writes one itself). `lazy` for the same reason as
+    /// `linkService` ([BOOT-REVIEW P0-1] first use, not `init()`: building
+    /// it constructs a `CNContactStore`, and a launch whose contacts never
+    /// save a linked photo must never need an address-book handle).
+    private lazy var systemContactPhotoWriter: SystemContactPhotoWriting =
+        injectedSystemContactPhotoWriter ?? SystemContactPhotoWriter(observabilityBus: observabilityBus)
+
+    /// Test seam (T-158), the `injectedLinkService` pattern: the scripted
+    /// writer this coordinator hands out in place of the real actor. nil —
+    /// the app's own construction — builds the real one at first use. Set
+    /// once in `init`.
+    private var injectedSystemContactPhotoWriter: SystemContactPhotoWriting? = nil
+
+    /// The wizard's post-save system-photo step (design-l2 §1.9/§2.6;
+    /// L1 §10.2 steps 2-3) — a THIN delegation to the T-154 write seam.
+    /// The payload is the app-local processed JPEG the record already
+    /// holds (`loadData` — the bytes the system record receives are
+    /// byte-identical to the bytes the app stored), and the outcome
+    /// vocabulary is the writer's own.
+    ///
+    /// `nil` when no family contact carries `id` (the wizard's only caller
+    /// passes the id it just saved; nil means the record left the roster).
+    /// `.skippedNoLink` when the contact has no VERIFIED link — no
+    /// attempt, and the writer seam is never even built — plus
+    /// `.skippedNoAuthorization(access)` when the write access refuses the
+    /// attempt (no store call; the honest fallback label).
+    ///
+    /// Consequences (design-l2 §4.4/§4.5): `.written` — invalidate the
+    /// identifier's photo cache and bump `faceEpoch` (the resolved system
+    /// bytes may differ); `.recordGone`/`.identityMismatch` — refresh the
+    /// verified links (the stored claim may now degrade, FR-FCU-006). No
+    /// other outcome triggers anything.
+    @MainActor
+    func syncSystemPhoto(forContactID id: UUID,
+                         clearing: Bool) async -> SystemContactPhotoWriteOutcome? {
+        guard let contact = familyContacts.first(where: { $0.id == id }) else { return nil }
+        guard let link = verifiedLinks.links[id], !link.identifier.isEmpty else {
+            // No verified link → no attempt (today's unlinked UX exactly).
+            // Short-circuited BEFORE the writer seam is resolved, so a
+            // contact with no link never constructs a `CNContactStore` —
+            // the same first-use rule the lazy seam above exists for.
+            return .skippedNoLink
+        }
+        // Resolve the seam on the caller's (main) context, before any await.
+        let writer = systemContactPhotoWriter
+        let access = await writer.writeAccess()
+        if let preAttempt = SystemContactWriteDecision.preAttemptOutcome(hasVerifiedLink: true,
+                                                                         access: access) {
+            return preAttempt   // .skippedNoAuthorization(access) — no store call
+        }
+        let outcome: SystemContactPhotoWriteOutcome
+        if clearing {
+            outcome = await writer.clearPhoto(from: link)
+        } else if let jpeg = contactPhotoStore.loadData(named: contact.photoFilename) {
+            outcome = await writer.writePhoto(jpeg, to: link)
+        } else {
+            // The payload IS the app-local photo; without it there is
+            // nothing to write to the system (reachable when the record
+            // save kept an older/no file). No attempt, no false success —
+            // the honest kept-on-phone state.
+            outcome = .failed(.fetchFailed)
+        }
+        switch outcome {
+        case .written:
+            let service = linkService
+            await service.invalidate(identifier: link.identifier)
+            faceEpoch += 1
+        case .recordGone, .identityMismatch:
+            refreshVerifiedLinks()
+        case .skippedNoLink, .skippedNoAuthorization, .failed:
+            break   // no consequence (the writer's own event records the outcome)
+        }
+        return outcome
     }
 
     /// Adds a curated contact (spec §4.4.2). `photo`, when given, is
@@ -4818,9 +8563,23 @@ self.noteTalkContractChanged()
     /// the just-written file is deleted again, so a failed add never
     /// orphans a photo on disk.
     ///
-    /// `nickname` (family-wizard task, 2026-09-07): the optional
-    /// informal name from the wizard's last step; defaulted so the
-    /// onboarding call site (which never collects one) is unchanged.
+    /// `id` (T-156, design-l2 §1.9): the identity the caller already
+    /// knows — the wizard stages a draft id across its steps — defaulted
+    /// so every pre-existing call site compiles unchanged.
+    ///
+    /// `nicknames` (T-156, design-l2 §1.9/§3.2 — the REAL signature; the
+    /// interim single-value shim is gone): the informal names, passed
+    /// through `FamilyContact.normalizedNicknames` HERE, the one point
+    /// every caller passes through, so no untrimmed or whitespace-only
+    /// entry can reach the store and order is preserved exactly as the
+    /// family entered it.
+    ///
+    /// `link` (T-156, design-l2 §1.9): a non-nil claim is stored on the
+    /// new contact — nil means unlinked. A claim on an identifier
+    /// ANOTHER contact already stores is REFUSED before anything is
+    /// written (defense in depth per L1 §6.1 — the wizard's steering
+    /// prevents the path; the refusal is reason-coded rather than
+    /// silent).
     ///
     /// `address` (directions task, 2026-09-07) is the contact's optional
     /// home address for voice navigation — blank text is stored as nil.
@@ -4831,19 +8590,30 @@ self.noteTalkContractChanged()
     /// Defaulted so the onboarding call site (which has no toggle) is
     /// unchanged; an add written before the flag simply stores false.
     @discardableResult
-    func addFamilyContact(name: String, phone: String, relationship: String,
+    func addFamilyContact(id: UUID = UUID(),
+                          name: String, phone: String, relationship: String,
                           messengerHandle: String? = nil,
                           photo: UIImage? = nil,
-                          nickname: String? = nil,
+                          nicknames: [String] = [],
                           address: String? = nil,
-                          isEmergencyContact: Bool = false) -> Bool {
+                          email: String? = nil,
+                          isEmergencyContact: Bool = false,
+                          link: SystemContactLink? = nil,
+                          dialerOverride: CallApp? = nil) -> Bool {
+        guard !Self.isDuplicateLinkClaim(link, in: familyContacts, excluding: nil) else {
+            emitDuplicateLinkClaimRefusal()
+            return false
+        }
         let filename = photo.flatMap { contactPhotoStore.save($0) }
-        let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
+        let contact = FamilyContact(id: id, name: name, phone: phone, relationship: relationship,
                                     messengerHandle: messengerHandle,
+                                    dialerOverride: dialerOverride,
                                     photoFilename: filename,
-                                    nickname: nickname,
+                                    nicknames: FamilyContact.normalizedNicknames(nicknames),
                                     address: Self.normalizedOptionalText(address),
-                                    isEmergencyContact: isEmergencyContact)
+                                    email: FamilyContactValidation.normalizedEmail(email),
+                                    isEmergencyContact: isEmergencyContact,
+                                    systemContact: link)
         guard familyContactStore.add(contact) else {
             if let filename { contactPhotoStore.delete(named: filename) }
             return false
@@ -4867,9 +8637,18 @@ self.noteTalkContractChanged()
     /// deleted after the new record is safely persisted, so a failed
     /// edit never loses the photo the contact already had.
     ///
-    /// `nickname` (family-wizard task, 2026-09-07): the wizard's
-    /// optional informal name; nil clears a stored one, defaulted so
-    /// pre-wizard callers compile unchanged.
+    /// `nicknames` (T-156, design-l2 §1.9 — the widened, REAL signature;
+    /// the interim single-value shim is gone): the contact's full list of
+    /// informal names, passed through `FamilyContact.normalizedNicknames`
+    /// before persisting. An empty list clears the stored nicknames; the
+    /// caller passes the complete intended list (the save REPLACES it).
+    ///
+    /// `link` (T-156, design-l2 §1.9): non-nil sets or REPLACES the
+    /// stored `SystemContactLink` claim; nil leaves the stored link
+    /// UNCHANGED — clearing a link is `setFamilyContactLink` only
+    /// (T-158), never this seam. A claim on an identifier ANOTHER
+    /// contact already stores is REFUSED before anything is written
+    /// (defense in depth, L1 §6.1).
     ///
     /// `isEmergencyContact` (family-emergency task, 2026-09-07): the
     /// editor's current "Emergency contact" toggle value — the save
@@ -4883,20 +8662,41 @@ self.noteTalkContractChanged()
     func updateFamilyContact(id: UUID, name: String, phone: String, relationship: String,
                              messengerHandle: String?,
                              photo: UIImage? = nil, removingPhoto: Bool = false,
-                             nickname: String? = nil,
+                             nicknames: [String] = [],
                              address: String? = nil,
-                             isEmergencyContact: Bool = false) -> Bool {
+                             email: String? = nil,
+                             isEmergencyContact: Bool = false,
+                             link: SystemContactLink? = nil,
+                             dialerOverride: CallApp? = nil) -> Bool {
+        // The duplicate-claim guard runs FIRST: a refused write persists
+        // nothing, so no photo is saved and no orphan can be created.
+        guard !Self.isDuplicateLinkClaim(link, in: familyContacts, excluding: id) else {
+            emitDuplicateLinkClaimRefusal()
+            return false
+        }
         guard var contact = familyContacts.first(where: { $0.id == id }) else { return false }
         contact.name = name
         contact.phone = phone
         contact.relationship = relationship
         contact.messengerHandle = messengerHandle
-        contact.nickname = nickname
+        contact.nicknames = FamilyContact.normalizedNicknames(nicknames)
+        // `link` non-nil sets/replaces the claim; nil keeps the stored
+        // link UNCHANGED (unlink is `setFamilyContactLink` only, T-158).
+        if let link { contact.systemContact = link }
         contact.isEmergencyContact = isEmergencyContact
+        // [PER-CONTACT-OVERRIDE] (2026-10-14) The editor's pick passes
+        // through: nil clears the override (back to the globals), a pick
+        // sets it. The chain consumes it at call time.
+        contact.dialerOverride = dialerOverride
         // The editor passes the CURRENT text each save; blank clears the
         // stored address (nil), so "remove the address" is an edit, not a
         // separate affordance (directions task, 2026-09-07).
         contact.address = Self.normalizedOptionalText(address)
+        // Same rule for the Google address (calendar & family sharing,
+        // 2026-09-16): blank clears it, and the editor's emergency gate
+        // is what makes a blank impossible while the contact is flagged
+        // — this normalizes, it does not enforce.
+        contact.email = FamilyContactValidation.normalizedEmail(email)
 
         let oldFilename = contact.photoFilename
         var newFilename = oldFilename
@@ -5102,38 +8902,658 @@ self.noteTalkContractChanged()
         favoriteAppIDs.removeAll { $0 == app.id }
     }
 
-    /// Launches a quick-access app from the Home row / picker, with the
-    /// dual-channel honesty every open path holds: probe FIRST, and when
-    /// the app is gone (deleted after the row appeared) say so out loud
-    /// and show it on the outcome card — never a silent dead tap. One
+    /// Launches a quick-access app — the Home row / picker tile tap AND
+    /// the confirmed voice launch (`launcher.open`) share this ONE
+    /// executor, so the two paths can never drift apart in what they
+    /// probe, say, or claim.
+    ///
+    /// [APP-UI-CONFIRM] (2026-10-14) The tile reaches this executor only
+    /// AFTER its own question was asked (`requestAppLaunchFromTile`): a
+    /// re-tap of the same tile performs straight away, and any other
+    /// answer (spoken yes, chipped yes, or another tile's tap) arrives
+    /// through `handleConfirmationResponse` → `executePendingAppLaunch`.
+    /// The voice-yes path arrives with the pend already cleared, so the
+    /// `resolveLaunchQuestion` below is the TILE's resolver and a
+    /// defense-in-depth no-op for the voice path.
+    ///
+    /// Dual-channel honesty as before: probe FIRST, and when the app is
+    /// gone (deleted after the row appeared) say so out loud and show it
+    /// on the outcome card — never a silent dead tap. An absent app that
+    /// HAS a web fallback (Facebook, Instagram, YouTube, WhatsApp — the
+    /// four the design gives one) opens its website and discloses the
+    /// swap; an absent app without one hears the honest not-installed
+    /// line rather than being sent to Safari on an unrelated page. One
     /// `app_launcher` event per attempt; the outcome names which surface
-    /// appeared (`<id>:opened`) or why nothing did (`<id>:notInstalled`).
+    /// appeared (`<id>:opened`, `<id>:openedWebFallback`) or why nothing
+    /// did (`<id>:notInstalled`, `<id>:cameraUnavailable`).
+    ///
+    /// The camera entry never reaches the URL branch: it has no URL
+    /// (`AppLauncher.Kind.camera`) and is answered by the in-app capture
+    /// flow, which is why a `.camera` tile is no longer a tap that
+    /// announces "Opening Camera" over a screen that never appears.
     func performAppLaunch(_ app: AppLauncher.App) {
-        let locale = activeLocale
-        let name = L10n.str(app.nameKey, locale: locale)
-        guard isAppInstalled(app) else {
-            let text = L10n.fmt("apps.announce.notInstalled", locale: locale, name)
-            setOutcome(icon: "exclamationmark.triangle.fill", text: text)
-            speak(text: text)
-            emitAppLaunch(outcome: "\(app.id):notInstalled")
-            return
+        // [APP-LAUNCHER F6] A tap IS an answer. Resolving the outstanding
+        // question first is what keeps the tile from racing the 45 s
+        // window it pends: the question is cleared (and its window closed)
+        // before the app opens, so the elder can never hear "Time is up, I
+        // won't open it" over an app they are already looking at.
+        // [APP-UI-CONFIRM] Now also the answer to the tile's OWN question
+        // (a same-tile re-tap lands here with its pend still live) — and
+        // a no-op for the voice-yes path, which clears the pend before it
+        // calls in (`handleConfirmationResponse`).
+        resolveLaunchQuestion(openedBy: app.id)
+        switch app.kind {
+        case .camera:
+            presentCameraCapture(app)
+        case .url:
+            launchURLApp(app)
         }
-        appLauncher.open(app)
-        let text = L10n.fmt("apps.announce.opened", locale: locale, name)
-        setOutcome(icon: app.systemImage, text: text)
-        speak(text: text)
-        emitAppLaunch(outcome: "\(app.id):opened")
     }
 
-    private func emitAppLaunch(outcome: String) {
+    /// The `.url` half of the executor: probe, open, and speak the surface
+    /// that actually appeared.
+    private func launchURLApp(_ app: AppLauncher.App) {
+        let locale = activeLocale
+        let name = L10n.str(app.nameKey, locale: locale)
+        // [F9] The probe, the web fallback and the Settings fallback are
+        // resolved in ONE place (`AppLauncher.launchPlan`) so the tile, the
+        // voice request and this executor can never decide differently
+        // about what a launch opens.
+        switch appLauncher.launchPlan(for: app) {
+        case .app:
+            appLauncher.open(app)
+            let text = L10n.fmt("apps.announce.opened", locale: locale, name)
+            setOutcome(icon: app.systemImage, text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):opened")
+        case .webFallback:
+            // The web fallback is a REAL surface (Safari, or the app's own
+            // universal link when it turns out to be installed after all),
+            // disclosed out loud — never a silent substitution.
+            guard appLauncher.openWebFallback(app) else {
+                return announceNotInstalled(app, name: name, locale: locale)
+            }
+            let text = L10n.fmt("apps.announce.openingWeb", locale: locale, name)
+            setOutcome(icon: app.systemImage, text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):openedWebFallback")
+        case .settingsFallback:
+            // [F9] The pane's private App-Prefs URL did not answer; the
+            // public Settings deep link always does. Same disclosure rule
+            // as the web fallback — the elder is told which surface
+            // actually appeared, and the outcome names it too.
+            guard appLauncher.openSettingsFallback() else {
+                return announceNotInstalled(app, name: name, locale: locale)
+            }
+            let text = L10n.str("apps.announce.openingSettings", locale: locale)
+            setOutcome(icon: app.systemImage, text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):openedSettingsFallback")
+        case .unavailable:
+            announceNotInstalled(app, name: name, locale: locale)
+        case .camera:
+            // `performAppLaunch` routes `.camera` before it reaches this
+            // executor (see its `switch`); a caller that reaches it anyway
+            // lands on the honest capture path rather than a silent no-op.
+            presentCameraCapture(app)
+        }
+    }
+
+    /// The honest absent-app line, spoken and carded (the same surface
+    /// every other failed launch uses) — shared by the three plans that
+    /// can end with nothing opened.
+    private func announceNotInstalled(_ app: AppLauncher.App, name: String,
+                                      locale: Locale) {
+        let text = L10n.fmt("apps.announce.notInstalled", locale: locale, name)
+        setOutcome(icon: "exclamationmark.triangle.fill", text: text)
+        speak(text: text)
+        emitAppLaunch(outcome: "\(app.id):notInstalled")
+    }
+
+    /// The camera half of the executor (launcher plan T4 owns the system
+    /// picker behind this seam). Everything the capture flow says — the
+    /// saved / save-failed / no-camera / permission-denied lines — is
+    /// spoken by the flow through these channels, so the coordinator adds
+    /// no claim of its own: an unset seam means no presenter is installed
+    /// and the honest answer is that nothing can be captured here, never
+    /// an "Opening Camera" over a screen that does not appear.
+    private func presentCameraCapture(_ app: AppLauncher.App) {
+        guard let cameraCapture else {
+            let text = L10n.str("apps.camera.unavailable", locale: activeLocale)
+            setOutcome(icon: "exclamationmark.triangle.fill", text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):cameraUnavailable")
+            return
+        }
+        cameraCapture.start()
+    }
+
+    /// The camera-capture seam: presenter + photo writer + the flow that
+    /// speaks the outcome. A stored, assignable property so a test can put
+    /// a scripted flow in its place; production value is built once in
+    /// `init` (see `makeCameraCaptureFlow`). Nil would mean no presenter is
+    /// installed: see `presentCameraCapture`.
+    var cameraCapture: CameraCaptureFlow?
+
+    /// Builds the production capture flow (T4): the system picker
+    /// (`PhotoCameraPresenter`) and the add-only library write
+    /// (`PhotosLibraryPhotoSaver`) behind the two injectable seams, with
+    /// this coordinator's own speech / outcome-card / bus channels.
+    ///
+    /// Deliberately cheap and I/O-free: constructing it resolves no window
+    /// and asks no permission (the presenter probes both at presentation
+    /// time), so it is safe in `init` before the UI exists.
+    private func makeCameraCaptureFlow() -> CameraCaptureFlow {
+        CameraCaptureFlow(
+            presenter: PhotoCameraPresenter(),
+            saver: PhotosLibraryPhotoSaver(),
+            locale: { [weak self] in
+                self?.activeLocale ?? Locale(identifier: "ne-NP")
+            },
+            channels: CameraCaptureFlow.Channels(
+                speak: { [weak self] text in
+                    self?.speak(text: text)
+                },
+                announce: { [weak self] icon, text in
+                    self?.setOutcome(icon: icon, text: text)
+                },
+                emit: { [weak self] eventType, outcome in
+                    self?.emitAppLaunch(eventType: eventType, outcome: outcome)
+                }
+            )
+        )
+    }
+
+    private func emitAppLaunch(eventType: String = "launch", outcome: String) {
         observabilityBus.emit(ObservabilityEvent(
             component: "app_launcher",
-            eventType: "launch",
+            eventType: eventType,
             durationMs: nil,
             outcome: outcome,
             errorCode: nil,
             metadata: [:]  // catalog app id only — no contact identifiers (C9)
         ))
+    }
+
+    // MARK: - Voice app launcher (launcher.open plugin, 2026-09-16)
+    //
+    // The confirmation half of the voice launch (design D3: confirm-first
+    // before EVERY external launch). It reuses the router's existing
+    // confirmation-follow-up machinery rather than adding a parallel one:
+    // `requestAppLaunch` pends a launch and returns the question,
+    // `isAwaitingAppLaunchConfirmation` widens `CommandRouter.route`'s
+    // yes/no path, `handleConfirmationResponse` executes or cancels, and
+    // the session's existing 45 s window auto-dismisses (below, in
+    // `voiceSession.onConfirmationTimeout`) — the same four seams the
+    // call / calendar-event / navigation confirmations ride.
+
+    /// [APP-LAUNCHER F1] Who owns the elder's NEXT yes/no when a launch
+    /// question and a medication dose-challenge are both outstanding.
+    ///
+    /// The two flows share one confirmation window
+    /// (`VoiceSessionState.awaitingConfirmation`) and one router yes/no
+    /// parse, so exactly one of them may own the answer. The medication
+    /// challenge wins, always. It is the dementia-aware FR-D01
+    /// double-dose gate (spec §3.3), and the whole point of the window is
+    /// that a "हो" lands in `medicationScheduler.acknowledgeWithConfirmation`
+    /// where the double-dose check can see it; a launch, by contrast, can
+    /// simply be asked again. The failure mode this prevents is the
+    /// dangerous one: a dose question answered yes while the launch block
+    /// returns early means the dose is never recorded and the elder is
+    /// told (by the launch's own line) that something was opened.
+    ///
+    /// Pure policy so the rule is testable without an AppCoordinator —
+    /// the same shape as the other extracted helper types in this file.
+    enum ConfirmationArbitration {
+        enum Owner: Equatable {
+            case appLaunch
+            case medication
+            case none
+        }
+
+        static func owner(pendingAppLaunch: String?,
+                          hasMedicationChallenge: Bool) -> Owner {
+            if hasMedicationChallenge { return .medication }
+            return pendingAppLaunch == nil ? .none : .appLaunch
+        }
+
+        /// [APP-LAUNCHER F6] What a launch performed by a TAP means for the
+        /// question still pended. The same app is the question being
+        /// answered yes (`.confirmed`); a different app is that question
+        /// being superseded, which is the unanswered verdict the flywheel
+        /// already understands (`.superseded` → recorded as a timeout).
+        enum TileResolution: Equatable {
+            case confirmed
+            case superseded
+        }
+
+        static func tileResolution(pending: String, opened: String) -> TileResolution {
+            pending == opened ? .confirmed : .superseded
+        }
+    }
+
+    /// [APP-LAUNCHER F13] The launch question's expiry, named in one place.
+    ///
+    /// A launch question that runs out its 45 s is a terminal outcome like
+    /// the yes and the no, so it gets the same three treatments they get:
+    /// a spoken line, a card that says what happened, and one
+    /// `app_launcher` event. It used to get only the first — the question
+    /// card ("Should I open Camera?") stayed on screen as if still
+    /// pending, and the bus carried no record that a question had been
+    /// asked and dropped. The constants live together so the handler, the
+    /// event and the test can never drift apart.
+    enum LaunchTimeout {
+        static let eventType = "launch_timeout"
+        static let icon = "clock.badge.exclamationmark"
+        static let speechKey = "launcher.timeout"
+        static func outcome(appID: String) -> String { "\(appID):timeout" }
+    }
+
+    /// A launch pended for the elder's spoken yes/no. Mirrors
+    /// `PendingCallAction`: the pending state, the flywheel identity and
+    /// the question→verdict clock all live together, so a verdict can
+    /// never be recorded against a launch that was never asked about.
+    struct PendingAppLaunch {
+        /// [APP-UI-CONFIRM] Which surface asked the question — the voice
+        /// path (an utterance the elder produced) or a curated-bar tile
+        /// tap (2026-10-14). `var` with a default, the `PendingCallAction`
+        /// L2-D3 style: every voice-shaped construction keeps compiling
+        /// and keeps meaning "voice".
+        ///
+        /// Why the distinction exists at all: the two origins share ONE
+        /// pending window (the elder must see one confirmation
+        /// vocabulary, never two) but only one of them is flywheel
+        /// material. A launch the elder SPOKE ("open WhatsApp") is a
+        /// proposal the interpreter or the keyword rules produced, and
+        /// the yes/no that follows is exactly the accept-band signal the
+        /// flywheel trains on. A TILE TAP is not an utterance at all —
+        /// the elder's finger proposed the question, no model ran, no
+        /// interpretation happened — and recording it under
+        /// `launcher.open` would fabricate interpreter performance from
+        /// a touch. So the tile asks through the same window, but its
+        /// verdicts never reach the flywheel (`recordsFlywheelCapture`,
+        /// the gate every capture site funnels through via
+        /// `appendLaunchCapture`).
+        enum Origin { case voice; case tile }
+        let appID: String
+        /// The interpreted command's confidence, when the launch came from
+        /// the model (nil for the keyword/plugin seams that don't carry
+        /// one) — the flywheel's accept-band input.
+        let confidence: Double?
+        /// The surface that asked — see `Origin`. Only `.voice` launches
+        /// record flywheel verdicts.
+        var origin: Origin = .voice
+        /// [INTENTLOG-CAPTURE] When the confirmation question was asked —
+        /// the flywheel's latency start (question → verdict).
+        let requestedAt: Date = Date()
+
+        /// [APP-LAUNCHER F10] Which routing stage asked the question — the
+        /// flywheel's PATH label, and the reason this is derived here
+        /// rather than defaulted at the recording site.
+        ///
+        /// `IntentLogStore.Capture`'s path defaults to "model", which is
+        /// right for everything the interpreter or a plugin produced but
+        /// WRONG for the deterministic keyword fast path: a
+        /// `KeywordIntentRule` hit never saw a model, and labelling it
+        /// "model" teaches the accept-band statistics that the model
+        /// proposed launches it never saw. That stage is exactly the one
+        /// that carries no confidence (`CommandRouter` passes
+        /// `confidence: nil` from its `.appLaunch` stage; every
+        /// interpreter/plugin command has one by construction), so nil IS
+        /// the keyword signature.
+        ///
+        /// [APP-UI-CONFIRM] A tile-originated launch is ALSO confidence-
+        /// nil, but it never records (`recordsFlywheelCapture`), so this
+        /// path never mislabels a finger as a keyword hit: the gate in
+        /// `appendLaunchCapture` runs BEFORE any path is read.
+        var capturePath: String { confidence == nil ? "keyword" : "model" }
+
+        /// This launch's flywheel identity. The slot is the catalog app id
+        /// — a public catalog key, never user content (C9).
+        var capture: IntentLogStore.Capture {
+            IntentLogStore.Capture(action: "launcher.open",
+                                   slots: ["app": appID],
+                                   confidence: confidence,
+                                   requestedAt: requestedAt)
+        }
+
+        /// [APP-UI-CONFIRM] Whether this launch may feed the flywheel —
+        /// false for the tile origin (see `Origin`). Every capture site
+        /// writes through `appendLaunchCapture`, which reads this one
+        /// gate, so "record only utterances" is enforced in one place
+        /// instead of six.
+        var recordsFlywheelCapture: Bool { origin == .voice }
+    }
+
+    @Published private(set) var pendingAppLaunch: PendingAppLaunch?
+
+    /// Router-side twin of `pendingAppLaunch != nil` — the router skips its
+    /// generic medication-flavored yes/no speech while a launch is pended
+    /// (see `VoiceCommandCoordinating.isAwaitingAppLaunchConfirmation`)
+    /// and reports `.appLaunchConfirmed` for the yes.
+    ///
+    /// [APP-LAUNCHER F1] …but never while a dose challenge is pended: the
+    /// launch does not own that answer (see `ConfirmationArbitration`), so
+    /// the router must not treat the utterance as a launch confirmation
+    /// NOR suppress the medication line.
+    var isAwaitingAppLaunchConfirmation: Bool {
+        ConfirmationArbitration.owner(
+            pendingAppLaunch: pendingAppLaunch?.appID,
+            hasMedicationChallenge: pendingConfirmationEntryId != nil) == .appLaunch
+    }
+
+    /// Pends a catalog app for the elder's spoken yes/no and returns the
+    /// line to speak — the `app_launcher` plugin's single seam (voice) and
+    /// the API a deterministic keyword stage can call the same way.
+    ///
+    /// Two refusals to ASK, both deliberate (the call path's
+    /// messenger-no-handle gate, same rationale): a launch that can only
+    /// fail must never be turned into a yes/no question. An app that is not
+    /// installed AND has no web fallback is answered with the honest
+    /// not-installed line, nothing pended. An app that is not installed but
+    /// HAS a web fallback IS asked about — the launch can still succeed
+    /// (Safari) — with the swap disclosed in the question itself, so the
+    /// "yes" the elder gives is a yes to what actually happens.
+    ///
+    /// The camera entry is always asked about: it needs no installed app
+    /// (the capture is in-process), and whether the DEVICE can capture is
+    /// answered after the yes, where the failure is.
+    ///
+    /// [APP-UI-CONFIRM] (2026-10-14) The curated-bar tile asks through
+    /// the SAME machinery — one pending window, one question vocabulary,
+    /// one executor (`requestAppLaunchFromTile`, below) — carrying
+    /// `origin: .tile` so a finger-tapped question never masquerades as
+    /// an interpreted one on the flywheel (`PendingAppLaunch.Origin`).
+    /// This entry point stays the utterance path: `.voice`.
+    func requestAppLaunch(appID: String, confidence: Double?) -> String {
+        requestAppLaunchCore(appID: appID, confidence: confidence, origin: .voice).line
+    }
+
+    /// [APP-UI-CONFIRM] What a launch REQUEST resolved to: the line to
+    /// speak, and whether the request actually pended a question. The
+    /// voice path only ever reads `line` (the plugin's reply and the
+    /// router's outcome card deliver it); the tile path must ALSO know
+    /// `pended` — an unavailable app returns the honest not-installed
+    /// line with nothing pended, and the tile has no plugin layer to
+    /// card that line for it, so the tile cards the refusal itself.
+    struct AppLaunchRequest {
+        let line: String
+        let pended: Bool
+    }
+
+    /// The one launch-request implementation, shared by the voice seam
+    /// and the tile — the origin only travels into the pend, and from
+    /// there into the flywheel gate. Private on purpose: "which surface
+    /// asked" must be spelled at every call site, never default-omitted
+    /// by a future caller.
+    private func requestAppLaunchCore(appID: String,
+                                      confidence: Double?,
+                                      origin: PendingAppLaunch.Origin) -> AppLaunchRequest {
+        let locale = activeLocale
+        guard let app = AppLauncher.app(for: appID) else {
+            // No catalog entry: nothing to ask about, and the caller speaks
+            // this honest line instead (the plugin's own unknown-app case
+            // is caught before it gets here — this is the same line, from
+            // the layer that knows the catalog).
+            emitAppLaunch(eventType: "launch_request", outcome: "unknownApp")
+            return AppLaunchRequest(line: L10n.fmt("launcher.unknownApp", locale: locale, appID),
+                                    pended: false)
+        }
+        let name = L10n.str(app.nameKey, locale: locale)
+        // [F9] Same single resolution the executor uses: what this launch
+        // can actually open decides which question is asked — or whether
+        // one is asked at all.
+        switch appLauncher.launchPlan(for: app) {
+        case .app, .camera:
+            pendAppLaunch(appID: app.id, confidence: confidence, origin: origin)
+            emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):pending")
+            return AppLaunchRequest(line: L10n.fmt("launcher.confirmOpen", locale: locale, name),
+                                    pended: true)
+        case .webFallback:
+            pendAppLaunch(appID: app.id, confidence: confidence, origin: origin)
+            emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):webFallbackPending")
+            return AppLaunchRequest(line: L10n.fmt("launcher.confirmOpenWeb", locale: locale, name),
+                                    pended: true)
+        case .settingsFallback:
+            // [F9] A pane whose private App-Prefs URL did not answer is
+            // still launchable — the public Settings deep link opens the
+            // Settings app. The swap is disclosed in the question itself,
+            // so the elder's "yes" is a yes to what actually happens (the
+            // same contract as the web-fallback question above). The line
+            // names no pane: for the Settings ROOT entry the fallback is
+            // the same screen, and "I can't open that exact screen" is
+            // true in every case.
+            pendAppLaunch(appID: app.id, confidence: confidence, origin: origin)
+            emitAppLaunch(eventType: "launch_request",
+                          outcome: "\(app.id):settingsFallbackPending")
+            return AppLaunchRequest(line: L10n.str("launcher.confirmOpenSettings", locale: locale),
+                                    pended: true)
+        case .unavailable:
+            // A launch that can only fail is never turned into a yes/no
+            // question: the honest not-installed line, nothing pended.
+            emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):notInstalled")
+            return AppLaunchRequest(line: L10n.fmt("apps.announce.notInstalled", locale: locale, name),
+                                    pended: false)
+        }
+    }
+
+    /// [APP-UI-CONFIRM] (2026-10-14) A tap on a curated-app tile — the
+    /// owner's report, verbatim: "the same thing happens when i try to
+    /// open apps from the curated apps scrollable bar at the top - shows
+    /// english dialog confirmation. change that to also use custom UI
+    /// instead of native using corresponding components."
+    ///
+    /// The "english dialog" was iOS's own "Open in <App>?" confirmation,
+    /// presented in the SYSTEM language at the moment the scheme URL
+    /// opened — after the fact, unfixable from here, and silent about
+    /// WHO is being opened (it names the app in English). The fix is the
+    /// voice path's own dialogue, brought to the tile: the tap pends the
+    /// launch and asks in the app's own localized words
+    /// (`launcher.confirmOpen` / `Launcher` chips Open/Cancel), the same
+    /// window, the same 45 s budget, the same executor. The launch
+    /// itself opens the universal link where one exists
+    /// (`AppLauncher.App.preferredLaunchURL`), so for WhatsApp, Facebook,
+    /// Instagram, YouTube, Google Maps and Maps iOS presents no second
+    /// sheet; the remaining custom-scheme apps keep their sheet after
+    /// ours — the honest limit, listed on the `AppLauncher.catalog`
+    /// matrix.
+    ///
+    /// Resolution order, and why:
+    ///
+    ///  1. Re-tap of the SAME tile while its own question is pended IS
+    ///     the answer — proceed exactly as a spoken yes would (the F6
+    ///     "a tap IS an answer" rule, now applied to OUR question
+    ///     instead of circumventing it).
+    ///  2. When another confirm-tier flow owns the window (a call,
+    ///     navigation walk, calendar write or dose challenge is pended),
+    ///     the launch question could never own its answer — so the tile
+    ///     performs directly (the pre-fix behavior), system sheet and
+    ///     all, instead of asking a question that the chips would
+    ///     misroute.
+    ///  3. Past that, a question for a DIFFERENT app is superseded first,
+    ///     recorded the same way a new question supersedes one (F6
+    ///     `supersededByTile`), so no stale question outlives the tap
+    ///     and no 45 s timer later speaks over the app that opened.
+    ///  4. Then the tap asks its own question through the shared core —
+    ///     with `origin: .tile`, so the verdict never reaches the
+    ///     flywheel (see `PendingAppLaunch.Origin`). The bus events keep
+    ///     the voice strings (`<id>:pending`, …): the REQUEST decision is
+    ///     origin-neutral, and the origin-sensitive events
+    ///     (`confirmedByTile` / `supersededByTile`) already carry their
+    ///     suffix.
+    ///
+    /// The question is spoken through the same `speak` seam as the voice
+    /// path, so the elder HEARS it (and its `lastAssistantReply` feeds
+    /// the confirmation chips' body — the same surface the voice path
+    /// uses). A yes — spoken or chipped — runs the identical
+    /// `handleConfirmationResponse` / `executePendingAppLaunch` route, so
+    /// the launched/announce speech fires exactly once, exactly like the
+    /// voice flow (Part C: no double-speak, no dropped launch speech).
+    func requestAppLaunchFromTile(_ app: AppLauncher.App) {
+        if pendingAppLaunch?.appID == app.id {
+            // Same-tile re-tap = yes. `performAppLaunch` resolves the
+            // question itself (F6 `confirmedByTile`) and runs the shared
+            // executor — the one code path every launch takes.
+            performAppLaunch(app)
+            return
+        }
+        // [APP-UI-CONFIRM] The ask only when the launch question would
+        // OWN its answer — the exact priority `handleConfirmationResponse`
+        // applies (navigation walk → call → calendar → launch → dose
+        // challenge). When another flow's question is on screen, a launch
+        // question could never be the one answered: the chips would say
+        // "Open" while the tap answered a call. In that corner the tile
+        // keeps its pre-fix behavior — launch now (the F6 resolution in
+        // `performAppLaunch` still clears or supersedes any launch
+        // question) — and iOS's own sheet, where one appears, stays the
+        // disclosed limit of this fix.
+        let windowBelongsToLaunch = !isAwaitingCallConfirmation
+            && !isAwaitingNavigationDisambiguation
+            && !isAwaitingCalendarEventConfirmation
+            && pendingConfirmationEntryId == nil
+        if !windowBelongsToLaunch {
+            performAppLaunch(app)
+            return
+        }
+        if pendingAppLaunch != nil {
+            // Different question live: supersede it first — recorded and
+            // announced before the new one is asked (F6). The window
+            // stays open across the swap (`requestAppLaunchCore` re-arms
+            // it through `pendAppLaunch`), so the elder still has the
+            // full 45 s for the NEW question.
+            resolveLaunchQuestion(openedBy: app.id)
+        }
+        let request = requestAppLaunchCore(appID: app.id, confidence: nil, origin: .tile)
+        speak(text: request.line)
+        if !request.pended {
+            // The honest refusal (the app is gone and has no fallback
+            // surface): the voice path's caller cards the returned line
+            // through the router's plugin delivery — the tile has no
+            // such layer, so it cards the refusal itself, with the same
+            // warning icon `announceNotInstalled` uses.
+            setOutcome(icon: "exclamationmark.triangle.fill", text: request.line)
+        }
+    }
+
+    /// Pends the launch and arms the session's existing confirmation
+    /// window (the 45 s budget in `VoiceSessionStateMachine`) — nothing is
+    /// opened until the elder says yes.
+    ///
+    /// [APP-LAUNCHER F14] The window is opened in the SAME breath as the
+    /// pend (`openConfirmationWindow`), not by a bare `transition(to:)`
+    /// that could no-op: a launch question may arrive while the session
+    /// sits in a state the transition table does not let reach
+    /// `.awaitingConfirmation` directly (`.error` after a pipeline
+    /// failure, `.stopped` before the pipeline is primed), and a pend with
+    /// no window is a pend with no timer and no clearer — the question
+    /// would sit on screen forever, answered only by chance.
+    private func pendAppLaunch(appID: String, confidence: Double?,
+                               origin: PendingAppLaunch.Origin) {
+        pendingAppLaunch = PendingAppLaunch(appID: appID, confidence: confidence,
+                                            origin: origin)
+        openConfirmationWindow()
+    }
+
+    /// [APP-LAUNCHER F14] Guarantees the confirmation window is open —
+    /// the session machine bridges through `.idle` when the current state
+    /// cannot reach `.awaitingConfirmation` directly, and the machine
+    /// reports whether it got there. Main-queue confinement is preserved
+    /// by the same hop the callers used before; when the caller is already
+    /// on main (the usual case — the router and the tile both are) the
+    /// window opens synchronously, so there is no instant in which the
+    /// caller has pended work but no timer exists for it.
+    private func openConfirmationWindow() {
+        // [MTC] M-2 (ADR-MTC-03): arming a confirmation SUPERSEDES any
+        // live dialogue frame — every one of the four arming sites pends
+        // through here, so this single point is what keeps the two answer
+        // windows mutually exclusive in the frame direction. The funnel
+        // emits the `superseded` outcome itself; with no frame live
+        // (almost every call) it is a cheap no-op.
+        if Thread.isMainThread {
+            resolveDialogueFrame(.superseded)
+            voiceSession.openConfirmationWindow()
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                // On main now: supersede first, then open — strictly the
+                // same order as the main branch, inside the one hop.
+                self.resolveDialogueFrame(.superseded)
+                self.voiceSession.openConfirmationWindow()
+            }
+        }
+    }
+
+    /// [APP-LAUNCHER F6] A launch performed OUTSIDE the spoken yes/no —
+    /// the Home quick-access tile, or the executor reached from any other
+    /// tap — resolves the launch question that is still on screen.
+    ///
+    /// Without this the question stayed pended over a live camera with
+    /// its 45 s window still armed: the elder tapped the tile, the app
+    /// opened, and 45 seconds later the assistant announced "Time is up, I
+    /// won't open it" over the app they were looking at. The tile IS an
+    /// answer, and it is a CONFIRMED one when it names the same app (the
+    /// question was "should I open X?" and X is what opened); a tile for a
+    /// DIFFERENT app supersedes the question the same way a new question
+    /// does, and is recorded as the unanswered verdict it is.
+    ///
+    /// [APP-UI-CONFIRM] (2026-10-14) The same two verdicts now serve the
+    /// tile's OWN question: a re-tap of the same tile resolves it as
+    /// `confirmedByTile` (the tap is a yes), and a tap on a different
+    /// tile supersedes it before that tile asks its own question
+    /// (`requestAppLaunchFromTile`). The flywheel keeps only the
+    /// utterance-asked verdicts (`appendLaunchCapture`'s gate).
+    ///
+    /// The window is closed with the pend (when no other flow is riding on
+    /// it) so the timer cannot fire at all: `VoiceSessionStateMachine` only
+    /// reports an expiry for a window that is still open, so a closed one
+    /// stays silent even if its callback was already in flight.
+    private func resolveLaunchQuestion(openedBy appID: String) {
+        guard let launch = pendingAppLaunch else { return }
+        pendingAppLaunch = nil
+        switch ConfirmationArbitration.tileResolution(pending: launch.appID,
+                                                      opened: appID) {
+        case .confirmed:
+            appendLaunchCapture(launch, .confirmed)
+            emitAppLaunch(eventType: "launch_confirmed",
+                          outcome: "\(launch.appID):confirmedByTile")
+        case .superseded:
+            appendLaunchCapture(launch, .timeout)
+            emitAppLaunch(eventType: "launch_superseded",
+                          outcome: "\(launch.appID):supersededByTile")
+        }
+        // Close the window only when nothing else pended is riding on it —
+        // closing it under a medication challenge would leave that pend
+        // with no timer (the F14 failure mode in mirror image).
+        if !isAwaitingConfirmation, voiceSession.state == .awaitingConfirmation {
+            voiceSession.transition(to: .idle)
+        }
+    }
+
+    /// Confirmed: resolve the pended id through the catalog and hand it to
+    /// the SAME executor the Home tile uses. A catalog id that no longer
+    /// resolves (catalog changed between the question and the yes) speaks
+    /// the honest unknown-app line rather than opening a guess.
+    private func executePendingAppLaunch(_ launch: PendingAppLaunch) {
+        guard let app = AppLauncher.app(for: launch.appID) else {
+            // The catalog changed between the question and the yes: say so
+            // honestly, and record NOTHING — a confirmed verdict that
+            // could not be executed teaches the flywheel nothing (the same
+            // rule the calendar write and the call path hold for a failed
+            // open).
+            replyHonestly(key: "launcher.noApp")
+            return
+        }
+        performAppLaunch(app)
+        // Recorded on the launch, exactly like the call path's confirmed
+        // execution: by construction every pended launch was launchable
+        // when it was asked about (installed, or carrying a web fallback,
+        // or the in-process camera), so the elder's yes is the verdict the
+        // executor acts on. A device that refuses the CAMERA after the yes
+        // is a separate, honestly-reported outcome (its own
+        // `camera_capture_*` event) — the interpretation was still right.
+        // [APP-UI-CONFIRM] Only for an utterance-asked launch: a tile's
+        // yes is a finger, not an interpretation (`appendLaunchCapture`).
+        appendLaunchCapture(launch, .confirmed)
     }
 
     // MARK: - Phone-leaf contact-list launches (contact-leaf-launch task,
@@ -5196,6 +9616,27 @@ self.noteTalkContractChanged()
     private func canOpenURLOnMain(_ url: URL) -> Bool {
         if Thread.isMainThread { return UIApplication.shared.canOpenURL(url) }
         return DispatchQueue.main.sync { UIApplication.shared.canOpenURL(url) }
+    }
+
+    /// The one WhatsApp probe (call-dialer-primary-secondary,
+    /// 2026-10-12; FR-CDP-005): the pure static over the shipped
+    /// main-thread `canOpenURL` hop above, probing only the compiled
+    /// `whatsapp://` literal. Computed at call time only — no caching,
+    /// no polling, no new plist entry, no new permission, no new egress
+    /// (NFR-CDP-002/004); a `false` for any reason (including a
+    /// platform refusal) is "not installed" and the chain hops on,
+    /// announced.
+    var whatsAppInstalledNow: Bool {
+        CallChannelChain.whatsAppInstalled(canOpen: canOpenURLOnMain)
+    }
+
+    /// A usable Messenger handle on file, by the shipped normalization
+    /// (call-dialer-primary-secondary, 2026-10-12; FR-CDP-004) — the
+    /// same `CallLinks.messengerHandle` normalization the shipped
+    /// confirmation gates derive through, so availability here can never
+    /// disagree with what the message opener will accept.
+    private func hasUsableMessengerHandle(_ raw: String?) -> Bool {
+        !CallLinks.messengerHandle(raw ?? "").isEmpty
     }
 
     private func emitContactLeafLaunch(outcome: String) {
@@ -5270,9 +9711,11 @@ self.noteTalkContractChanged()
         guard canWriteCalendarEvents else { return nil }
         let event = PendingCalendarEvent(title: title, startDate: startDate)
         pendingCalendarEvent = event
-        DispatchQueue.main.async { [weak self] in
-            self?.voiceSession.transition(to: .awaitingConfirmation)
-        }
+        // [MTC] M-2 (ADR-MTC-03): the challenge pends through the ONE
+        // window opener — it supersedes any live dialogue frame before
+        // arming, so the two answer windows never coexist. (The direct
+        // transition this replaced is gone from every arming site.)
+        openConfirmationWindow()
         return L10n.fmt("router.calendarEventConfirm",
                         locale: activeLocale,
                         event.title,
@@ -5316,6 +9759,17 @@ self.noteTalkContractChanged()
             guard let self else { return }
             if self.voiceCalendarEventWriter.eventsAccess == .notDetermined {
                 _ = await self.voiceCalendarEventWriter.requestAccess()
+            }
+            // [CALENDAR-SHARE] (2026-09-16) Attached here, not at
+            // construction, to keep the writer lazy (its property doc
+            // explains why) — and re-attached each write, which is
+            // harmless because the closure is the same every time.
+            self.voiceCalendarEventWriter.onEventCreated = { [weak self] creation in
+                self?.calendarShareService.eventCreated(
+                    localEventId: creation.localEventId,
+                    title: creation.title,
+                    startDate: creation.startDate,
+                    durationMinutes: creation.durationMinutes)
             }
             let created = self.voiceCalendarEventWriter.create(
                 title: event.title,
@@ -5400,11 +9854,13 @@ self.noteTalkContractChanged()
         let sourceTranscript: String?
         let sourceCommand: InterpretedCommand?
         /// [INTENTLOG-CAPTURE] When the confirmation question was asked —
-        /// the flywheel's latency start (question → verdict). Reset when
-        /// a correction re-pends an amended action: the elder is being
-        /// asked a NEW question, so the new question's clock is the one
-        /// the answer belongs to.
-        let requestedAt: Date = Date()
+        /// the flywheel's latency start. `var` (L2-D3) so the hop's copy
+        /// can preserve the ORIGINAL question's clock.
+        ///
+        /// Still reset when a correction re-pends an amended action: a
+        /// construction that omits the field takes the default — the new
+        /// question's clock is the one the answer belongs to.
+        var requestedAt: Date = Date()
         /// [T-056-A] The amendment utterance that produced THIS action,
         /// set only at the correction site and only on the rebuilt action.
         /// It exists because a correction has two ends — the misheard
@@ -5414,6 +9870,16 @@ self.noteTalkContractChanged()
         /// so the memberwise init keeps it optional for every other
         /// construction site.
         var amendmentTranscript: String? = nil
+        /// Channels the chain attempted and skipped, in attempt order —
+        /// empty when nothing fell back (FR-CDP-008). Drives the prompt
+        /// disclosure (FR-CDP-013); never mutated after construction.
+        var fellBackFrom: [CallApp] = []
+        /// The launch-fail candidates: the attempt order's
+        /// vocabulary-filtered suffix after the routed channel
+        /// (FR-CDP-015, L2-D1). Empty for touch-shaped constructions and
+        /// after an override (the amended action deliberately drops
+        /// provenance so a stale disclosure is never re-spoken).
+        var hopCandidates: [CallApp] = []
 
         /// This action's flywheel identity, for whichever verdict lands
         /// (confirmed / denied / corrected / timeout). The slots are the
@@ -5431,6 +9897,21 @@ self.noteTalkContractChanged()
                 requestedAt: requestedAt,
                 transcript: amendmentTranscript ?? sourceTranscript)
         }
+
+        /// The hop's re-entry copy (FR-CDP-015; L2-D3/D7): routed method
+        /// and remaining candidates replaced; the flywheel pair carries
+        /// over; `fellBackFrom` deliberately resets to `[]` (not passed
+        /// below) so the hop never re-speaks the disclosure while the
+        /// training context survives.
+        func replacing(method: CallMethod, hopCandidates: [CallApp]) -> PendingCallAction {
+            PendingCallAction(contact: contact,
+                              method: method,
+                              unsupportedRequestedApp: nil,
+                              sourceTranscript: sourceTranscript,
+                              sourceCommand: sourceCommand,
+                              requestedAt: requestedAt,
+                              hopCandidates: hopCandidates)
+        }
     }
 
     @Published private(set) var pendingCallAction: PendingCallAction?
@@ -5445,9 +9926,9 @@ self.noteTalkContractChanged()
 
     func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?) {
         pendingRephrase = (command, sourceTranscript)
-        DispatchQueue.main.async { [weak self] in
-            self?.voiceSession.transition(to: .awaitingConfirmation)
-        }
+        // [MTC] M-2 (ADR-MTC-03): pend through the ONE window opener —
+        // a live dialogue frame is superseded before the challenge arms.
+        openConfirmationWindow()
         speak(key: "router.rephrase.question")
     }
 
@@ -5472,6 +9953,13 @@ self.noteTalkContractChanged()
                                  sourceTranscript: String?, sourceCommand: InterpretedCommand?) -> String? {
         guard let contactQuery else { return nil }
         let contact: FamilyContact
+        // [NEAR-MISS] (2026-10-11) A rejected query gets ONE more chance:
+        // a single near-miss family contact (edit-distance band in
+        // `ContactResolver.nearMiss`) becomes the SAME spoken
+        // confirmation the exact path uses — the yes IS the call gate,
+        // and the prompt discloses both the heard name and the proposed
+        // one, so nothing is ever dialed on a silent substitution.
+        var isNearMiss = false
         switch contactResolver.resolve(contactQuery) {
         case .one(let match):
             contact = match
@@ -5479,36 +9967,80 @@ self.noteTalkContractChanged()
             let names = matches.prefix(2).map(\.name).joined(separator: ", ")
             return L10n.fmt("router.call.disambiguate", locale: activeLocale, names)
         case .none:
-            return nil
+            guard let near = contactResolver.nearMiss(contactQuery) else { return nil }
+            contact = near
+            isNearMiss = true
         }
         let resolved = methodResolver.resolve(contactId: contact.id,
                                               requestedApp: requestedApp,
                                               callType: callType)
-        // Messenger needs a per-contact handle (username/user-id), not a
-        // phone number — and most contacts won't have one yet. Caught
-        // HERE, before the confirmation question, so the elder is never
-        // asked to yes/no an action that can only fail (mirrors the
-        // .ambiguous path above: nothing pended, and the returned line
-        // tells them what actually unblocks it). The same normalization
-        // the opener uses decides "usable", so the two checks can't
-        // disagree.
-        if resolved.method == .messengerAudio || resolved.method == .messengerVideo,
-           CallLinks.messengerHandle(contact.messengerHandle ?? "").isEmpty {
-            return L10n.fmt("router.call.messengerNoHandle", locale: activeLocale, contact.name)
+        // ADR-CDP-05 step 3: the chain runs BEFORE the action is pended —
+        // the feasibility fallback replaces the shipped Messenger-no-
+        // handle refusal, so the elder is never asked to yes/no an action
+        // that can only fail.
+        let intentIsVideo = resolved.method == .facetimeVideo
+            || resolved.method == .messengerVideo
+        // [PER-CONTACT-OVERRIDE] (2026-10-14) A contact's explicit
+        // dialer override wins the audio-class chain: [override,
+        // (override == secondary ? primary : secondary), phone]. The
+        // override is attempted exactly once; its fallback is never a
+        // repeat of itself. Video-class calls keep the method-resolved
+        // channel (the contact's video preference owns that path).
+        let override = intentIsVideo ? nil : contact.dialerOverride
+        let preferred: CallApp
+        let hopOrder: [CallApp]
+        let route: CallChannelChain.Result
+        if let override {
+            preferred = override
+            hopOrder = CallChannelChain.attemptOrderForOverride(
+                override: override,
+                primary: defaultCallApp,
+                secondary: secondaryCallApp)
+            route = Self.resolvedCallChannelWithOverride(
+                override: override,
+                defaultApp: defaultCallApp,
+                secondaryApp: secondaryCallApp,
+                messengerHandleAvailable: hasUsableMessengerHandle(contact.messengerHandle),
+                whatsAppInstalled: whatsAppInstalledNow)
+        } else {
+            preferred = CallChannelChain.channel(for: resolved.method)
+            hopOrder = CallChannelChain.attemptOrder(preferred: preferred,
+                                                     secondary: secondaryCallApp)
+            route = Self.resolvedCallChannel(
+                explicit: preferred,
+                defaultApp: defaultCallApp,
+                secondaryApp: secondaryCallApp,
+                messengerHandleAvailable: hasUsableMessengerHandle(contact.messengerHandle),
+                whatsAppInstalled: whatsAppInstalledNow)
         }
         let action = PendingCallAction(contact: contact,
-                                       method: resolved.method,
+                                       method: CallChannelChain.method(for: route.channel,
+                                                                       isVideo: intentIsVideo),
                                        unsupportedRequestedApp: resolved.unsupportedRequestedApp,
                                        sourceTranscript: sourceTranscript,
-                                       sourceCommand: sourceCommand)
+                                       sourceCommand: sourceCommand,
+                                       fellBackFrom: route.fellBackFrom,
+                                       hopCandidates: CallChannelChain.hopCandidates(
+                                           in: hopOrder,
+                                           routed: route.channel))
         pendingCallAction = action
         // Dementia-loop guard (spec §7.2): same target called again
         // within the window → the confirmation prompt says so out loud.
         let isRepeat = repetitionGuard.isRepeat(actionKey: "call", targetId: contact.id.uuidString)
-        DispatchQueue.main.async { [weak self] in
-            self?.voiceSession.transition(to: .awaitingConfirmation)
+        // [MTC] M-2 (ADR-MTC-03): pend through the ONE window opener —
+        // a live dialogue frame is superseded before the challenge arms.
+        openConfirmationWindow()
+        let prompt = confirmationPrompt(for: action, isRepeat: isRepeat)
+        // [NEAR-MISS] Disclose the substitution in the SAME utterance as
+        // the confirmation: the elder hears the name that was heard, the
+        // name proposed, and the method — the yes that follows is a fully
+        // informed call gate, never a silent substitution.
+        if isNearMiss {
+            let prefix = L10n.fmt("router.call.didYouMeanPrefix", locale: activeLocale,
+                                  contactQuery, contact.name)
+            return prefix + " " + prompt
         }
-        return confirmationPrompt(for: action, isRepeat: isRepeat)
+        return prompt
     }
 
     /// Call-confirmation correction protocol (spec §7.2): the user
@@ -5556,7 +10088,13 @@ self.noteTalkContractChanged()
         return true
     }
 
-    private func confirmationPrompt(for action: PendingCallAction, isRepeat: Bool) -> String {
+    /// Composes the confirmation utterance (design-l2 §8): the parts, in
+    /// order, are [repeat notice][unsupported-app notice][fallback
+    /// disclosure][method sentence + confirm question]; the near-miss
+    /// prefix is prepended by the caller. Internal (not private) so the
+    /// wording pins can drive it with a constructed action against the
+    /// real catalog (design-l2 §28).
+    func confirmationPrompt(for action: PendingCallAction, isRepeat: Bool) -> String {
         let locale = activeLocale
         var parts: [String] = []
         if isRepeat {
@@ -5564,6 +10102,14 @@ self.noteTalkContractChanged()
         }
         if let unsupported = action.unsupportedRequestedApp {
             parts.append(L10n.fmt("router.call.appUnsupportedNotice", locale: locale, unsupported))
+        }
+        if let skipped = action.fellBackFrom.first {
+            parts.append(L10n.fmt("router.call.fallbackDisclosure", locale: locale,
+                                  CallChannelChain.label(skipped, locale: locale),
+                                  action.contact.name,
+                                  CallChannelChain.label(
+                                      CallChannelChain.channel(for: action.method),
+                                      locale: locale)))
         }
         let methodKey: String
         switch action.method {
@@ -5592,7 +10138,16 @@ self.noteTalkContractChanged()
         let locale = activeLocale
         switch action.method {
         case .phone:
-            callLinks.openPhone(action.contact.phone)
+            guard placeGSMCall(phone: action.contact.phone) else {
+                // RES-8/RES-10: the floor is terminal but its dial can
+                // still fail (an undialable number) — the shipped honest
+                // line, no hop exists from the floor. (callkit-gsm: the
+                // dial itself is CallKit, see `placeGSMCall` — a plain
+                // tel: open here would raise the SYSTEM sheet AFTER the
+                // app's own confirmation, the owner-reported dialog.)
+                announceNoUsableNumber(contact: action.contact, locale: locale)
+                return
+            }
             contactNumberUsed(action.contact.phone)
             setOutcome(icon: "phone.fill",
                        text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
@@ -5622,9 +10177,20 @@ self.noteTalkContractChanged()
                 setOutcome(icon: "exclamationmark.triangle.fill",
                            text: L10n.str("router.call.facetimeUnavailable", locale: locale))
                 speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+                // FR-CDP-015 (L2 §10.1): the shipped honest line just
+                // spoke; a remaining candidate hops — announced by the
+                // shared step, then re-entered through THIS executor.
+                hopFromCallAction(after: .faceTime, action: action,
+                                  isVideo: isVideo, locale: locale)
             }
         case .whatsappChat:
-            callLinks.openWhatsAppChat(action.contact.phone)
+            guard callLinks.openWhatsAppChat(action.contact.phone) else {
+                // M-1 disposition (i) (T-144, design-l2 §10.1): false means
+                // no dialable digits remain — the shipped honest line, no
+                // success, no learning, no activity, no hop (RES-10).
+                announceNoUsableNumber(contact: action.contact, locale: locale)
+                return
+            }
             setOutcome(icon: "message.fill",
                        text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, action.contact.name))
@@ -5669,8 +10235,135 @@ self.noteTalkContractChanged()
                 setOutcome(icon: "exclamationmark.triangle.fill",
                            text: L10n.fmt("router.call.messengerNoHandle", locale: locale, action.contact.name))
                 speak(text: L10n.fmt("router.call.messengerNoHandle", locale: locale, action.contact.name))
+                // Same rule as the FaceTime arm (L2 §10.1): the honest
+                // line has spoken, then a remaining candidate hops.
+                hopFromCallAction(after: .messenger, action: action,
+                                  isVideo: action.method == .messengerVideo, locale: locale)
             }
         }
+    }
+
+    // MARK: - Launch-fail hop (call-dialer-primary-secondary, 2026-10-12)
+    //
+    // FR-CDP-015/016, design-l2 §10: a failed open walks the remaining
+    // candidates at most once each, announcing the swap through the ONE
+    // shipped catalogue key before attempting the next channel. Failure
+    // semantics stay exactly as shipped: a failed open records no
+    // learning, no activity and no history — the hop only decides, says
+    // and re-attempts. Synchronous throughout (NFR-CDP-004): no await,
+    // no timer, no queue, no detached task.
+
+    /// The launch-fail hop input a per-channel opener may carry
+    /// (FR-CDP-015): the remaining candidates at THIS attempt, plus the
+    /// contact's resolved Messenger handle (the feasibility filter).
+    /// `nil` means "no hop" — the shipped behaviour, byte-identical.
+    ///
+    /// `phone` is the W6-review N-4 carry (adjudicated into T-151/T-152):
+    /// the messenger opener has no number of its own, so a hopped
+    /// `.phone` leg would otherwise land on the shipped no-number line
+    /// although the surface that hopped HAS a number. `var` with a
+    /// default (the L2-D3 lesson): the synthesized memberwise
+    /// initializer keeps a DEFAULTED parameter, so every shipped
+    /// `LaunchHop(candidates:handle:)` call site compiles unchanged.
+    struct LaunchHop: Equatable {
+        let candidates: [CallApp]
+        let handle: String?
+        var phone: String? = nil
+    }
+
+    /// The shared hop decision + announcement (the ONLY
+    /// `call.announce.launchFailedFallback` site, FR-CDP-015). Returns
+    /// the next channel and the remaining candidates (the input list
+    /// minus everything up to and including `next`), or nil at
+    /// exhaustion — the caller's shipped failure line already spoke.
+    ///
+    /// Internal (not private) so this unit's pins can drive the decision
+    /// step against the real catalogue — the same §28 relaxation
+    /// `confirmationPrompt` carries (T-148); behaviour and signature are
+    /// otherwise the design-l2 §10.2 listing verbatim.
+    func launchFailHopStep(after failed: CallApp, candidates: [CallApp],
+                           handle: String?, name: String,
+                           locale: Locale) -> (next: CallApp, remaining: [CallApp])? {
+        guard let next = CallChannelChain.nextLaunchFailCandidate(
+                after: failed,
+                attemptOrder: candidates,
+                messengerHandleAvailable: hasUsableMessengerHandle(handle)) else {
+            return nil
+        }
+        noteLaunchFailHop(after: failed, next: next)
+        speak(text: L10n.fmt("call.announce.launchFailedFallback", locale: locale,
+                             CallChannelChain.label(failed, locale: locale),
+                             name,
+                             CallChannelChain.label(next, locale: locale)))
+        let remaining = Array(candidates.drop(while: { $0 != next }).dropFirst())
+        return (next, remaining)
+    }
+
+    /// The TAP-path hop (FR-CDP-015, ADR-08; L1 C5 signature, verbatim):
+    /// on a failed open, speak the hop announcement and attempt the next
+    /// channel through the shipped per-channel opener for its type.
+    /// Returns true when a hop was attempted. The candidate list is
+    /// consumed one item per hop and the recursion is synchronous, so at
+    /// most one hop is in flight per tap and no channel is attempted
+    /// twice.
+    @discardableResult
+    private func performLaunchFailHop(after failed: CallApp,
+                                      candidates: [CallApp],
+                                      name: String, phone: String, handle: String?,
+                                      isVideo: Bool, locale: Locale) -> Bool {
+        guard let step = launchFailHopStep(after: failed, candidates: candidates,
+                                           handle: handle, name: name,
+                                           locale: locale) else { return false }
+        switch step.next {
+        case .phone:
+            performSystemContactCall(name: name, phone: phone)   // floor: its own honest line
+        case .faceTime:
+            // W6-review N-1 carry (T-151/T-152): the failed FaceTime
+            // attempt threads its remaining candidates on — the same form
+            // the `.whatsApp` and `.messenger` legs below already carry,
+            // so a hop never abandons its suffix.
+            performFaceTimeCall(name: name, phone: phone, video: isVideo,
+                                hop: LaunchHop(candidates: step.remaining, handle: handle))
+        case .whatsApp:
+            performSystemContactWhatsApp(name: name, phone: phone,
+                                         hop: LaunchHop(candidates: step.remaining, handle: handle))
+        case .messenger:
+            guard let handle, !handle.isEmpty else { return true }  // filtered above; defensive
+            performSystemContactMessenger(name: name, handle: handle,
+                                          hop: LaunchHop(candidates: step.remaining, handle: handle))
+        }
+        return true
+    }
+
+    /// The hop's classification event (L2-D12): category strings only, no
+    /// names, no numbers, `metadata: [:]`. The failed attempt's own
+    /// event (where the context emits one) already recorded the attempt.
+    private func noteLaunchFailHop(after failed: CallApp, next: CallApp) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "call_launch_fallback",
+            eventType: "hop",
+            durationMs: nil,
+            outcome: "\(failed.rawValue):\(next.rawValue)",
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+
+    /// FR-CDP-015 for the voice path (ADR-08): decide + announce through
+    /// `launchFailHopStep`, then re-enter `performCallAction` with the
+    /// copied action — the same executor a fresh confirmation reaches,
+    /// and the routed (hopped) method is what the success branch records
+    /// and teaches (L2-D7).
+    private func hopFromCallAction(after failed: CallApp, action: PendingCallAction,
+                                   isVideo: Bool, locale: Locale) {
+        guard let step = launchFailHopStep(after: failed,
+                                           candidates: action.hopCandidates,
+                                           handle: action.contact.messengerHandle,
+                                           name: action.contact.name,
+                                           locale: locale) else { return }
+        performCallAction(action.replacing(
+            method: CallChannelChain.method(for: step.next, isVideo: isVideo),
+            hopCandidates: step.remaining))
     }
 
     /// Post-execution learning (spec §4.2 + §6.2): a CONFIRMED call is
@@ -5689,31 +10382,63 @@ self.noteTalkContractChanged()
     }
 
     /// Tap-originated call from a ContactTile video/audio button
-    /// (contact-call-buttons task, 2026-09-06). The tap IS the
-    /// confirmation (redesign precedent: the user's own hand on their own
-    /// unlocked phone — the same trust model as any contacts app), so
-    /// unlike the voice flow there is no PendingCallAction: resolve the
-    /// contact's preferred app (contact preference → global default,
-    /// baked into the model) and open it immediately, announcing aloud
+    /// (contact-call-buttons task, 2026-09-06; chain-routed by T-152).
+    /// The tap IS the confirmation (redesign precedent: the user's own
+    /// hand on their own unlocked phone — the same trust model as any
+    /// contacts app), so unlike the voice flow there is no
+    /// PendingCallAction: the contact's preferred app (contact
+    /// preference → global default, baked into the model) goes through
+    /// the resolution chain with THIS button's vocabulary — a video tile
+    /// never resolves to the GSM dialer, an audio tile never to FaceTime
+    /// (the seam substitutes what the vocabulary forbids) — the routed
+    /// channel is announced at resolution when the chain skipped one
+    /// (FR-CDP-016; ADR-CDP-07: BEFORE the open, since a successful open
+    /// may background the app), and the branch opens it, announcing aloud
     /// which surface actually appeared — the same dual-channel honesty
-    /// `performCallAction` holds to. No method-history learning here:
-    /// the contact's stored preference IS this path's source of truth,
-    /// and `CallMethod` has no messenger case to record.
+    /// `performCallAction` holds to. A failed open hops through the
+    /// remaining candidates; the phone floor stays terminal (RES-10) and
+    /// the WhatsApp lane's terminal/recovery arms never hop. No
+    /// method-history learning here: the contact's stored preference IS
+    /// this path's source of truth, and `CallMethod` has no messenger
+    /// case to record.
     func performContactCall(_ contact: FamilyContact, kind: ContactCallKind) {
         let locale = activeLocale
-        let app = kind == .video ? contact.resolvedVideoApp : contact.resolvedAudioApp
+        let preferred = kind == .video ? contact.resolvedVideoApp : contact.resolvedAudioApp
+        let vocabulary: CallChannelVocabulary = kind == .video ? .video : .audio
+        let route = Self.resolvedCallChannel(
+            explicit: preferred,
+            defaultApp: defaultCallApp,
+            secondaryApp: secondaryCallApp,
+            messengerHandleAvailable: hasUsableMessengerHandle(contact.messengerHandle),
+            whatsAppInstalled: whatsAppInstalledNow,
+            vocabulary: vocabulary)
         observabilityBus.emit(ObservabilityEvent(
             component: "contact_call_buttons",
             eventType: "tap",
             durationMs: nil,
-            outcome: "\(kind == .video ? "video" : "audio"):\(app.rawValue)",
+            outcome: "\(kind == .video ? "video" : "audio"):\(route.channel.rawValue):"
+                + (route.fellBackFrom.isEmpty ? "direct" : "fellBack"),
             errorCode: nil,
             metadata: [:]  // no contact identifiers — C9 policy
         ))
-        switch app {
+        if let skipped = route.fellBackFrom.first {
+            // ADR-CDP-07: at resolution, BEFORE the open. Nothing is
+            // spoken when nothing fell back (FR-CDP-016 scenario 3).
+            speak(text: L10n.fmt("call.announce.fallbackRouted", locale: locale,
+                                 CallChannelChain.label(skipped, locale: locale),
+                                 contact.name,
+                                 CallChannelChain.label(route.channel, locale: locale)))
+        }
+        let candidates = CallChannelChain.hopCandidates(preferred: preferred,
+                                                        secondary: secondaryCallApp,
+                                                        routed: route.channel,
+                                                        vocabulary: vocabulary)
+        switch route.channel {
         case .faceTime:
-            // Video-only in the button vocabulary; `resolvedVideoApp`
-            // already guarantees an audio tap never lands here.
+            // Video-only in the button vocabulary: `resolvedVideoApp` is
+            // video-legal by construction and the seam substitutes any
+            // forbidden route with the vocabulary terminal, so an audio
+            // tap can never reach this branch.
             switch callLinks.openFaceTime(handle: contact.phone, video: true) {
             case .opened:
                 setOutcome(icon: "video.fill",
@@ -5726,9 +10451,16 @@ self.noteTalkContractChanged()
                 setOutcome(icon: "exclamationmark.triangle.fill",
                            text: L10n.str("router.call.facetimeUnavailable", locale: locale))
                 speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+                // Failed open (L2 §10.1): the shipped line above stands;
+                // the hop then attempts the remaining candidates through
+                // the same shipped openers.
+                performLaunchFailHop(after: .faceTime, candidates: candidates,
+                                     name: contact.name, phone: contact.phone,
+                                     handle: contact.messengerHandle,
+                                     isVideo: kind == .video, locale: locale)
             }
         case .phone:
-            guard callLinks.openPhone(contact.phone) else {
+            guard placeGSMCall(phone: contact.phone) else {
                 announceNoUsableNumber(contact: contact, locale: locale)
                 return
             }
@@ -5756,8 +10488,19 @@ self.noteTalkContractChanged()
                                messengerHandle: contact.messengerHandle)
             case .invalidHandle:
                 announceNoUsableNumber(contact: contact, locale: locale)
+                // Failed open (L2 §10.1): the shipped line above stands;
+                // the hop then attempts the remaining candidates.
+                performLaunchFailHop(after: .messenger, candidates: candidates,
+                                     name: contact.name, phone: contact.phone,
+                                     handle: contact.messengerHandle,
+                                     isVideo: kind == .video, locale: locale)
             }
         case .whatsApp:
+            // The WhatsApp lane never hops (L2 §10.1): `invalidPhone` is
+            // a data failure and `needsNativeCompose`/`copiedNumber` are
+            // recoveries — every arm below is the shipped terminal or
+            // recovery, byte-identical, and `candidates` is deliberately
+            // not consulted here.
             switch callLinks.openWhatsAppCallChat(contact.phone) {
             case .openedChat:
                 setOutcome(icon: "message.fill",
@@ -5783,22 +10526,28 @@ self.noteTalkContractChanged()
     /// Dial a SYSTEM-address-book search result (Phone leaf search,
     /// system-contacts search task 2026-09-06) — plain GSM audio call,
     /// the one surface a random phone-book row implies (there is no
-    /// per-contact `FamilyContact` preference behind it). Dialed through
-    /// `PhoneDialer.url(for:)`, the helper the emergency icon in the same
-    /// leaf chrome already uses (`RedesignComponents`) — per the task;
-    /// the family paths keep dialing via `CallLinks`, which builds the
-    /// same `tel:` with stricter '+' handling. A dialable row can't
-    /// really fail, but if it somehow does, say so aloud instead of
-    /// going silent. The number enters the recency ranking only after
-    /// the dial actually opened.
-    func performSystemContactCall(name: String, phone: String) {
-        guard let url = PhoneDialer.url(for: phone) else {
+    /// per-contact `FamilyContact` preference behind it). The dial goes
+    /// through `placeGSMCall` (callkit-gsm, 2026-10-14 — CallKit's
+    /// native `CXStartCallAction`, so no system `tel:` sheet interrupts
+    /// the flow), the single site every other GSM path uses too; a
+    /// numberless row can't dial and says so aloud instead of going
+    /// silent. The number enters the recency ranking only after the
+    /// dial actually opened.
+    /// The `hop` parameter is accepted for call-site uniformity with the
+    /// three search-shaped openers but deliberately never consulted: the
+    /// GSM floor is TERMINAL (design-l2 §10.1, "the floor is the last
+    /// resort") — an undialable number speaks the shipped honest line
+    /// below and nothing further is attempted. (The task spec lists this
+    /// opener among the four that gain the parameter; the design's three
+    /// are the hopping ones — see the T-149 notes.)
+    func performSystemContactCall(name: String, phone: String,
+                                  hop: LaunchHop? = nil) {
+        guard placeGSMCall(phone: phone) else {
             setOutcome(icon: "exclamationmark.triangle.fill",
                        text: L10n.fmt("call.announce.noPhoneNumber", locale: activeLocale, name))
             speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: activeLocale, name))
             return
         }
-        DispatchQueue.main.async { UIApplication.shared.open(url) }
         contactNumberUsed(phone)
         setOutcome(icon: "phone.fill",
                    text: L10n.fmt("home.outcome.callPlaced", locale: activeLocale, name))
@@ -5807,12 +10556,54 @@ self.noteTalkContractChanged()
                        contactName: name, phone: phone)
     }
 
+    /// The ONE GSM dial site (callkit-gsm, 2026-10-14) — every GSM path
+    /// (the voice executor's floor, the family contact tiles, the
+    /// system-search leaf, the emergency icon, missed-call dial-back)
+    /// reaches the phone app through here, and the dial is CallKit's
+    /// native `CXStartCallAction` everywhere: the SYSTEM `tel:`
+    /// confirmation sheet (the owner-report dialog — number plus
+    /// Open/Cancel) never appears, so the app's own spoken yes/no
+    /// confirmation stays the ONLY confirmation.
+    /// Returns false when the number carries no dialable digits —
+    /// nothing dialable anywhere; the caller speaks its shipped honest
+    /// line. Should CallKit itself reject the submitted request, the
+    /// dialer falls back to the shipped `tel:` open — the one remaining
+    /// path that can raise the system sheet, kept strictly for that
+    /// failure.
+    @discardableResult
+    func placeGSMCall(phone: String) -> Bool {
+        switch callKitDialer.dial(phoneNumber: phone, onFailure: { [weak self] in
+            _ = self?.callLinks.openPhone(phone)
+        }) {
+        case .requested:
+            return true
+        case .invalidNumber:
+            return false
+        }
+    }
+
+    /// The emergency icon's dial (callkit-gsm, 2026-10-14) — the SAME
+    /// CallKit path every other GSM call takes, so an emergency tap
+    /// reaches the contact with no system sheet standing between the
+    /// tap and the call. False when the contact's number is undialable;
+    /// the icon's own alert surface then stands
+    /// (`EmergencyIconButton.trigger`).
+    @discardableResult
+    func dialEmergencyContact(_ contact: FamilyContact) -> Bool {
+        placeGSMCall(phone: contact.phone)
+    }
+
     /// FaceTime re-initiation for a Recent activity row (call-history
     /// task, 2026-09-06): the row stored the number a FaceTime link
     /// opened before, and tapping it opens FaceTime again — the same
     /// genuine-open path performContactCall's faceTime case uses, with
     /// the same "record only a real open" rule.
-    func performFaceTimeCall(name: String, phone: String, video: Bool) {
+    /// `hop` (FR-CDP-015, design-l2 §10.1): `.unavailable`/`.invalidHandle`
+    /// is a failed open — after the shipped honest line the remaining
+    /// candidates are attempted through `performLaunchFailHop`. `nil` (the
+    /// non-chain callers) preserves the shipped behaviour byte-identically.
+    func performFaceTimeCall(name: String, phone: String, video: Bool,
+                             hop: LaunchHop? = nil) {
         let locale = activeLocale
         switch callLinks.openFaceTime(handle: phone, video: video) {
         case .opened:
@@ -5828,6 +10619,11 @@ self.noteTalkContractChanged()
             setOutcome(icon: "exclamationmark.triangle.fill",
                        text: L10n.str("router.call.facetimeUnavailable", locale: locale))
             speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+            // Failed open (L2 §10.1 row 11): hop, when the caller carried
+            // one. Nothing is recorded from the failure itself.
+            performLaunchFailHop(after: .faceTime, candidates: hop?.candidates ?? [],
+                                 name: name, phone: phone, handle: hop?.handle,
+                                 isVideo: video, locale: locale)
         }
     }
 
@@ -5839,7 +10635,13 @@ self.noteTalkContractChanged()
     /// native Messages sheet, else the number on the pasteboard — each
     /// swap disclosed out loud. No recency entry: opening a chat is not
     /// a call (consistent with the family whatsApp button).
-    func performSystemContactWhatsApp(name: String, phone: String) {
+    /// `hop` is accepted for call-site uniformity with its sibling
+    /// openers but never consulted: every outcome of this opener is
+    /// TERMINAL (`invalidPhone` — nothing dialable anywhere) or a
+    /// RECOVERY (`needsNativeCompose`, `copiedNumber`) per design-l2
+    /// §10.1, and only a failure-with-hop row may hop (RES-10).
+    func performSystemContactWhatsApp(name: String, phone: String,
+                                      hop: LaunchHop? = nil) {
         let locale = activeLocale
         switch callLinks.openWhatsAppCallChat(phone) {
         case .openedChat:
@@ -5921,7 +10723,17 @@ self.noteTalkContractChanged()
     /// thread opens in-app when Messenger is installed, as the m.me web
     /// chat in Safari when it is not, and a missing handle opens nothing
     /// and says so. No recency entry.
-    func performSystemContactMessenger(name: String, handle: String) {
+    /// `hop` (FR-CDP-015, design-l2 §10.1): `.invalidHandle` is a failed
+    /// open — after the shipped honest line the remaining candidates are
+    /// attempted. This opener carries no number of its own (design-l2
+    /// §14), so a hopped `.phone` leg dials `hop.phone` when the hopping
+    /// surface carried one (W6-review N-4 carry, T-151/T-152) and the
+    /// shipped `call.announce.noPhoneNumber` line when it did not — the
+    /// hop can no longer report "no number" for a row that has one.
+    /// `isVideo: false` matches the search surfaces' audio-shaped
+    /// FaceTime (L2 §9.1).
+    func performSystemContactMessenger(name: String, handle: String,
+                                       hop: LaunchHop? = nil) {
         let locale = activeLocale
         switch callLinks.openMessengerThread(handle: handle) {
         case .openedThread:
@@ -5950,6 +10762,15 @@ self.noteTalkContractChanged()
                        text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
             speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
             noteSearchChannelTap(outcome: "messenger:invalidHandle")
+            // Failed open (L2 §10.1 row 14): the shipped line and the
+            // shipped tap event above stand; the hop then attempts the
+            // remaining candidates through the same shipped openers. The
+            // hopped floor leg dials the hop's own number (N-4 carry) —
+            // `?? ""` keeps the shipped no-number line for hop-less
+            // callers, byte-identical to before.
+            performLaunchFailHop(after: .messenger, candidates: hop?.candidates ?? [],
+                                 name: name, phone: hop?.phone ?? "", handle: hop?.handle,
+                                 isVideo: false, locale: locale)
         }
     }
 
@@ -6005,33 +10826,112 @@ self.noteTalkContractChanged()
                                             phone: phone,
                                             messengerHandle: messengerHandle,
                                             body: storedBody))
+        // Arm the missed-call attribution (call-tracking task,
+        // 2026-09-13; wired by the missed-calls fix, 2026-09-18): a call
+        // the app genuinely OPENED is the one event iOS's anonymous
+        // unanswered report may honestly be matched to — this is the
+        // capture seam where the missed call's NUMBER comes from. Only
+        // the real call channels qualify — a Messenger thread open is
+        // recorded as a call attempt but is not a call, WhatsApp opens a
+        // chat, and an `.unanswered` row is the observer's own event
+        // (never a dial of ours), so none of them can become a candidate.
+        if kind == .call, Self.attributableCallChannels.contains(channel) {
+            openedCallAttributor.recordOpenedCall(name: contactName,
+                                                  phone: phone,
+                                                  at: timestamp)
+        }
         refreshRecentActivity()
     }
 
-    /// Records one ANONYMOUS unanswered call — the coordinator side of
-    /// the live-call detector's `onUnanswered` (missed-calls task,
-    /// 2026-09-07). Fired when CXCallObserver reported a call that ended
-    /// without ever connecting: a missed or declined incoming call, or
-    /// an attempted outgoing call nobody picked up. iOS masks calls that
-    /// involve other apps so completely that these are
-    /// indistinguishable — this row claims only the shared fact, "a call
-    /// ended unanswered". `contactName` and `phone` are EMPTY ON
-    /// PURPOSE: the caller's identity AND number are masked by iOS —
-    /// there is no name to store, no number to look up or dial, and no
-    /// address-book match is possible — and the UI renders the localized
-    /// "Unanswered call" label (`history.unanswered`) instead of a
-    /// stored locale string. The row's action opens the Phone app
-    /// (`PhoneAppOpener`), where the caller's identity genuinely lives
-    /// (its Recents tab, one tap from the dialer).
+    /// The channels whose open IS a placed call (call-tracking task,
+    /// 2026-09-13) — the only ones `OpenedCallAttributor` may match an
+    /// unanswered event to. Messenger is deliberately absent: its "call"
+    /// request resolves to an opened THREAD (no documented scheme starts a
+    /// Messenger call), so no call exists to go unanswered.
+    private static let attributableCallChannels: Set<AppActivityEntry.Channel> = [
+        .phone, .faceTimeVideo, .faceTimeAudio
+    ]
+
+    /// Records one unanswered call — the coordinator side of the
+    /// live-call detector's `onUnanswered` (missed-calls task, 2026-09-07;
+    /// attribution, call-tracking task 2026-09-13, wired by the
+    /// missed-calls fix 2026-09-18). Fired when CXCallObserver reported a
+    /// call that ended without ever connecting: a missed or declined
+    /// incoming call, or an attempted outgoing call nobody picked up. iOS
+    /// masks calls that involve other apps so completely that these are
+    /// indistinguishable, so the row claims only the shared fact, "a call
+    /// ended unanswered".
+    ///
+    /// TWO shapes, and the difference is what the app can prove:
+    ///  - ATTRIBUTED — the app itself opened a call to a contact moments
+    ///    before the event and no call ever connected in between
+    ///    (`OpenedCallAttributor`): the row carries that contact AND the
+    ///    dialed NUMBER — captured at the source (the dial), because the
+    ///    app already knew who and what number it called and the
+    ///    ended-unconnected event is that dial's outcome. New entries
+    ///    from this shape ALWAYS carry a number.
+    ///  - ANONYMOUS — everything else. `contactName` and `phone` are
+    ///    EMPTY ON PURPOSE: the caller's identity AND number are masked
+    ///    by iOS — there is no name to store, no number to look up or
+    ///    dial, and no address-book match is possible — and the UI
+    ///    renders the localized "Unanswered call" label
+    ///    (`history.unanswered`) instead of a stored locale string. Such
+    ///    a row's action opens the Phone app (`PhoneAppOpener`), where
+    ///    the caller's identity genuinely lives (its Recents tab, one
+    ///    tap from the dialer).
     private func recordUnansweredCall(at timestamp: Date) {
+        if let opened = openedCallAttributor.attributedMissedCall(endedAt: timestamp) {
+            recordActivity(kind: .call, channel: .unanswered,
+                           contactName: opened.name, phone: opened.phone,
+                           timestamp: timestamp)
+            return
+        }
         recordActivity(kind: .call, channel: .unanswered,
                        contactName: "", phone: "", timestamp: timestamp)
+    }
+
+    /// [CLOUD-CASCADE] (2026-09-16) Records one turn the cloud cascade tier
+    /// sent to the ONLINE brain — the coordinator half of the tier's
+    /// `onEscalated` seam, run once per escalated turn, right after the
+    /// observability event and BEFORE the cloud call.
+    ///
+    /// Two trails, and neither one carries the utterance (C9 policy):
+    ///  · an activity-log row (`Kind.cloudEscalation` / `Channel.cloud`)
+    ///    with an EMPTY contact and number — the household can see that a
+    ///    turn reached the cloud, and nothing about what was said;
+    ///  · an app log line naming the escalation unmistakably, with the
+    ///    provider id and the two scores only (the same numbers the
+    ///    observability event carries — read this line and the
+    ///    `cloud_cascade_escalated` event side by side to tell a
+    ///    cloud-answered turn from an on-device one).
+    ///
+    /// Main queue by contract (the tier's completion runs there, like every
+    /// other brain in the ladder → `recordActivity`'s rule).
+    private func recordCloudCascadeEscalation(_ escalation: CloudCascadeEscalation) {
+        recordActivity(kind: .cloudEscalation, channel: .cloud, contactName: "")
+        // Numbers and a provider id only — never what the user said or what
+        // the assistant answered (C9 policy; the same rule the
+        // `cloud_cascade_escalated` event holds to). Note the Release-log
+        // privacy gate (tools/check-release-log-safety.sh) rejects any
+        // non-DEBUG print whose statement names the utterance's text, so
+        // this line is deliberately vocabulary-clean.
+        print("[cloud_cascade] LOCAL ANSWER OVERRULED — this turn goes to the ONLINE brain "
+              + "provider=\(escalation.provider) "
+              + "threshold=\(PipelineTraceSummary.score(escalation.threshold)) "
+              + "local_confidence=\(PipelineTraceSummary.score(escalation.localConfidence)) "
+              + "(numbers only — no utterance or reply content)")
     }
 
     /// Refreshes the published window from the store (see
     /// `recentActivity`). Main queue.
     private func refreshRecentActivity() {
         recentActivity = activityLog.entries()
+        // The window changed, so the missed-call correlation is rebuilt
+        // too (missed-calls fix, 2026-09-18): new numbered rows resolve
+        // their family-contact names synchronously; the native-book half
+        // rides the same refresh (no permission prompt here — a call
+        // event is nobody's point of use; the leaves prompt on appear).
+        refreshMissedCallCorrelations()
     }
 
     /// Builds the live-call detector. Instance method (not a closure over
@@ -6044,13 +10944,25 @@ self.noteTalkContractChanged()
         let detector = LiveCallDetector(
             provider: CXCallStateProvider(),
             onChange: { [weak self] active in
-                DispatchQueue.main.async { self?.liveCallActive = active }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.liveCallActive = active
+                    // A connected call clears the attribution candidate
+                    // (call-tracking task, 2026-09-13; wired by the
+                    // missed-calls fix): something was ANSWERED, so if an
+                    // unanswered event lands later it is not the app's
+                    // dial — better to record it anonymously than to name
+                    // the wrong contact.
+                    if active { self.openedCallAttributor.noteCallConnected() }
+                }
             },
             onUnanswered: { [weak self] timestamp in
-                // Record the anonymous unanswered row (missed-calls task,
-                // 2026-09-07). Same main-hop rule as onChange: the store
-                // is main-queue confined, whatever queue the provider
-                // fired on.
+                // Record the unanswered row (missed-calls task,
+                // 2026-09-07) — attributed with the app's own contact and
+                // number when the attributor can prove it (missed-calls
+                // fix, 2026-09-18), anonymous otherwise. Same main-hop
+                // rule as onChange: the store is main-queue confined,
+                // whatever queue the provider fired on.
                 DispatchQueue.main.async { self?.recordUnansweredCall(at: timestamp) }
             }
         )
@@ -6059,6 +10971,321 @@ self.noteTalkContractChanged()
         // its initial snapshot — that is exactly what this read is for).
         liveCallActive = detector.hasActiveCall
         return detector
+    }
+
+    // MARK: - Missed-call correlation & dial-back (missed-calls fix, 2026-09-18)
+
+    /// Rebuilds `missedCallDisplayNames` for every numbered missed-call
+    /// row in the published window: the FAMILY correlation is synchronous
+    /// (the app's own contacts need no permission), and the NATIVE
+    /// address-book half runs on a background queue and publishes back on
+    /// main — point-of-use permission lives there (see
+    /// `refreshNativeMissedCallNames`). A row with no correlation simply
+    /// has no entry in the map; the views fall back to the stored name,
+    /// then the raw number, then the honest label. Main queue.
+    func refreshMissedCallCorrelations(promptIfNeeded: Bool = false) {
+        let rows = recentActivity.filter {
+            $0.channel == .unanswered && !$0.phone.isEmpty
+        }
+        let family = familyContacts
+        let snapshot = verifiedLinks
+        var names: [UUID: String] = [:]
+        for row in rows {
+            // The LINK-AWARE family correlation (T-158, design-l2 §8.2):
+            // the SAME lookup the dial-back identity uses, so the list and
+            // the tap can never disagree about who a number reaches
+            // (FR-FCU-004 — one person on every surface).
+            if let contact = familyContact(matchingPhone: row.phone) {
+                names[row.id] = contact.name
+            }
+        }
+        missedCallDisplayNames = names
+        let needNative = rows.filter { names[$0.id] == nil }
+        guard !needNative.isEmpty else { return }
+        // The verified snapshot travels BY VALUE with the captured roster
+        // (this method is main-confined; the native pass runs detached).
+        refreshNativeMissedCallNames(needNative, family: family,
+                                     snapshot: snapshot,
+                                     promptIfNeeded: promptIfNeeded)
+    }
+
+    /// The NATIVE-address-book half of the missed-call correlation:
+    /// second source, after the family contacts (the task's order). The
+    /// CNContact search runs off-main (`AddressBookDirectory` enumerates
+    /// the whole book) and its result publishes back on main. `family`
+    /// and `snapshot` are captured BY VALUE here — the published state
+    /// stays main-queue confined and the task reads its own snapshot.
+    ///
+    /// POINT-OF-USE PERMISSION: Contacts access is asked for HERE — when
+    /// a numbered missed-call row needs a name the family list cannot
+    /// give — and only when `promptIfNeeded` is set, which only the
+    /// MISSED-CALLS LIST does on appear (never a background call event,
+    /// never app launch). The system prompt is the explanation (standard
+    /// iOS pattern). HONEST DENIAL: a denied/restricted state stays
+    /// quiet — no entry is published, the raw number remains the display,
+    /// and the app never asks again.
+    private func refreshNativeMissedCallNames(_ rows: [AppActivityEntry],
+                                              family: [FamilyContact],
+                                              snapshot: VerifiedLinksSnapshot,
+                                              promptIfNeeded: Bool) {
+        let phoneRows = rows.map { (id: $0.id, phone: $0.phone) }
+        Task.detached(priority: .utility) { [weak self] in
+            let directory = AddressBookDirectory()
+            var access = AddressBookDirectory.access()
+            if access == .notDetermined, promptIfNeeded {
+                _ = await directory.requestAccess()
+                // Post-prompt RE-READ (design-l2 §3.5, review-iter-2 R4):
+                // the sheet may grant full authorization OR a limited
+                // selection — the status is the truth, and collapsing a
+                // limited grant into `.allowed` would claim access that
+                // was never given (and vice versa).
+                access = AddressBookDirectory.access()
+            }
+            // `.limited` is READABLE: the granted set enumerates. Only a
+            // genuinely unreadable state skips the pass.
+            guard access.allowsReading,
+                  let entries = try? directory.allEntries() else { return }
+            var names: [UUID: String] = [:]
+            for row in phoneRows {
+                let resolution = MissedCallContactResolver.resolve(
+                    phone: row.phone,
+                    family: family,
+                    native: entries,
+                    access: access,
+                    snapshot: snapshot)
+                if case .name(let name) = resolution {
+                    names[row.id] = name
+                }
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                for (id, name) in names {
+                    self.missedCallDisplayNames[id] = name
+                }
+            }
+        }
+    }
+
+    /// The family contact whose RAW stored phone is the same dialable
+    /// number as `phone` — the missed-call list's family correlation
+    /// (`MissedCallContactResolver`'s trailing-digit rule; the editor
+    /// stores numbers raw, so "+977-9841…" and "(977) 9841…" are one
+    /// number). Also the dial-back's identity source: a matched contact
+    /// makes the tap resolve EXACTLY like that contact's audio call
+    /// button (`resolvedMissedCallChannel`).
+    ///
+    /// LINK-AWARE (T-158, design-l2 §1.8/§8.2; FR-FCU-004): after the
+    /// contact's OWN phone, the VERIFIED linked records' numbers are
+    /// consulted (`linkedFamilyMatch`), so a call from the number of the
+    /// system record a family contact is linked to resolves to that
+    /// FAMILY person. The published snapshot is the only link source — an
+    /// unverified or stale claim is absent from it and falls through to
+    /// today's behaviour exactly (FR-FCU-006: never the wrong person).
+    func familyContact(matchingPhone phone: String) -> FamilyContact? {
+        MissedCallContactResolver.familyMatch(phone: phone, in: familyContacts)
+            ?? MissedCallContactResolver.linkedFamilyMatch(phone: phone,
+                                                          in: familyContacts,
+                                                          snapshot: verifiedLinks)
+    }
+
+    /// The route a missed-call row's dial-back opens (missed-calls fix,
+    /// 2026-09-18; chain seam: call-dialer-primary-secondary,
+    /// 2026-10-12) — resolved the SAME way a family contact's AUDIO call
+    /// button resolves (`FamilyContact.resolvedAudioApp`), because a
+    /// dial-back IS an audio call: the matched family contact's own
+    /// preference wins (that contact's `preferredCallApp`, FaceTime
+    /// excluded — it is video-only in the button vocabulary), else the
+    /// global `defaultCallApp`, through the shared chain seam with the
+    /// audio vocabulary — a FaceTime preference still routes to the
+    /// phone floor, exactly as today, and a Messenger preference
+    /// without an on-file handle falls to the secondary or the floor
+    /// rather than dead-ending. The GSM `tel:` path is always in the
+    /// chain, so dialing always works. The `Result` carries the routed
+    /// channel plus the attempt-order provenance the dial-back
+    /// announcement and the launch-fail hop compose from. Pure static so
+    /// the whole matrix is unit-testable.
+    static func resolvedMissedCallChannel(familyContact: FamilyContact?,
+                                          defaultApp: CallApp,
+                                          secondaryApp: CallApp,
+                                          messengerHandleAvailable: Bool,
+                                          whatsAppInstalled: Bool)
+                                          -> CallChannelChain.Result {
+        // ADR-CDP-03 step 4: the shipped `supportsAudio` guard's own
+        // semantics ARE this seam's vocabulary (`.audio`): a FaceTime
+        // preference on an audio path still routes to `.phone`, exactly
+        // as today.
+        resolveChannel(order: CallChannelChain.attemptOrder(
+            preferred: familyContact?.resolvedAudioApp ?? defaultApp,
+            secondary: secondaryApp),
+            messengerHandleAvailable: messengerHandleAvailable,
+            whatsAppInstalled: whatsAppInstalled,
+            vocabulary: .audio)
+    }
+
+    /// What a missed-call row's tap resolves to (missed-calls fix,
+    /// 2026-09-18) — the pure decision behind `dialBackMissedCall`,
+    /// static so tests can drive the whole matrix without a coordinator
+    /// (the house seam pattern). `name` is the row's resolved display
+    /// identity (correlated name, stored name, or the raw number).
+    enum MissedCallDialAction: Equatable {
+        /// The row has no number (an anonymous row from before the fix,
+        /// or a caller iOS masked) — open the Phone app, where the call
+        /// genuinely lives in Recents.
+        case openPhoneApp
+        /// A number exists but normalizes to nothing dialable —
+        /// defensive: the honest dead-row line, never a silent tap.
+        case unusableNumber(name: String)
+        /// Plain GSM dial-back via `tel:` — always works.
+        case call(name: String, phone: String)
+        /// FaceTime (the video surface; a dial-back never resolves here
+        /// today — kept so the switch stays exhaustive and future-proof).
+        case faceTime(name: String, phone: String)
+        /// WhatsApp chat to the number (call icon one tap away), the
+        /// same surface the contact call button opens.
+        case whatsApp(name: String, phone: String)
+        /// Messenger thread (call icon one tap away) — only resolved
+        /// when a handle is on file.
+        case messenger(name: String, phone: String, handle: String)
+    }
+
+    /// The dial-back decision plus its routing provenance (FR-CDP-011):
+    /// the action to dispatch and everything the announcement and the
+    /// launch-fail hop need, so `dialBackMissedCall` never re-derives a
+    /// routing fact (single source — the pure seam).
+    struct MissedCallDialRoute: Equatable {
+        let action: MissedCallDialAction
+        /// The routed channel — nil for the two numberless actions,
+        /// which return before the chain (nothing to route).
+        let channel: CallApp?
+        /// Skipped channels in attempt order (empty = no fallback).
+        let fellBackFrom: [CallApp]
+        /// The launch-fail candidates for `channel` ([] when nil).
+        let hopCandidates: [CallApp]
+    }
+
+    /// The pure dial-back decision (missed-calls fix, 2026-09-18; route
+    /// value: call-dialer-primary-secondary, 2026-10-12) — the shipped
+    /// `MissedCallDialAction` decision extended into the
+    /// `MissedCallDialRoute` (design-l2.md:404-438, L2-D9): the routed
+    /// CHANNEL, the attempt-order PROVENANCE the announcement composes
+    /// from, and the launch-fail CANDIDATES the hop consumes — one
+    /// snapshot, so the dispatch re-derives no routing fact (design-
+    /// l2.md:753-786). The two shipped guards are preserved verbatim: a
+    /// numberless row keeps the honest Phone-app open; a number that
+    /// normalizes to nothing speaks the honest dead-row line instead of
+    /// a silent dead tap — both return BEFORE the chain, so their route
+    /// carries `channel: nil`, `fellBackFrom: []` and `hopCandidates: []`.
+    static func missedCallDialAction(phone: String,
+                                     familyContact: FamilyContact?,
+                                     defaultApp: CallApp,
+                                     secondaryApp: CallApp,
+                                     messengerHandle: String?,
+                                     whatsAppInstalled: Bool,
+                                     name: String) -> MissedCallDialRoute {
+        guard !phone.isEmpty else {
+            return MissedCallDialRoute(action: .openPhoneApp, channel: nil,
+                                       fellBackFrom: [], hopCandidates: [])
+        }
+        guard !ContactNumberKey.normalized(phone).isEmpty else {
+            return MissedCallDialRoute(action: .unusableNumber(name: name), channel: nil,
+                                       fellBackFrom: [], hopCandidates: [])
+        }
+        // L2-D9 (design-l2.md:404-438) + W3-review N-2: the messenger
+        // availability input stays the RAW shipped derivation
+        // (`messengerHandle?.isEmpty == false`), verbatim — NOT
+        // `hasUsableMessengerHandle`. A handle non-empty raw but
+        // normalising to empty (whitespace-only, "@"-only) is unusable
+        // for the row/voice predicate yet usable here; the divergence is
+        // shipped behaviour, design-sanctioned ("derived exactly as
+        // shipped") and pinned by `MissedCallDialBackTests` — do not
+        // "fix" it into the normalised predicate.
+        let preferred = familyContact?.resolvedAudioApp ?? defaultApp
+        let route = resolvedMissedCallChannel(
+            familyContact: familyContact, defaultApp: defaultApp,
+            secondaryApp: secondaryApp,
+            messengerHandleAvailable: messengerHandle?.isEmpty == false,
+            whatsAppInstalled: whatsAppInstalled)
+        let action: MissedCallDialAction
+        switch route.channel {
+        case .phone: action = .call(name: name, phone: phone)
+        case .faceTime: action = .faceTime(name: name, phone: phone)
+        case .whatsApp: action = .whatsApp(name: name, phone: phone)
+        case .messenger: action = .messenger(name: name, phone: phone,
+                                             handle: messengerHandle ?? "")
+        }
+        return MissedCallDialRoute(
+            action: action, channel: route.channel, fellBackFrom: route.fellBackFrom,
+            hopCandidates: CallChannelChain.hopCandidates(
+                preferred: preferred, secondary: secondaryApp,
+                routed: route.channel, vocabulary: .audio))
+    }
+
+    /// Tap-to-dial-back of a missed-call row (missed-calls fix,
+    /// 2026-09-18; chain routing + announcement: call-dialer-primary-
+    /// secondary, 2026-10-12) — the row's action in HistoryView and
+    /// CallView's recent-activity section. A row WITH a number dials it
+    /// back through the same deep-link resolution a family contact's
+    /// audio call button uses (matched family contact's preference, else
+    /// the global default, then the secondary, Messenger gated on a
+    /// handle, `tel:` always in the chain — `performSystemContactCall`
+    /// opens `tel://` unconditionally), so the tap always opens the
+    /// resolved app or the dialer. The routed channel is ANNOUNCED at
+    /// resolution, before the dispatch, only when the chain skipped a
+    /// channel (ADR-CDP-07; design-l2.md:753-786): a successful open may
+    /// background the app before post-open speech could be heard. The
+    /// route's hop candidates feed the LaunchHop the hopping openers
+    /// consume on a failed launch (FR-CDP-015); the GSM floor never hops
+    /// (RES-10). A numberless row (an old anonymous entry, or a caller
+    /// iOS masked) keeps the honest Phone-app open — there is no number
+    /// to dial and the app never fakes one. Main queue (every dispatch
+    /// below is a coordinator method confined to it).
+    func dialBackMissedCall(_ entry: AppActivityEntry) {
+        let identity = ActivityRowText.unansweredIdentity(
+            for: entry,
+            correlatedName: missedCallDisplayNames[entry.id]) ?? ""
+        let family = familyContact(matchingPhone: entry.phone)
+        let route = Self.missedCallDialAction(
+            phone: entry.phone,
+            familyContact: family,
+            defaultApp: defaultCallApp,
+            secondaryApp: secondaryCallApp,
+            messengerHandle: family?.messengerHandle,
+            whatsAppInstalled: whatsAppInstalledNow,
+            name: identity)
+        if let skipped = route.fellBackFrom.first, let channel = route.channel {
+            // ADR-CDP-07: at resolution, BEFORE the dispatch — the
+            // spoken line names the skipped channel and the one that
+            // actually opens. Nothing is spoken when nothing fell back
+            // (FR-CDP-016 scenario 3).
+            speak(text: L10n.fmt("call.announce.fallbackRouted", locale: activeLocale,
+                                 CallChannelChain.label(skipped, locale: activeLocale),
+                                 identity,
+                                 CallChannelChain.label(channel, locale: activeLocale)))
+        }
+        // W6-review N-4 carry (T-151/T-152): the hop carries the row's
+        // own number — the additive defaulted `phone` field landed at
+        // `LaunchHop` (AppCoordinator.swift:7992) so a hopped `.phone`
+        // leg dials it instead of speaking the shipped no-number line;
+        // the design listing at design-l2.md:772 shows the two-label
+        // form.
+        let hop = LaunchHop(candidates: route.hopCandidates,
+                            handle: family?.messengerHandle,
+                            phone: entry.phone)
+        switch route.action {
+        case .openPhoneApp:
+            PhoneAppOpener.openDialer()
+        case .unusableNumber:
+            speak(text: L10n.fmt("call.announce.noPhoneNumber",
+                                 locale: activeLocale, identity))
+        case .call(let name, let phone):
+            performSystemContactCall(name: name, phone: phone)          // floor: no hop
+        case .faceTime(let name, let phone):
+            performFaceTimeCall(name: name, phone: phone, video: true, hop: hop)
+        case .whatsApp(let name, let phone):
+            performSystemContactWhatsApp(name: name, phone: phone, hop: hop)
+        case .messenger(let name, _, let handle):
+            performSystemContactMessenger(name: name, handle: handle, hop: hop)
+        }
     }
 
     /// Normalized-number → last-call-date index for ranking search
@@ -6306,9 +11533,10 @@ self.noteTalkContractChanged()
     func requestNavigationDisambiguation(targets: [DirectionsCandidate]) -> String? {
         guard let first = targets.first else { return nil }
         pendingNavigationWalk = targets
-        DispatchQueue.main.async { [weak self] in
-            self?.voiceSession.transition(to: .awaitingConfirmation)
-        }
+        // [MTC] M-2 (ADR-MTC-03): pend through the ONE window opener —
+        // a live dialogue frame is superseded before the walk's first
+        // question arms.
+        openConfirmationWindow()
         return navigationQuestion(for: first)
     }
 
@@ -6352,6 +11580,31 @@ self.noteTalkContractChanged()
     /// fallback.
     func navigateHome() {
         requestNavigation(to: .defaultHome)
+    }
+
+    /// Navigates to a free-form event's address — the detail screen's Go
+    /// button (rich-events task, 2026-09-17; design §4), and the route a
+    /// fired reminder's Open action leads into.
+    ///
+    /// A free-form event has no saved-place id, so — unlike the three
+    /// wrappers above — this one carries the name and address straight
+    /// into the shared executor. That is the whole feature: geocoding at
+    /// TAP time, map-app policy, the in-app fallback and the honest
+    /// spoken lines all stay `launchNavigation`'s, already built and
+    /// already audited, so an event behaves exactly like a saved place.
+    /// Nothing is stored: whatever the family last corrected in their own
+    /// Calendar app is what gets geocoded.
+    func navigateToEvent(_ event: FreeFormEvent) {
+        guard let address = event.address?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !address.isEmpty else {
+            // The Go button is not even drawn without an address, so this
+            // is only reachable by a race — the family cleared the
+            // address while the screen was open. Honest line, no dead end.
+            emitDirections(eventType: "command", outcome: "place_missing")
+            replyHonestly(key: "directions.placeNotFound")
+            return
+        }
+        launchNavigation(name: event.title, address: address)
     }
 
     /// The core navigation executor — shared by `requestNavigation` and
@@ -6532,26 +11785,24 @@ self.noteTalkContractChanged()
     /// `ApplianceHelperPlugin.handle` instead. 2026-09-06: until now only
     /// the voice path existed; the dock tile was designed but unbuilt.
     func presentApplianceHelper(question: String?) {
-        guard geminiClient.isAvailable else {
-            speak(text: L10n.str("plugin.applianceHelper.notConfigured", locale: activeLocale))
-            return
-        }
+        // The helper also owns the offline manuals library. Cloud
+        // configuration gates photo analysis, never the whole menu.
         let session = ApplianceHelperSession(question: question,
                                              locale: activeLocale,
                                              geminiClient: geminiClient,
                                              cache: ApplianceCache(storage: storage),
                                              observabilityBus: observabilityBus,
                                              speaker: speaker)
-        presentPluginView(AnyView(ApplianceHelperView(session: session)))
+        presentPluginView(AnyView(ApplianceHelperView(session: session,
+                                                      labelCache: labelTranslationCache)))
     }
 
     /// Opens a bundled default manual from the Settings → Manuals leaf.
     /// The session is armed already in `.guidance`, so the presented
     /// sheet renders the manual's step cards immediately and never shows
     /// the camera-capture state (ApplianceHelperView's auto-open camera is
-    /// gated on `.capturing`). Not gated on `geminiClient.isAvailable` —
-    /// unlike `presentApplianceHelper`, bundled content must work first
-    /// launch, offline, with no key configured.
+    /// gated on `.capturing`). Like the helper menu, bundled content
+    /// must work first launch, offline, with no key configured.
     ///
     /// Returns false when the manual's overview image is unavailable — the
     /// caller stays on the browse list and shows an honest failure.
@@ -6564,7 +11815,8 @@ self.noteTalkContractChanged()
                                              observabilityBus: observabilityBus,
                                              speaker: speaker)
         guard session.presentBundledManual(manual, locale: activeLocale) else { return false }
-        presentPluginView(AnyView(ApplianceHelperView(session: session)))
+        presentPluginView(AnyView(ApplianceHelperView(session: session,
+                                                      labelCache: labelTranslationCache)))
         return true
     }
 
@@ -6649,10 +11901,44 @@ self.noteTalkContractChanged()
     /// 2026-09-07).
     var medicationEntries: [MedicationEntry] { medicationScheduler.medicationEntries() }
 
+    /// [T-023] The medication schedule's redraw signal. `medicationEntries`
+    /// above is COMPUTED over the scheduler — no observable state changes
+    /// when a save lands, so a surface that reads it can keep drawing the
+    /// pre-save list until something unrelated re-renders it ("I entered a
+    /// medication schedule and it just disappeared"). This counter is the
+    /// explicit dependency: it is bumped on every COMMITTED medication
+    /// write (the `onScheduleChanged` seam — `loadSchedule` only fires it
+    /// after the payload is persisted and the reminders are armed), and
+    /// the manage list reads it in its body, so a landed save, an edit, a
+    /// removal or a voice `set_reminder` re-draws the list immediately.
+    /// A failed write bumps nothing — the schedule did not change.
+    @Published private(set) var medicationScheduleRevision = 0
+
     func medicationName(for entryId: UUID) -> String {
         medicationScheduler.medicationEntries()
             .first { $0.id == entryId }?
             .medicationName ?? ""
+    }
+
+    /// One medication entry by id (medication-visual-aids task,
+    /// 2026-09-16) — the Settings photo editor and the Reminders leaf read
+    /// an entry's photos through this. Nil when the entry is gone.
+    func medicationEntry(for entryId: UUID) -> MedicationEntry? {
+        medicationScheduler.medicationEntry(for: entryId)
+    }
+
+    /// A medication entry's photos, snapshotted for presentation — the
+    /// tap-to-view paths (the Meds leaf's dose thumbnail, the Reminders
+    /// leaf's dose rows) share the fired-dose screen's presentation type,
+    /// so all three draw the same screen from the same values. Nil when
+    /// the entry is gone or carries no photos, which is also the answer to
+    /// "is there anything to tap": callers gate the thumbnail on this, not
+    /// on a separate `isEmpty` check that could drift from it.
+    func medicationVisualAidsPresentation(for entryId: UUID)
+        -> MedicationVisualAidsPresentation? {
+        guard let entry = medicationEntry(for: entryId),
+              !entry.visualAids.isEmpty else { return nil }
+        return MedicationVisualAidsPresentation(entry: entry)
     }
 
     // MARK: - Derived notification count ([BOOT-REVIEW P1-7])
@@ -6760,6 +12046,222 @@ self.noteTalkContractChanged()
         intentEncoderInterpreter.handleMemoryPressure()
     }
 
+    // MARK: - Model lifecycle ([MODEL-LIFECYCLE])
+
+    /// Level-2 observer for the residency ledger.
+    ///
+    /// Installed unconditionally, unlike the encoder's gate-scoped observer
+    /// below: the models it evicts (STT, the brain) are in EVERY build, so
+    /// a build without the internal-testing encoder gate still needs the
+    /// OOM protection. Two observers on the same notification is fine —
+    /// the encoder's handler releases only the encoder, and the manager
+    /// leaves light slots alone, so neither can undo the other.
+    private func observeModelLifecycleMemoryPressure() {
+        guard modelLifecycleObserver == nil else { return }
+        modelLifecycleObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil, queue: .main
+        ) { _ in
+            ModelLifecycleManager.shared.handleMemoryPressure()
+        }
+    }
+
+    /// Registers the slots the coordinator itself owns and starts the idle
+    /// sweep. The heavy slots (STT, brain) register themselves at their own
+    /// load sites, because a slot must describe the engine that is actually
+    /// about to load.
+    private func startModelLifecycle() {
+        let lifecycle = ModelLifecycleManager.shared
+        observeModelLifecycleMemoryPressure()
+
+        // The encoder slot is NOT registered here. `intentEncoderInterpreter`
+        // is a `lazy var` built only when the encoder gate AND the runtime
+        // toggle both allow it, and touching it here would defeat that gate
+        // by constructing the object in every launch. `installLocalBrainSlot`
+        // registers it at the moment `gatedEncoder` actually resolves it —
+        // see `registerEncoderSlotIfNeeded()`.
+
+        // The corrector is NOT a model — it is a ~2.6 MB JSON lexicon in a
+        // process-wide `static let`. Registered ownerless and un-evictable
+        // so the ledger's total is honest and the next reader does not have
+        // to rediscover that.
+        lifecycle.register(
+            slot: .sttCorrector,
+            modelID: nil,
+            owner: nil,
+            evictable: false
+        ) {}
+
+        // [TRUNCATION-FIX] Bridge the ledger's decisions to the
+        // observability bus — `onEvent` used to be assigned only in
+        // tests, so a field capture of the "दशैँ कहिले हो" kill showed
+        // no trace of which model was evicted or admitted.
+        lifecycle.onEvent = { [weak self] event in
+            self?.relayModelLifecycleEvent(event)
+        }
+
+        lifecycle.startIdleTimer()
+
+        // [MODEL-WARDEN] Step 0 — the kernel's own pressure signal, alongside
+        // `didReceiveMemoryWarning`. `.warning` routes to the existing
+        // squeeze; `.critical` additionally cancels every pending reservation
+        // and evicts the light residents the squeeze spares.
+        //
+        // The three residents Step 0 brings into the ledger — the TTS voice
+        // cache, the wake-word spotter, the VAD — are NOT registered here:
+        // each registers at the object that actually allocates it
+        // (`PiperVoiceSpeaker`, `SherpaKWSWakeWordEngine`, `SileroONNXVAD`),
+        // the same convention the heavy slots already follow, so a row only
+        // exists while the bytes it describes do. Registering the shipped
+        // `EnergyVAD` here, for instance, would add 0.9 MB of Silero ONNX
+        // bytes the build does not hold — the ledger's total has to stay
+        // checkable against `phys_footprint`.
+        lifecycle.startMemoryPressureMonitor()
+    }
+
+    /// Observability bridge for `ModelLifecycleEvent` — component
+    /// "model_lifecycle", one event type per decision, metadata carries
+    /// the slot/reason/bytes.
+    private func relayModelLifecycleEvent(_ event: ModelLifecycleEvent) {
+        let type: String
+        let metadata: [String: String]
+        switch event {
+        case .admitted(let slot, let liveBytes, let evicted):
+            type = "admitted"
+            metadata = ["slot": slot.rawValue,
+                        "liveBytes": String(liveBytes),
+                        "evicted": evicted.map(\.rawValue).joined(separator: ",")]
+        case .denied(let slot, let reason):
+            type = "denied"
+            metadata = ["slot": slot.rawValue, "reason": reason.rawValue]
+        case .evicted(let slot, let reason):
+            type = "evicted"
+            metadata = ["slot": slot.rawValue, "reason": reason.rawValue]
+        case .soloOverBudget(let slot, let liveBytes, let budgetBytes):
+            type = "solo_over_budget"
+            metadata = ["slot": slot.rawValue,
+                        "liveBytes": String(liveBytes),
+                        "budgetBytes": String(budgetBytes)]
+        case .memoryPressure(let budgetBytes, let evicted):
+            type = "memory_pressure"
+            metadata = ["budgetBytes": String(budgetBytes),
+                        "evicted": evicted.map(\.rawValue).joined(separator: ",")]
+        // [CAMERA-BUDGET] A closed token, a byte count and a reason token:
+        // applied / cleared / expired / ownerReleased / refusedStaleOwner —
+        // the enum's own raw values, which is what `reason.rawValue` below
+        // emits (the comment here used to spell them snake_case, tokens this
+        // bridge has never written; the `type` is what separates a profile's
+        // token from a reservation's, not the spelling, and both vocabularies
+        // are camelCase for that reason — see `SessionProfileEventReason`).
+        // The pair is what makes a leaked profile visible in a capture, and
+        // the reason is what tells a leak from an ordinary session end.
+        //
+        // The profile rides an existing allowed key (`state`) rather than a
+        // new `profile` one: the allow-list in `LogSanitiser` is the PII
+        // filter, and widening it for a value that is already a closed token
+        // would let every other emitter write a string called "profile" —
+        // the vocabulary a future caller is most likely to fill with
+        // something about the elder. `state=cameraLive` says exactly as much.
+        //
+        // The lease's ordinal rides `count` for the same reason it exists at
+        // all: it is a count of applications, it is what pairs a `cleared`
+        // with the `applied` it ends, and it is an integer, not a token a
+        // caller could fill with prose.
+        case .sessionProfile(let profile, let budgetBytes, let generation, let reason):
+            type = "session_profile"
+            metadata = ["state": profile?.rawValue ?? "none",
+                        "budgetBytes": budgetBytes.map(String.init) ?? "none",
+                        "count": String(generation),
+                        "reason": reason.rawValue]
+        // [MODEL-WARDEN] Step 1 — the reservation layer. Every value below is
+        // a slot name, a closed token or a byte count; nothing here can carry
+        // content, and every key is in `LogSanitiser.allowedKeys` (a test
+        // pins that claim, because a silently dropped key is how the memory
+        // story arrived at the field with no bytes in it the first time).
+        case .reserved(let slot, let liveBytes, let purpose, let isLargeLoad):
+            type = "reserved"
+            metadata = ["slot": slot.rawValue,
+                        "liveBytes": String(liveBytes),
+                        "purpose": purpose.rawValue,
+                        "isLargeLoad": String(isLargeLoad)]
+        case .reservationDenied(let slot, let reason, let purpose):
+            type = "reservation_denied"
+            metadata = ["slot": slot.rawValue,
+                        "reason": reason.token,
+                        "purpose": purpose.rawValue]
+        case .reservationCommitted(let slot, let heldSeconds):
+            type = "reservation_committed"
+            metadata = ["slot": slot.rawValue,
+                        "heldSeconds": String(format: "%.2f", heldSeconds)]
+        case .reservationAbandoned(let slot, let reason):
+            type = "reservation_abandoned"
+            metadata = ["slot": slot.rawValue, "reason": reason.rawValue]
+        case .footprintSample(let physFootprintBytes, let ceilingBytes,
+                              let residentLiveBytes, let transientLiveBytes):
+            type = "footprint_sample"
+            metadata = ["phys_footprint": String(physFootprintBytes),
+                        "ceiling_bytes": String(ceilingBytes),
+                        "liveBytes": String(residentLiveBytes),
+                        "transientLiveBytes": String(transientLiveBytes)]
+        // [MODEL-WARDEN] Step 2 — the priority ladder's two decisions. Both
+        // carry only tokens: a slot name, a closed outcome word, a refusal
+        // reason from `UnloadRefusal`'s two cases, the guard's kind and a
+        // count. `reason` is the same key the denial events already use, and
+        // `outcome` is the bus's own key — so the ladder is legible in a
+        // capture without a single new allow-list entry.
+        case .preempted(let slot, let outcome):
+            type = "preempted"
+            // `metadata` is assigned once per case (the switch binds a
+            // `let`), so the optional refusal reason is folded into the
+            // literal rather than added to it afterwards.
+            metadata = outcome.refusalReason.map { refusal in
+                ["slot": slot.rawValue,
+                 "outcome": outcome.token,
+                 "reason": refusal.rawValue]
+            } ?? ["slot": slot.rawValue, "outcome": outcome.token]
+        case .thrashGuarded(let slot, let kind, let count):
+            type = "thrash_guarded"
+            metadata = ["slot": slot.rawValue,
+                        "reason": kind.rawValue,
+                        "count": String(count)]
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "model_lifecycle",
+            eventType: type,
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: metadata
+        ))
+    }
+
+    /// Declares the encoder's ledger row the first time the encoder is
+    /// actually constructed. Idempotent — `register` overwrites the slot's
+    /// footprint and closure, so calling it again on a re-install is
+    /// harmless.
+    ///
+    /// [VOICE-OOM] The encoder is LIGHT (≈ 140 MB) and evictable: a
+    /// critical-pressure sweep may take its CoreML specialization — the
+    /// trade `handleCriticalMemoryPressure` documents ("the light models
+    /// the `.warning` path spares"; the kernel is out of memory and 140 MB
+    /// of specialization is worth less than surviving). The flag only
+    /// widens the eviction surface to that moment: the idle sweep has its
+    /// own heavy-only filter and never touches a light slot, and the
+    /// `.warning` squeeze takes heavy models first. The re-arm is the
+    /// encoder's own contract — the release closure below IS its level-2
+    /// `handleMemoryPressure()`, and `rearmIntentEncoderIfEnabled()` at the
+    /// next turn's capture start reloads it ([T-037-a]).
+    private func registerEncoderSlotIfNeeded() {
+        ModelLifecycleManager.shared.register(
+            slot: .intentEncoder,
+            modelID: ModelCatalog.intentEncoderSpike,
+            owner: intentEncoderInterpreter,
+            evictable: true
+        ) { [weak intentEncoderInterpreter] in
+            intentEncoderInterpreter?.handleMemoryPressure()
+        }
+    }
+
     /// Re-arms the encoder after a memory-pressure unload at the start of
     /// a voice turn (no-op unless the internal-testing gate is on AND the
     /// runtime toggle is ON, so the lazy encoder object is never even
@@ -6772,32 +12274,81 @@ self.noteTalkContractChanged()
     /// Adds or validates a medication schedule entry from the Settings
     /// editor. Returns a catalog key on validation failure, nil on success.
     /// Success persists via `loadSchedule` and re-arms alarms (spec §4.4.3).
+    ///
+    /// `purpose` ([MED-PURPOSE], 2026-09-17) is what the medicine is for —
+    /// a `MedicationPurpose` chip id or the family's own words, exactly as
+    /// `MedicationPurposeDraft.storedValue` resolved it. Defaulted nil so
+    /// every pre-purpose caller (the voice `set_reminder` path, every test
+    /// fixture) keeps compiling and keeps creating the entry it always
+    /// did; blank is normalized to nil rather than stored as an empty
+    /// string, the same rule `normalizedOptionalText` applies everywhere
+    /// else in this file.
+    /// `times` ([MED-OCR], 2026-09-18) is one or more dose times: the editor
+    /// grew time rows for the label scan (a `1-0-1` is two doses, and a form
+    /// that could only hold one of them would silently drop half of what the
+    /// label said). Empty is rejected rather than defaulted — a medication
+    /// with no dose time is not a schedule, and inventing one for it is the
+    /// kind of quiet claim this app does not make.
+    ///
+    /// `strength` ([MED-OCR]) is the printed dose strength ("500 mg") and is
+    /// stored in the entry's existing `doseDescription` — the dose line the
+    /// fired-dose screen and the morning briefing already render. Blank is
+    /// nil, like every other optional text here.
+    ///
+    /// `photo` ([MED-OCR]) is the picture the scan flow just took. It is
+    /// written to the medication `VisualAidStore` under the NEW entry's id,
+    /// before the entry payload is persisted, and becomes the entry's first
+    /// visual aid — the family's "which box is this?" picture, attached by
+    /// the act of scanning. A failed write (no bitmap, unusable sandbox)
+    /// leaves the entry without the photo, exactly as the visual-aid editor
+    /// treats a failed save: a nicety, never a failed medication.
     @discardableResult
-    func addMedication(name: String, time: DateComponents) -> String? {
+    func addMedication(name: String, times: [DateComponents],
+                       purpose: String? = nil,
+                       strength: String? = nil,
+                       photo: UIImage? = nil) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "settings.meds.nameRequired" }
+        guard !times.isEmpty else { return "settings.meds.timeRequired" }
         let duplicate = medicationScheduler.medicationEntries().contains { entry in
-            entry.medicationName == trimmed && entry.scheduleTimes.contains(time)
+            entry.medicationName == trimmed
+                && entry.scheduleTimes.contains { times.contains($0) }
         }
         guard !duplicate else { return "settings.meds.duplicateError" }
+        let trimmedPurpose = purpose?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedStrength = strength?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let entryId = UUID()
+        var visualAids: [VisualAid] = []
+        if let photo, let aid = medicationVisualAidStore.save(photo, for: entryId) {
+            visualAids.append(aid)
+        }
 
         var entries = medicationScheduler.medicationEntries()
         let entry = MedicationEntry(
-            id: UUID(),
+            id: entryId,
             userProfileId: UUID(),
             medicationName: trimmed,
-            doseDescription: "",
-            scheduleTimes: [time],
+            doseDescription: trimmedStrength ?? "",
+            scheduleTimes: times,
             frequency: .daily,
             ackWindowMinutes: 5,
             maxRefireCount: 5,
             escalationWindowMinutes: 60,
             doubleDoseWindowHours: 4,
             photoVerificationEnabled: false,
-            confirmationDescription: nil
+            confirmationDescription: nil,
+            purpose: (trimmedPurpose?.isEmpty ?? true) ? nil : trimmedPurpose,
+            visualAids: visualAids
         )
         entries.append(entry)
-        medicationScheduler.loadSchedule(entries: entries)
+        // [T-023] The persist result is LOAD-BEARING: a failed write must
+        // not be followed by an arming pass, a share sync or a count
+        // refresh, and the caller must hear about it — a nil here means
+        // "saved", and a lost entry must never be reported as one.
+        guard medicationScheduler.loadSchedule(entries: entries) else {
+            return "settings.meds.saveFailed"
+        }
         medicationScheduler.scheduleAll()
         calendarSync.syncNow(entries: routineScheduler.entries())
         // [BOOT-REVIEW P1-7] A schedule edit changes today's dose total —
@@ -6806,16 +12357,442 @@ self.noteTalkContractChanged()
         return nil
     }
 
+    // MARK: - Slot-model save plumbing (C12, IF-21) [MED-SLOT]
+
+    /// Saves a medication through the slot-model API (design-l2 IF-21;
+    /// T-017, C12). ONE dose row is ONE entry (D1): N rows create N
+    /// single-slot entries, in row order — `slot` is singular on the
+    /// shipped model, and one row is one dose, so a twice-daily medicine
+    /// is two rows and two entries.
+    ///
+    /// The row shapes are all `.time` or all `.slot`; a mixed list is
+    /// refused (`settings.meds.slotRequired`), never resolved halfway.
+    /// The coordinator — NEVER the view — turns each row into the
+    /// entry's stored schedule:
+    ///
+    ///  - a `.slot` row resolves through the household mapping (C1) and
+    ///    the entry's `scheduleTimes` is written as the D2 resolved-time
+    ///    MIRROR. A slot the mapping cannot resolve (fail-closed
+    ///    `.indeterminate`) leaves the mirror EMPTY and does NOT fail the
+    ///    save: the entry lands with the family's slot, the arming path
+    ///    resolves fresh (IF-11) and surfaces the slot with the honest
+    ///    `medication_slot_unresolved` line (FR-MSR-018 — no guessed
+    ///    time, no invented fallback);
+    ///  - a `.time` row stores its stated components verbatim, the
+    ///    shipped shape (legacy rows stay first-class).
+    ///
+    /// The duplicate gate (m-2) is the SHIPPED expression — exact name
+    /// equality plus effective-time intersection — over EFFECTIVE times:
+    /// a slot row contributes its resolved mirror (so a mixed legacy/slot
+    /// pair compares resolved-vs-stored and still flags), an unresolvable
+    /// row contributes nothing (an empty mirror intersects nothing — a
+    /// corrupt mapping does NOT flag), and entries created earlier in the
+    /// same save participate (two rows on the same resolved time flag the
+    /// second). Nothing is persisted when the gate flags.
+    ///
+    /// `doseDescription` is composed once through `DoseLine` (C2, IF-5) —
+    /// the one documented composition of quantity and dose text — and
+    /// every entry persists through the shipped `loadSchedule` + re-arm
+    /// path, whose persist result is checked ([T-023]): a failed write
+    /// returns `settings.meds.saveFailed` with nothing armed, so the one
+    /// code path that can lose a schedule is also the one that says so.
+    /// The request's photo is written to the medication
+    /// `VisualAidStore` under EACH new entry's id, fail-soft, exactly the
+    /// shipped scan path's rule.
+    ///
+    /// `photoVerificationEnabled: false` at every NEW-entry construction
+    /// site: the dementia photo machinery is not part of this flow and a
+    /// save must not switch it on (FR-MSR-020).
+    ///
+    /// Returns nil on success, or a shipped catalog error KEY — the
+    /// editor's own error line: `settings.meds.nameRequired` (the
+    /// unchanged name gate), `settings.meds.timeRequired` (a save needs
+    /// at least one dose row), `settings.meds.slotRequired` (mixed row
+    /// shapes), `settings.meds.duplicateError` (the gate above, m-2) or
+    /// `settings.meds.saveFailed` ([T-023] the persist itself failed —
+    /// nothing was armed, and the form keeps everything the family
+    /// entered instead of resetting under a success it did not have).
+    func addMedication(_ request: MedicationSaveRequest) -> String? {
+        saveMedication(request, replacing: nil)
+    }
+
+    /// Updates an existing medication through the same request (IF-21;
+    /// the C8 edit-existing form itself is T-018).
+    ///
+    /// Row 1 edits the entry IN PLACE — same id, same history linkage,
+    /// visual aids kept, and every field the request does not speak
+    /// (windows, frequency, confirmation text, the stored dementia
+    /// toggle) carried over verbatim from the entry. Rows 2+ create NEW
+    /// entries with copies of the entry's visual aids (D1's conversion
+    /// shape: a converted legacy medicine with two times is two entries).
+    ///
+    /// The duplicate gate is the shipped one with the entry being edited
+    /// EXCLUDED from its own check (m-2): re-saving an entry at its own
+    /// effective time must not flag itself, while every other entry —
+    /// and every entry this save creates, and the entry's own NEW
+    /// effective time for the later rows — still participates. An id
+    /// that no longer resolves (deleted since the form opened) degrades
+    /// to the add path: the family's edit is saved rather than silently
+    /// dropped.
+    ///
+    /// Returns the same catalog error KEYs as `addMedication(_:)`.
+    func updateMedication(id: UUID, _ request: MedicationSaveRequest) -> String? {
+        saveMedication(request, replacing: id)
+    }
+
+    /// The gate + resolve + construct + persist core both entry points
+    /// share (IF-21). All state is read once per save — the mapping, the
+    /// schedule, the dose line — so every row of one save is judged and
+    /// written against one consistent snapshot.
+    private func saveMedication(_ request: MedicationSaveRequest,
+                                replacing entryId: UUID?) -> String? {
+        // The shipped gates, in the shipped order: a name, then at least
+        // one dose row, then the row shape (IF-21 refuses the mixed list).
+        let trimmed = request.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "settings.meds.nameRequired" }
+        guard !request.rows.isEmpty else { return "settings.meds.timeRequired" }
+        guard rowsShareOneShape(request.rows) else { return "settings.meds.slotRequired" }
+
+        // The mapping is read ONCE for the whole save, so every slot row
+        // of one request resolves against the same household record. The
+        // D2 effective times per row, in row order: a `.time` row's
+        // stated components, a `.slot` row's resolved mirror — EMPTY
+        // when the mapping cannot resolve it (fail-closed, never guessed,
+        // never defaulted).
+        let mapping = slotClockStore.load()
+        let rowTimes: [[DateComponents]] = request.rows.map { row in
+            switch row {
+            case .time(let components):
+                return [components]
+            case .slot(let slot):
+                switch mapping.resolve(slot: slot) {
+                case .success(let time):
+                    return [time.dateComponents]
+                case .failure:
+                    return []
+                }
+            }
+        }
+
+        // The entry an update edits in place. nil = a fresh add; an id
+        // that no longer resolves degrades to the add path below.
+        let replaced = entryId.flatMap { medicationScheduler.medicationEntry(for: $0) }
+
+        // The m-2 gate, the SHIPPED expression over effective times.
+        // `working` starts as the stored schedule WITHOUT the entry being
+        // edited (its own check must not flag the edit), and every entry
+        // this save creates — or, for an update, the entry's own
+        // replacement — is appended as it is made, so a collide-within-
+        // one-save pair flags the second row.
+        var working = medicationScheduler.medicationEntries()
+        working.removeAll { $0.id == entryId }
+
+        let doseLine = DoseLine.compose(quantity: request.quantity,
+                                        doseText: request.strength ?? "",
+                                        locale: activeLocale)
+        let purpose = Self.normalizedOptionalText(request.purpose)
+
+        var updated: MedicationEntry?
+        var created: [MedicationEntry] = []
+        for (index, row) in request.rows.enumerated() {
+            let times = rowTimes[index]
+            let duplicate = working.contains { entry in
+                entry.medicationName == trimmed
+                    && entry.scheduleTimes.contains { times.contains($0) }
+            }
+            guard !duplicate else { return "settings.meds.duplicateError" }
+
+            if index == 0, let existing = replaced {
+                let entry = editedEntry(existing, name: trimmed, doseLine: doseLine,
+                                        times: times, slot: slot(of: row), purpose: purpose,
+                                        quantity: request.quantity,
+                                        mealRelation: request.mealRelation,
+                                        visualAids: existing.visualAids
+                                            + savedAids(from: request.photo, for: existing.id))
+                updated = entry
+                working.append(entry)
+            } else {
+                let id = UUID()
+                let entry = newEntry(id: id, name: trimmed, doseLine: doseLine,
+                                     times: times, slot: slot(of: row), purpose: purpose,
+                                     quantity: request.quantity,
+                                     mealRelation: request.mealRelation,
+                                     visualAids: copiedAids(of: replaced, for: id)
+                                         + savedAids(from: request.photo, for: id))
+                created.append(entry)
+                working.append(entry)
+            }
+        }
+
+        // The shipped persist + re-arm tail, unchanged: the re-armed
+        // schedule is what every arming read resolves fresh (D2 — the
+        // mirror is a carrier, never an arming input).
+        var entries = medicationScheduler.medicationEntries()
+        if let updated {
+            entries.removeAll { $0.id == updated.id }
+            entries.append(updated)
+        }
+        entries.append(contentsOf: created)
+        // [T-023] Persist first, then arm — and say so honestly when the
+        // persist fails. The nil below means "saved"; the failure key is
+        // the editor's own error line, so a lost write can never read as
+        // a reset-to-success form (FR-MSR-022 / D2).
+        guard medicationScheduler.loadSchedule(entries: entries) else {
+            return "settings.meds.saveFailed"
+        }
+        medicationScheduler.scheduleAll()
+        calendarSync.syncNow(entries: routineScheduler.entries())
+        // [BOOT-REVIEW P1-7] A schedule edit changes today's dose total —
+        // one of the count's two inputs.
+        refreshActiveNotificationCount()
+        return nil
+    }
+
+    /// True when every row is a `.time` or every row is a `.slot` — the
+    /// IF-21 shape rule. An empty list is the other gate's business
+    /// (`settings.meds.timeRequired`); a mixed list is refused here and
+    /// never resolved row by row (one save states one model).
+    private func rowsShareOneShape(_ rows: [MedicationDoseRow]) -> Bool {
+        guard let first = rows.first else { return false }
+        switch first {
+        case .time:
+            return rows.allSatisfy { row in
+                if case .time = row { return true }
+                return false
+            }
+        case .slot:
+            return rows.allSatisfy { row in
+                if case .slot = row { return true }
+                return false
+            }
+        }
+    }
+
+    /// The slot a row contributes to its entry: the family's stated slot,
+    /// or nil for a `.time` row (the legacy shape — and the D2 mirror is
+    /// NOT a slot: a clock entry does not acquire one by being saved).
+    private func slot(of row: MedicationDoseRow) -> MedicationSlot? {
+        if case .slot(let slot) = row { return slot }
+        return nil
+    }
+
+    /// The aid records a request's photo produces for one entry — written
+    /// through the medication `VisualAidStore` under the entry's id
+    /// BEFORE the payload persists, exactly the shipped scan path's rule,
+    /// applied per entry (D1: each row is its own entry and each carries
+    /// the picture). Fail-soft: a photo that cannot be written leaves the
+    /// entry with no aid, never a failed medication save — a nicety,
+    /// never a failed medicine, the shipped stance.
+    private func savedAids(from photo: UIImage?, for entryId: UUID) -> [VisualAid] {
+        guard let photo, let aid = medicationVisualAidStore.save(photo, for: entryId) else {
+            return []
+        }
+        return [aid]
+    }
+
+    /// Copies a source entry's visual aids to a NEW entry's id — the D1
+    /// conversion shape for an update's rows 2+ ("new entries with copied
+    /// visual aids"). A copy is the BYTES re-saved under the new entry's
+    /// folder: aid files resolve per entry id, so copying the bare file
+    /// names without their files would leave a claim no surface could
+    /// render. One unreadable aid is skipped — fail-soft, like every
+    /// other visual-aid write; the new entry simply carries one fewer
+    /// photo. nil source (a fresh add) copies nothing.
+    private func copiedAids(of source: MedicationEntry?, for entryId: UUID) -> [VisualAid] {
+        guard let source else { return [] }
+        return source.visualAids.compactMap { aid in
+            guard let image = medicationVisualAidStore.load(aid, for: source.id) else {
+                return nil
+            }
+            return medicationVisualAidStore.save(image, for: entryId, caption: aid.caption)
+        }
+    }
+
+    /// A NEW entry for one save row. Every construction site of this path
+    /// passes `photoVerificationEnabled: false` (the shipped default; the
+    /// dementia toggle is not part of this form and a save must not turn
+    /// it on — FR-MSR-020).
+    private func newEntry(id: UUID, name: String, doseLine: String,
+                          times: [DateComponents], slot: MedicationSlot?, purpose: String?,
+                          quantity: MedicationQuantity?, mealRelation: MealRelation?,
+                          visualAids: [VisualAid]) -> MedicationEntry {
+        MedicationEntry(
+            id: id,
+            userProfileId: UUID(),
+            medicationName: name,
+            doseDescription: doseLine,
+            scheduleTimes: times,
+            frequency: .daily,
+            ackWindowMinutes: 5,
+            maxRefireCount: 5,
+            escalationWindowMinutes: 60,
+            doubleDoseWindowHours: 4,
+            photoVerificationEnabled: false,
+            confirmationDescription: nil,
+            purpose: purpose,
+            visualAids: visualAids,
+            quantity: quantity,
+            slot: slot,
+            mealRelation: mealRelation
+        )
+    }
+
+    /// The in-place edit for an update's row 1: same id, and EVERY field
+    /// the request does not speak is carried over verbatim from the entry
+    /// being edited — windows, frequency, confirmation text, visual aids.
+    /// The dementia toggle rides the same carry-over deliberately:
+    /// `photoVerificationEnabled` is the caregiver's stored setting on
+    /// THIS entry (FR-MSR-020: the dementia photo machinery is untouched
+    /// by this feature), and an edit must never silently disable it. (The
+    /// model's own `withScheduleTimes` trap, C6, is why each carried
+    /// field is named explicitly here: when `MedicationEntry` gains a
+    /// field, this constructor must carry it.)
+    private func editedEntry(_ existing: MedicationEntry, name: String, doseLine: String,
+                             times: [DateComponents], slot: MedicationSlot?, purpose: String?,
+                             quantity: MedicationQuantity?, mealRelation: MealRelation?,
+                             visualAids: [VisualAid]) -> MedicationEntry {
+        MedicationEntry(
+            id: existing.id,
+            userProfileId: existing.userProfileId,
+            medicationName: name,
+            doseDescription: doseLine,
+            scheduleTimes: times,
+            frequency: existing.frequency,
+            ackWindowMinutes: existing.ackWindowMinutes,
+            maxRefireCount: existing.maxRefireCount,
+            escalationWindowMinutes: existing.escalationWindowMinutes,
+            doubleDoseWindowHours: existing.doubleDoseWindowHours,
+            photoVerificationEnabled: existing.photoVerificationEnabled,
+            confirmationDescription: existing.confirmationDescription,
+            purpose: purpose,
+            visualAids: visualAids,
+            quantity: quantity,
+            slot: slot,
+            mealRelation: mealRelation
+        )
+    }
+
     /// Removes a medication entry and re-arms (spec §4.4.3).
-    func removeMedication(id: UUID) {
+    ///
+    /// [T-023] Removal is persisted FIRST and the cascade runs only over
+    /// a stored removal: on a failed write the entry stays exactly as it
+    /// was — same schedule, same armed reminders, same photos, same
+    /// evidence — and the caller sees `false` (the manage list surfaces
+    /// the shipped failure line rather than a row that silently snaps
+    /// back). Deleting an entry's photos behind a schedule that still
+    /// exists would be half-applied state, so nothing downstream of the
+    /// guard runs on failure.
+    @discardableResult
+    func removeMedication(id: UUID) -> Bool {
         var entries = medicationScheduler.medicationEntries()
         entries.removeAll { $0.id == id }
-        medicationScheduler.loadSchedule(entries: entries)
+        guard medicationScheduler.loadSchedule(entries: entries) else { return false }
         medicationScheduler.scheduleAll()
+        // The dose's photos go WITH the medication (medication-visual-aids
+        // task, 2026-09-16): a picture of a box the household no longer
+        // takes must not outlive the entry, and nothing else can find
+        // those files afterwards. Same rule the routine scheduler applies
+        // when a reminder is removed.
+        medicationVisualAidStore.deleteAll(for: id)
+        // The dose EVIDENCE goes with it too (T-017, FR-MSR-013's remove
+        // cascade): a photo that documented an intake of a medicine the
+        // household no longer takes must not outlive the entry. Fail-soft
+        // — `deleteAll` is a Void that no-ops on an absent folder, so
+        // removing a medication can never fail in the family's face over
+        // a photo (and never did have evidence to begin with).
+        medicationEvidenceStore.deleteAll(for: id)
         calendarSync.syncNow(entries: routineScheduler.entries())
         // [BOOT-REVIEW P1-7] Removing an entry can empty today's doses —
         // the row hides itself, so the count must follow.
         refreshActiveNotificationCount()
+        return true
+    }
+
+    // MARK: - Medicine times: the household mapping (IF-9/IF-10) [MED-SLOT]
+
+    /// The current household mapping, read through the coordinator's OWN
+    /// store — the T-018 deviation-3 follow-up this unit closes. The
+    /// "Medicine times" card seeds its three rows from here instead of
+    /// composing a second store over the storage seam, so the view reads
+    /// the ONE record through the ONE seam the save gate and the arming
+    /// path already read, and can never hold a divergent clock. A read,
+    /// never a cache: `load()` is the store's non-throwing read (defaults
+    /// on missing/corrupt), and nothing here writes.
+    func currentMedicationSlotClock() -> MedicationSlotClock {
+        slotClockStore.load()
+    }
+
+    /// Saves the household "Medicine times" mapping (IF-9; T-020) — the
+    /// ONE write path of the slot clock (the settings card is its caller).
+    ///
+    /// The order is the contract (persist-before-effect, design-l2 IF-9):
+    ///
+    ///  1. **Validate first** (IF-2): a mapping with any indeterminate
+    ///     slot is refused BEFORE anything is written or re-armed; the
+    ///     result names the offending slot and carries the failure line.
+    ///     The stored mapping is untouched;
+    ///  2. **Persist through the C1 store** (IF-4): a refused or failed
+    ///     write leaves the stored record unchanged and runs NO re-arm —
+    ///     nothing may arm against a mapping that was not stored;
+    ///  3. **Re-arm** (`rearmForSlotClockChange`, IF-12; T-010): the
+    ///     report's four facts travel back verbatim (m-1) and the result's
+    ///     lines follow the report, never a claim beside it.
+    ///
+    /// Main thread, like every scheduler call beside it. The result is
+    /// the complete honest outcome — no fact here is inferred later at
+    /// the view.
+    func saveMedicationSlotClock(_ clock: MedicationSlotClock) -> SlotClockSaveResult {
+        // 1. Validation before persist (IF-2). The offending slot is the
+        //    one fact the family-facing line does not carry; it rides the
+        //    result for the caller and the tests.
+        if case .failure(.indeterminate(let slot)) = MedicationSlotClock.validate(clock) {
+            return SlotClockSaveResult(persisted: false,
+                                       invalidSlot: slot,
+                                       rearmedCount: 0,
+                                       keptLiveCount: 0,
+                                       unresolvedSlots: [],
+                                       persistenceFailed: false,
+                                       lineKeys: [SlotClockSaveResult.saveFailedLineKey])
+        }
+        // 2. Persist (IF-4). The store validates again as its own
+        //    backstop; a refused or failed write is reported honestly and
+        //    re-arms nothing.
+        guard case .success = slotClockStore.save(clock) else {
+            return SlotClockSaveResult(persisted: false,
+                                       invalidSlot: nil,
+                                       rearmedCount: 0,
+                                       keptLiveCount: 0,
+                                       unresolvedSlots: [],
+                                       persistenceFailed: true,
+                                       lineKeys: [SlotClockSaveResult.saveFailedLineKey])
+        }
+        // 3. Re-arm under the mapping just stored (IF-12) and surface its
+        //    facts verbatim (m-1).
+        let report = medicationScheduler.rearmForSlotClockChange()
+        return SlotClockSaveResult(persisted: true,
+                                   invalidSlot: nil,
+                                   rearmedCount: report.rearmedCount,
+                                   keptLiveCount: report.keptLiveCount,
+                                   unresolvedSlots: report.unresolvedSlots,
+                                   persistenceFailed: report.persistenceFailed,
+                                   lineKeys: SlotClockSaveResult.lineKeys(for: report))
+    }
+
+    /// Surfaces the one-shot retime note (IF-10, m-5; T-020) — set from
+    /// the scheduler's refusal hook through a main hop. Shown until
+    /// dismissed ONCE; a household that dismissed it never sees it again,
+    /// whatever refuses retimes afterwards.
+    func surfaceMedicationRetimeNote() {
+        guard !medicationRetimeNoteDismissed else { return }
+        medicationRetimeNotePresented = true
+    }
+
+    /// Dismisses the retime note for good: the dismissal persists (the
+    /// property's own didSet) and the note is never shown again (IF-10).
+    /// Idempotent — dismissing twice writes the same value.
+    func dismissMedicationRetimeNote() {
+        medicationRetimeNotePresented = false
+        medicationRetimeNoteDismissed = true
     }
 
     // MARK: - Doctor's appointments (medical task, 2026-09-07)
@@ -6857,6 +12834,124 @@ self.noteTalkContractChanged()
         appointmentSmsNoteDismissed = true
     }
 
+    // MARK: - Free-form events (rich-events task, 2026-09-17; design §2)
+
+    /// The household's own events — the ones that are neither a routine
+    /// nor a medication ("डाक्टर भेट, मंगलबार ११ बजे").
+    ///
+    /// The app owns no event store for these: a free-form event IS a
+    /// native `EKEvent` in the default calendar (design §1 decision 4),
+    /// so the family's Calendar app, the app's own import, the reminder
+    /// that fires and the Google bridge all see the same event, and a
+    /// family edit is simply an edit. `FreeFormEventService` is the thin
+    /// read/write face over EventKit plus the encrypted side index that
+    /// holds the ONE field the platform cannot (`EventExtrasStore` →
+    /// `EventExtras.photoFilename`).
+    ///
+    /// LAZY like the calendar services around it: constructing it opens
+    /// an `EKEventStore` and reads one encrypted payload, so it belongs
+    /// off the launch path. Nothing here requests permission — the Events
+    /// screens ask through the same EventKit prompt every other calendar
+    /// surface uses, and a denial reads as an empty list, never a crash.
+    private(set) lazy var freeFormEventService = FreeFormEventService(
+        extras: EventExtrasStore(storage: storage),
+        observability: observabilityBus
+    )
+
+    /// The Events leaf's list: the app's own events, soonest first.
+    /// Loaded from the leaf's `.task`, never its `body` — every row is an
+    /// EventKit fetch (see the service's note).
+    func freeFormEvents() -> [FreeFormEvent] {
+        freeFormEventService.upcoming()
+    }
+
+    /// One event for the detail screen, or nil when it is gone (deleted
+    /// here, or by the family in their own Calendar app).
+    func freeFormEvent(id: String) -> FreeFormEvent? {
+        freeFormEventService.event(withId: id)
+    }
+
+    /// The event's photo, or nil when it has none. Read through the
+    /// service, so the screens never touch a file store themselves.
+    func freeFormEventPhoto(forEventId eventId: String) -> UIImage? {
+        freeFormEventService.photo(forEventId: eventId)
+    }
+
+    /// Saves the Events form — creating when `eventId` is nil — and tells
+    /// the Google bridge, answering the native identifier. nil means
+    /// nothing was written, which is the form's cue to stay open with its
+    /// draft rather than claim a save that did not happen.
+    ///
+    /// Create AND edit both go through `eventCreated`, and that is the
+    /// whole edit-reconcile (design §3): the call rebuilds the twin's
+    /// draft from the event's CURRENT values and the service's
+    /// fingerprint diff decides whether anything changed — so an edit
+    /// that alters nothing sends no request, and one that moves the time
+    /// queues exactly one PUT.
+    @discardableResult
+    func saveFreeFormEvent(_ form: FreeFormEventForm,
+                           editing eventId: String? = nil) -> String? {
+        guard let savedId = freeFormEventService.save(form, editing: eventId) else {
+            return nil
+        }
+        // Read back through the service rather than the form: what was
+        // actually written is the honest thing to share (the gateway
+        // normalizes blank notes and address to nil on the way in).
+        if let saved = freeFormEventService.event(withId: savedId) {
+            calendarShareService.eventCreated(localEventId: savedId,
+                                              title: saved.title,
+                                              startDate: saved.startDate,
+                                              durationMinutes: saved.durationMinutes,
+                                              location: saved.address)
+        }
+        return savedId
+    }
+
+    /// Deletes the event natively, then tells the Google bridge — so the
+    /// family's copy does not keep an appointment the elder removed. The
+    /// bridge's tombstone is gated on sharing being ON (`canShare`), so
+    /// no queue row accumulates while the family has not made a decision;
+    /// `cleanupVanishedEvents()` queues the same tombstone on the first
+    /// pass after they switch it on.
+    ///
+    /// Answers whether the native event was actually removed — a false
+    /// still means "gone from this app" (the index row and the photo go
+    /// either way), so the UI treats both as deleted.
+    @discardableResult
+    func deleteFreeFormEvent(eventId: String) -> Bool {
+        let removed = freeFormEventService.delete(eventId: eventId)
+        calendarShareService.eventDeleted(localEventId: eventId)
+        return removed
+    }
+
+    /// A sheet-presents-this request for the Event detail screen, in the
+    /// `pendingPluginPresentation` shape so ContentView stays the only
+    /// place that knows how a screen is put on top.
+    struct EventDetailPresentation: Identifiable, Equatable {
+        let id = UUID()
+        let eventId: String
+    }
+    @Published var pendingEventDetail: EventDetailPresentation?
+
+    /// Opens the detail screen for `eventId` — the reminder notification's
+    /// **Open** action (design §4), and the same screen the Events list
+    /// opens for an edit, so an event never has two faces.
+    ///
+    /// The id is carried through, not a copy of the event: the calendar
+    /// may have changed since the notification was armed, and the detail
+    /// screen re-reads from the service when it appears.
+    func openEventDetail(eventId: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.pendingEventDetail = EventDetailPresentation(eventId: eventId)
+        }
+    }
+
+    /// The detail sheet's close button — clears the request so the sheet
+    /// cannot reappear on the next body pass.
+    func dismissEventDetail() {
+        pendingEventDetail = nil
+    }
+
     // MARK: - Native Calendar mirroring (v2 design §4.1, 2026-09-06)
 
     /// EventKit mirror of the unified routine schedule — the app remains
@@ -6867,6 +12962,70 @@ self.noteTalkContractChanged()
     /// natively — the parallel tag-store approach from the same merge
     /// was dropped in favor of it).
     private(set) lazy var calendarSync = CalendarSyncService(observabilityBus: observabilityBus)
+
+    // MARK: - Calendar & family sharing (2026-09-16)
+
+    /// The Google Calendar bridge (design §4.1). LAZY like `calendarSync`
+    /// above: constructing it reads a bundle key, an `EKEventStore` and
+    /// three local stores and touches no permission and no network. Its
+    /// first real work is `syncCalendarShare()` in
+    /// `composePostFirstFrame` — post-first-frame, so nothing here delays
+    /// the first paint.
+    ///
+    /// A missing OAuth client id is NOT a construction failure. The
+    /// session reports `isConfigured == false`, the service reports
+    /// `.notConfigured`, and the Settings card says so in words — which
+    /// is the state the app ships in until the family provides a client
+    /// (design §0). Graceful degradation here is the difference between
+    /// "sharing is not set up" and a crash on launch.
+    ///
+    /// No `objectWillChange` forward is installed for it, unlike the
+    /// eager nested services above: the Settings card observes the
+    /// service directly (`@ObservedObject`), and no coordinator state is
+    /// derived from it, so a forward would only invalidate every
+    /// coordinator observer for nothing — and installing one would force
+    /// this lazy service to exist at boot.
+    private(set) lazy var calendarShareService = CalendarShareService(
+        session: calendarShareSession,
+        gateway: calendarShareGateway,
+        store: LocalGoogleEventMappingStore(storage: storage),
+        consent: CalendarShareConsent(),
+        notifySettings: caregiverNotifySettings,
+        observabilityBus: observabilityBus,
+        contactsProvider: { [weak self] in self?.familyContacts ?? [] }
+    )
+
+    /// The Google account session — separate from the service so sign-out
+    /// is one call on one object, and so the presenter (a UI concern the
+    /// service must not know about) lives with the composition root that
+    /// can actually reach the window.
+    private(set) lazy var calendarShareSession: GoogleAccountSession = {
+        let session = GoogleAccountSession(observabilityBus: observabilityBus)
+        // Resolved at PRESENT time, never captured: the window scene does
+        // not exist when the composition root runs, and a controller
+        // captured then would be a detached one.
+        session.presenter = { [weak self] in self?.topPresentingViewController() }
+        return session
+    }()
+
+    /// The Calendar v3 / People v1 REST client over the session above.
+    private(set) lazy var calendarShareGateway = GoogleCalendarGateway(
+        session: calendarShareSession,
+        observabilityBus: observabilityBus
+    )
+
+    /// The topmost view controller Google's sign-in sheet presents from.
+    /// Walks past anything already presented so the sheet never lands
+    /// under an open modal. Returns nil before the scene exists, which
+    /// the session reports as a failed sign-in rather than a crash.
+    private func topPresentingViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        guard let window = scene?.windows.first(where: \.isKeyWindow) ?? scene?.windows.first,
+              var top = window.rootViewController else { return nil }
+        while let presented = top.presentedViewController { top = presented }
+        return top
+    }
 
     /// Read-only native Calendar/Reminders integration (2026-09-07): the
     /// REVERSE direction of `calendarSync` — native events/reminders
@@ -6996,6 +13155,27 @@ self.noteTalkContractChanged()
         refreshActiveNotificationCount()
     }
 
+    /// Applies family edits to the dose mirror — the
+    /// `onMedicationNativeChanges` relay (rich-events task, 2026-09-17).
+    /// The scheduler's mutator writes through `loadSchedule`, which
+    /// re-persists the entry, re-arms every dose and fires
+    /// `onScheduleChanged`: the Google twins follow from there, and the
+    /// mirror re-syncs over the new times, so a retime converges in one
+    /// pass instead of two apps disagreeing until the next launch.
+    private func applyMedicationCalendarMutations(
+        _ mutations: [CalendarSyncService.MedicationCalendarMutation]) {
+        for mutation in mutations {
+            switch mutation {
+            case .setScheduleTimes(let entryId, let times):
+                medicationScheduler.setScheduleTimes(times, entryId: entryId)
+            }
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
+        }
+        refreshActiveNotificationCount()
+    }
+
     // MARK: - Read-only external Calendar/Reminders surface (2026-09-07)
 
     /// Settings toggle handler for the native-item import: ON asks for
@@ -7081,10 +13261,106 @@ self.noteTalkContractChanged()
             // fire ran, and any refresh racing the task above is
             // superseded by the task's post-fire read.
             refreshTodayBriefing()
+            // [CALENDAR-SHARE] (2026-09-16) Same activation, the share
+            // layer's pass: reconcile both schedules, drain the queue,
+            // pull invitations the family sent. Runs here rather than on
+            // its own timer because a foreground return is the only
+            // moment the elder's device is reliably online.
+            syncCalendarShare()
+            // [FAMILY-CONTACTS-UNIFY T-156] (2026-10-12) Identity refresh
+            // (design-l2 §4.5): one wholesale photo-cache invalidation +
+            // epoch bump (an EXTERNAL photo edit in Contacts.app
+            // surfaces here and only here), then the ordinary link
+            // refresh against the live address book. Both steps are
+            // non-blocking; `.background` is untouched.
+            refreshContactsIdentity()
         case .background:
+            // [MODEL-WARDEN] Step 0/1 — the scene-phase hook. A backgrounded
+            // app is judged against a much smaller jetsam limit and its
+            // in-flight work may never be resumed, so a permission to
+            // allocate must not outlive the foreground: every uncommitted
+            // reservation is withdrawn here (a committed one is resident,
+            // and residency is the eviction policy's business, not the
+            // scene's). The next activation re-issues the load through the
+            // same gate, which is why this is a cancellation and not a
+            // state change.
+            ModelLifecycleManager.shared
+                .cancelPendingReservations(reason: .backgrounded)
             externalCalendar.submitBackgroundRefresh()
         default:
             break
+        }
+    }
+
+    // MARK: - Calendar & family sharing (2026-09-16)
+
+    /// The share layer's launch/foreground pass.
+    ///
+    /// The reconciling is here, not only on the schedulers' change
+    /// seams, for one reason: those seams fire on CHANGES, so a schedule
+    /// that already existed before the family connected Google would
+    /// never be shared at all. Reconcile is fingerprint-diffed and
+    /// enqueue is the only thing that can produce work, so an unchanged
+    /// schedule costs a few local reads and zero requests — which is
+    /// what makes it safe to run on every activation.
+    ///
+    /// [GOOGLE-RESTORE] (2026-09-17) The SDK's stored session is restored
+    /// FIRST, and the pass is SEQUENCED behind it rather than raced with
+    /// it. Every gate in the pass reads `session.isSignedIn`, which is
+    /// nil in a cold process until a restore has run — so a pass that
+    /// went first would judge a connected household signed out,
+    /// reconcile nothing and drain nothing, and the family's already
+    /// queued events would wait for the next activation (the
+    /// silent-skip this change exists to remove). The restore is
+    /// idempotent, so the cost of this on every activation is one
+    /// in-memory check.
+    func syncCalendarShare() {
+        let share = calendarShareService
+        share.locale = activeLocale
+        // Idempotent assignment: the closure is the same every pass, and
+        // setting it here (rather than at construction) is what keeps
+        // the service lazy until the first pass.
+        share.onLocalEventImported = { [weak self] in
+            // An accepted invitation now sits in the native calendar;
+            // the existing import is what turns it into an armed
+            // reminder that fires and alerts a caregiver.
+            Task { await self?.externalCalendar.rescan() }
+        }
+        Task { [weak self] in
+            // Nothing may present from here: a restore takes no
+            // presenter and shows no sheet, which is what makes it safe
+            // at launch — before the window the sign-in flow needs
+            // exists.
+            await share.restoreSession()
+            await MainActor.run { self?.runCalendarSharePass() }
+        }
+    }
+
+    /// The reconcile/flush half of `syncCalendarShare()`, run once the
+    /// session restore has landed.
+    ///
+    /// Main-confined: it reads the coordinator's published schedules and
+    /// the free-form event index, both of which are only ever mutated on
+    /// the main queue.
+    private func runCalendarSharePass() {
+        let share = calendarShareService
+        share.reconcileMedication(medicationScheduler.medicationEntries())
+        share.reconcileRoutines(routineScheduler.entries())
+        // Swept BEFORE the flush, so a twin whose local event the elder
+        // deleted natively in the same window is deleted from the family
+        // calendar by this pass rather than the next one.
+        share.cleanupVanishedEvents()
+        // And the free-form events' CURRENT native state, for the same
+        // window and the same reason: an event retimed by the family in
+        // their own Calendar app is an edit to the one native event this
+        // app reads back, so it belongs in this pass rather than only at
+        // the form's save seam. The key set is the side INDEX (not the
+        // ledger) because the ledger also holds invitations this device
+        // imported, whose twin belongs to the organizer.
+        share.reconcileFreeFormEvents(trackedEventIds: freeFormEventService.trackedEventIds)
+        Task {
+            await share.flushPending()
+            await share.syncInbound()
         }
     }
 
@@ -7102,6 +13378,15 @@ self.noteTalkContractChanged()
     }
 
     // MARK: - Routine reminder surface (v2 pivot Phase 1)
+
+    /// A routine reminder that just fired WITH photos, presented full
+    /// screen for the person the reminder is for (photo-visual-aids task,
+    /// 2026-09-16). Set by `RoutineVisualAidFireHandler` — the app's only
+    /// in-app firing surface for reminders, since routine reminders
+    /// otherwise deliver as text-only notification banners. Nil (the
+    /// normal state) means nothing to present; entries without photos
+    /// never set it, so their behaviour is byte-for-byte unchanged.
+    @Published private(set) var firedRoutineVisualAids: FiredRoutineVisualAids?
 
     /// All configured routine entries (seeded categories + voice-created)
     /// — the Reminders leaf's manage list.
@@ -7124,6 +13409,555 @@ self.noteTalkContractChanged()
         // [BOOT-REVIEW P1-7] Routine mutations land in the same reminder
         // surface the derived count reads.
         refreshActiveNotificationCount()
+    }
+
+    /// Replaces a routine's photos (the photo editor's save path).
+    /// Files are already written by `VisualAidStore` before this is
+    /// called; this persists the model payload and re-arms, so a photo
+    /// edit and a time edit take the same path. Re-arming matters here:
+    /// the fired notification carries the first photo, so a photo added
+    /// to an already-armed reminder only reaches the banner through the
+    /// reschedule.
+    func setRoutineVisualAids(_ entryId: UUID, aids: [VisualAid]) {
+        routineScheduler.setVisualAids(aids, entryId: entryId)
+    }
+
+    /// The presentation is dismissed (Close button, or the cover's own
+    /// swipe) — clearing the item is what actually dismisses it.
+    func dismissFiredRoutineVisualAids() {
+        firedRoutineVisualAids = nil
+    }
+
+    /// `RoutineVisualAidFireHandler`'s presentation sink, on the main
+    /// queue. Reads the title through `activeLocale` at fire time — the
+    /// language the app is in NOW, not the one it was in when the
+    /// notification was armed.
+    private func presentRoutineVisualAids(for entry: RoutineEntry) {
+        firedRoutineVisualAids = FiredRoutineVisualAids(
+            entryId: entry.id,
+            title: entry.displayTitle(locale: activeLocale),
+            aids: entry.visualAids
+        )
+    }
+
+    // MARK: - Medication dose surface (medication-visual-aids, 2026-09-16)
+
+    /// A medication reminder that just fired WITH photos, presented full
+    /// screen for the person the dose is for. Set by
+    /// `MedicationVisualAidFireHandler` — nil (the normal state) means
+    /// nothing to present, and entries without photos never set it, so
+    /// their delivery is exactly what it was before this feature.
+    @Published private(set) var firedMedicationVisualAids: MedicationVisualAidsPresentation?
+
+    /// Replaces a medication's photos (the photo editor's save path).
+    /// Files are already written by `VisualAidStore` before this is
+    /// called; this persists the entry payload only — a photo edit is not
+    /// a schedule edit, so no alarm is re-armed and no escalation state is
+    /// touched (see `MedicationScheduler.setVisualAids`; the dose screen
+    /// reads the entry at fire time, so the photo is live either way).
+    func setMedicationVisualAids(_ entryId: UUID, aids: [VisualAid]) {
+        medicationScheduler.setVisualAids(aids, entryId: entryId)
+    }
+
+    // MARK: - Medication label scan ([MED-OCR], 2026-09-18)
+
+    /// The label-scan seam: the same system camera the voice launcher
+    /// presents, plus the on-device OCR pass over the shot label. A stored,
+    /// assignable property so a test can put a scripted scanner in its place;
+    /// production is built once in `init` (see `makeMedicationLabelScanner`).
+    var medicationLabelScanner: MedicationLabelScanner?
+
+    /// Runs one scan for the Settings medication editor, handing the result
+    /// back on the main queue. The scanner speaks its own outcomes — the
+    /// read line, the "could not read it" line and the camera guidance — so
+    /// this method adds no claim of its own.
+    func scanMedicationLabel(completion: @escaping (MedicationLabelScanResult) -> Void) {
+        guard let medicationLabelScanner else {
+            // No scanner installed: the same honest answer the camera path
+            // gives when its presenter is missing — nothing can be captured
+            // here — rather than a button that does nothing.
+            speak(text: L10n.str("apps.camera.unavailable", locale: activeLocale))
+            completion(.unavailable(.cannotPresent))
+            return
+        }
+        medicationLabelScanner.start(completion: completion)
+    }
+
+    /// Builds the production scanner: the system picker behind
+    /// `CameraCapturePresenting`, the on-device recognizer, and this
+    /// coordinator's speech + observability channels.
+    private func makeMedicationLabelScanner() -> MedicationLabelScanner {
+        MedicationLabelScanner(
+            presenter: PhotoCameraPresenter(),
+            recognizer: VisionMedicationLabelRecognizer(),
+            locale: { [weak self] in
+                self?.activeLocale ?? Locale(identifier: "ne-NP")
+            },
+            channels: MedicationLabelScanner.Channels(
+                speak: { [weak self] text in
+                    self?.speak(text: text)
+                },
+                emit: { [weak self] eventType, outcome in
+                    self?.emitMedicationScan(eventType: eventType, outcome: outcome)
+                }
+            )
+        )
+    }
+
+    /// The scan's ledger row. Metadata-free: the outcome names the PATH
+    /// (scanned / noText / ocrFailed / cancelled / a camera reason), never
+    /// the medicine and never a word of what was read (constitution C9).
+    private func emitMedicationScan(eventType: String, outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "medication_label_scan",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+
+    // MARK: - Medication purpose lookup ([MED-PURPOSE-LOOKUP], 2026-09-18)
+
+    /// The web-lookup seam. Production is a `SearchTool` round-trip over
+    /// `URLSession`; nil would mean no lookup stack is installed and the
+    /// honest answer is the "web search is not set up" line.
+    var medicationPurposeLookup: MedicationPurposeLookingUp?
+
+    /// Asks the web what `name` is FOR and hands the outcome back on the
+    /// main queue.
+    ///
+    /// The FOUND text is the caller's to put in the purpose field — showing
+    /// it is the answer, and speaking a snippet into a settings screen the
+    /// family is reading would be noise. Every OTHER outcome is spoken here,
+    /// because "nothing happened" is exactly the state the family must not
+    /// be left in: an unconfigured tool, an empty result set and a failed
+    /// round-trip each get their own honest sentence.
+    func lookupMedicationPurpose(name: String,
+                                 completion: @escaping (MedicationPurposeLookupOutcome) -> Void) {
+        guard let medicationPurposeLookup else {
+            speak(key: "meds.lookup.notConfigured")
+            emitMedicationLookup(.notConfigured)
+            completion(.notConfigured)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let outcome = await medicationPurposeLookup.lookupPurpose(forMedicine: name)
+            guard let self else { return }
+            switch outcome {
+            case .found:
+                // The filled field is the answer; nothing to say.
+                break
+            case .notConfigured:
+                self.speak(key: "meds.lookup.notConfigured")
+            case .capReached:
+                // The SAME line the voice search speaks when the shared
+                // daily budget is spent — it is the same budget.
+                self.speak(key: "search.capReached")
+            case .noResults:
+                self.speak(key: "meds.lookup.noResults")
+            case .unavailable:
+                self.speak(key: "meds.lookup.failed")
+            }
+            self.emitMedicationLookup(outcome)
+            completion(outcome)
+        }
+    }
+
+    /// The lookup's ledger row: the outcome only — never the medicine name
+    /// and never a word of the summary (C9).
+    private func emitMedicationLookup(_ outcome: MedicationPurposeLookupOutcome) {
+        let name: String
+        switch outcome {
+        case .found: name = "found"
+        case .notConfigured: name = "notConfigured"
+        case .capReached: name = "capReached"
+        case .noResults: name = "noResults"
+        case .unavailable: name = "unavailable"
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "medication_purpose_lookup",
+            eventType: "medication_purpose_lookup",
+            durationMs: nil,
+            outcome: name,
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+
+    /// Builds the production lookup: the credential PAIR gate and the locale
+    /// resolved at call time, over `URLSession` — the same transport, the
+    /// same credentials and the same quota the voice search uses, because it
+    /// is the same search.
+    private func makeMedicationPurposeLookup() -> MedicationPurposeLookupService {
+        MedicationPurposeLookupService(
+            credentials: { [weak self] in
+                guard let self else { return nil }
+                let store = self.searchConfigStore
+                // Exactly `fireWebSearchIfDue`'s gate: search is family
+                // opt-in, and both halves of the credential pair must exist —
+                // a key without an engine is unconfigured, not
+                // half-configured.
+                guard store.isConfigured,
+                      let apiKey = store.apiKey,
+                      let engineID = store.searchEngineID else { return nil }
+                return MedicationPurposeLookupService.Credentials(
+                    apiKey: apiKey, searchEngineID: engineID)
+            },
+            transport: URLSession.shared,
+            locale: { [weak self] in
+                self?.activeLocale ?? Locale(identifier: "ne-NP")
+            }
+        )
+    }
+
+    /// The presentation is dismissed (Close button, or the cover's own
+    /// swipe) — clearing the item is what actually dismisses it.
+    func dismissFiredMedicationVisualAids() {
+        firedMedicationVisualAids = nil
+    }
+
+    /// The elder tapped "I took it" on the fired-dose screen. Runs the same
+    /// dose path as the Meds leaf row (`confirmMedicationDose`: the FR-D01
+    /// challenge gate first, then the baseline acknowledgement) and clears
+    /// the presentation: when a challenge was issued the Home chips own the
+    /// follow-up, and when the dose was recorded the Home outcome caption
+    /// behind this screen is what the elder should now see.
+    func confirmFiredMedicationDose(entryId: UUID) {
+        confirmMedicationDose(entryId: entryId)
+        firedMedicationVisualAids = nil
+    }
+
+    /// The elder's "I took it" from an elder-facing dose surface — the
+    /// Meds leaf's dose row and the fired-dose screen share this one path,
+    /// so the safety gate cannot drift between them. Returns true when the
+    /// dementia-aware confirmation challenge was issued (the caller's
+    /// surface gets out of the way; the Home chips own the answer).
+    @discardableResult
+    func confirmMedicationDose(entryId: UUID) -> Bool {
+        if startVoiceAckConfirmation(for: entryId) != nil {
+            return true
+        }
+        handleMedicationAcknowledgement(entryId: entryId)
+        speak(key: "router.confirmationYes")
+        return false
+    }
+
+    /// `MedicationVisualAidFireHandler`'s presentation sink, on the main
+    /// queue. Snapshots the name and dose line at FIRE time — the entry
+    /// may be edited (or deleted) while the screen is up, and the dose the
+    /// elder is being shown must be the one that fired.
+    private func presentMedicationVisualAids(for entry: MedicationEntry) {
+        firedMedicationVisualAids = MedicationVisualAidsPresentation(entry: entry)
+    }
+
+    // MARK: - The voice photo query ([MED-PHOTO], 2026-09-17)
+
+    /// The live medication schedule as the voice photo query sees it — the
+    /// `VoiceCommandCoordinating` seam the router reads ONCE per turn: the
+    /// keyword rule builds its vocabulary from these entries (name +
+    /// purpose keys per `MedicationVoiceVocabulary`), and the matched key
+    /// is resolved back against the same list. Nothing is cached: a
+    /// medicine added or deleted a moment ago is already in (or gone from)
+    /// the answer.
+    var medicationVoiceEntries: [MedicationEntry] { medicationScheduler.medicationEntries() }
+
+    /// The elder asked what a medicine looks like ("रक्तचापको औषधि कस्तो
+    /// छ?"). Presents the same full-screen photo surface a fired dose uses
+    /// — in its IDENTIFY mode, so nothing about a dose appears: no "time to
+    /// take your medicine", no "I took it". Nothing is due; a dose prompt
+    /// with an active acknowledge button at a moment when no dose was
+    /// scheduled is exactly how a dose gets recorded that was never taken
+    /// (the double-dose detector would then block the real one).
+    ///
+    /// Returns the line to speak: the photo's caption ("रक्तचापको औषधि —
+    /// अम्लोडिपिन", the same line the fired dose's screen shows), the
+    /// honest "no photo yet" line when the entry carries none, and nil when
+    /// the entry is gone (nothing to show, nothing to claim).
+    func showMedicationPhoto(entryId: UUID) -> String? {
+        guard let entry = medicationEntry(for: entryId) else {
+            emitMedicationPhotoQuery(outcome: "entryGone", entryId: nil)
+            return nil
+        }
+        let presentation = MedicationVisualAidsPresentation(entry: entry, mode: .identify)
+        guard !entry.visualAids.isEmpty else {
+            // The honest line, never a blank screen with a promise: the
+            // family can add the photo, and this says where.
+            emitMedicationPhotoQuery(outcome: "noPhoto", entryId: entry.id)
+            return L10n.str("meds.photoMissing", locale: activeLocale)
+        }
+        firedMedicationVisualAids = presentation
+        emitMedicationPhotoQuery(outcome: "presented", entryId: entry.id)
+        return presentation.caption(locale: activeLocale)
+    }
+
+    /// Observability for the voice photo query — the outcome and, when an
+    /// entry resolved, its HASH. Never the medicine's name, its purpose or
+    /// the transcript: the medication privacy rule every other event in
+    /// this file follows (`setVisualAids` logs an `entry_id_hash` for the
+    /// same reason). The hash is what lets a "she asked and got the honest
+    /// no-photo line three times this week" observation be made at all.
+    private func emitMedicationPhotoQuery(outcome: String, entryId: UUID?) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "medication_photo",
+            eventType: "medication_photo_query",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: entryId.map { ["entry_id_hash": IdHashing.shortHash(of: $0)] } ?? [:]
+        ))
+    }
+
+    // MARK: - Medication evidence capture and the "Taken today" read (IF-14, IF-24; T-021)
+
+    /// The camera seam an evidence capture presents through. The SAME
+    /// `PhotoCameraPresenter` plumbing the label scanner and the voice
+    /// launcher use (one camera system camera sheet, permissions asked at
+    /// point of use, the shipped availability copy) — a stored, assignable
+    /// property so a test can put a scripted presenter in its place;
+    /// production is built once in `init` (the `medicationLabelScanner`
+    /// precedent). Nil would mean no camera stack is installed: the honest
+    /// "cannot open the camera" answer instead of a button that does
+    /// nothing (the `scanMedicationLabel` precedent).
+    var evidenceCameraPresenter: CameraCapturePresenting?
+
+    /// The store work's serial home (IF-14): every evidence file write and
+    /// cleanup for the WHOLE app runs here, one at a time, so two captures
+    /// can never interleave their compression/writes even if they are
+    /// triggered from different threads. The scheduler half of a capture
+    /// (`holdPendingEvidence` / `attachEvidence`) runs on the caller's
+    /// thread — in every real flow the main thread, which is the
+    /// scheduler's own discipline.
+    private let evidenceStoreQueue = DispatchQueue(label: "medication.evidence.store")
+
+    /// One capture at a time (IF-14). True from the moment a camera session
+    /// begins until its outcome is delivered: a second request while a
+    /// session is up is answered immediately (nil — no capture was made)
+    /// and never stacked into a second sheet, because the presenter has one
+    /// completion slot and overwriting it is how a capture goes missing
+    /// (the `MedicationLabelScanner.isRunning` contract, verbatim).
+    private var isEvidenceCaptureActive = false
+
+    /// Bumped whenever the on-device evidence for a recorded dose changes
+    /// in a way a visible surface must re-draw (a record-surface attach).
+    /// The rows themselves are read fresh (`takenDosesToday()`); this is
+    /// only the refresh seam, so no view has to assume it will be redrawn
+    /// because some OTHER published value moved.
+    @Published private(set) var medicationEvidenceRevision = 0
+
+    /// One photo captured as evidence for a dose (IF-14) — the whole
+    /// plumbing seam between the camera and the record.
+    ///
+    /// Main-thread entry. The OUTCOME carries exactly what happened:
+    ///
+    ///  - `.pendingDose(entryId)`: the record does not exist yet — the log
+    ///    id is MINTED HERE, at capture time (R-1(a)), the store names the
+    ///    file by it (`<logId>.jpg`), and the hold (IF-15) binds the
+    ///    finalize that writes the record to that same identity. A hold
+    ///    whose chain already finalized is refused by the scheduler (R-3)
+    ///    and its file deleted there — reported honestly as
+    ///    `.declinedNoContext`.
+    ///  - `.recordedDose(logId)`: the record EXISTS (the record surface
+    ///    only ever offers confirmed records); the capture stores and
+    ///    attaches to that log and nothing else. An unknown log id is
+    ///    declined BEFORE anything is stored, so the misuse guard holds
+    ///    with no orphan file either: a photo never creates a record.
+    ///
+    /// Threading, in the frozen signature's terms: the store work runs on
+    /// the serial store queue (never on the caller/main thread), and the
+    /// outcome is applied on the caller's thread — main for every real
+    /// flow — where the scheduler's hold/attach also run. The synchronous
+    /// signature is the design's; the caller waits for the store step, and
+    /// the WORK is off main as C5 requires.
+    ///
+    /// Nothing here touches the network and nothing references the
+    /// dementia photo-verification machinery (FR-MSR-020, NFR-MSR-003): the
+    /// photo is stored on-device through `MedicationEvidenceStore` and
+    /// stops there.
+    func captureEvidence(image: UIImage, context: EvidenceCaptureContext) -> EvidenceCaptureOutcome {
+        switch context {
+        case .pendingDose(let entryId):
+            let logId = UUID()  // R-1(a): the capture-time identity
+            switch storeEvidence(image: image, logId: logId, entryId: entryId) {
+            case .failure(let error):
+                emitEvidenceCapture(outcome: "failed", entryId: entryId,
+                                    errorCode: Self.evidenceErrorName(error))
+                return .failed(error)
+            case .success(let fileName):
+                let held = medicationScheduler.holdPendingEvidence(
+                    logId: logId, fileName: fileName, for: entryId)
+                if held {
+                    emitEvidenceCapture(outcome: "held", entryId: entryId)
+                    return .held(entryId: entryId)
+                }
+                // R-3: the chain finalized before the store completed —
+                // the scheduler already deleted the just-stored file.
+                // Nothing to hold, nothing to claim.
+                emitEvidenceCapture(outcome: "declinedNoContext", entryId: entryId)
+                return .declinedNoContext
+            }
+
+        case .recordedDose(let logId):
+            guard let log = medicationScheduler.takenLogs(on: Date())
+                .first(where: { $0.id == logId }) else {
+                // No such confirmed record: decline before storing — a
+                // photo alone must not leave anything behind, and it
+                // must never create the record it came to decorate.
+                emitEvidenceCapture(outcome: "declinedNoContext", entryId: nil)
+                return .declinedNoContext
+            }
+            let entryId = log.medicationEntryId
+            switch storeEvidence(image: image, logId: logId, entryId: entryId) {
+            case .failure(let error):
+                emitEvidenceCapture(outcome: "failed", entryId: entryId,
+                                    errorCode: Self.evidenceErrorName(error))
+                return .failed(error)
+            case .success(let fileName):
+                switch medicationScheduler.attachEvidence(fileName: fileName, toLog: logId) {
+                case .success:
+                    medicationEvidenceRevision += 1
+                    emitEvidenceCapture(outcome: "attached", entryId: entryId)
+                    return .attached(logId: logId)
+                case .failure:
+                    // The attach never landed, so the just-stored file can
+                    // never be claimed: idempotent cleanup here (the
+                    // scheduler's failure arm deletes it too — absent =
+                    // success either way), and the honest typed failure
+                    // outward. Never a claim (FR-MSR-018).
+                    deleteEvidence(fileName: fileName, entryId: entryId)
+                    emitEvidenceCapture(outcome: "failed", entryId: entryId,
+                                        errorCode: "storageUnavailable")
+                    return .failed(.storageUnavailable)
+                }
+            }
+        }
+    }
+
+    /// One capture from the camera to the stored outcome — the flow the
+    /// capture surfaces call. Presents the system camera (the shipped
+    /// `CameraCapturePresenting` seam, permissions asked at point of use,
+    /// the shared availability copy), runs `captureEvidence` on the shot,
+    /// speaks what happened, and hands `onOutcome` exactly one answer on
+    /// the main thread: the outcome, or nil when no capture was made
+    /// (cancelled, camera unavailable, or a session already running).
+    ///
+    /// D11: before the camera opens, the announce names the medication the
+    /// capture is FOR — the caller passes the bound presentation's own
+    /// name, so the line can never name a different one.
+    ///
+    /// Single-flight: a request that arrives while a session is up is
+    /// answered with nil and nothing else happens — no second sheet, no
+    /// second listen for the first session's completion.
+    func captureMedicationEvidence(medicationName: String,
+                                   context: EvidenceCaptureContext,
+                                   onOutcome: @escaping (EvidenceCaptureOutcome?) -> Void) {
+        guard !isEvidenceCaptureActive else {
+            onOutcome(nil)
+            return
+        }
+        guard let presenter = evidenceCameraPresenter,
+              presenter.availability == .available else {
+            // Never present a sheet that cannot appear: the honest
+            // guidance is the whole answer (the scanner's rule, and its
+            // shared copy table).
+            speak(key: CameraCaptureFlow.unavailableKey(for: evidenceCameraPresenter?.availability
+                                                        ?? .cannotPresent))
+            onOutcome(nil)
+            return
+        }
+        isEvidenceCaptureActive = true
+        // D11: the announce names the bound medication, from the ONE
+        // composition the presentation suite pins.
+        speak(text: MedicationVisualAidsPresentation.evidenceAnnounceLine(
+            medicationName: medicationName, locale: activeLocale))
+        presenter.presentCamera { [weak self] cameraOutcome in
+            guard let self else { return }
+            // The presenter's contract is a main-thread completion (the
+            // shipped `PhotoCameraPresenter` hops; scripted doubles call
+            // synchronously), the same contract the label scanner runs on.
+            self.isEvidenceCaptureActive = false
+            switch cameraOutcome {
+            case .cancelled:
+                // One word — never silence mid-conversation (the scanner's
+                // shipped line).
+                self.speak(key: "apps.camera.cancelled")
+                onOutcome(nil)
+            case .unavailable(let reason):
+                self.speak(key: CameraCaptureFlow.unavailableKey(for: reason))
+                onOutcome(nil)
+            case .captured(let image):
+                let outcome = self.captureEvidence(image: image, context: context)
+                if let key = MedicationVisualAidsPresentation.evidenceOutcomeKey(for: outcome) {
+                    self.speak(key: key)
+                }
+                onOutcome(outcome)
+            }
+        }
+    }
+
+    /// Today's CONFIRMED intakes (IF-24) — the "Taken today" record
+    /// surface's one read. Main thread, pure read: no disk IO, no state
+    /// change, and this seam never writes a record (it exists to show the
+    /// day, not to make one).
+    ///
+    /// The day key is `Calendar.current` over `scheduledAt` (the
+    /// scheduler seam's documented choice, matching
+    /// `MedicalView.todaysReminders`); rows exist only for records whose
+    /// ENTRY still exists — a removed medication's history must not draw
+    /// a row with no name — and only for `.acknowledged` records: a photo
+    /// or a double-dose attempt can never make a row appear.
+    func takenDosesToday() -> [TakenDoseRow] {
+        medicationScheduler.takenLogs(on: Date())
+            .compactMap { log in
+                guard let entry = medicationEntry(for: log.medicationEntryId) else {
+                    return nil
+                }
+                return TakenDoseRow(id: log.id,
+                                    entryId: log.medicationEntryId,
+                                    medicationName: entry.medicationName,
+                                    scheduledAt: log.scheduledAt,
+                                    hasEvidence: log.evidencePhotoFileName != nil)
+            }
+            .sorted { $0.scheduledAt < $1.scheduledAt }
+    }
+
+    /// The store half of one capture, on the serial store queue.
+    private func storeEvidence(image: UIImage, logId: UUID,
+                               entryId: UUID) -> Result<String, EvidenceStoreError> {
+        evidenceStoreQueue.sync {
+            medicationEvidenceStore.store(image: image, for: logId, entryId: entryId)
+        }
+    }
+
+    /// The cleanup half (never-claim paths), on the same serial queue.
+    private func deleteEvidence(fileName: String, entryId: UUID) {
+        _ = evidenceStoreQueue.sync {
+            medicationEvidenceStore.delete(fileName: fileName, entryId: entryId)
+        }
+    }
+
+    /// The capture's ledger row: outcome classification, the entry-id hash
+    /// where an entry is known, and — for a store failure — the typed
+    /// error's name. No image, no file name, no medication name, no text
+    /// (C9; design-l2 §5.2).
+    private func emitEvidenceCapture(outcome: String, entryId: UUID?, errorCode: String? = nil) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "medication_evidence",
+            eventType: "medication_evidence_captured",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: errorCode,
+            metadata: entryId.map { ["entry_id_hash": IdHashing.shortHash(of: $0)] } ?? [:]
+        ))
+    }
+
+    private static func evidenceErrorName(_ error: EvidenceStoreError) -> String {
+        switch error {
+        case .compressionFailed: return "compressionFailed"
+        case .storageUnavailable: return "storageUnavailable"
+        case .removeFailed: return "removeFailed"
+        }
     }
 
     /// Today's medication reminders as localized "name — time" lines for
@@ -7180,11 +14014,31 @@ self.noteTalkContractChanged()
         guard let prompt = medicationScheduler.startConfirmationChallenge(for: entryId) else {
             return nil
         }
+        // [APP-LAUNCHER F1] The dose challenge takes the window — and the
+        // question it displaces is dropped BEFORE the challenge is armed,
+        // so the two can never be pended at once (the invariant
+        // `ConfirmationArbitration.owner` encodes).
+        dropLaunchSupersededByMedicationChallenge()
         DispatchQueue.main.async { [weak self] in
             self?.pendingConfirmationEntryId = entryId
-            self?.voiceSession.transition(to: .awaitingConfirmation)
+            self?.openConfirmationWindow()
         }
         return prompt
+    }
+
+    /// [APP-LAUNCHER F1] Drops a pended launch because a dose challenge is
+    /// taking the confirmation window. The launch is recorded as the
+    /// unanswered verdict it now is (`timeout` — the question expired
+    /// without an answer) and announced on the bus; nothing is opened. The
+    /// alternative — leaving it pended — is the bug this fixes: the next
+    /// "हो" would then be spent on the launch, and the FR-D03 double-dose
+    /// gate would never run on a dose the elder had just been asked about.
+    private func dropLaunchSupersededByMedicationChallenge() {
+        guard let launch = pendingAppLaunch else { return }
+        pendingAppLaunch = nil
+        appendLaunchCapture(launch, .timeout)
+        emitAppLaunch(eventType: "launch_superseded",
+                      outcome: "\(launch.appID):supersededByMedicationChallenge")
     }
 
     // MARK: - [INTENTLOG-CAPTURE] Flywheel capture (T-054 precursor)
@@ -7212,6 +14066,28 @@ self.noteTalkContractChanged()
                                              utteranceHandle: handle, at: now))
     }
 
+    /// [APP-UI-CONFIRM] (2026-10-14) The launch branch of the flywheel
+    /// seam: records a pending launch's verdict — but ONLY when the
+    /// question was asked of an UTTERANCE (`PendingAppLaunch.Origin.voice`).
+    /// A tile-asked question records nothing: the elder's finger proposed
+    /// it, no interpreter ran, and a `launcher.open` sample from a tap
+    /// would fabricate accept-band signal about a model that never saw
+    /// the input. Every launch capture site funnels through here — the
+    /// F6 tile-resolution pair, the confirmed executor, the
+    /// medication-challenge drop, the 45 s timeout and the spoken no —
+    /// so the gate exists once and cannot be forgotten at a seventh
+    /// site.
+    ///
+    /// It also fixes a latent mislabel while it is here: the timeout site
+    /// used to record through the DEFAULT path ("model") even for a
+    /// keyword-asked launch, contradicting `capturePath`'s F10 contract.
+    /// The helper always passes `launch.capturePath`.
+    private func appendLaunchCapture(_ launch: PendingAppLaunch,
+                                     _ verdict: IntentLogStore.Verdict) {
+        guard launch.recordsFlywheelCapture else { return }
+        appendCapture(launch.capture, verdict, path: launch.capturePath)
+    }
+
     /// A confirm-tier confirmation whose 45 s window expired (C12). The
     /// action stays pended exactly as before — this records the verdict,
     /// it does not change what the flow does with it. The medication
@@ -7222,6 +14098,11 @@ self.noteTalkContractChanged()
             appendCapture(action.capture, .timeout)
         } else if let event = pendingCalendarEvent {
             appendCapture(event.capture, .timeout)
+        } else if let launch = pendingAppLaunch {
+            // [APP-UI-CONFIRM] Through the gated seam — a tile-asked
+            // question records nothing, and the voice-asked one records
+            // under its OWN path ("keyword"/"model"), not the default.
+            appendLaunchCapture(launch, .timeout)
         }
     }
 
@@ -7308,7 +14189,62 @@ self.noteTalkContractChanged()
             }
             return
         }
+        // App-launch confirmations (voice app launcher, 2026-09-16): the
+        // same additive shape as the call and calendar-event blocks above
+        // — checked and returned early, so the medication path below stays
+        // untouched for every confirmation EXCEPT a simultaneous dose
+        // challenge, which outranks the launch (F1). A YES hands the pended app to the shared launch
+        // executor (which speaks the surface that actually appeared); a NO
+        // speaks the honest cancellation, because an elder who answers
+        // "होइन" must hear that they were heard. Nothing is opened on a no.
+        //
+        // [APP-LAUNCHER F1] ONLY when the launch owns this answer. A
+        // medication dose-challenge that is pended at the same time takes
+        // precedence (`ConfirmationArbitration`), so the block falls
+        // through to the medication path below — which is where the FR-D03
+        // double-dose check lives. This early return used to swallow it:
+        // the launch was answered, the launch was opened, and the dose the
+        // elder had just confirmed was never recorded.
+        let confirmationOwner = ConfirmationArbitration.owner(
+            pendingAppLaunch: pendingAppLaunch?.appID,
+            hasMedicationChallenge: pendingConfirmationEntryId != nil)
+        if confirmationOwner == .appLaunch, let launch = pendingAppLaunch {
+            pendingAppLaunch = nil
+            if case .yes = response {
+                emitAppLaunch(eventType: "launch_confirmed", outcome: "\(launch.appID):confirmed")
+                executePendingAppLaunch(launch)
+            } else {
+                // [INTENTLOG-CAPTURE] Same negative-half capture as the
+                // call path above — a declined launch is flywheel signal
+                // when the elder SPOKE it. [APP-UI-CONFIRM] A tile-asked
+                // question's "no" records nothing (the gated seam): the
+                // finger declined, no interpreter to correct.
+                appendLaunchCapture(launch, .denied)
+                emitAppLaunch(eventType: "launch_cancelled", outcome: "\(launch.appID):cancelled")
+                speak(text: L10n.str("launcher.cancelled", locale: activeLocale))
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.voiceSession.transition(to: .idle)
+            }
+            return
+        }
+        // [CNR T-177] (2026-10-14) The cloud-chat consent question's
+        // spoken answer — additive block, the LAST of the flowed
+        // confirmations: every block above (navigation, call, calendar,
+        // app launch) has already returned early, so none of them can be
+        // stolen by this one, and the medication challenge below keeps
+        // its claim on a simultaneous yes/no the same way it outranks
+        // the launch (`ConfirmationArbitration`'s rule): the question
+        // outlives a missed answer, a dose does not.
+        if pendingCloudChatConsentCapture, pendingConfirmationEntryId == nil {
+            switch response {
+            case .yes: answerCloudChatConsent(granted: true)
+            case .no: answerCloudChatConsent(granted: false)
+            }
+            return
+        }
         guard let entryId = pendingConfirmationEntryId else { return }
+
         _ = medicationScheduler.acknowledgeWithConfirmation(
             entryId: entryId,
             at: Date(),
@@ -7336,10 +14272,20 @@ self.noteTalkContractChanged()
     /// [DIRECTIONS] (2026-09-07) The navigation ambiguity walk pends the
     /// same way — while candidates remain, the router's yes/no parsing
     /// stays in force.
+    /// [MED-ACK-WALK] (T-013; design-l2 §C4) The clarification walk rides
+    /// this same OR-fold — while it is open, the router's confirmation
+    /// region owns the follow-up, and the walk's end (explicit, expiry or
+    /// a vanished candidate) flips this flag with it.
     var isAwaitingConfirmation: Bool {
         pendingConfirmationEntryId != nil || pendingCallAction != nil || pendingRephrase != nil
             || pendingCalendarEvent != nil
             || !pendingNavigationWalk.isEmpty
+            || pendingAppLaunch != nil
+            // [CNR T-177] The cloud-chat consent question's spoken answer
+            // rides the same window (the router's confirmation path owns
+            // the yes/no while it is pended).
+            || pendingCloudChatConsentCapture
+            || pendingAckClarification != nil
     }
 
     /// Used by `CommandRouter` to identify what "I took my medication" refers
@@ -7349,6 +14295,317 @@ self.noteTalkContractChanged()
             .sorted { $0.scheduledAt < $1.scheduledAt }
             .first?
             .medicationEntryId
+    }
+
+    // MARK: - [MED-ACK-WALK] Clarification walk (C4; IF-7 + IF-8)
+
+    /// The walk's state — non-nil while a clarification is in flight
+    /// (design-l2 §C4). `@Published private(set)` like the design pins:
+    /// the router (T-014) consults `isAwaitingAckClarification` and the
+    /// response op; only this file's walk ops ever write it. Main-confined.
+    @Published private(set) var pendingAckClarification: AckClarificationState?
+
+    /// The walk's expiry block, armed once at `beginAckClarification` and
+    /// cancelled by every end. A cancelled `DispatchWorkItem` still
+    /// executes its block when already dispatched, so the block itself
+    /// re-checks the deadline it was armed for against the live state —
+    /// a superseded or already-ended walk's timer can never end a newer
+    /// walk (the `warmWatchdogWork` pattern).
+    private var ackClarifyExpiryWork: DispatchWorkItem?
+
+    /// Is a clarification walk open right now (the router's T-014 consult).
+    var isAwaitingAckClarification: Bool { pendingAckClarification != nil }
+
+    /// IF-7 — the pending reminders as resolver candidates, in the FIXED
+    /// order (`scheduledAt`, canonical medication name, entry id — never
+    /// firing order, pending order or recency; the same order
+    /// `MedicationAckResolver` produces for its own outputs).
+    ///
+    /// A pure in-memory read (the `oldestPendingReminderEntryId`
+    /// precedent): one candidate per pending reminder, no error path —
+    /// the empty case IS the empty array, which the resolver reports as
+    /// `.nothingPending`. The candidate facts come from the live schedule
+    /// exactly as the resolver documents them (IF-6): `fired` is
+    /// `lastFiredAt != nil`, `slot` is the entry's slot (nil for legacy
+    /// entries — they never match a slot word), `voiceKeys` is
+    /// `MedicationVoiceVocabulary.voiceKeys(for:)` (one vocabulary, the
+    /// same the resolver matches with), and `medicationName` is the
+    /// canonical-name tiebreak and the sanctioned copy's noun.
+    ///
+    /// A reminder whose entry is gone (defensive: `loadSchedule` rebuilds
+    /// reminders with their entries, so this is a torn state, not a flow)
+    /// still yields a candidate — parity with
+    /// `oldestPendingReminderEntryId`, no silent filtering — with no
+    /// voice keys and an empty name; it can only ever be settled by a
+    /// yes/no, never by a name match.
+    func medicationAckCandidates() -> [MedicationAckCandidate] {
+        var entriesById: [UUID: MedicationEntry] = [:]
+        for entry in medicationScheduler.medicationEntries() {
+            entriesById[entry.id] = entry
+        }
+        let candidates = medicationScheduler.pendingReminders.map { reminder -> MedicationAckCandidate in
+            let entry = entriesById[reminder.medicationEntryId]
+            return MedicationAckCandidate(
+                entryId: reminder.medicationEntryId,
+                scheduledAt: reminder.scheduledAt,
+                fired: reminder.lastFiredAt != nil,
+                slot: entry?.slot,
+                voiceKeys: entry.map { MedicationVoiceVocabulary.voiceKeys(for: $0) } ?? [],
+                medicationName: entry?.medicationName ?? "")
+        }
+        return Self.ackCandidateFixedOrder(candidates)
+    }
+
+    /// The fixed ordering, derived from candidate facts alone — the same
+    /// comparison `MedicationAckResolver.fixedOrder` performs (its
+    /// comparator is private; this is the coordinator's half of the ONE
+    /// ordering rule, and this suite pins the two against each other):
+    /// `scheduledAt`, then the canonical medication name, then the entry
+    /// id — all three compared, so equal-time, equal-name candidates
+    /// still order totally and stably across calls.
+    private static func ackCandidateFixedOrder(_ candidates: [MedicationAckCandidate]) -> [MedicationAckCandidate] {
+        candidates.sorted { left, right in
+            if left.scheduledAt != right.scheduledAt {
+                return left.scheduledAt < right.scheduledAt
+            }
+            let leftName = MedicationVoiceVocabulary.canonical(left.medicationName)
+            let rightName = MedicationVoiceVocabulary.canonical(right.medicationName)
+            if leftName != rightName {
+                return leftName < rightName
+            }
+            return left.entryId.uuidString < right.entryId.uuidString
+        }
+    }
+
+    /// IF-8 — begin the walk: speaks the first sanctioned question
+    /// (design-l2 C4, "Entry"). Only the candidates that are still pending
+    /// at this instant enter the walk; no candidates, no walk (the
+    /// resolver's `.nothingPending` already covers that upstream — nothing
+    /// here to ask about, nothing spoken).
+    ///
+    /// Defensive guards, both structural halves of design contracts:
+    /// - A live medication challenge outranks the walk (C4 invariant: walk
+    ///   and challenge are mutually exclusive; an acknowledgement arriving
+    ///   while the challenge is open is intercepted by the shipped block
+    ///   and re-prompted, never walked). If one IS open, begin refuses —
+    ///   the challenge never loses its window to a walk.
+    /// - A prior walk is cancelled first (design-l2 §IF-8: "begin cancels
+    ///   any prior walk"; a barge-in re-entry is the only way to arrive
+    ///   with one open, and the router ends the walk before the new
+    ///   acknowledgement is handled — so this path is defense, and it
+    ///   reports the replaced walk honestly as `.bargedIn`).
+    ///
+    /// The response window comes from `ackClarificationConfig` (the T-006
+    /// named home) — never a literal.
+    func beginAckClarification(candidates: [MedicationAckCandidate]) {
+        guard pendingConfirmationEntryId == nil else { return }
+        if pendingAckClarification != nil {
+            endAckClarification(reason: .bargedIn)
+        }
+        let live = Set(medicationAckCandidates().map(\.entryId))
+        let ordered = Self.ackCandidateFixedOrder(candidates.filter { live.contains($0.entryId) })
+        guard !ordered.isEmpty else { return }
+        let deadline = Date().addingTimeInterval(ackClarificationConfig.responseWindowSeconds)
+        let state = AckClarificationState(candidates: ordered,
+                                          cursor: 0,
+                                          pairAsked: ordered.count == 2,
+                                          deadline: deadline)
+        pendingAckClarification = state
+        armAckClarificationExpiry(deadline: deadline)
+        speakAckClarificationQuestion(for: state)
+    }
+
+    /// The design-l2 §IF-8 spelling of the same operation — one
+    /// implementation, two spec-pinned labels (`orderedCandidates:` is
+    /// the design's name for the fixed-order array; the unit spec's is
+    /// `candidates:`).
+    func beginAckClarification(orderedCandidates: [MedicationAckCandidate]) {
+        beginAckClarification(candidates: orderedCandidates)
+    }
+
+    /// IF-8 — one spoken answer. The router's SHIPPED yes/no classifiers
+    /// pass their verdicts in (`isYes` / `isNo`); this op mints no
+    /// vocabulary and re-parses nothing. What happens, in order:
+    ///
+    /// 1. The walk's candidate set is revalidated against the live
+    ///    pending set: if any candidate the walk asks about is no longer
+    ///    pending, the walk's question has expired — it ends (`.expired`,
+    ///    honest ended line, nothing recorded) rather than resolving
+    ///    against a reminder that no longer exists.
+    /// 2. A response naming exactly one WALK candidate (name-key
+    ///    containment over the same vocabulary as C3, at any cursor)
+    ///    resolves to it. Two or more named in one breath refuse to
+    ///    guess: the current question is asked again. Zero named falls
+    ///    through — the elder may be answering the question, not naming
+    ///    a medication.
+    /// 3. `isYes` on the PAIR question falls to the single form at
+    ///    cursor 0 (`.narrowed`); `isYes` on the single form resolves to
+    ///    the cursor's candidate.
+    /// 4. `isNo`: with three or more candidates the cursor advances and
+    ///    the next candidate is asked (m-4); at the last candidate — and
+    ///    for one or two candidates at any form — the walk ends
+    ///    (`.rejected`) with nothing recorded.
+    /// 5. Neither: the current sanctioned question is asked again
+    ///    (`.unanswered`) — the walk stays open until an answer or its
+    ///    window closes.
+    ///
+    /// Resolution NEVER records: the walk ends silently (`.resolved`, no
+    /// ended line, no ended event — resolved ends through the resolved
+    /// path) and returns the entry id; the caller continues the shipped
+    /// safety sequence.
+    @discardableResult
+    func ackClarificationResponse(raw: String, isYes: Bool, isNo: Bool) -> AckClarifyOutcome {
+        guard let state = pendingAckClarification else {
+            // No walk open: nothing was being asked, nothing is re-asked.
+            return .unanswered
+        }
+        let live = Set(medicationAckCandidates().map(\.entryId))
+        guard state.candidates.allSatisfy({ live.contains($0.entryId) }) else {
+            endAckClarification(reason: .expired)
+            return .ended(reason: .expired)
+        }
+
+        // 2. The elder said which medication (the resolver's matching
+        //    rule: canonical keys, Character-cluster containment).
+        let text = MedicationVoiceVocabulary.canonical(raw)
+        let named = state.candidates.filter { candidate in
+            candidate.voiceKeys.contains { key in
+                MedicationAckVocabulary.containsKey(key, inCanonical: text)
+            }
+        }
+        if named.count == 1 {
+            return resolveAckClarification(to: named[0].entryId)
+        }
+        if named.count > 1 {
+            speakAckClarificationQuestion(for: state)
+            return .unanswered
+        }
+
+        // 3./4. The answer to the question: yes or no.
+        if isYes {
+            if state.pairAsked && state.candidates.count == 2 {
+                // "Yes" to "X or Y?" narrows to the single form at
+                // cursor 0 — `state` is a value copy, so re-pend the
+                // narrowed shape before asking.
+                var narrowed = state
+                narrowed.pairAsked = false
+                pendingAckClarification = narrowed
+                speakAckClarificationQuestion(for: narrowed)
+                return .narrowed
+            }
+            let index = min(max(state.cursor, 0), state.candidates.count - 1)
+            return resolveAckClarification(to: state.candidates[index].entryId)
+        }
+        if isNo {
+            if state.candidates.count >= 3 && state.cursor + 1 < state.candidates.count {
+                var advanced = state
+                advanced.cursor += 1
+                pendingAckClarification = advanced
+                speakAckClarificationQuestion(for: advanced)
+                return .advanced
+            }
+            endAckClarification(reason: .rejected)
+            return .ended(reason: .rejected)
+        }
+
+        // 5. Neither a candidate's name nor a yes/no: ask the sanctioned
+        //    question again — never a leading question, never a hint about
+        //    which answer resolves.
+        speakAckClarificationQuestion(for: state)
+        return .unanswered
+    }
+
+    /// The T-013 spelling: an utterance with no classifier verdicts (its
+    /// name-containment half only). The router's call is the flagged form
+    /// above — a yes/no word arriving through here is deliberately NOT
+    /// interpreted, because this file mints no second yes/no vocabulary.
+    @discardableResult
+    func ackClarificationResponse(utterance: String) -> AckClarifyOutcome {
+        ackClarificationResponse(raw: utterance, isYes: false, isNo: false)
+    }
+
+    /// IF-8 — end the walk. Idempotent (a nil state is a no-op, design-l2
+    /// §IF-8), cancels the expiry block, clears the state (so
+    /// `isAwaitingConfirmation` flips with it) and reports the end
+    /// honestly:
+    /// - `medication_ack_clarify_ended` for every end EXCEPT `.resolved`
+    ///   (resolved ends through the resolved path — design-l2 §5.2),
+    ///   PII-free: outcome only, empty metadata, never a name.
+    /// - The ended line (`meds.ack.clarifyEnded`) only for `.rejected`
+    ///   and `.expired` — the ends with no voice of their own. `.denied`
+    ///   falls through to the shipped refusal ladder and `.bargedIn` to
+    ///   the acknowledgement path; both speak next, and a line here would
+    ///   talk over them.
+    func endAckClarification(reason: AckClarifyEndReason) {
+        guard pendingAckClarification != nil else { return }
+        ackClarifyExpiryWork?.cancel()
+        ackClarifyExpiryWork = nil
+        pendingAckClarification = nil
+        if reason == .rejected || reason == .expired {
+            speak(key: "meds.ack.clarifyEnded")
+        }
+        if reason != .resolved {
+            observabilityBus.emit(ObservabilityEvent(
+                component: "medication_ack",
+                eventType: "medication_ack_clarify_ended",
+                durationMs: nil,
+                outcome: reason.observationOutcome,
+                errorCode: nil,
+                metadata: [:]))
+        }
+    }
+
+    /// The design-l2 §IF-8 positional spelling of the same operation —
+    /// one implementation, two spec-pinned labels.
+    func endAckClarification(_ reason: AckClarifyEndReason) {
+        endAckClarification(reason: reason)
+    }
+
+    /// The sanctioned question for a walk state — the ONE home of the
+    /// walk's copy: the pair form for an open pair question, the single
+    /// form at the cursor otherwise. Internal, not private, so the suite
+    /// can pin the exact forms (bare tests have no speaker); the ROUTER
+    /// never calls this — it consults the walk, never rebuilds its
+    /// questions. Empty candidates have no question: "" (nothing to say).
+    func ackClarificationQuestion(for state: AckClarificationState) -> String {
+        guard !state.candidates.isEmpty else { return "" }
+        if state.pairAsked && state.candidates.count == 2 {
+            return L10n.fmt("meds.ack.clarifyPair", locale: activeLocale,
+                            state.candidates[0].medicationName,
+                            state.candidates[1].medicationName)
+        }
+        let index = min(max(state.cursor, 0), state.candidates.count - 1)
+        return L10n.fmt("meds.ack.clarifyOne", locale: activeLocale,
+                        state.candidates[index].medicationName)
+    }
+
+    /// Speak the current sanctioned question (a no-op without a speaker —
+    /// the walk's state still advances; speech is presentation).
+    private func speakAckClarificationQuestion(for state: AckClarificationState) {
+        speak(text: ackClarificationQuestion(for: state))
+    }
+
+    /// The walk's one resolution seam: ends the walk silently and hands
+    /// the id back. NOTHING here records, challenges or speaks — the
+    /// caller continues the shipped safety sequence (T-014's contract).
+    private func resolveAckClarification(to entryId: UUID) -> AckClarifyOutcome {
+        endAckClarification(reason: .resolved)
+        return .resolved(entryId: entryId)
+    }
+
+    /// Arms the expiry block for `deadline` (see `ackClarifyExpiryWork`).
+    private func armAckClarificationExpiry(deadline: Date) {
+        ackClarifyExpiryWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self,
+                  let current = self.pendingAckClarification,
+                  current.deadline == deadline else { return }
+            self.endAckClarification(reason: .expired)
+        }
+        ackClarifyExpiryWork = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + ackClarificationConfig.responseWindowSeconds,
+            execute: work)
     }
 
     /// Creates a reminder entry through the scheduler storage (spec §5.1,
@@ -7371,7 +14628,16 @@ self.noteTalkContractChanged()
             confirmationDescription: nil
         )
         entries.append(entry)
-        medicationScheduler.loadSchedule(entries: entries)
+        // [T-023] The voice path persists through the same gate, and says
+        // so in the same words: a failed write surfaces the shipped
+        // failure line and offers NO undo — there is nothing to undo,
+        // and a "reminder set" card over a lost entry is the exact lie
+        // this unit removes.
+        guard medicationScheduler.loadSchedule(entries: entries) else {
+            setOutcome(icon: "exclamationmark.triangle.fill",
+                       text: L10n.str("settings.meds.saveFailed", locale: activeLocale))
+            return
+        }
         medicationScheduler.scheduleAll()
         // Genuinely reversible — `removeMedication` already exists and
         // re-arms alarms, so the outcome card's undo link does real work
@@ -7428,6 +14694,18 @@ self.noteTalkContractChanged()
             }
             Task {
                 await self.externalCalendar.rescan()
+                // [CALENDAR-SHARE] (2026-09-16) The share layer's INTERVAL
+                // pass (design §2.5: "foreground + interval"). It rides
+                // this handler rather than a task identifier of its own:
+                // the identifier set is fixed in Info.plist, the cadence
+                // wanted is exactly this one, and this handler is already
+                // awake with the app free to use the network.
+                //
+                // The hop is not cosmetic — the handler fires on a
+                // background queue and the share service is main-confined
+                // (it reads schedulers and settings and, on an import,
+                // kicks the rescan that touches the UI's published state).
+                await MainActor.run { self.syncCalendarShare() }
                 task.setTaskCompleted(success: true)
             }
         }
@@ -7645,6 +14923,145 @@ extension AppCoordinator {
 }
 
 extension AppCoordinator: VoiceCommandCoordinating {
+    // MARK: - [MTC] Dialogue frame (design-l2 §12.1/§15, FR-MTC-001)
+
+    /// `VoiceCommandCoordinating.activeDialogueFrame` — the pre-ladder
+    /// interception's once-per-turn read (T-133). Delegates to the
+    /// manager's expiry-aware read: nil when absent OR expired (an
+    /// expired frame is dropped on the spot), which is what makes "the
+    /// same utterance before expiry an answer, after expiry a fresh
+    /// command" true with no clock logic in the router. Main-queue read;
+    /// a getter cannot hop.
+    var activeDialogueFrame: DialogueFrame? {
+        dialogueManager.liveFrame
+    }
+
+    /// `VoiceCommandCoordinating.startDialogueFrame` — the pinned order
+    /// (design-l2 §15 edit 3): a pending confirmation refuses outright
+    /// (the two windows are mutually exclusive — ADR-MTC-03); a live
+    /// frame refuses (one deep); the window opens; the manager arms. A
+    /// throw — a draft with neither candidates nor a default — closes
+    /// the just-opened window again through the legal `.idle` edge
+    /// (which cancels its timer) and refuses, so "any opened window is
+    /// closed again" holds for every refusal. Never speaks: the caller
+    /// speaks the probe exactly once, only on `true`.
+    ///
+    /// Off-main (defensive only — every caller is the main-thread
+    /// router): REFUSE without hopping. §12.6's "hop internally" cannot
+    /// be honoured for a synchronous `Bool`: a hopped start would open a
+    /// window after this caller had already taken its non-probe
+    /// fallback, leaving an unspoken probe frame that would swallow the
+    /// next utterance. Refusal keeps one action per utterance.
+    func startDialogueFrame(_ frame: DialogueFrame) -> Bool {
+        guard Thread.isMainThread else { return false }
+        guard !isAwaitingConfirmation else { return false }
+        guard dialogueManager.liveFrame == nil else { return false }
+        guard voiceSession.openSlotAnswerWindow() else { return false }
+        do {
+            try dialogueManager.arm(frame)
+        } catch {
+            voiceSession.transition(to: .idle)
+            return false
+        }
+        return true
+    }
+
+    /// `VoiceCommandCoordinating.noteDialogueAttempt` — invalid-answer
+    /// accounting (L2-D6): the attempt increments on the SAME frame, its
+    /// deadline restamps and the open window gets a full fresh timer.
+    /// Silent — the router owns the `dialogue_answer` event and the
+    /// re-probe speech. The mutation is main-confined (design-l2 §12.6).
+    @discardableResult
+    func noteDialogueAttempt() -> Int {
+        if Thread.isMainThread {
+            let attempts = dialogueManager.noteAttempt()
+            voiceSession.refreshSlotAnswerWindow()
+            return attempts
+        }
+        // Defensive (unreachable: the router's interception is on main):
+        // the mutation hops; the returned count is the pre-hop estimate
+        // of the count the hop will produce.
+        let attempts = (dialogueManager.frame?.attempts ?? 0) + 1
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            _ = self.dialogueManager.noteAttempt()
+            self.voiceSession.refreshSlotAnswerWindow()
+        }
+        return attempts
+    }
+
+    /// `VoiceCommandCoordinating.resolveDialogueFrame` — THE funnel
+    /// (design-l2 §15 edit 5): one manager resolve, one window close
+    /// through legal edges, one telemetry emit for the three outcomes
+    /// the coordinator owns. Idempotent: a second resolution — or any
+    /// resolution with no frame held — finds the manager empty and does
+    /// nothing at all.
+    func resolveDialogueFrame(_ resolution: DialogueFrameResolution) {
+        if Thread.isMainThread {
+            resolveDialogueFrameOnMain(resolution)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.resolveDialogueFrameOnMain(resolution)
+            }
+        }
+    }
+
+    /// `VoiceCommandCoordinating.clearDialogueFrame(reason:)` — the
+    /// stated-reason clear (L2-D16): the router's §12.3 emergency
+    /// side-effect and the session-exit supersession both travel the
+    /// same funnel.
+    func clearDialogueFrame(reason: DialogueFrameResolution) {
+        resolveDialogueFrame(reason)
+    }
+
+    /// `VoiceCommandCoordinating.prepareDialogueAnswerText` — the answer
+    /// value through the exact order every turn runs (L2-D14, C-MTC-08c):
+    /// `InputSanitiser` (.quarantine) then the SHARED input seam, both
+    /// via the T-127 `IntentTranscriptPreparation` helper. The seam is
+    /// the production wiring's own — the local brain chain's seam from
+    /// `installLocalBrainSlot` (the `:1824`
+    /// `IntentEncoderWiring.localSlotInputSeam`) — and the accessor falls
+    /// back to that same production composition when the chain is not
+    /// installed yet, so the seam is non-nil on EVERY path and no caller
+    /// can ever receive an unsanitised answer value (M-3). Never the
+    /// model.
+    func prepareDialogueAnswerText(_ raw: String) -> String {
+        IntentTranscriptPreparation.prepare(
+            raw,
+            seam: productionDialogueAnswerSeam).prepared
+    }
+
+    /// [CORRECTION-REVIVE] The last turn's correction result, read through
+    /// the local brain chain that produced it — the same accessor shape as
+    /// `productionDialogueAnswerSeam` (the chain stores it in
+    /// `turnInput`). The router reads it on the unrecognised path, after
+    /// the interpret that ran the seam.
+    var lastTurnCorrection: CorrectionResult? {
+        (intentRouter?.localBrain as? LocalBrainChain)?.lastCorrection
+    }
+
+    /// [JUDGE-PRE-INTERPRET] Whether the semantic judge already ran for
+    /// this turn — the failure path reads it to skip the second judge
+    /// and go straight to the spoken clarification.
+    var lastTurnCorrectionJudged: Bool {
+        (intentRouter?.localBrain as? LocalBrainChain)?.lastCorrectionJudged
+            ?? false
+    }
+
+    /// [CORRECTION-REVIVE] The pluggable semantic judge.
+    ///
+    /// NOT WIRED to the 4B (device field report 2026-10-12): the 4B takes
+    /// ~15 s per inference on the phone — every judge call timed out even
+    /// at 8 s, and the pre-interpret hook doubled the wait. The 4B judge
+    /// is architecturally resident-only AND fast-model-pending: it
+    /// returns when the trained correction model (in training on the
+    /// server) slots into this same seam. Until then the failure path
+    /// goes STRAIGHT to the conversational yes-first clarification —
+    /// fast, and never a numbered list.
+    var correctionJudge: SemanticJudge {
+        NoSemanticJudge()
+    }
+
     /// [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1 — the router's
     /// "read me my briefing" hook. `fire()` is idempotent per calendar
     /// day and shares its once-per-day budget with the activation
@@ -7670,6 +15087,90 @@ extension AppCoordinator: VoiceCommandCoordinating {
         Task {
             await newsReader.fire()
         }
+    }
+}
+
+// MARK: - [MTC] Dialogue frame internals (design-l2 §15; T-136)
+
+extension AppCoordinator {
+    /// The funnel's body, main-queue only: the manager clears the frame
+    /// first (idempotent — nil means a second resolution or no frame, so
+    /// nothing else may happen), then the window closes through the
+    /// legal `.awaitingSlotAnswer → .idle` edge (which cancels the slot
+    /// timer), then telemetry. Frame before window on purpose: the close
+    /// triggers the session-exit observer, which then finds no live
+    /// frame and no-ops — a resolution can never be re-entered as a
+    /// supersession.
+    private func resolveDialogueFrameOnMain(_ resolution: DialogueFrameResolution) {
+        guard dialogueManager.resolve(resolution) != nil else { return }
+        if voiceSession.state == .awaitingSlotAnswer {
+            voiceSession.transition(to: .idle)
+        }
+        switch resolution {
+        case .timedOut, .emergency, .superseded:
+            // The coordinator's three (design-l2 §26 component split):
+            // the seven turn-time outcomes are emitted by the router at
+            // its own resolution sites — emitting here too would
+            // double-emit.
+            emitDialogueFrameResolved(resolution)
+        case .answered, .defaultExecuted, .candidateSelected,
+             .correctionSelected, .exhausted, .cancelled, .escaped, .bargedIn:
+            break
+        }
+    }
+
+    /// The session-exit observer's named resolver (installed in `init`):
+    /// a frame is only ever armed WITH a window, so a session that
+    /// legally exited `.awaitingSlotAnswer` while a frame is still held
+    /// resolves it as `superseded` through the funnel. Runs on main (the
+    /// observer hops); a no-op on every ordinary transition.
+    private func resolveDialogueFrameOnSessionExit() {
+        guard voiceSession.state != .awaitingSlotAnswer else { return }
+        guard dialogueManager.liveFrame != nil else { return }
+        resolveDialogueFrame(.superseded)
+    }
+
+    /// The closed-vocabulary `dialogue_frame_resolved` emit — the exact
+    /// case map the router's own helper uses (T-133
+    /// `CommandRouter.emitDialogueFrameResolved`), with this component's
+    /// name (`app_coordinator`; the `emitCalendarEvent` `:7327`
+    /// precedent). Metadata is the outcome identifier only: no
+    /// transcript, no candidate labels (constitution C9 / NFR-MTC-012).
+    private func emitDialogueFrameResolved(_ resolution: DialogueFrameResolution) {
+        let outcome: String
+        switch resolution {
+        case .answered: outcome = "answered"
+        case .defaultExecuted: outcome = "defaultExecuted"
+        case .candidateSelected: outcome = "candidateSelected"
+        case .correctionSelected: outcome = "correctionSelected"
+        case .exhausted: outcome = "exhausted"
+        case .cancelled: outcome = "cancelled"
+        case .escaped: outcome = "escaped"
+        case .bargedIn: outcome = "bargedIn"
+        case .timedOut: outcome = "timedOut"
+        case .superseded: outcome = "superseded"
+        case .emergency: outcome = "emergency"
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "app_coordinator",
+            eventType: "dialogue_frame_resolved",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: ["outcome": outcome]
+        ))
+    }
+
+    /// The production answer seam (M-3): the installed local brain
+    /// chain's OWN seam when the chain exists — the `:1824` wiring, the
+    /// same seam the brain path runs — else the identical production
+    /// composition constructed directly, because `installLocalBrainSlot`
+    /// has not run yet (a construction that never started) and the
+    /// helper's nil-seam branch is a raw pass-through that exists for
+    /// parity tests only. Non-nil on every path by construction.
+    private var productionDialogueAnswerSeam: LocalBrainChain.InputSeam {
+        (intentRouter?.localBrain as? LocalBrainChain)?.transcriptPreparationSeam
+            ?? IntentEncoderWiring.localSlotInputSeam(traceRecorder: pipelineTraceRecorder)
     }
 }
 
@@ -7762,6 +15263,10 @@ extension AppCoordinator {
     private func performFeedRefresh() async {
         let result = await feedService.refresh()
         await MainActor.run { [self] in
+            // The read state is what the unread badges render, so it must
+            // be loaded before the first card paints (main-thread: it
+            // publishes).
+            ensureFeedReadStateLoaded()
             feedItems = FeedLanguageSorter.sort(result.items, app: appLanguage)
             feedFailedSourceNames = result.failedSourceNames
             // Honest state mapping: empty + failures = the failed card
@@ -7905,6 +15410,136 @@ extension AppCoordinator {
             }
         }
     }
+
+    // MARK: Read aloud + read state (feeds readaloud task, 2026-09-19)
+
+    /// Loads the persisted read state once per launch. Idempotent, and
+    /// safe to call from every reading entry point and from the leaf's
+    /// refresh — the store read is cheap but pointless per card.
+    /// MAIN-thread only (it publishes).
+    func ensureFeedReadStateLoaded() {
+        guard !feedReadStateLoaded else { return }
+        feedReadStateLoaded = true
+        feedReadIDs = Set(feedReadStateStore.load().readIDs)
+    }
+
+    /// True when the item has been read aloud to completion — the card's
+    /// unread badge is exactly the negation of this.
+    func isFeedItemRead(_ item: FeedItem) -> Bool {
+        feedReadIDs.contains(item.id)
+    }
+
+    /// Marks the item read and persists it. Called ONLY from the
+    /// speech-completion seam (see `speakFeedItemReading`) — never from a
+    /// scroll, a render, or an opening sheet.
+    func markFeedItemRead(_ item: FeedItem) {
+        ensureFeedReadStateLoaded()
+        feedActiveItemID = item.id
+        feedReadIDs = Set(feedReadStateStore.markRead(id: item.id).readIDs)
+    }
+
+    /// Reads the item's SUMMARY aloud — the card's "Read aloud" button.
+    /// The caller passes the text it is DISPLAYING (the translation when
+    /// one is showing), preserving the feed translation task's
+    /// single-resolution rule: the voice can never read different words
+    /// than the card shows.
+    func readFeedItemSummaryAloud(_ item: FeedItem, text: String) {
+        speakFeedItemReading(item: item, text: text)
+    }
+
+    /// Reads the item's FULL article aloud — the source's own body,
+    /// sanitized here (tags and URLs stripped before anything reaches the
+    /// speaker). Translations cover the card's title + summary and never
+    /// the article body, so this reads the ORIGINAL words rather than
+    /// inventing a translation that does not exist.
+    func readFeedItemArticleAloud(_ item: FeedItem) {
+        speakFeedItemReading(
+            item: item,
+            text: FeedSpeechSanitizer.articleSpeechText(title: item.title,
+                                                        summary: item.summary,
+                                                        fullText: item.fullText))
+    }
+
+    /// The one reading path both entry points share: speak, then mark the
+    /// item read when the reading COMPLETES.
+    ///
+    /// Completion is the honest moment: the queue's completion seam runs
+    /// only for an utterance the elder heard to the end — a TTS failure
+    /// (nothing was heard) or a preemption by a safety lane (the
+    /// remainder was never heard) leaves the item unread.
+    private func speakFeedItemReading(item: FeedItem, text: String) {
+        ensureFeedReadStateLoaded()
+        guard !text.isEmpty else { return }
+        feedActiveItemID = item.id
+        speakFeedText(text) { [weak self] in
+            // The seam fires on the queue's worker thread.
+            Task { @MainActor in self?.markFeedItemRead(item) }
+        }
+    }
+
+    /// [FEEDS-FULL-ARTICLE] (2026-09-19) The voice command's hand-off
+    /// ("read the full article" / "पूरा समाचार पढ") — the deterministic
+    /// router stage calls this instead of speaking anything itself.
+    ///
+    /// Subject: the item the reading path is on (the last one read
+    /// aloud), else the newest item in the feed — never a guess at a
+    /// story the elder did not just hear. Honest when there is nothing
+    /// to read, and honest when the source shares only a summary: that
+    /// line is SPOKEN here because a voice command has no card to carry
+    /// the caption the UI shows.
+    func readFullFeedArticle() {
+        ensureFeedReadStateLoaded()
+        guard let item = feedItemForFullArticle() else {
+            speak(text: L10n.str("feeds.voice.noItems", locale: activeLocale))
+            return
+        }
+        if !FeedSpeechSanitizer.hasFullArticle(summary: item.summary,
+                                               fullText: item.fullText) {
+            speak(text: L10n.str("feeds.voice.summaryOnly", locale: activeLocale))
+        }
+        readFeedItemArticleAloud(item)
+    }
+
+    /// The full-article voice command's subject — see `readFullFeedArticle`.
+    private func feedItemForFullArticle() -> FeedItem? {
+        if let id = feedActiveItemID,
+           let active = feedItems.first(where: { $0.id == id }) {
+            return active
+        }
+        return feedItems.first
+    }
+
+    /// Speaks feed text through the shared queue and runs `onSpoken` when
+    /// the utterance was HEARD to the end (`SpeakQueue`'s completion seam
+    /// — never on a TTS failure, never on preemption). Bookkeeping is
+    /// identical to `speak(text:)`: the reading is still recorded as an
+    /// assistant utterance, so the transcript and turn tracking behave
+    /// exactly as they did before this task. The only difference is the
+    /// `sourceID`, which names the feature that owns the utterance.
+    private func speakFeedText(_ text: String, onSpoken: (() -> Void)?) {
+        guard !text.isEmpty else { return }
+        if let queue = speakQueue {
+            noteAssistantSpoke(text)
+            queue.enqueue(Announcement(id: UUID(),
+                                       text: text,
+                                       priority: .interactive,
+                                       sourceID: Self.feedReadingSourceID,
+                                       card: nil),
+                          onSpoken: onSpoken)
+            return
+        }
+        // Pre-`start()` fallback — the `speak(text:)` shape: no queue
+        // exists to observe, and the awaited call IS the completion.
+        guard let speaker else { return }
+        noteAssistantSpoke(text)
+        noteSpeakingStarted()
+        let locale = activeLocale
+        Task { [weak self] in
+            await speaker.speak(text, locale: locale)
+            self?.noteSpeakingEnded()
+            onSpoken?()
+        }
+    }
 }
 
 // MARK: - ConsoleObservabilityBus (routes every event through LogSanitiser)
@@ -7987,5 +15622,67 @@ extension AppCoordinator: VoicePipelineSuspending {
                 self.noteVoicePipelineStartFailed(err)
             }
         }
+    }
+}
+
+// MARK: - [PROFILE-INTERVIEW] Profile seams (T-092)
+
+extension AppCoordinator {
+
+    /// The only writer for the profile record (design-l2 §5.6): the
+    /// wizard and the Settings editor call it and nothing else touches
+    /// the store. The values are written as the COMPLETE new record;
+    /// callers merge by reading `currentProfileSnapshot()` first
+    /// (the merge helpers live in `OnboardingDrafts`). Main-thread by
+    /// contract — the store asserts it. Failure is explicit
+    /// (`.failure(.writeFailed)`) and changes nothing (E3).
+    ///
+    /// `photoFilename` (about-you selfie, 2026-10-06) is the file name
+    /// the capture step stored via `contactPhotoStore` — the step writes
+    /// the file first and this call is the record commit point (the
+    /// same split the family-contact editor uses). It has no default on
+    /// purpose: every caller passes the MERGED record's value, so a
+    /// call site added later cannot silently erase a stored selfie.
+    @discardableResult
+    func saveProfile(name: String,
+                     addressAs: String,
+                     dateOfBirth: DateComponents?,
+                     emergencyDoctor: String?,
+                     localHospital: String?,
+                     photoFilename: String?) -> Result<Void, ProfileStoreError> {
+        profileStore.save(UserProfile(
+            name: name,
+            addressAs: addressAs,
+            dateOfBirth: dateOfBirth,
+            emergencyDoctor: emergencyDoctor,
+            localHospital: localHospital,
+            photoFilename: photoFilename))
+    }
+
+    /// The store's cached load result; no disk I/O after the first read.
+    /// Any queue (the store's lock serves it). Empty strings are legal
+    /// and mean "not recorded yet" — clearing returns to the
+    /// un-personalized path (FR-PI-011).
+    func currentProfileSnapshot() -> ProfileLoadResult {
+        profileStore.load()
+    }
+
+    /// Cold-start interview routing (T-102 / C13, FR-PI-016): the pure
+    /// rule composed with THIS coordinator's inputs — its own step map
+    /// and its own cached snapshot. `.loaded` with trimmed non-empty name
+    /// AND address-as counts as recorded; `.absent` and `.unreadable`
+    /// count as missing (the unreadable-route repair path, edge table).
+    /// nil → the app starts normally.
+    func coldStartInterviewRoute() -> OnboardingState.Step? {
+        let mandatoryRecorded: Bool
+        switch currentProfileSnapshot() {
+        case .loaded(let profile):
+            mandatoryRecorded = AboutYouDraft.mandatoryFieldsRecorded(in: profile)
+        case .absent, .unreadable:
+            mandatoryRecorded = false
+        }
+        return OnboardingState.coldStartInterviewStep(
+            firstPending: onboardingState.firstPendingStep,
+            mandatoryFieldsRecorded: mandatoryRecorded)
     }
 }

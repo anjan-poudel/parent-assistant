@@ -83,12 +83,21 @@ enum IntentPrompt {
         // ECHOING the transcript instead of emitting JSON (llama3.2:1b,
         // 2026-09-06). Keep this text byte-identical to the seed copy at
         // tools/train-intent/seeds/prompt_template.txt — see the enum doc.
+        //
+        // [GEMINI-SOLIDIFY] (2026-09-18) The no-invention rule and the
+        // Nepali reply-phrasing hint were added here, paid for by trimming
+        // non-load-bearing prose (the set_reminder time example, the
+        // deflect clause's enumeration, the functional-ack examples) so
+        // the template stays within the measured token budget — a
+        // "fewer invented slots at the source" pass, since the provenance
+        // guard can only reject what the model already emitted.
         return """
         You are Sahayak, an elderly-care voice assistant — NOT a general chatbot. Their language hint is: \(context.userLanguageHint). Pending medications: \(meds).
 
         EXACTLY TWO MODES: (1) INTENT DECIPHERING — want something DONE; extract intent + entities. (2) OPEN-FORM ANSWERING — question or feelings; nothing runs, "response" IS the answer.
 
-        "response" is SPOKEN ALOUD: non-empty, their language, plain and simple, short sentences, warm, respectful.
+        "response" is SPOKEN ALOUD: non-empty, their language, plain and simple, short sentences, warm, respectful. In Nepali, say "हजुर", one short idea per sentence.\(addressAsClause(context.addressAs))
+        Fill ONLY slots you heard — never invent a name, time, or message; unheard slots stay null.
 
         Reply with ONLY one JSON object (no fences, no other text):
         {"intent": "ack_med"|"call"|"send_message"|"set_reminder"|"emergency"|"health_query"|"music"|"create_calendar_event"|"suggest_video"|"guide"|"query"|"none",
@@ -100,14 +109,14 @@ enum IntentPrompt {
         - "ack_med": confirms medication.
         - "call": contact = the person named (name or relationship); callType = "video" for a video call ("भिडियो कल"), else "voice"; requestedApp = an app THEY named (facetime, whatsapp, messenger, viber).
         - "send_message": contact = recipient; message = dictated words; requestedApp = an app they named.
-        - "set_reminder": time = their wording (e.g. "बिहान ८ बजे"); medication = the dose name if a dose reminder.
+        - "set_reminder": time = their wording; medication = the dose name if a dose reminder.
         - "emergency": ANY plea for help, urgent pain, injury, fall, trouble breathing, chest pain, or fear for safety, even as a question. Err toward "emergency": a false alarm costs one reassurance, a miss costs far more. "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ" is "emergency", NOT "health_query".
         - "health_query": calm, non-urgent, no help-seeking.
         - "music"/"create_calendar_event"/"suggest_video": song/bhajan, calendar event, a video.
         - "guide": HOW to use a device/appliance: topic = the thing; steps = short ordered steps, READ ALOUD, never executed.
         - "query": other questions; "none": anything else.
-        - "query"/"none": "response" IS the answer — real, SUBSTANTIVE, from your own knowledge. Do NOT deflect to another app, website or device: you are their only assistant; warmth and empathy first.
-        - else: a short FUNCTIONAL acknowledgment in their language (call placed, reminder set).
+        - "query"/"none": "response" IS the answer — real, SUBSTANTIVE, from your own knowledge. Do NOT deflect: you are their only assistant; warmth and empathy first.
+        - else: a short FUNCTIONAL acknowledgment in their language.
 
         Example: {"intent": "query", "response": "आज काठमाडौंमा मौसम बदली छ।", "confidence": 0.9, "actionType": null, "actionUrl": null}
 
@@ -116,6 +125,23 @@ enum IntentPrompt {
 
         """
         + pluginSections(activePlugins)
+    }
+
+    /// [PROFILE-INTERVIEW T-094] The address-as clause (design-l2 §5.5,
+    /// settled wording): appended directly after the reply-style pinning
+    /// sentence in each builder. nil AND empty compose to the empty
+    /// string — the no-term output stays byte-identical to the
+    /// pre-feature baseline (pinned digest in `IntentPromptTests`; the
+    /// mirror gate pins the template half). The term arrives ALREADY
+    /// GUARDED and bounded at the read seam
+    /// (`ProfilePersonalization.addressAsForPrompt` — ADR-09: the prompt
+    /// side takes the guarded term, the spoken side the verbatim one);
+    /// the clause frames it as quoted DATA, never as an instruction. The
+    /// static half is 56 Characters; the term is at most the prompt
+    /// bound (24), so the worst-case addition is 80 Characters.
+    private static func addressAsClause(_ term: String?) -> String {
+        guard let term, !term.isEmpty else { return "" }
+        return " Address them as \"\(term)\" where it fits, never every sentence."
     }
 
     /// Schema addendum appended when any plugin is active (cloud path):
@@ -140,6 +166,48 @@ enum IntentPrompt {
             sections.append("\n\n        " + indented)
         }
         return sections.joined()
+    }
+
+    /// [CHAT] Stage 1 of the conversational-augmentation plan (2026-09-23):
+    /// the prompt for a CHIT-CHAT turn — the free-text reply shape.
+    ///
+    /// A separate builder, not a mode inside `build`, because the two
+    /// teach different decodes: `build` teaches the 12-intent slot
+    /// contract, this one teaches a three-key object with a free-text
+    /// `reply` and no slots at all. `build`'s text is byte-mirrored by
+    /// `tools/train-intent/seeds/prompt_template.txt` and pinned by
+    /// `IntentPromptTests`; adding a mode to it would move those bytes and
+    /// invalidate the training/inference identity that mirror exists to
+    /// protect. The chat shape is a NEW contract with its own labels (the
+    /// stage that fine-tunes it authors them against this text).
+    ///
+    /// Deliberately smaller than `build`: there is no catalog to teach, no
+    /// entity vocabulary and no example slot-fill, so the prompt fits the
+    /// 1,024-token on-device context with room to spare. `pendingMedications`
+    /// is not composed in either — a turn that executes nothing has no use
+    /// for a dose list, and leaving it out keeps the smallest possible
+    /// context for the reply the user is waiting on.
+    ///
+    /// The key order (`intent`, `reply`, `confidence`) matches
+    /// `LlamaGrammar.chatJSONSchema` exactly, and the one-shot output line
+    /// is the shape the decode grammar enforces: even an untrained model
+    /// that follows the instruction produces a string this runtime can
+    /// read, and one that does not ABSTAINS (nil) rather than speaking
+    /// something malformed — the graceful stage-1 state.
+    static func buildChat(transcript: String,
+                          context: InterpreterContext) -> String {
+        return """
+        You are Sahayak, a warm companion talking with an elderly speaker. This turn is SMALL TALK — a greeting, thanks, a goodbye, or how they feel. Nothing is being asked for, so nothing runs: "reply" IS the whole answer.
+
+        "reply" is SPOKEN ALOUD: non-empty, in their own language (hint: \(context.userLanguageHint)), plain and simple, short sentences, warm, respectful. In Nepali, say "हजुर", one short idea per sentence.\(addressAsClause(context.addressAs)) Never invent a fact, a name, a time or an appointment, and promise nothing you cannot do.
+
+        Reply with ONLY one JSON object (no fences, no other text):
+        {"intent": "chat", "reply": the spoken reply, "confidence": 0-1}
+
+        User said: "\(transcript)"
+        Now output ONLY the JSON object for that reply.
+
+        """
     }
 
     /// Collapse #1 prompt (intent-engine spec 2026-09-05 §4): audio goes
@@ -180,6 +248,8 @@ enum IntentPrompt {
          "actionUrl": the deep link when needed, else null,
          plus the entity fields the intent needs (rest null): "entryId", "contact", "time", "medication", "message", "callType", "requestedApp", "topic", "steps"}
 
+        Fill ONLY the entity fields you actually heard in the audio — never invent a name, time, message, or app the speaker did not say; every unheard field is null.
+
         Rules:
         - "ack_med": confirms taking their medication.
         - "call": a phone call. contact = the person they named (name or relationship, e.g. "छोरा"); callType = "video" only for a video call ("भिडियो कल"), else "voice"; requestedApp = an app THEY named (facetime, whatsapp, messenger, viber).
@@ -193,6 +263,7 @@ enum IntentPrompt {
 
         Reply style:
         - "query"/"none": "response" IS the actual answer — a real, SUBSTANTIVE reply from your own knowledge (typical weather, facts, advice). Do NOT deflect them to another app, website, or device: you are their only assistant. Feelings (loneliness, sadness, worry): warmth and empathy first.
+        - When the reply is Nepali, address them warmly as "हजुर" and keep one short idea per sentence.\(addressAsClause(context.addressAs))
         - every other intent: a short FUNCTIONAL acknowledgment in their language (call placed, reminder set, dose recorded).
         """
     }

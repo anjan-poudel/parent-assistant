@@ -34,10 +34,15 @@ final class NotificationReaderTests: XCTestCase {
         XCTAssertTrue(spoken)
         XCTAssertEqual(queue.enqueued.count, 1)
         let announcement = queue.enqueued[0]
-        // Pinned key "notification.read.medication" ("Medicine time: %@").
+        // Pinned key "notification.read.medication" ("Medicine time, %@"),
+        // resolved in the APP language — mirrors the reader's `L10n.fmt`
+        // (audit item 3: bare NSLocalizedString followed the system
+        // language, so a Nepali app on an English device spoke English).
         XCTAssertEqual(
             announcement.text,
-            String(format: NSLocalizedString("notification.read.medication", comment: "Spoken when a medication reminder notification is read aloud; format argument is the medication name"), "Amlodipine")
+            L10n.fmt("notification.read.medication",
+                     locale: AppLanguage.persisted().locale,
+                     "Amlodipine")
         )
         XCTAssertTrue(announcement.text.contains("Amlodipine"))
         XCTAssertEqual(announcement.priority, .safety, "medication reminders must enter the .safety lane")
@@ -234,11 +239,17 @@ enum TestNotificationFactory {
         return raw
     }
 
+    /// `userInfo` (rich-events task, 2026-09-17): the deep-link handlers
+    /// read their payload — an event id, say — out of the content, so a
+    /// response built without one could not exercise them. Defaults to
+    /// empty, which is what every pre-existing call site means.
     static func response(
         category: String,
-        actionIdentifier: String
+        actionIdentifier: String,
+        userInfo: [String: String] = [:]
     ) -> UNNotificationResponse {
-        let notification = notification(category: category, title: "T", body: "B")
+        let notification = notification(category: category, title: "T", body: "B",
+                                        userInfo: userInfo)
         let raw = class_createInstance(UNNotificationResponse.self, 0)! as Any as! UNNotificationResponse
         raw.setValue(notification, forKey: "notification")
         raw.setValue(actionIdentifier, forKey: "actionIdentifier")

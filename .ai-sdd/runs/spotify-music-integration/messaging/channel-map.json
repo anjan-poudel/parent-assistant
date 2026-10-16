@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "provider": "slack",
+  "workspace_id": "T0C78DE0QF2",
+  "session": "spotify-music-integration",
+  "channel": {
+    "id": "C0C7X2RR8EL",
+    "name": "ai-sdd-spotify-music-integration"
+  },
+  "control_message_ts": null,
+  "created_at": "2026-10-06T11:12:10.165Z",
+  "last_verified_at": "2026-10-06T11:12:10.165Z"
+}

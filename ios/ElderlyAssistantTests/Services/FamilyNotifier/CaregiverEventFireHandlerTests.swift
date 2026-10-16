@@ -72,7 +72,8 @@ final class CaregiverEventFireHandlerTests: XCTestCase {
                                   startDate: Date = Date()) -> ExternalReminder {
         ExternalReminder(id: stableKey, source: .event, title: title, notes: nil,
                          startDate: startDate, isAllDay: false, hasOwnAlarm: false,
-                         calendarName: "Home")
+                         calendarName: "Home", nativeEventIdentifier: nil,
+                         location: nil)
     }
 
     /// A 64-char hex digest, the shape `ExternalCalendarService.stableKey`

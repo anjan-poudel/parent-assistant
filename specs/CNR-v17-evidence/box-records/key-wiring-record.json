@@ -1,0 +1,34 @@
+{
+  "record": "judge-key-wiring",
+  "date": "2026-10-17",
+  "actor": "CNR run (T-183 Phase B continuation)",
+  "context": "The chat-judge leg of the full ship gate was behind the owner money gate: the key previously available to the box (sourced from /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.env) returned HTTP 402 (prepayment credits depleted) at the smoke probe. The owner topped up the AI Studio project on 2026-10-17; this record covers the re-smoke and the wiring.",
+  "smoke": {
+    "probe": "one minimal generateContent, v1beta/models/gemini-2.5-flash-lite (the harness judge model, config.yaml:7)",
+    "key_source": "Mac shell env GEMINI_API_KEY (53 chars), never printed, never in argv (curl config via umask-077 temp file, deleted after)",
+    "before": "HTTP 402 RESOURCE_EXHAUSTED — 'Your prepayment credits are depleted...' (2026-10-17, pre-top-up)",
+    "after": "HTTP 200, finishReason STOP, modelVersion gemini-2.5-flash-lite (2026-10-17, post-top-up)",
+    "verdict": "funded; judge transport live"
+  },
+  "secrets_staging": {
+    "path": "/mnt/nvme1/cnr-v17/secrets/gemini.env",
+    "pattern": "house secrets dir (same as openrouter.env), mode 600, dir mode 700",
+    "transfer": "ssh stdin heredoc from the Mac env — never argv, never a file on the Mac, never in any record",
+    "verification": "mode 600; exactly one GEMINI_API_KEY line; key length 53; byte-identity verified by sha256 equality between the local env value and the box file (hash not recorded)"
+  },
+  "script_wiring": {
+    "fullgate-replay.sh": "source line rewired 2026-10-17 from the old .env to /mnt/nvme1/cnr-v17/secrets/gemini.env; original preserved at fullgate-replay.sh.bak-20261017; diff = exactly the one source line",
+    "fullgate-run.sh": "NOT rewired while its run is in flight (bash reads scripts incrementally — editing a running script risks offset desync; also moot: the running process env is fixed at launch and its judge leg is the designed honest-block leg). Rewire AFTER 'fullgate done' appears, before any re-run.",
+    "judge_failure_semantics_unchanged": "run_judge aborts after 10 failures; only successful calls journal; the replay pays the 500 calls fresh; the replay's own guard (chat-outputs=500, preds>=8050) is evaluated at fire time"
+  },
+  "chained_execution": {
+    "box_watcher": "/mnt/nvme1/cnr-v17/chain-replay-after-fullgate.sh (nohup setsid, detached; waits for 'fullgate done' in logs/fullgate-cnr-v17.log, then runs fullgate-replay.sh; markers in logs/replay-chain.log; bound 720 min)",
+    "mac_waiter": "caffeinated bounded waiter on 'replay done' in logs/fullgate-replay.log; fetches the report #2 predicates on completion",
+    "effect": "report #1 lands as designed (judge not_measured rows, honest); the funded replay then writes report #2 (complete-except-latency) over the recorded decode without re-running it"
+  },
+  "guards_at_wiring_time": {
+    "chat_outputs_rows": 500,
+    "preds_file": "not yet present (written at hard-gate completion); replay guard will see the completed dump at fire time",
+    "replay_done_marker": "absent (replay has not run)"
+  }
+}

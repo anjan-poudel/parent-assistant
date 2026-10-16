@@ -31,11 +31,18 @@ final class ChatHistoryStoreTests: XCTestCase {
     /// A second store over the SAME storage (a fresh launch) must see
     /// everything the first one appended — text, role, timestamp, and
     /// the persisted ids pagination slices on.
+    ///
+    /// [RESPONSIVENESS] (2026-10-14) `append` now writes on the store's
+    /// serial io queue, so a test that reads the persisted payload back
+    /// must `flush()` first — the deterministic seam that stands in for
+    /// "the process kept running until the queue drained". Production
+    /// relaunches are days apart; only tests read disk this eagerly.
     func testPersistenceRoundTripAcrossStoreInstances() {
         let storage = StubEncryptedStorage()
         let first = ChatHistoryStore(storage: storage)
         append(first, count: 3)
         XCTAssertEqual(first.all.map(\.text), ["e0", "e1", "e2"])
+        first.flush()
 
         let relaunch = ChatHistoryStore(storage: storage)
         relaunch.load()
@@ -44,6 +51,36 @@ final class ChatHistoryStoreTests: XCTestCase {
         // The ids survived the JSON round-trip, so id-based pagination
         // still finds boundaries after a relaunch.
         XCTAssertEqual(relaunch.older(than: relaunch.all[2].id).count, 2)
+    }
+
+    /// [RESPONSIVENESS] (2026-10-14) The split append contract: memory
+    /// is updated IMMEDIATELY (the Home window, the turn-timing
+    /// caption's newest-exchange lookup and pagination all read `all`
+    /// the instant `append` returns — no flush), while the encode +
+    /// encrypted write run on the store's serial io queue and converge
+    /// on the newest snapshot. `flush()` proves the disk half ran in
+    /// append order with the LAST snapshot winning.
+    func testAppendIsMemoryImmediateAndDiskConvergesAfterFlush() {
+        let storage = StubEncryptedStorage()
+        let store = ChatHistoryStore(storage: storage)
+
+        store.append(exchange(0))
+        // Memory is the authority and is never queued.
+        XCTAssertEqual(store.recent().map(\.text), ["e0"])
+
+        store.append(exchange(1))
+        store.append(exchange(2))
+        XCTAssertEqual(store.all.map(\.text), ["e0", "e1", "e2"],
+                       "every append must be visible in memory without waiting for disk")
+
+        // Drain the writer: the payload on disk is the LAST snapshot —
+        // not a stale earlier one — decoded back in append order.
+        store.flush()
+        let relaunch = ChatHistoryStore(storage: storage)
+        relaunch.load()
+        XCTAssertEqual(relaunch.all.map(\.text), ["e0", "e1", "e2"])
+        XCTAssertEqual(relaunch.all, store.all,
+                       "the drained payload must equal the newest in-memory state, ids included")
     }
 
     // MARK: - 200-entry cap (drop oldest)
@@ -59,7 +96,9 @@ final class ChatHistoryStoreTests: XCTestCase {
         XCTAssertEqual(store.all.last?.text, "e204")
 
         // The persisted file is trimmed too — a relaunch never sees the
-        // dropped entries resurface.
+        // dropped entries resurface. `flush` drains the async writer
+        // (see the round-trip test's [RESPONSIVENESS] note).
+        store.flush()
         let relaunch = ChatHistoryStore(storage: storage)
         relaunch.load()
         XCTAssertEqual(relaunch.all, store.all)
@@ -107,6 +146,7 @@ final class ChatHistoryStoreTests: XCTestCase {
         XCTAssertTrue(store.all.isEmpty)
 
         store.append(exchange(0))
+        store.flush()
         let relaunch = ChatHistoryStore(storage: storage)
         relaunch.load()
         XCTAssertEqual(relaunch.all.map(\.text), ["e0"])

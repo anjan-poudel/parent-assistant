@@ -162,4 +162,94 @@ final class IntentRouterTests: XCTestCase {
         let (router, _) = makeRouter()
         XCTAssertNil(interpret(router, "anything"))
     }
+
+    // MARK: - [PIPELINE-TRACE] the band row
+    //
+    // The band policy is the one gate only `IntentRouter` can describe: a
+    // caller sees the returned command, never WHICH branch the score
+    // landed in (the two drop reasons are indistinguishable from the
+    // return value). So the row is written where the decision is made —
+    // the score and its source in, the branch taken out — and it carries
+    // the number with the branch, so the card (and a Release console)
+    // reads `accept/local score=0.83` rather than a bare label.
+
+    private func tracedRouter() -> (IntentRouter, PipelineTraceRecorder) {
+        let recorder = PipelineTraceRecorder()
+        let cache = IntentCommandCache(storage: StubEncryptedStorage())
+        return (IntentRouter(cache: cache,
+                             observabilityBus: NullObservabilityBus(),
+                             traceRecorder: recorder), recorder)
+    }
+
+    func testBandRowCarriesTheScoreAndTheBranchTaken() {
+        let (router, recorder) = tracedRouter()
+        recorder.beginTurn()
+        let cmd = makeCommand(action: .query, confidence: 0.83)
+        router.localBrain = StubCommandInterpreter(result: cmd)
+
+        XCTAssertEqual(interpret(router, "आज मौसम कस्तो छ?"), cmd)
+
+        let trace = recorder.finishTurn()
+        XCTAssertEqual(trace.rows.map(\.stage), PipelineTraceStage.allCases,
+                       "the band is one row of the full trace, in canonical order")
+        XCTAssertTrue(trace.rows.allSatisfy { $0.durationMs >= 0 })
+        let band = trace.rows.first { $0.stage == .band }
+        XCTAssertEqual(band?.ran, true)
+        XCTAssertEqual(band?.decision, "accept/local score=0.83",
+                       "the branch, the layer AND the number — the decision token stays a token")
+        XCTAssertEqual(band?.inputSummary, "query 0.83 via local",
+                       "what the policy saw: the action, its score, its source")
+    }
+
+    func testBandRowSaysDropWhenTheScoreFallsBelowTheRephraseFloor() {
+        let (router, recorder) = tracedRouter()
+        recorder.beginTurn()
+        router.localBrain = StubCommandInterpreter(
+            result: makeCommand(action: .call, confidence: 0.3))
+
+        XCTAssertNil(interpret(router, "mumble mumble"))
+
+        let band = recorder.finishTurn().rows.first { $0.stage == .band }
+        XCTAssertEqual(band?.ran, true)
+        XCTAssertEqual(band?.decision, "drop/local score=0.30",
+                       "a nil return has two causes; the row says which one happened")
+    }
+
+    func testBandRowIsRecordedWhenNoCommandEverReachedThePolicy() {
+        // A brain that answered nothing never reached the band policy at
+        // all — the row says so (and which way the turn went) instead of
+        // silently disappearing, or claiming a band that never ran.
+        let (router, recorder) = tracedRouter()
+        recorder.beginTurn()
+        router.localBrain = StubCommandInterpreter(result: nil)
+        router.cloudEnabled = false
+
+        XCTAssertNil(interpret(router, "open ended question"))
+
+        let band = recorder.finishTurn().rows.first { $0.stage == .band }
+        XCTAssertEqual(band?.ran, true)
+        XCTAssertEqual(band?.decision, "abstain/local")
+        XCTAssertEqual(band?.inputSummary, "no command")
+    }
+
+    func testBandRowEndsOnTheLayerThatMadeTheFinalCall() {
+        // The local mid-band tier-free answer is dropped for escalation;
+        // the cloud then accepts the same turn. One `band` row exists, and
+        // it is the LAST call's — the layer whose decision the turn ended
+        // with — never a stale local one.
+        let (router, recorder) = tracedRouter()
+        recorder.beginTurn()
+        let cloudAnswer = makeCommand(action: .music, confidence: 0.9)
+        let cloud = StubCommandInterpreter(result: cloudAnswer)
+        router.localBrain = StubCommandInterpreter(
+            result: makeCommand(action: .music, confidence: 0.5))
+        router.cloudBrain = cloud
+        router.cloudEnabled = true
+
+        XCTAssertEqual(interpret(router, "play a bhajan maybe"), cloudAnswer)
+
+        let band = recorder.finishTurn().rows.first { $0.stage == .band }
+        XCTAssertEqual(band?.decision, "accept/cloud score=0.90")
+        XCTAssertEqual(cloud.callCount, 1, "the row is instrumentation — the ladder is unchanged")
+    }
 }

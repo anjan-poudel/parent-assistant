@@ -75,6 +75,14 @@ final class AckFastLaneTests: XCTestCase {
         var speakingEnded = 0
         var timerStartOutcome: AlarmTimerSetOutcome = .scheduled
 
+        // [MED-ACK-WALK] Additive T-014 script (all defaults inert — every
+        // pre-existing test keeps the shipped nil/empty behaviour).
+        var candidates: [MedicationAckCandidate] = []
+        var challengePrompt: String? = nil
+        private(set) var challengeIssuedFor: UUID?
+        private(set) var recordedAckEntryIds: [UUID] = []
+        private(set) var confirmationResponses: [ConfirmationResponse] = []
+
         func noteAssistantSpoke(_ text: String) { assistantSpoken.append(text) }
         func noteSpeakingStarted() { speakingStarted += 1 }
         func noteSpeakingEnded() { speakingEnded += 1 }
@@ -85,9 +93,17 @@ final class AckFastLaneTests: XCTestCase {
         func requestAlarmSet(at time: Date, label: String?) async -> AlarmTimerSetOutcome { .failed }
         func recordTranscript(_ text: String) {}
         func oldestPendingReminderEntryId() -> UUID? { nil }
-        func handleMedicationAcknowledgement(entryId: UUID) {}
-        func startVoiceAckConfirmation(for entryId: UUID) -> String? { nil }
-        func handleConfirmationResponse(_ response: ConfirmationResponse) {}
+        func handleMedicationAcknowledgement(entryId: UUID) {
+            recordedAckEntryIds.append(entryId)
+        }
+        func startVoiceAckConfirmation(for entryId: UUID) -> String? {
+            challengeIssuedFor = entryId
+            return challengePrompt
+        }
+        func handleConfirmationResponse(_ response: ConfirmationResponse) {
+            confirmationResponses.append(response)
+        }
+        func medicationAckCandidates() -> [MedicationAckCandidate] { candidates }
         func addVoiceReminder(title: String, time: DateComponents) {}
         var pendingRephraseCommand: InterpretedCommand? { nil }
         func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?,
@@ -170,6 +186,45 @@ final class AckFastLaneTests: XCTestCase {
         buf.frameLength = 2_205
         try file.write(from: buf)
         return url
+    }
+
+    /// [VOLUME-BOOST] A tiny WAV whose loudest sample is `peak` — the
+    /// worst case a boost can meet (a file already close to full scale).
+    private func writeHotWAV(_ name: String, peak: Float) throws -> URL {
+        let url = tempRoot.appendingPathComponent(name)
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                   sampleRate: 22_050, channels: 1,
+                                   interleaved: false)!
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        let frames = AVAudioFrameCount(2_205)
+        let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+        buf.frameLength = frames
+        let samples = buf.floatChannelData![0]
+        for i in 0..<Int(frames) {
+            samples[i] = i % 2 == 0 ? peak : -peak / 2
+        }
+        try file.write(from: buf)
+        return url
+    }
+
+    /// Loudest |sample| of a finite-normal audio file (nil when the file
+    /// cannot be read back).
+    private func peakOfWAV(at url: URL) -> Float? {
+        guard let file = try? AVAudioFile(forReading: url) else { return nil }
+        let frames = AVAudioFrameCount(file.length)
+        guard frames > 0,
+              let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat,
+                                         frameCapacity: frames) else { return nil }
+        try? file.read(into: buf)
+        guard let data = buf.floatChannelData else { return nil }
+        var peak: Float = 0
+        for ch in 0..<Int(file.processingFormat.channelCount) {
+            for i in 0..<Int(buf.frameLength) {
+                let value = data[ch][i]
+                if value.isFinite { peak = max(peak, abs(value)) }
+            }
+        }
+        return peak
     }
 
     // MARK: - Cache store/lookup
@@ -419,16 +474,130 @@ final class AckFastLaneTests: XCTestCase {
         let played = player.playCachedAck(variant: 1, locale: ne)
 
         XCTAssertTrue(played, "a cached WAV plays without synthesis")
-        XCTAssertEqual(seamBegins, 1, "playback begins the voice-reply session mode")
+        // [ACK-MIC-CONTINUITY] The ack plays on the capture preset — the
+        // voice-reply seam is deliberately not opened around it, so the
+        // mic stays live and listening resumes the moment the ack ends.
+        XCTAssertEqual(seamBegins, 0, "a cached ack never opens the voice-reply session mode")
         let hit = bus.events.first { $0.eventType == "ack_cache_hit" }
         XCTAssertNotNil(hit, "a hit is logged with its setup cost")
         XCTAssertEqual(hit?.metadata["locale"], "ne-NP")
 
         player.cancel()
-        XCTAssertEqual(seamEnds, 1, "settling restores the session mode exactly once")
+        XCTAssertEqual(seamEnds, 0, "settling has no session mode to restore — the mic never closed")
         XCTAssertEqual(finished, 1, "the finished note fires exactly once per started playback")
         player.cancel()
         XCTAssertEqual(finished, 1, "a cancel with nothing playing is a no-op")
+    }
+
+    func testPlayerThatRefusesToPlaySettlesInsteadOfHangingTheFastLane() throws {
+        // play() returning false means no delegate callback will ever
+        // fire — the fast lane must settle (fire the finished note) or
+        // the turn hangs. [ACK-MIC-CONTINUITY] The seam is never opened
+        // around an ack, so a refused play has no session mode to
+        // restore — the mic was never closed.
+        final class RefusingPlayer: AVAudioPlayer {
+            override func play() -> Bool { false }
+        }
+        var seamBegins = 0
+        var seamEnds = 0
+        ResponsePlaybackModeSeam.begin = { seamBegins += 1 }
+        ResponsePlaybackModeSeam.end = { seamEnds += 1 }
+        let bus = RecordingBus()
+        let player = AckFastLanePlayer(
+            cache: cache, observabilityBus: bus,
+            playerFactory: { url in try RefusingPlayer(contentsOf: url) })
+        let spec = AckVoiceSpec.resolve(locale: ne)
+        try cache.store(wav: writeTinyWAV("refusing.wav"), variant: 1, spec: spec)
+
+        var finished = 0
+        player.onPlaybackFinished = { finished += 1 }
+
+        let played = player.playCachedAck(variant: 1, locale: ne)
+
+        XCTAssertFalse(played, "a refused play reads as a miss — the router falls back")
+        XCTAssertEqual(seamBegins, 0, "a refused play never opened the seam")
+        XCTAssertEqual(seamEnds, 0, "nothing to restore — the mic never closed")
+        XCTAssertEqual(finished, 1, "the finished note fires — no hang")
+    }
+
+    // MARK: - [VOLUME-BOOST] The ack carries the reply volume
+
+    func testPlayerProcessesTheAckAtEverySettingIncludingOneHundred() throws {
+        // [VOLUME-BASELINE] 100 % is the loud baseline (3× gain) — the
+        // ack is processed like every other setting; the cached slot is
+        // never rewritten, and the gained copy is cleaned up on settle.
+        let bus = RecordingBus()
+        var played: [URL] = []
+        let player = AckFastLanePlayer(
+            cache: cache, observabilityBus: bus,
+            playerFactory: { url in
+                played.append(url)
+                return try AVAudioPlayer(contentsOf: url)
+            },
+            gainPercentProvider: { 100 })
+        let spec = AckVoiceSpec.resolve(locale: ne)
+        let cached = try writeTinyWAV("ack-volume-100.wav")
+        try cache.store(wav: cached, variant: 1, spec: spec)
+        let cachedURL = try XCTUnwrap(cache.wavURL(variant: 1, spec: spec))
+        let cachedBytes = try Data(contentsOf: cachedURL)
+
+        XCTAssertTrue(player.playCachedAck(variant: 1, locale: ne))
+        XCTAssertNotEqual(played.first, cachedURL,
+                          "100 % plays a gained copy — the baseline applies")
+        XCTAssertEqual(try Data(contentsOf: cachedURL), cachedBytes,
+                       "the cache slot is shared with later turns — never rewritten")
+
+        player.cancel()
+    }
+
+    func testPlayerAppliesTheGainToTheAckWhenBoosted() throws {
+        // A boosted setting must reach the ack too (it is the assistant
+        // speaking): the played file is a temp COPY, the shared cache slot
+        // is never rewritten, the copy is limited to the ceiling, and the
+        // copy is cleaned up when playback settles.
+        let bus = RecordingBus()
+        var played: [URL] = []
+        let player = AckFastLanePlayer(
+            cache: cache, observabilityBus: bus,
+            playerFactory: { url in
+                played.append(url)
+                return try AVAudioPlayer(contentsOf: url)
+            },
+            gainPercentProvider: { 150 })
+        let spec = AckVoiceSpec.resolve(locale: ne)
+        let cached = try writeHotWAV("ack-volume-150.wav", peak: 0.95)
+        try cache.store(wav: cached, variant: 1, spec: spec)
+        let cachedURL = try XCTUnwrap(cache.wavURL(variant: 1, spec: spec))
+        let cachedBytes = try Data(contentsOf: cachedURL)
+
+        XCTAssertTrue(player.playCachedAck(variant: 1, locale: ne))
+        let playedURL = try XCTUnwrap(played.first)
+        XCTAssertNotEqual(playedURL, cachedURL,
+                          "a boosted ack plays from a processed copy")
+        XCTAssertEqual(try Data(contentsOf: cachedURL), cachedBytes,
+                       "the cache slot is shared with later turns — never rewritten")
+        let peak = try XCTUnwrap(peakOfWAV(at: playedURL))
+        XCTAssertLessThanOrEqual(peak, VoiceOutputGain.ceilingLinear + 0.0001,
+                                 "0.95 × 1.5 would clip; the limiter holds −1 dBFS")
+
+        player.cancel()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: playedURL.path),
+                       "the temp copy is removed once playback settles")
+    }
+
+    func testTheTransformRefusesUnreadableAudioRatherThanGuessing() throws {
+        // The player's fallback (play the cached file as-is) rests on this
+        // contract: the processor THROWS on anything it cannot decode
+        // instead of inventing samples, so the caller can play the
+        // original — a quieter ack, never a broken one.
+        let notAudio = tempRoot.appendingPathComponent("not-audio.wav")
+        try Data([0x00, 0x01, 0x02, 0x03]).write(to: notAudio)
+        XCTAssertThrowsError(try SpokenReplyGainProcessor.playbackURL(for: notAudio,
+                                                                      percent: 150))
+        // [VOLUME-BASELINE] 100 % processes too (the 3× baseline) — the
+        // unreadable-file refusal applies at every setting.
+        XCTAssertThrowsError(try SpokenReplyGainProcessor.playbackURL(for: notAudio,
+                                                                      percent: 100))
     }
 
     // MARK: - Speaker warm seam
@@ -501,5 +670,99 @@ final class AckFastLaneTests: XCTestCase {
             $0.component == "ack_cache" && $0.eventType == "warm"
                 && $0.outcome == "failed" && $0.errorCode == "voice_missing"
         })
+    }
+
+    // MARK: - [MED-ACK-WALK] (T-014) Named ack shapes on the shipped pipeline
+
+    /// A named acknowledgement ("I have taken Metformin for morning") —
+    /// one of the FR-MSR-012 utterance shapes — rides the SHIPPED ack
+    /// pipeline unchanged: the same deterministic gate admits it (no new
+    /// gate), the same challenge seam answers it, and the new shape
+    /// introduces no fast-lane step of its own (no cached-WAV playback,
+    /// no miss event) — one committed utterance, balanced speak notes, so
+    /// the [ACK-MIC-CONTINUITY] listening seam behaves exactly as it does
+    /// for the shipped ack shapes.
+    func testNamedAckShapeRidesTheShippedPipelineWithNoNewGate() {
+        let coordinator = FakeAckCoordinator()
+        let entryId = UUID()
+        coordinator.candidates = [MedicationAckCandidate(
+            entryId: entryId,
+            scheduledAt: Date(timeIntervalSince1970: 1_000),
+            fired: true,
+            slot: .morning,
+            voiceKeys: ["metformin"],
+            medicationName: "Metformin")]
+        coordinator.challengePrompt = "औषधि खानुभयो?"
+        let player = FakePreAckPlayer()
+        let (router, speaker, bus) = makeRouter(coordinator, player: player)
+
+        let result = router.route(transcript: "i have taken metformin for morning")
+        waitForAsyncSpeak()
+
+        XCTAssertEqual(result, .acknowledgedMedication,
+                       "the named shape is consumed by the shipped deterministic ack path")
+        XCTAssertEqual(coordinator.challengeIssuedFor, entryId,
+                       "the shipped challenge seam runs for the named entry — no new gate")
+        XCTAssertEqual(coordinator.recordedAckEntryIds, [],
+                       "recording still waits for the challenge answer, as shipped")
+        XCTAssertEqual(coordinator.assistantSpoken, [coordinator.challengePrompt!],
+                       "one committed utterance — the shipped challenge prompt")
+        XCTAssertEqual(coordinator.speakingStarted, 1)
+        waitForAsyncSpeak()
+        XCTAssertEqual(coordinator.speakingEnded, 1,
+                       "the single utterance settles — no speak note dangles and no new listening gap opens")
+        XCTAssertTrue(speaker.utterances.contains { $0.text == coordinator.challengePrompt },
+                      "the prompt rides the shipped reply lane")
+        XCTAssertTrue(player.playCalls.isEmpty,
+                      "the new shape fabricates no fast-lane ack of its own")
+        XCTAssertFalse(bus.events.contains { $0.eventType == "ack_cache_miss" },
+                       "the fast lane is never consulted, so it can never miss — mic continuity untouched")
+        XCTAssertEqual(bus.events.first { $0.eventType == "medication_ack_resolved" }?
+                        .metadata["entry_id_hash"],
+                       IdHashing.shortHash(of: entryId))
+    }
+
+    /// The answer spoken immediately after that acknowledgement is
+    /// captured in the same turn flow: with the challenge window open —
+    /// exactly the state the acknowledgement leaves behind — the very
+    /// next transcript reaches the challenge handler (never the
+    /// interpreter, never a walk), and the ack path added no gap between
+    /// the two turns.
+    func testChallengeAnswerSpokenRightAfterAnAckIsCapturedInTheSameTurnFlow() {
+        let coordinator = FakeAckCoordinator()
+        let entryId = UUID()
+        coordinator.candidates = [MedicationAckCandidate(
+            entryId: entryId,
+            scheduledAt: Date(timeIntervalSince1970: 1_000),
+            fired: true,
+            slot: .morning,
+            voiceKeys: ["metformin"],
+            medicationName: "Metformin")]
+        coordinator.challengePrompt = "औषधि खानुभयो?"
+        let player = FakePreAckPlayer()
+        let (router, speaker, bus) = makeRouter(coordinator, player: player)
+
+        _ = router.route(transcript: "i have taken metformin for morning")
+        // The coordinator opens the challenge window when the prompt is
+        // issued (the real coordinator's `startVoiceAckConfirmation`).
+        coordinator.isAwaitingConfirmation = true
+        waitForAsyncSpeak()
+
+        let result = router.route(transcript: "हो")
+        waitForAsyncSpeak()
+
+        XCTAssertEqual(result, .acknowledgedMedication,
+                       "the answer to the challenge is the challenge's, as shipped")
+        XCTAssertEqual(coordinator.confirmationResponses, [.yes],
+                       "captured by the challenge handler in the same turn flow")
+        XCTAssertTrue(coordinator.recordedAckEntryIds.isEmpty,
+                       "the yes still goes through the shipped safety sequence")
+        XCTAssertTrue(speaker.utterances.contains { $0.text == L10n.str("router.confirmationYes", locale: ne) },
+                      "the shipped confirmation line answers the yes")
+        XCTAssertTrue(bus.events.contains {
+            $0.eventType == "confirmation_yes" && $0.outcome == "success"
+        })
+        XCTAssertTrue(player.playCalls.isEmpty,
+                      "neither the ack nor its answer introduces a fast-lane step of its own")
     }
 }

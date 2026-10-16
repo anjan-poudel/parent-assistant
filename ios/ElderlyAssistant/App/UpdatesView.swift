@@ -41,7 +41,14 @@ extension AppCoordinator: UpdatesDataProviding {}
 ///
 /// `id` is the stable identity per row (widget id, "today.date",
 /// "today.next", or "activity.<exchange id>").
-struct UpdatesRow: Identifiable {
+///
+/// [RESPONSIVENESS] (2026-10-14) Every field is a value type with a
+/// synthesized `==`, so the row model is `Equatable` and its view can be
+/// gated with `.equatable()` — the same update-scoping the Home
+/// presentation slices use (`HomePresentationState`'s documented rule:
+/// `==` compares the DATA inputs; action closures and environment are
+/// deliberately out of the comparison).
+struct UpdatesRow: Identifiable, Equatable {
     let id: String
     let icon: String
     let tint: DesignTokens.BadgeTint
@@ -391,6 +398,7 @@ enum UpdatesAlarmsComposer {
 /// their text live every second through the house `TimelineView`
 /// pattern (updates-alarms task, 2026-09-10).
 struct UpdatesRowButton: View {
+    @Environment(\.appAppearance) private var appearance
     let row: UpdatesRow
 
     /// The app locale (set at the app root) — drives the Devanagari
@@ -425,8 +433,8 @@ struct UpdatesRowButton: View {
                 primaryText(text, monospaced: monospaced)
                 if let secondaryText = row.secondaryText {
                     Text(secondaryText)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                         .lineLimit(2)
                 }
             }
@@ -435,16 +443,15 @@ struct UpdatesRowButton: View {
                 Image(systemName: "chevron.right")
                     // Caption-token disclosure chevron (DESIGN-REVIEW) —
                     // 18pt floor, Dynamic Type aware; was a fixed 15pt.
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize,
                alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        .appSurface(cornerRadius: DesignTokens.bubbleCornerRadius)
     }
 
     /// The row's primary line — monospaced digits on live countdowns so
@@ -452,8 +459,8 @@ struct UpdatesRowButton: View {
     @ViewBuilder
     private func primaryText(_ value: String, monospaced: Bool) -> some View {
         let base = Text(value)
-            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-            .foregroundStyle(DesignTokens.textPrimary)
+            .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+            .foregroundStyle(appearance.colors.textPrimary)
             .multilineTextAlignment(.leading)
         if monospaced {
             base.monospacedDigit()
@@ -473,6 +480,21 @@ struct UpdatesRowButton: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text(row.accessibilityText))
+    }
+}
+
+/// [RESPONSIVENESS] (2026-10-14) The extracted value view's equality
+/// contract, mirroring `HomePresentationState`'s documented rule: `==`
+/// compares the DATA input only (the row model) — nothing else is a
+/// stored property, and environment values (appearance, locale, the
+/// live countdown's `TimelineView` tick) still drive their own
+/// re-evaluation of the body SwiftUI decides to keep. The leaf observes
+/// the whole coordinator (84 `@Published`s), so without this gate every
+/// unrelated publish — a calendar scan, an alarm toggle, a download
+/// tick — rebuilt all 30-odd rows of this list.
+extension UpdatesRowButton: Equatable {
+    static func == (lhs: UpdatesRowButton, rhs: UpdatesRowButton) -> Bool {
+        lhs.row == rhs.row
     }
 }
 
@@ -508,6 +530,7 @@ private extension UpdatesRow {
 /// `LeafScreen` chrome (back button + title) is this leaf's chrome, and
 /// the leaves pushed from it have theirs.
 struct UpdatesScreen: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
 
     /// The SAME registry instance Home renders its bell badge from — the
@@ -537,19 +560,24 @@ struct UpdatesScreen: View {
     private func sectionView(_ section: UpdatesSection) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(LocalizedStringKey(section.titleKey))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textSecondary)
             if section.rows.isEmpty {
                 if let emptyTextKey = section.emptyTextKey {
                     Text(LocalizedStringKey(emptyTextKey))
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                         .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize,
                                alignment: .leading)
                 }
             } else {
+                // [RESPONSIVENESS] (2026-10-14) `.equatable()` gates the
+                // row's body on its data input (see the conformance
+                // above): an unrelated coordinator publish that leaves
+                // this row's model untouched no longer rebuilds it.
                 ForEach(section.rows) { row in
                     UpdatesRowButton(row: row)
+                        .equatable()
                 }
             }
         }

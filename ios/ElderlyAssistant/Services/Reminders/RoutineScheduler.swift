@@ -27,6 +27,14 @@ final class RoutineScheduler {
     /// Per-event-type preferences, read at FIRE time (see
     /// `CaregiverNotifySettings`).
     private let caregiverNotifySettings: CaregiverNotifySettings
+    /// Photo store for the entries' visual aids (photo-visual-aids task,
+    /// 2026-09-16). Optional with a nil default so every existing test
+    /// harness constructs a scheduler unchanged and an entry without
+    /// photos — the overwhelming majority — never touches the disk.
+    /// `AppCoordinator` passes the app's shared instance, which is what
+    /// makes fired notifications carry the picture and deleted entries
+    /// drop their photos.
+    private let visualAidStore: VisualAidStore?
     /// Injectable clock — tests pin "now" so window/weekday behavior is
     /// deterministic. Production passes `Date.init`.
     private let now: () -> Date
@@ -48,6 +56,7 @@ final class RoutineScheduler {
         observabilityBus: ObservabilityBus,
         familyNotifier: FamilyNotifierProtocol,
         caregiverNotifySettings: CaregiverNotifySettings,
+        visualAidStore: VisualAidStore? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.store = store
@@ -55,6 +64,7 @@ final class RoutineScheduler {
         self.observabilityBus = observabilityBus
         self.familyNotifier = familyNotifier
         self.caregiverNotifySettings = caregiverNotifySettings
+        self.visualAidStore = visualAidStore
         self.now = now
     }
 
@@ -100,9 +110,30 @@ final class RoutineScheduler {
 
     func removeEntry(id: UUID) {
         guard store.remove(id: id) else { return }
+        // The photos go WITH the reminder (photo-visual-aids task): a
+        // picture of a medicine box must not outlive the reminder it was
+        // attached to, and nothing else can find these files afterwards.
+        visualAidStore?.deleteAll(for: id)
         emit("entry_removed", metadata: ["entry_id_hash": idHash(id)])
         scheduleAll()
         onScheduleChanged?()
+    }
+
+    /// Replaces an entry's visual aids (the photo editor's save path).
+    /// Persists and re-arms through `persistAndReschedule`, so an edit to
+    /// the photos behaves exactly like an edit to the times: durable
+    /// immediately, notifications refreshed, calendar mirror re-synced.
+    ///
+    /// The FILES are the caller's business (`VisualAidStore.save` on add,
+    /// `delete` on remove) — this mutator owns only the model payload, the
+    /// same separation `RoutineStore` keeps.
+    @discardableResult
+    func setVisualAids(_ aids: [VisualAid], entryId: UUID) -> Bool {
+        guard var entry = entry(for: entryId) else { return false }
+        entry.visualAids = aids
+        return persistAndReschedule(entry, eventType: "entry_visual_aids_updated",
+                                    metadata: ["entry_id_hash": idHash(entryId),
+                                               "count": String(aids.count)])
     }
 
     // MARK: - Native-edit application (calendar-driven task, 2026-09-07)
@@ -336,6 +367,7 @@ final class RoutineScheduler {
                     occurrenceId: occurrence.id,
                     entryId: entry.id,
                     title: entry.displayTitle(locale: locale),
+                    visualAidURL: visualAidURL(for: entry),
                     at: occurrence.scheduledAt
                 )
             } else {
@@ -348,6 +380,17 @@ final class RoutineScheduler {
         if !expiredIds.isEmpty {
             persistOccurrences()
         }
+    }
+
+    /// The file to attach to this entry's fired notification: its FIRST
+    /// visual aid, or nil when the entry has none, the store is not wired,
+    /// or the file has gone missing. One image per notification is the
+    /// platform's limit (a `UNNotificationAttachment` is singular), and
+    /// "the first photo the caregiver added" is the one that matters — the
+    /// full set is what the in-app screen pages through.
+    private func visualAidURL(for entry: RoutineEntry) -> URL? {
+        guard let visualAidStore, let aid = entry.visualAids.first else { return nil }
+        return visualAidStore.existingFileURL(aid, for: entry.id)
     }
 
     private func combine(day: Date, time: DateComponents, calendar: Calendar) -> Date? {

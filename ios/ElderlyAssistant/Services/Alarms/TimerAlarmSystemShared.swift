@@ -49,7 +49,7 @@ struct AlarmKitMetadata: AlarmMetadata, Codable, Hashable, Sendable {
 /// Bundle identifier of the widget extension that hosts the AlarmKit
 /// alarm presentation (declared in project.yml).
 enum TimerAlarmSystemShared {
-    static let widgetExtensionBundleID = "com.elderlyassistant.app.TimerAlarmWidget"
+    static let widgetExtensionBundleID = "ai.voicebridge.senior.assistant.TimerAlarmWidget"
 }
 
 // MARK: - App Intents `.clock` schema — investigated, NOT adoptable yet

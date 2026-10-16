@@ -9,16 +9,27 @@ import AVKit
 /// Settings → Feeds.
 ///
 /// Per-card affordances (spec: ONE action per card, ≥44pt targets):
-/// - text card  → "Read aloud" (SpeakQueue via the coordinator's single
-///   speech path — the `AVSpeech`-free house rule);
-/// - image card → the image itself (async-loaded, no action);
+/// - text card  → the published photo (when the feed carries one), then
+///   "Translate", "Read aloud" and "Read full article" (SpeakQueue via
+///   the coordinator's single speech path — the `AVSpeech`-free house
+///   rule); tapping the news text itself opens the full-article reader;
+/// - image card → the photo; tapping it opens the same reader;
 /// - audio/video → "Play", which presents the `FeedMediaPlayerSheet`.
-/// Nothing autoplays — playback only ever starts from the user's tap.
+/// Nothing autoplays — playback only ever starts from the user's tap,
+/// and nothing is ever spoken until a read button is tapped.
 struct FeedsView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
+    /// [AX-VIEWPORT] Gates the summary's line cap below.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// The item whose play sheet is open (audio or video), nil = closed.
     @State private var playingItem: FeedItem?
+
+    /// The item whose full-article reader is open (news-feed-images task,
+    /// 2026-10-14), nil = closed. Set by tapping a text or image card's
+    /// news text — "tap news to read the news text full".
+    @State private var readingItem: FeedItem?
 
     /// Per-card toggle state (feed translation task, 2026-09-08): ids
     /// the user reverted to the ORIGINAL after a translation was shown —
@@ -40,6 +51,15 @@ struct FeedsView: View {
         .sheet(item: $playingItem) { item in
             FeedMediaPlayerSheet(item: item)
         }
+        // The tap-through reader (news-feed-images task, 2026-10-14).
+        // FULL-SCREEN, because the article is the whole task once opened
+        // — and the house leaf chrome (`LeafScreen`) gives it the same
+        // back chevron and Emergency icon as every other leaf, so
+        // leaving is a control the elder already knows. The play sheet
+        // stays a sheet: a video wants a stage, an article wants a page.
+        .fullScreenCover(item: $readingItem) { item in
+            FeedArticleReaderView(item: item)
+        }
     }
 
     // MARK: - Header row (count + refresh)
@@ -48,19 +68,17 @@ struct FeedsView: View {
         HStack(spacing: 12) {
             Text(L10n.fmt("feeds.count", locale: coordinator.activeLocale,
                           coordinator.feedItems.count))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                .foregroundStyle(appearance.colors.textSecondary)
             Spacer()
             Button {
                 Task { await coordinator.refreshFeed() }
             } label: {
                 Label("feeds.refresh", systemImage: "arrow.clockwise")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                     .padding(.horizontal, 16)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.card)
-                    .clipShape(Capsule())
+                    .appSurface(role: .card, cornerRadius: 999)
             }
             .buttonStyle(.plain)
         }
@@ -88,41 +106,38 @@ struct FeedsView: View {
         HStack(spacing: 12) {
             ProgressView()
             Text("feeds.loading")
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var failedCard: some View {
         VStack(spacing: 12) {
             Image(systemName: "wifi.exclamationmark")
                 .font(.system(size: 28))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             Text("feeds.failed")
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Button {
                 Task { await coordinator.refreshFeed() }
             } label: {
                 Text("feeds.retry")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Capsule())
+                    .appSurface(role: .accent, cornerRadius: 999)
             }
             .buttonStyle(.plain)
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     @ViewBuilder
@@ -148,29 +163,27 @@ struct FeedsView: View {
             Image(systemName: "exclamationmark.circle.fill")
                 // Caption-token status glyph (DESIGN-REVIEW) — 18pt floor,
                 // Dynamic Type aware; was a fixed 16pt.
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .padding(.top, 2)
             Text(L10n.fmt("feeds.partialFailure", locale: coordinator.activeLocale,
                           coordinator.feedFailedSourceNames.joined(separator: ", ")))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var emptyCard: some View {
         Text("feeds.empty")
-            .font(.system(size: DesignTokens.minBodyPointSize))
-            .foregroundStyle(DesignTokens.textSecondary)
+            .font(.system(size: appearance.typography.bodyPointSize))
+            .foregroundStyle(appearance.colors.textSecondary)
             .multilineTextAlignment(.center)
             .padding(32)
             .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     // MARK: - Cards (one action per card)
@@ -187,88 +200,138 @@ struct FeedsView: View {
         }
     }
 
-    /// Text card: title, a few lines of summary, source + time caption,
-    /// and two actions — "Translate" (feed translation task) and
-    /// "Read aloud" (SpeakQueue via the coordinator's canonical path,
-    /// the BriefingView precedent — no AVSpeech). The AI-translated
-    /// marker shows only while the translation is displayed.
+    /// Text card: the published photo (news-feed-images task, 2026-10-14)
+    /// when the feed carries one, title, a few lines of summary, source +
+    /// time caption, and the card's actions — "Translate" (feed
+    /// translation task), "Read aloud" (SpeakQueue via the coordinator's
+    /// canonical path, the BriefingView precedent — no AVSpeech), and
+    /// "Read full article" (feeds readaloud task, 2026-09-19) when the
+    /// source published a body beyond the summary. The AI-translated
+    /// marker shows only while the translation is displayed; the "New"
+    /// marker (feeds readaloud task) shows until the item has been read
+    /// aloud to the end.
+    ///
+    /// Tapping the card's NEWS TEXT — photo, markers, headline, summary,
+    /// caption — opens the full-article reader ("tap news to read the
+    /// news text full", news-feed-images task). The tap is scoped to
+    /// that glance area rather than the whole card on purpose: the three
+    /// buttons below stay siblings, not children, of the tappable view,
+    /// so a tap can never do two things at once — pressing "Read aloud"
+    /// reads, pressing the text opens the reader, with no gesture
+    /// arbitration to get wrong. VoiceOver: the glance combines into ONE
+    /// element carrying the card's text and the button trait, so a card
+    /// is a single swipe that announces the story and opens it on
+    /// double-tap; the action buttons remain their own elements after
+    /// it.
+    ///
+    /// The unread marker lives on TEXT cards only: reading aloud is the
+    /// one thing that marks an item read, and text cards are the only
+    /// cards that offer it (the voice command can read any item, which is
+    /// exactly why a badge on an image card could never be cleared by the
+    /// card's own affordances and would lie).
     private func textCard(_ item: FeedItem) -> some View {
         let display = display(for: item)
         return VStack(alignment: .leading, spacing: 10) {
-            if display.isShowingTranslation {
-                translatedMarker
-            }
-            Text(display.title)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let summary = displaySummary(display) {
-                Text(summary)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                    .lineLimit(4)
+            VStack(alignment: .leading, spacing: 10) {
+                FeedArticleImageView(urlString: item.imageURL)
+                if display.isShowingTranslation || !coordinator.isFeedItemRead(item) {
+                    HStack(spacing: 8) {
+                        if !coordinator.isFeedItemRead(item) {
+                            unreadMarker
+                        }
+                        if display.isShowingTranslation {
+                            translatedMarker
+                        }
+                    }
+                }
+                Text(display.title)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
+                    // [FEED-VISUAL-FIX] Wraps long unbroken tokens
+                    // (URLs, hashtags) instead of spilling past the card.
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                if let summary = displaySummary(display) {
+                    Text(summary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textPrimary)
+                        // [FEED-VISUAL-FIX] (2026-10-14) No line cap at
+                        // any size — owner: "text is getting cut off".
+                        // The tap-through reader exists now, so the
+                        // glance no longer needs to truncate to protect
+                        // the card's height; the summary wraps fully.
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                captionRow(item)
+                if coordinator.isFeedItemTranslating(item), !display.hasTranslation {
+                    translatingCaption
+                } else if coordinator.feedTranslationFailed(for: item), !display.hasTranslation {
+                    translationUnavailableCaption
+                }
             }
-            captionRow(item)
-            if coordinator.isFeedItemTranslating(item), !display.hasTranslation {
-                translatingCaption
-            } else if coordinator.feedTranslationFailed(for: item), !display.hasTranslation {
-                translationUnavailableCaption
-            }
+            .contentShape(Rectangle())
+            .onTapGesture { openReader(item) }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { openReader(item) }
             HStack(spacing: 10) {
                 translateButton(item)
                 readAloudButton(item)
             }
+            if FeedSpeechSanitizer.hasFullArticle(summary: item.summary,
+                                                  fullText: item.fullText) {
+                fullArticleButton(item)
+            } else {
+                summaryOnlyCaption
+            }
         }
         .padding(18)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
-    /// Image card: the photo (async), then title + caption. No action —
-    /// the image IS the content.
+    /// Image card: the photo, then title + caption. The photo now loads
+    /// through the house downsampling cache (`FeedArticleImageView`,
+    /// news-feed-images task, 2026-10-14) in a fixed full-width band —
+    /// the old raw `AsyncImage` reserved 160pt for its placeholder and
+    /// then reflowed the card to the photo's natural height when it
+    /// landed, which this slot cannot do. The whole photo shows
+    /// (letterboxed): this card is where the elder comes to LOOK at the
+    /// picture, so cropping it would hide what the card promised.
+    ///
+    /// Tapping the card opens the full-article reader — the card has no
+    /// buttons, so the whole card is the target.
     private func imageCard(_ item: FeedItem) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let url = item.imageURL.flatMap(URL.init(string:)) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFit()
-                    case .empty:
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 160)
-                    case .failure:
-                        // Honest placeholder — the image failed to load,
-                        // the card still says what the item is.
-                        Image(systemName: "photo")
-                            .font(.system(size: 40))
-                            .foregroundStyle(DesignTokens.textSecondary)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 160)
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
-                .accessibilityHidden(true)
-            }
+            FeedArticleImageView(urlString: item.imageURL, fit: .fit)
             Text(item.title)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textPrimary)
+                // [FEED-VISUAL-FIX] Wraps long unbroken tokens instead
+                // of spilling past the card edge.
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             captionRow(item)
         }
         .padding(18)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
+        .contentShape(Rectangle())
+        .onTapGesture { openReader(item) }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { openReader(item) }
+    }
+
+    /// The card tap's one action (news-feed-images task, 2026-10-14):
+    /// open the full-article reader for `item`. Shared by the tap
+    /// gesture and the VoiceOver activation so both go through one path;
+    /// the light press confirmation is the house card-action feel
+    /// (`HapticsPolicy` withholds it wholesale under reduceMotion and
+    /// VoiceOver — for the latter, VoiceOver's own speech is the
+    /// confirmation).
+    private func openReader(_ item: FeedItem) {
+        Haptics.play(.tap)
+        readingItem = item
     }
 
     /// Audio/video card: kind badge, title, source caption, and two
@@ -286,17 +349,16 @@ struct FeedsView: View {
             HStack(spacing: 10) {
                 Image(systemName: item.kind == .audio
                       ? "speaker.wave.2.fill" : "play.rectangle.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.accent)
+                    .font(.system(size: 22)).foregroundStyle(appearance.colors.accentForeground)
                 Text(display.title)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .lineLimit(3)
             }
             if let summary = displaySummary(display) {
                 Text(summary)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .lineLimit(2)
             }
             captionRow(item)
@@ -310,13 +372,12 @@ struct FeedsView: View {
                     playingItem = item
                 } label: {
                     Label("feeds.play", systemImage: "play.fill")
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 18)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: DesignTokens.minTapTargetSize)
-                        .background(DesignTokens.accent)
-                        .clipShape(Capsule())
+                        .appSurface(role: .accent, cornerRadius: 999)
                 }
                 .buttonStyle(.plain)
                 .disabled(item.mediaURL == nil)
@@ -325,10 +386,7 @@ struct FeedsView: View {
             }
         }
         .padding(18)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     // MARK: - Card helpers
@@ -337,17 +395,17 @@ struct FeedsView: View {
     private func captionRow(_ item: FeedItem) -> some View {
         HStack(spacing: 6) {
             Text(item.sourceName)
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                .foregroundStyle(appearance.colors.textSecondary)
             if let date = item.publishedAt {
                 Text("·")
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                 Text(HistoryTimeFormat.displayString(for: date,
                                                      now: Date(),
                                                      calendar: .current,
                                                      locale: coordinator.activeLocale))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
         }
     }
@@ -378,14 +436,13 @@ struct FeedsView: View {
     private var translatedMarker: some View {
         HStack(spacing: 4) {
             Image(systemName: "sparkles")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
             Text("feeds.translatedByAI")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-        }
-        .foregroundStyle(DesignTokens.accent)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+        }.foregroundStyle(appearance.colors.accentForeground)
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
-        .background(DesignTokens.accent.opacity(0.12))
+        .background(appearance.colors.accent.opacity(0.12))
         .clipShape(Capsule())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("feeds.translatedByAI"))
@@ -400,11 +457,11 @@ struct FeedsView: View {
         HStack(spacing: 6) {
             ProgressView()
                 .controlSize(.small)
-                .tint(DesignTokens.textSecondary)
+                .tint(appearance.colors.textSecondary)
             Text("feeds.translating")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
         }
-        .foregroundStyle(DesignTokens.textSecondary)
+        .foregroundStyle(appearance.colors.textSecondary)
         .accessibilityElement(children: .combine)
     }
 
@@ -417,11 +474,11 @@ struct FeedsView: View {
     private var translationUnavailableCaption: some View {
         HStack(spacing: 6) {
             Image(systemName: "exclamationmark.circle.fill")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
             Text("feeds.translationUnavailable")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
         }
-        .foregroundStyle(DesignTokens.textSecondary)
+        .foregroundStyle(appearance.colors.textSecondary)
         .accessibilityElement(children: .combine)
     }
 
@@ -444,7 +501,7 @@ struct FeedsView: View {
             Group {
                 if translating {
                     ProgressView()
-                        .tint(DesignTokens.accent)
+                        .tint(appearance.colors.accentForeground)
                 } else {
                     Label(LocalizedStringKey(display.isShowingTranslation
                                              ? "feeds.showOriginal" : "feeds.translate"),
@@ -452,14 +509,12 @@ struct FeedsView: View {
                           ? "arrow.uturn.backward" : "character.bubble.fill")
                 }
             }
-            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-            .foregroundStyle(DesignTokens.accent)
+            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
             .padding(.horizontal, 18)
             .frame(maxWidth: .infinity)
             .frame(minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.background)
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(DesignTokens.accent.opacity(0.4), lineWidth: 1.5))
+            .appSurface(role: .control, cornerRadius: 999)
+            .overlay(Capsule().stroke(appearance.colors.accentForeground.opacity(0.4), lineWidth: 1.5))
         }
         .buttonStyle(.plain)
         .disabled(translating)
@@ -486,29 +541,91 @@ struct FeedsView: View {
     /// displays: the translation when it is showing, the original
     /// otherwise (feed translation task). Sanitized through the shared
     /// TTS-friendly path either way; an item with nothing speakable is
-    /// never enqueued.
+    /// never enqueued. The item is marked read when the reading finishes
+    /// (feeds readaloud task, 2026-09-19) — see
+    /// `coordinator.readFeedItemSummaryAloud`.
     private func readAloudButton(_ item: FeedItem) -> some View {
         Button {
             readAloud(item)
         } label: {
             Label("feeds.readAloud", systemImage: "speaker.wave.2.fill")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 18)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.accent)
-                .clipShape(Capsule())
+                .appSurface(role: .accent, cornerRadius: 999)
         }
         .buttonStyle(.plain)
     }
 
+    /// "Read full article" (feeds readaloud task, 2026-09-19) — a
+    /// full-width row of its own rather than a third button squeezed into
+    /// the Translate/Read-aloud row: the target stays large (≥44pt) and
+    /// the label keeps the body point size, which is the whole point for
+    /// this audience. Shown only when the source published a body beyond
+    /// the summary (`hasFullArticle`); otherwise the honest caption
+    /// below takes its place.
+    private func fullArticleButton(_ item: FeedItem) -> some View {
+        Button {
+            coordinator.readFeedItemArticleAloud(item)
+        } label: {
+            Label("feeds.readFullArticle", systemImage: "doc.text.fill")
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
+                .padding(.horizontal, 18)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .appSurface(role: .control, cornerRadius: 999)
+                .overlay(Capsule().stroke(appearance.colors.accentForeground.opacity(0.4), lineWidth: 1.5))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Unread marker — the item has not been read aloud yet. Same
+    /// house-chip shape as the AI-translated marker, with a filled dot so
+    /// "new" reads at a glance as well as in words (the word is the
+    /// accessible label).
+    private var unreadMarker: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(appearance.colors.accentForeground)
+                .frame(width: 8, height: 8)
+            Text("feeds.unread")
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+        }.foregroundStyle(appearance.colors.accentForeground)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(appearance.colors.accent.opacity(0.12))
+        .clipShape(Capsule())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("feeds.unread"))
+    }
+
+    /// Honest caption in place of the full-article button: this source
+    /// published only a summary, so there is no longer read to offer.
+    /// Stated rather than implied by a missing button — the elder should
+    /// never wonder whether the app forgot it.
+    private var summaryOnlyCaption: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "text.alignleft")
+                .font(.system(size: appearance.typography.captionPointSize))
+            Text("feeds.summaryOnly")
+                .font(.system(size: appearance.typography.captionPointSize))
+        }
+        .foregroundStyle(appearance.colors.textSecondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The summary read. The text is resolved from what the card is
+    /// DISPLAYING (translation or original) and handed to the coordinator,
+    /// which speaks it and marks the item read on completion.
     private func readAloud(_ item: FeedItem) {
         let display = display(for: item)
         let text = FeedSpeechSanitizer.speechText(title: display.title,
                                                   summary: display.summary)
         guard !text.isEmpty else { return }
-        coordinator.speak(text: text)
+        coordinator.readFeedItemSummaryAloud(item, text: text)
     }
 }
 
@@ -530,6 +647,7 @@ struct FeedsView: View {
 /// itself never autoplays anything. The player pauses and releases on
 /// dismiss.
 struct FeedMediaPlayerSheet: View {
+    @Environment(\.appAppearance) private var appearance
     let item: FeedItem
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.dismiss) private var dismiss
@@ -544,20 +662,19 @@ struct FeedMediaPlayerSheet: View {
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .foregroundStyle(appearance.colors.textPrimary)
                         .frame(minWidth: DesignTokens.minTapTargetSize,
                                minHeight: DesignTokens.minTapTargetSize)
-                        .background(DesignTokens.card)
-                        .clipShape(Circle())
+                        .appSurface(role: .card, cornerRadius: 999)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("feeds.close"))
                 Text("feeds.playingTitle")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textSecondary)
                 Text(item.title)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .lineLimit(2)
                 Spacer(minLength: 8)
             }

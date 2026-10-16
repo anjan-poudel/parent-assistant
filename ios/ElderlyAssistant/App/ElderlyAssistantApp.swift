@@ -41,6 +41,24 @@ struct ElderlyAssistantApp: App {
             // backgrounding does not open a new one).
             .onAppear {
                 StartupSignposts.end(.firstMeaningfulFrame)
+                #if DEBUG
+                // Device-verification hook (2026-10-13): drives the
+                // Messenger open path from launch arguments so the
+                // verification lanes need no on-device taps; inert
+                // without `-probeMessengerHandle`.
+                MessengerProbe.runIfRequested(on: appCoordinator)
+                // Spotify link probe (2026-10-14): drives the link flow
+                // from launch arguments so the consent presentation can be
+                // verified without taps; inert without `-spotifyLink`.
+                SpotifyLinkProbe.runIfRequested(on: appCoordinator)
+                #endif
+            }
+            // The OAuth callback bridge for the default-browser consent
+            // seam (the iOS 27.0.1 ASWebAuthenticationSession workaround):
+            // callback-scheme URLs are consumed by a pending attempt and
+            // nothing else; all other URLs are not this handler's concern.
+            .onOpenURL { url in
+                _ = ExternalBrowserSpotifyAuthSession.handleOpenURL(url)
             }
             .environmentObject(appCoordinator)
             .environmentObject(appCoordinator.voiceSession)
@@ -59,6 +77,12 @@ struct ElderlyAssistantApp: App {
             // root. Every Text/catalog lookup, date, and number
             // formatter below this point follows it automatically.
             .environment(\.locale, appCoordinator.activeLocale)
+            .appTextSize(appCoordinator.appTextSize)
+            .environment(\.appAppearance, AppAppearance(
+                skin: appCoordinator.appTheme, style: appCoordinator.appVisualStyle,
+                textSize: appCoordinator.appTextSize))
+            .tint(AppColors.palette(for: appCoordinator.appTheme).accentForeground)
+            .preferredColorScheme(appCoordinator.appTheme.preferredColorScheme)
         }
     }
 }

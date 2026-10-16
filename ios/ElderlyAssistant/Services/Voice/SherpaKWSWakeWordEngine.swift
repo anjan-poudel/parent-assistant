@@ -184,7 +184,8 @@ final class SherpaKWSWakeWordEngine: WakeWordEngine {
     // MARK: - Construction (model load happens here, not in start())
 
     init(files: SherpaKWSModelFiles,
-         observabilityBus: ObservabilityBus? = nil) throws {
+         observabilityBus: ObservabilityBus? = nil,
+         lifecycle: ModelLifecycleManager = .shared) throws {
         self.observabilityBus = observabilityBus ?? NoopObservabilityBus()
         // A keywords file that exists but carries NO lines would build a
         // spotter that never fires (EncodeBase over an empty file) — a
@@ -205,6 +206,7 @@ final class SherpaKWSWakeWordEngine: WakeWordEngine {
             throw SherpaKWSUnavailableReason.engineInitFailed
         }
         self.spotter = spotter
+        registerSpotterWithLedger(lifecycle)
         #else
         // A build without the sherpa-onnx package linked (project.yml
         // pins it today) cannot detect anything — fail honestly at
@@ -214,6 +216,39 @@ final class SherpaKWSWakeWordEngine: WakeWordEngine {
                                               errorCode: "runtime_unavailable"))
         throw SherpaKWSUnavailableReason.runtimeNotLinked
         #endif
+    }
+
+    /// [MODEL-WARDEN] Step 0 — declare the spotter to the ledger.
+    ///
+    /// Proposal §1.2 / finding H5: `SherpaKWSWakeWordEngine.spotter` is
+    /// "built in `init` ('once per launch'), `stop()` only clears `active`
+    /// and `reset()`s" — a real ~5 MB allocation that the ledger's `M(t)`
+    /// did not contain.
+    ///
+    /// **Owner decision (proposal §7.6 as revised): KWS is load-on-demand,
+    /// not resident.** Made concrete here:
+    ///
+    ///  * the warden never loads it — nothing preloads the spotter; it
+    ///    exists exactly when the wake-word engine that owns it exists, and
+    ///    the row appears with it;
+    ///  * it is **not evictable**: freeing it out from under a live audio
+    ///    tap would need an audio-graph restart, which is a user-visible
+    ///    interruption for ~5 MB. The written reason is the point of the
+    ///    decision — `evictable: false` with no reason is indistinguishable
+    ///    from an oversight;
+    ///  * the row IS marked resident, because the bytes are really there:
+    ///    "not resident" is a statement about what policy may assume, not a
+    ///    licence to make the ledger's total undercount. `phys_footprint`
+    ///    contains this spotter, and a total that excluded it would fail the
+    ///    check it exists for.
+    private func registerSpotterWithLedger(_ lifecycle: ModelLifecycleManager) {
+        lifecycle.register(
+            slot: .wakeWord,
+            modelID: nil,
+            owner: self,
+            evictable: false
+        ) {}
+        lifecycle.didLoad(.wakeWord, owner: self)
     }
 
     /// Selection entry point: returns a live engine when the model is

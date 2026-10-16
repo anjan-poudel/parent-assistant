@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "provider": "slack",
+  "workspace_id": "T0C78DE0QF2",
+  "session": "multi-turn-conversation",
+  "channel": {
+    "id": "C0C85E99LGN",
+    "name": "ai-sdd-multi-turn-conversation"
+  },
+  "control_message_ts": null,
+  "created_at": "2026-10-10T01:25:08.206Z",
+  "last_verified_at": "2026-10-10T01:25:08.206Z"
+}

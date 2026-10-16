@@ -21,6 +21,12 @@ struct ScannedEvent: Equatable {
     /// mirror-tag notes are the braces, calendar-id exclusion the belt).
     let calendarIdentifier: String?
     let calendarName: String
+    /// `EKEvent.location` (rich-events task, 2026-09-17) — the address the
+    /// elder typed in the Events form, or the one the family corrected in
+    /// their own Calendar app, which is the same field either way. Carried
+    /// through to the fired reminder, where it decides whether the banner
+    /// offers a destination (design §4).
+    let location: String?
 }
 
 struct ScannedReminder: Equatable {
@@ -146,7 +152,8 @@ final class EKCalendarScanner: NativeCalendarScanning {
                 isDeclined: event.status == .canceled,
                 hasAlarms: event.hasAlarms,
                 calendarIdentifier: event.calendar.calendarIdentifier,
-                calendarName: event.calendar.title
+                calendarName: event.calendar.title,
+                location: event.location
             )
         }
     }

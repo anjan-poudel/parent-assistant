@@ -25,8 +25,15 @@ enum L10n {
         if let value = lookup(key, lproj: locale.identifier) {
             return value
         }
-        // 3. Last resort: the standard API (system language).
-        return String(localized: String.LocalizationValue(key), locale: locale)
+        // 3. Last resort: the standard API (system language). A total
+        //    miss returns the KEY itself — [AUDIT-SPOKEN] never let that
+        //    reach a synthesizer or a card: return "" instead, so the
+        //    emptiness guards at the speech seams (CommandRouter.speak,
+        //    NotificationReader) turn a miss into silence rather than
+        //    reading the key aloud, and display callers fall back to
+        //    their own defaults instead of rendering "router.x.y".
+        let fallback = String(localized: String.LocalizationValue(key), locale: locale)
+        return fallback == key ? "" : fallback
     }
 
     private static func lookup(_ key: String, lproj name: String) -> String? {
@@ -49,10 +56,53 @@ enum L10n {
     }
 
     /// Resolves `key` and applies `arguments` with `String(format:)`.
-    /// Used for keys containing %@ / %lld placeholders.
+    /// Used for keys containing %@ / %lld placeholders. A total miss
+    /// yields "" (see `str`) — callers must treat empty as
+    /// nothing-to-say, not as a format string.
     static func fmt(_ key: String, locale: Locale, _ arguments: CVarArg...) -> String {
         let format = str(key, locale: locale)
         return String(format: format, arguments: arguments)
+    }
+}
+
+// MARK: - Cloud-chat safe templates (T-171; design-l1 §17)
+
+extension L10n {
+    /// The bounded, spec-authored safe-template set (design-l1 §17:
+    /// `chat.safeTemplate.<class>` plus a generic entry; FR-CNR-006). The
+    /// guard's check classes (T-169's `GrammarCheckClass` raw values, the
+    /// style spec's `guard_checks` ids) map 1:1 onto the class cases. The
+    /// set is CLOSED on purpose: the fallback text spoken when a flagged
+    /// reply cannot be escalated is always one of these catalogue values —
+    /// never free-form text generated at runtime, and never the flagged
+    /// reply itself.
+    enum SafeTemplate: String, CaseIterable {
+        case generic
+        case honorificAgreement
+        case devanagariPurity
+        case danglingParticle
+
+        /// The catalogue key that carries this template's copy.
+        var catalogKey: String { "chat.safeTemplate.\(rawValue)" }
+    }
+
+    /// Deterministic selection keyed by the guard's flagging check classes
+    /// (T-174 consumes this at the dispatch seam): the FIRST known class
+    /// wins — the guard reports classes in its own fixed order — and a
+    /// flag with no known class resolves to `generic`. Unknown names are
+    /// dropped, never echoed into a key: the set stays bounded.
+    static func safeTemplate(forCheckClasses classes: [String]) -> SafeTemplate {
+        for name in classes {
+            if let template = SafeTemplate(rawValue: name) { return template }
+        }
+        return .generic
+    }
+
+    /// Resolves a safe template's copy in `locale` (the `str` contract:
+    /// a total miss yields "" — callers treat that as nothing-to-say; the
+    /// catalogue coverage suite is what keeps a miss from shipping).
+    static func safeTemplate(_ template: SafeTemplate, locale: Locale) -> String {
+        str(template.catalogKey, locale: locale)
     }
 }
 
@@ -64,6 +114,9 @@ extension ModelCatalogEntry {
     func displayName(locale: Locale) -> String {
         let key = "model.name.\(id.rawValue)"
         let value = L10n.str(key, locale: locale)
-        return value == key ? displayName : value
+        // `L10n.str` returns "" on a total miss (never the raw key); an
+        // empty resolution or a literal key-shaped value both mean "no
+        // catalog entry" and fall back to the English displayName.
+        return value.isEmpty || value == key ? displayName : value
     }
 }

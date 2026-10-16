@@ -2,9 +2,14 @@ import XCTest
 @testable import ElderlyAssistant
 
 /// Channel-derivation rules for caregiver event alerts (caregiver
-/// event-notifications task, 2026-09-13). Pure mapping, no fixtures —
-/// the whole point of `NotifyChannel` is that the delivery surface is
-/// decided by a rule a test can state in one line.
+/// event-notifications task, 2026-09-13). Almost all of this is pure
+/// mapping, no fixtures — the point of `NotifyChannel` is that the
+/// delivery surface is decided by a rule a test can state in one line.
+/// The one exception is the [MSR] T-011 rollup test at the bottom: it is
+/// here because a channel's meaning is per-CONTACT, so "what did each
+/// contact's channel actually deliver" is the end of the derivation, not a
+/// separate concern. It reuses `RecordingPushTransport` (defined in
+/// `FamilyNotifierTests.swift`).
 final class NotifyChannelTests: XCTestCase {
 
     // MARK: - app → channel
@@ -100,5 +105,71 @@ final class NotifyChannelTests: XCTestCase {
         XCTAssertEqual(NotifyChannel.messenger.rawValue, "messenger")
         XCTAssertEqual(NotifyChannel.whatsApp.rawValue, CallApp.whatsApp.rawValue)
         XCTAssertEqual(NotifyChannel.messenger.rawValue, CallApp.messenger.rawValue)
+    }
+
+    // MARK: - Per-contact delivery rollup ([MSR] T-011, FR-MSR-016)
+
+    /// A channel decides WHERE a push is attempted, never whether it
+    /// landed. Two contacts on two different channels whose pushes did not
+    /// both deliver is a PARTIAL fan-out — reported as partial, never as
+    /// success, because the shared stub that used to say "all good" is
+    /// precisely the false claim the honest transport removes.
+    func testMixedChannelOutcomesRollUpAsPartial() async {
+        let whatsAppContact = contact(channel: .whatsApp)
+        let smsContact = contact(channel: .sms)
+        let transport = RecordingPushTransport()
+        transport.outcomesByToken = [whatsAppContact.deviceToken: .delivered]
+        let notifier = APNsFamilyNotifier(contacts: [whatsAppContact, smsContact],
+                                          apnsProvider: transport,
+                                          observabilityBus: RecordingObservabilityBus())
+        let context = FamilyAlertContext(kind: .medicationReminder,
+                                         eventIdHash: IdHashing.shortHash(of: UUID()),
+                                         eventTitle: "Amlodipine",
+                                         fireAt: Date())
+
+        let results = await notifier.notifyAll(alertType: .eventReminder, at: Date(),
+                                               context: context)
+
+        XCTAssertEqual(results.deliveryRollup, .partial,
+                       "two channels, one delivery: partial — the rollup is per contact")
+        XCTAssertEqual(results.first { $0.success }?.channel,
+                       NotifyChannel.whatsApp.rawValue)
+        XCTAssertEqual(results.first { !$0.success }?.channel,
+                       NotifyChannel.sms.rawValue)
+        XCTAssertEqual(results.first { !$0.success }?.errorCode,
+                       "transport_unimplemented",
+                       "the not-delivered contact's channel records its honest failure")
+    }
+
+    /// The pure-mapping half of the rollup: every contact on one channel
+    /// that could not be delivered is `noneDelivered`, and a fan-out with
+    /// no targeted contact is `noRecipients` — never a vacuous
+    /// `deliveredAll`.
+    func testRollupRefusesToRoundUpAnEmptyOrFailedFanOut() async {
+        let transport = RecordingPushTransport()
+        let notifier = APNsFamilyNotifier(contacts: [contact(channel: .messenger)],
+                                          apnsProvider: transport,
+                                          observabilityBus: RecordingObservabilityBus())
+
+        let results = await notifier.notifyAll(alertType: .missedMedication, at: Date())
+        XCTAssertEqual(results.deliveryRollup, .noneDelivered,
+                       "the shipped stub delivers nothing — the rollup says so")
+
+        let notifierWithNoContacts = APNsFamilyNotifier(contacts: [],
+                                                        apnsProvider: transport,
+                                                        observabilityBus: RecordingObservabilityBus())
+        let empty = await notifierWithNoContacts.notifyAll(alertType: .missedMedication,
+                                                           at: Date())
+        XCTAssertTrue(empty.isEmpty)
+        XCTAssertEqual(empty.deliveryRollup, .noRecipients,
+                       "nothing attempted is not a delivery")
+        XCTAssertNotEqual(empty.deliveryRollup, .deliveredAll)
+    }
+
+    private func contact(channel: NotifyChannel) -> EmergencyContact {
+        EmergencyContact(id: UUID(), displayName: "Contact",
+                         deviceToken: "token-\(channel.rawValue)",
+                         isEmergencyContact: true, isFamilyNotificationTarget: true,
+                         notifyChannel: channel)
     }
 }

@@ -150,3 +150,69 @@ encoder:
     # gate failures are deterministic and stay an operator decision.
     stage_timeout_seconds: 0
     stage_retries: 0
+
+chat:
+  # T-182 (FR-CNR-016, FR-CNR-021; design-l1 §11.3) — the v17 chat-aware
+  # variant of this suite. ADDITIVE: with `enabled` absent or false nothing
+  # below is read by any stage, and the existing pipeline behaves
+  # byte-identically (the recorded v14/v16 runs stay reproducible). No key
+  # outside this section is new and no existing key or default changed.
+  #
+  # The full ship gate (`src/eval_golden.py --full-gates`) reads the variant
+  # FROM HERE — the selection is configuration, never a flag — and refuses
+  # to run while this flag is absent or false.
+  enabled: false
+  # Run layout (design §11.5): the corpus builder writes
+  # build/chat-corpus/<run_id>/<mix>/ (corpus, layers/, counters) and the
+  # provenance manifest one directory up, in the run directory; the full
+  # gate resolves the same layout from these keys (never hard-coded).
+  run_id: v17
+  mix: ship
+  corpus_root: build/chat-corpus
+  # Mixture (FR-CNR-016 / design §11.1): 70% conversation / 30% claw-back.
+  # The claw-back is the intent-regression mitigation and is NOT optional —
+  # a run whose recorded shares deviate is not swap-eligible (the full gate
+  # blocks it; shares are never silently rebalanced).
+  mixture:
+    conversation_share: 0.70
+    clawback_share: 0.30
+  # Layer source paths (design §11.1), relative to tools/train-intent/ — the
+  # admissible (ship + dev) registry entries of each layer, mirroring the
+  # builder's source registry (T-179; its admissibility/refusal policy stays
+  # the single source). L3 is teacher-generated: no file input. Sources
+  # absent on a host are recorded per run, never substituted (the training
+  # box is T-183's).
+  layers:
+    L1:
+      - chat-sources/l1/indic_dialogue_ne.jsonl
+      - chat-sources/l1/call_center_transcripts.jsonl
+      - chat-sources/l1/devanagari_ecommerce.jsonl
+    L2:
+      - chat-sources/l2/dailydialog.jsonl
+      - chat-sources/l2/personachat_convai2.jsonl
+      - chat-sources/l2/empathetic_dialogues.jsonl
+      - chat-sources/l2/taskmaster.jsonl
+      - chat-sources/l2/soda.jsonl
+      - chat-sources/l2/prosocial_dialog.jsonl
+      - chat-sources/l2/oasst1.jsonl
+    L3: []
+    L4:
+      - data/teacher.jsonl
+      - data/noised.jsonl
+      - data/edge_cases.jsonl
+  # Admission filters (design §11.2). The spec-driven checks execute
+  # author_chat_golden.mechanical_review (one rule, one source — nothing is
+  # restated here); the length rule and the held-out dedupe are the
+  # pipeline's own, and the full gate binds their numbers to the builder's
+  # constants (a deviation is a defect, not a knob).
+  filters:
+    spec_checks:
+      - honorific_agreement
+      - no_ai_isms
+      - dangling_particle
+      - devanagari_purity
+      - sentence_shape
+    min_word_tokens: 2
+    turn_token_ceiling: 512
+    held_out_dedupe: true
+    near_duplicate_jaccard: 0.80

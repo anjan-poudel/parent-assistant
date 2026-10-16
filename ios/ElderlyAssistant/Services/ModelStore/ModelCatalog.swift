@@ -26,16 +26,24 @@ enum ModelKind: String, Codable {
                        // (see `ModelStore.coreMLBundleFinalURL(for:)`).
                        // The catalog sha256 for this kind is the ZIP's own
                        // hash, verified at install time.
+    case yoloDetector  // [YOLO] The point-ask object detector — YOLO11n
+                       // CoreML (DIRECTORY artifact: a compiled
+                       // `yolo11n.mlmodelc` unpacked from a zip). The same
+                       // shape as `.intentEncoder`: CoreML-only, no ggml
+                       // sibling, install destination is the entry's own
+                       // final URL, and the catalog sha256 is the ZIP's
+                       // own hash, verified before unpacking.
     /// True when the entry's `filename` names a DIRECTORY artifact. Only
-    /// `.intentEncoder` reports true today: `.tts` / `.kws` keep their own
-    /// `ttsVoiceDirectory` / `kwsModelDirectory` helpers, and changing
-    /// their `finalURL` shape would be churn with no reader (T-037-a).
+    /// `.intentEncoder` and `.yoloDetector` report true today: `.tts` /
+    /// `.kws` keep their own `ttsVoiceDirectory` / `kwsModelDirectory`
+    /// helpers, and changing their `finalURL` shape would be churn with no
+    /// reader (T-037-a).
     /// Used by `ModelStore.finalURL(for:)` to make the URL the SAME value
     /// before and after an install — `appendingPathComponent(_:)` infers
     /// the trailing slash from the filesystem otherwise.
     var isDirectoryArtifact: Bool {
         switch self {
-        case .intentEncoder: return true
+        case .intentEncoder, .yoloDetector: return true
         default: return false
         }
     }
@@ -196,8 +204,10 @@ enum ModelCatalog {
     /// v5 fine-tune on the ANE path — 6-bit palettized, best accuracy +
     /// fast (v9 release, 2026-09-09).
     static let whisperKitMediumV5 = ModelID("whisperkit-ne-medium-v5-q6")
-    /// v6 fine-tune on the ANE path — 6-bit palettized, best accuracy +
-    /// fast (v11 release, 2026-09-11).
+    /// v6 fine-tune on the ANE path — 8-bit palettized rebuild (v17
+    /// release, 2026-09-14), best accuracy + fast. The id keeps the
+    /// `-q6` suffix it was first published under (the model DIRECTORY
+    /// name WhisperKit looks up); only the delivered zip changed.
     static let whisperKitMediumV6 = ModelID("whisperkit-ne-medium-v6-q6")
     static let whisperSmallMultilingual = ModelID("whisper-small-multilingual-q5_1")
     /// The FINISHED small Devanagari Nepali model: stage-4 fine-tune on
@@ -232,6 +242,16 @@ enum ModelCatalog {
     /// v14 slim-template retrain (seed 43) — NEW artifact id so devices
     /// cached on the v12 seed-42 file download it fresh.
     static let intentQwenS43       = ModelID("intent-ne-qwen-s43-q4km")
+    /// [CNR T-184] v17 CHAT-AWARE retrain of the seed-43 1.7B (T-183's run
+    /// `cnr-v17-20261015-0209`): the same `checkpoints/qwen-s43-merged`
+    /// 1.7B lineage as `intentQwenS43`, retrained for the conversational
+    /// chat lane, exported + Q4_K_M quantized. A NEW id BESIDE the
+    /// previous entry, never in place of it — the swap is versioned and
+    /// reversible, and a device cached on the seed-43 file must download
+    /// the new artifact fresh. Its promotion to the served default is NOT
+    /// a change to this constant; it is the data in
+    /// `chatVariantPromotionRecord`, gated by `promotionVerdict(for:)`.
+    static let intentQwenS43ChatV17 = ModelID("intent-ne-qwen-s43-chat-v17-q4km")
     /// 4B slim-template retrain seed 43 — the first gate-passing brain
     /// (all five gates, 2026-09-13) and the default brain until the
     /// slot-canonical retrain below superseded it. LAN-hosted for testing;
@@ -246,6 +266,158 @@ enum ModelCatalog {
     /// ordered parts (GitHub's per-asset cap) reassembled by
     /// `ModelDownloadService`.
     static let intentQwen4BSlotCanon = ModelID("intent-ne-qwen4b-slotcanon-q4km")
+    /// Round-2b EN→NE **translation** brain (Qwen 3 1.7B QLoRA, Q8_0) —
+    /// the live-translate tier's own model, not an intent brain.
+    ///
+    /// It is deliberately NOT in `availableBrainEntries`: that picker
+    /// selects the *assistant* brain (`LlamaCommandInterpreter` hot-swaps
+    /// it under the intent prompt), and this artifact is trained on the
+    /// translation tier's raw prompt header and answers
+    /// `{"translations":[…]}`. It is the head of
+    /// `LiveTranslateConfig.brainTranslationModelIDs`, which is the only
+    /// list that consumes it.
+    ///
+    /// Delivery: 1.83 GB in ONE file — under GitHub's 2 GiB per-asset cap,
+    /// so no `.partaa`/`.partab` split (unlike `intentQwen4BSlotCanon`).
+    /// The Q8_0 build is THE ship quant: the Q5_K_M export of the same
+    /// checkpoint failed 2 of 12 runtime probes and is not published.
+    static let nmtEnNeQwen17bR2bQ8 = ModelID("nmt-en-ne-qwen17b-r2b-q8_0")
+    /// TESTING-ONLY quant of the same checkpoint (owner device test,
+    /// 2026-09-19): fits standard-class phones with headroom. Fails 1 probe
+    /// row (S02) — the negation router gates those; REPLACED by the round-3
+    /// quant when it lands. Sideloaded; not in the download row list.
+    static let nmtEnNeQwen17bR2bQ4 = ModelID("nmt-en-ne-qwen17b-r2b-q4_k_m")
+    /// Round-3 EN→NE **translation** brain (Qwen 3 1.7B QLoRA, Q4_K_M) —
+    /// THE ship quant as of 2026-09-19, and the head of
+    /// `LiveTranslateConfig.brainTranslationModelIDs`.
+    ///
+    /// Round 3 is the first checkpoint where EVERY published quant cleared
+    /// the 12-row runtime safety probe with ZERO polarity failures. That is
+    /// what changes the ship decision: on round 2b the Q5_K_M export failed
+    /// 2 rows and the Q4_K_M export failed 1 (S02), so the only quant that
+    /// could ship was Q8_0 at 1.83 GB — over the standard-class budget. The
+    /// gate no longer forces the big quant, so the choice falls to device
+    /// fit, and 1.1 GB is the first ship quant that fits standard-class
+    /// phones with headroom.
+    ///
+    /// Delivery: 1_107_408_608 B in ONE file — under GitHub's 2 GiB
+    /// per-asset cap, so no `.partaa`/`.partab` split (unlike
+    /// `intentQwen4BSlotCanon`).
+    static let nmtEnNeQwen17bR3Q4 = ModelID("nmt-en-ne-qwen17b-r3-q4_k_m")
+    /// Alternate QUANT of the round-3 checkpoint (Q5_K_M, 1.26 GB). Same
+    /// gate result as the Q4 above (all 12 rows, 0 polarity failures), so
+    /// this is a size/quality knob, not a correctness one — hence NOT in
+    /// `availableTranslationEntries` (one good quant is the row; two would
+    /// make the household choose between them for no gate reason).
+    ///
+    /// It sits directly behind the Q4 in `brainTranslationModelIDs`, so a
+    /// device that carries it (sideload, owner test) uses it, and a device
+    /// that carries neither falls through to the round-2b entries.
+    static let nmtEnNeQwen17bR3Q5 = ModelID("nmt-en-ne-qwen17b-r3-q5_k_m")
+    /// Round-4 fine-tune (anti-transliteration mix), Q5_K_M — the model
+    /// that answers with MEANING instead of writing English words in
+    /// Devanagari letters (the owner's 22:41 gibberish capture). Same gate
+    /// sweep as round-3's ship quant: 34/34 app-header, 0 polarity
+    /// failures, probe 12/12.
+    ///
+    /// SUPERSEDED (2026-09-21). It passed the tier's *own* sweep but **fails
+    /// the gate under the SHIPPED prompt (S11)**, which is the prompt the app
+    /// actually sends — so it is no longer the head. It stays in the catalog
+    /// and in `brainTranslationModelIDs` (sideload-only) so a device that
+    /// installed it during the round-4 trial keeps translating on it.
+    static let nmtEnNeQwen17bR4Q5 = ModelID("nmt-en-ne-qwen17b-r4-q5_k_m")
+    /// Round-4 **ship quant** (Q6_K, 1.42 GB) — the head of
+    /// `LiveTranslateConfig.brainTranslationModelIDs` as of 2026-09-21.
+    ///
+    /// The round-4 verdict: this is the first checkpoint whose quant passes the
+    /// gate under the **shipped** prompt (S11) as well as the tier's raw-prompt
+    /// + `json_schema` contract and the 12-row runtime safety probe — which is
+    /// what the Q5 above failed. The anti-transliteration property is the
+    /// checkpoint's (the round-4 mix), and Q6_K is the size at which that
+    /// property survives quantisation.
+    ///
+    /// STANDARD-class fit: 1.42 GB takes the 1.7B weight band, and its
+    /// `minDeviceRAMBytes` is the shared `ModelLifecycleBudget.compactBoundaryBytes`
+    /// floor (PR #113), so the row is offered on every device the feature
+    /// supports and the warden's verdict, not this catalog, decides the load.
+    ///
+    /// Delivery: 1,417,754,336 B in ONE file — under GitHub's 2 GiB per-asset
+    /// cap, so no `.partaa`/`.partab` split (unlike `intentQwen4BSlotCanon`).
+    static let nmtEnNeQwen17bR4Q6 = ModelID("nmt-en-ne-qwen17b-r4-q6_k")
+    /// Round-4 **ablation quant** (Q4_K_M, 1.1 GB) — the small arm of the
+    /// Q6-vs-Q4 ARM-kernel A/B (2026-09-21).
+    ///
+    /// TEMPORARY OFFER, and the offer is the A/B's rather than a product
+    /// decision: the owner's phone cannot run the Q8 ceiling, so the arm it
+    /// CAN hold is this one, and one build has to be able to fetch both arms
+    /// on the same device. It is a member of
+    /// `availableTranslationEntries` for the duration of the run and sits
+    /// directly behind the Q6_K in `brainTranslationModelIDs`, so a device
+    /// carrying both still prefers the head. The revert is deleting the id
+    /// from the offer list; the ladder position goes with the verdict.
+    ///
+    /// Gate-clean as its own artifact (67.6% exact, probe 12/12, 34/34
+    /// accepted) — but it is the ablation arm, not a candidate head: the Q6_K
+    /// is the quant the round-4 verdict promoted for passing S11 under the
+    /// SHIPPED prompt, and nothing here reopens that.
+    ///
+    /// Delivery: 1_107_408_608 B in ONE file — under GitHub's 2 GiB
+    /// per-asset cap, so no `.partaa`/`.partab` split (unlike
+    /// `intentQwen4BSlotCanon`).
+    static let nmtEnNeQwen17bR4Q4 = ModelID("nmt-en-ne-qwen17b-r4-q4_k_m")
+    /// Round-4 **quality ceiling** (Q8_0, 1.83 GB) — sideload-only, never
+    /// offered as a download.
+    ///
+    /// The same checkpoint at the largest quant: the best translations the
+    /// round-4 fine-tune can produce, at the size that takes the 3 GB weight
+    /// band and is therefore refused `requires_evicting_warm_stt` on the
+    /// standard class (`ModelBudgetPolicyTests`). It is kept for the same
+    /// reason the Q8 alternates before it are: a device that sideloaded it
+    /// must keep working, and a later policy that moves the class line must
+    /// not have to re-add it.
+    static let nmtEnNeQwen17bR4Q8 = ModelID("nmt-en-ne-qwen17b-r4-q8_0")
+    /// Round-7 **ship quant** (Q8_0, 1.83 GB) — the tier's head until the
+    /// round-8 Q8 below superseded it (2026-09-22), and now the rung directly
+    /// behind it: a device that installed it keeps translating, and the order
+    /// in `brainTranslationModelIDs` is what makes that a fallback rather than
+    /// a choice.
+    ///
+    /// The round-7 verdict was the first pass under the app's SHIPPED 4-line
+    /// header — sign 82.4% (against the round-4 Q6_K's 76.5%), the 12-row
+    /// runtime safety probe 12/12, and the conversational set 66.7% — and the
+    /// round-8 export below is strictly better on the two sets that moved
+    /// (85.3% sign, 72.2% conversational) at the same file size, which is
+    /// what demotes this artifact rather than a gate it failed.
+    ///
+    /// Same size class as the head above it: this file is 1,834,426,080 B,
+    /// over the 1.5 GB "1.7B" file ceiling, so it takes the 3B rung's 800 MB
+    /// overhead (2.63 GB live) and the standard class refuses it BESIDE the
+    /// warm STT — the Q6_K further down stays the rung for a phone that
+    /// cannot hold a Q8 at all.
+    ///
+    /// Delivery: 1,834,426,080 B in ONE file — under GitHub's 2 GiB per-asset
+    /// cap, so no `.partaa`/`.partab` split (unlike `intentQwen4BSlotCanon`).
+    static let nmtEnNeQwen17bR7Q8 = ModelID("nmt-en-ne-qwen17b-r7-q8_0")
+    /// Round-8 **ship quant** (Q8_0, 1.83 GB) — the head of
+    /// `LiveTranslateConfig.brainTranslationModelIDs` as of 2026-09-22.
+    ///
+    /// The round-8 verdict: the withconv Q8_0 is strictly better than the
+    /// round-7 head it replaces, at the same 1,834,426,080 B — sign 85.3%
+    /// against round-7's 82.4%, the 12-row runtime safety probe 12/12 on
+    /// both, and the conversational set 72.2% against 66.7% — so the head
+    /// moves onto the artifact with the best measured numbers in the record.
+    ///
+    /// Same size class as the rung behind it, deliberately re-decided rather
+    /// than assumed: 1,834,426,080 B is over the 1.5 GB "1.7B" file ceiling,
+    /// so it takes the 3B rung's 800 MB overhead (2.63 GB live) and the
+    /// standard class refuses it BESIDE the warm STT, exactly as it did for
+    /// the round-7 Q8 — a promotion that moved no policy number. The Q6_K
+    /// stays further down as the rung for a phone that cannot hold a Q8 at
+    /// all.
+    ///
+    /// Delivery: 1,834,426,080 B in ONE file — under GitHub's 2 GiB per-asset
+    /// cap, so no `.partaa`/`.partab` split (unlike `intentQwen4BSlotCanon`).
+    static let nmtEnNeQwen17bR8Q8 = ModelID("nmt-en-ne-qwen17b-r8-q8_0")
     /// The GEMMA leg of the bake-off (2026-09-07): the QLoRA fine-tune
     /// over google/gemma-3-1b-it, merged to fp16 and exported Q4_K_M
     /// (`intent-ne-gemma-q4_k_m.gguf`, release v7). A real, hosted
@@ -275,30 +447,66 @@ enum ModelCatalog {
     /// (`IntentEncoderSchema`).
     ///
     /// No hosted URL exists for this spike and the catalog must not embed
-    /// a machine-specific path (`intentEncoderSpikeZipURL(environment:)`
-    /// documents the override). The supported internal-testing route does
-    /// not need a URL at all: pass the zip directly to
-    /// `ModelStore.installCoreMLEncoder(fromZip:for:)`. A device-side
-    /// install needs the zip copied over first (AirDrop / `devicectl`) —
-    /// the standard downloader would need a real HTTP URL, which is
-    /// deliberately not invented here.
+    /// a machine-specific path. The supported internal-testing route is the
+    /// app's OWN `Documents/` directory, with NO environment variable
+    /// required: `Documents/t033-encoder-int8-mlmodelc.zip` is the default
+    /// source, and `INTENT_ENCODER_SPIKE_ZIP` merely overrides it (see
+    /// `configuredIntentEncoderSpikeZipURL`). A device-side install needs
+    /// the zip copied over first (AirDrop / `devicectl`) — the standard
+    /// downloader would need a real HTTP URL, which is deliberately not
+    /// invented here.
     static let intentEncoderSpike = ModelID("intent-encoder-t033-c3-minilm-int8")
+
+    /// [YOLO] The point-ask object detector: ultralytics YOLO11n, imgsz
+    /// 640, exported WITHOUT baked NMS — raw outputs (single `var_1223`
+    /// [1, 84, 8400] tensor: channels 0-3 are the DFL-decoded cx/cy/w/h in
+    /// 640-pixel space, channels 4-83 the sigmoid class scores of the
+    /// standard 80 COCO classes — verified from the compiled spec on the
+    /// training server, 2026-09-19; the Swift decode lives in
+    /// `YOLODecoder`). The artifact is a compiled `.mlmodelc` directory
+    /// delivered as a zip (release v4 of the models repo).
+    static let yolo11n = ModelID("yolo11n")
+
+    /// The filename the internal-testing install reads from the app's
+    /// `Documents/` directory when no environment override is set.
+    static let intentEncoderSpikeZipFilename = "t033-encoder-int8-mlmodelc.zip"
+
+    /// `Documents/t033-encoder-int8-mlmodelc.zip` in the app container —
+    /// the DEFAULT source for the spike zip, so staging the file is the
+    /// whole handshake and no environment variable is needed.
+    ///
+    /// This is the path a tester can always construct: `devicectl` copies a
+    /// file into the app data container (`--domain-type appDataContainer
+    /// --domain-identifier ai.voicebridge.senior.assistant --destination
+    /// Documents/`) but never exposes the container UUID, so an absolute
+    /// `/var/mobile/Containers/Data/Application/<uuid>/Documents/…` path
+    /// cannot be written down from outside the device.
+    static func intentEncoderSpikeDocumentsZipURL() -> URL {
+        FileManager.default.urls(for: .documentDirectory,
+                                 in: .userDomainMask)[0]
+            .appendingPathComponent(intentEncoderSpikeZipFilename)
+    }
 
     /// The local zip the internal-testing encoder entry points at.
     ///
-    /// A personal home-directory path must not be committed (nobody else
-    /// could resolve it), so the default is a reserved-TLD placeholder
-    /// (`.invalid` — RFC 2606, can never resolve) and a tester who wants
-    /// the download/picker path to find their own copy sets:
+    /// Total on purpose — the Settings/download path needs a URL to show —
+    /// so it is the resolved source when one is configured, else the
+    /// reserved-TLD placeholder below. With no override the resolved source
+    /// is the app's own Documents copy
+    ///
+    ///     Documents/t033-encoder-int8-mlmodelc.zip
+    ///
+    /// which needs no environment variable and no personal path in source
+    /// (a home-directory literal would be unresolvable for every other
+    /// tester). A tester who keeps the zip somewhere else — or who wants the
+    /// internal-testing install OFF — sets the OPTIONAL override instead:
     ///
     ///     INTENT_ENCODER_SPIKE_ZIP=/path/to/t033-encoder-int8-mlmodelc.zip
     ///
-    /// A RELATIVE value is resolved against the app's Documents directory
-    /// instead — the `devicectl` route, where the tester can copy the zip
-    /// into `Documents/` but never learns the container UUID an absolute
-    /// path would need. See `configuredIntentEncoderSpikeZipURL`.
+    /// A RELATIVE value is resolved against the app's Documents directory.
+    /// See `configuredIntentEncoderSpikeZipURL`.
     ///
-    /// `environment` is injectable so tests can pin both branches without
+    /// `environment` is injectable so tests can pin every branch without
     /// touching the process environment.
     static func intentEncoderSpikeZipURL(
         environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
@@ -306,14 +514,22 @@ enum ModelCatalog {
             return configured
         }
         // Documentation-only placeholder: .invalid is reserved by RFC 2606
-        // and never resolves. The internal-testing install does not use it.
+        // and never resolves. Reached only when the override is explicitly
+        // BLANKED (the install switched off) — the unset case resolves to
+        // the Documents copy above.
         return URL(string: "https://invalid.invalid/t033-spike/t033-encoder-int8-mlmodelc.zip")!
     }
 
-    /// The tester's own copy of the spike zip, or nil when the environment
-    /// does not configure one.
+    /// The zip the internal-testing install reads, or nil when it is
+    /// explicitly switched off.
     ///
-    /// The value is whitespace-trimmed, then:
+    /// The environment override is OPTIONAL: the install needs no
+    /// environment variable at all. The value is whitespace-trimmed, then:
+    ///   - UNSET is `Documents/t033-encoder-int8-mlmodelc.zip`
+    ///     (`intentEncoderSpikeDocumentsZipURL`) — the default handshake,
+    ///     where staging the zip into Documents is the whole setup. A
+    ///     missing file there fails honestly at install time (`zip_missing`
+    ///     in `IntentEncoderSpikeInstaller`), never as a silent success;
     ///   - an ABSOLUTE path (leading `/`) is used as given — the original
     ///     behaviour, for a tester who has the file at a path they can
     ///     name; or
@@ -321,26 +537,35 @@ enum ModelCatalog {
     ///     directory and is resolved against it. This exists because
     ///     `devicectl` can copy a file into the app data container
     ///     (`--domain-type appDataContainer --domain-identifier
-    ///     com.elderlyassistant.app --destination Documents/`) but does not
+    ///     ai.voicebridge.senior.assistant --destination Documents/`) but does not
     ///     expose the container UUID, so the tester cannot construct the
     ///     absolute `/var/mobile/Containers/Data/Application/<uuid>/
     ///     Documents/…` path. Staging the zip into `Documents/` and setting
     ///
     ///         INTENT_ENCODER_SPIKE_ZIP=t033-encoder-int8-mlmodelc.zip
     ///
-    ///     is therefore the whole handshake.
+    ///     is therefore the whole handshake, for a copy that has to live
+    ///     somewhere other than the default filename; or
+    ///   - an explicitly BLANK value is nil — the internal-testing install
+    ///     is switched OFF outright (the same "blank disables" convention
+    ///     as `IntentEncoderSideload`'s `INTENT_ENCODER_SIDELOAD_URL`).
     ///
     /// [ENCODER-RUNTIME-READY] The install trigger
-    /// (`IntentEncoderSpikeInstaller`) has to tell "not configured" apart
-    /// from "configured": `intentEncoderSpikeZipURL` is deliberately total
+    /// (`IntentEncoderSpikeInstaller`) has to tell "read this" apart from
+    /// "install disabled": `intentEncoderSpikeZipURL` is deliberately total
     /// (the Settings/download path needs a URL to show), but installing its
     /// `.invalid` placeholder would be a silent no-op, and the trigger's
     /// contract is that a readiness request either installs or reports why
     /// not. Same key, same blank-string rule, one predicate.
     static func configuredIntentEncoderSpikeZipURL(
         environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
-        guard let raw = environment["INTENT_ENCODER_SPIKE_ZIP"] else { return nil }
-        let path = raw.trimmingCharacters(in: .whitespaces)
+        guard let raw = environment["INTENT_ENCODER_SPIKE_ZIP"] else {
+            // No override: the Documents copy is the default source, so
+            // the internal-testing install needs no environment variable.
+            return intentEncoderSpikeDocumentsZipURL()
+        }
+        let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Explicitly blank: the tester switched the install off.
         guard !path.isEmpty else { return nil }
         // Absolute: the tester's own staging location, used unchanged.
         if path.hasPrefix("/") {
@@ -349,8 +574,7 @@ enum ModelCatalog {
         // Relative: a file the tester staged into the app's Documents
         // directory (the devicectl route — the container UUID is unknowable
         // from outside, so the absolute path cannot be written down).
-        let documents = FileManager.default.urls(for: .documentDirectory,
-                                                 in: .userDomainMask)[0]
+        let documents = intentEncoderSpikeDocumentsZipURL().deletingLastPathComponent()
         return documents.appendingPathComponent(path)
     }
 
@@ -557,8 +781,14 @@ enum ModelCatalog {
             sizeBytes: 1_400_000_000,
             // SHA-256 of the release ZIP — verified by installWhisperKitModel.
             sha256: "d14082ebef5e34ade16826bdb5d49e85c55687d781b11608d0282be3070798ae",
-            // q6 live footprint ~2.5-3 GB — 6 GB-class devices pass.
-            minDeviceRAMBytes: 5_000_000_000,
+            // q6 live footprint ~2.5-3 GB — 5 GB is the smallest device that
+            // can hold it, which is also the `.compact` line: the class the
+            // floor admits is `.standard`, so it is spelled
+            // `ModelLifecycleBudget.compactBoundaryBytes` rather than a copy
+            // of the number. (STT is not class-gated — for a non-brain kind
+            // `ModelBudgetPolicy.availability` returns after the RAM check —
+            // so this floor is the only bound this artifact has.)
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
             dependsOn: nil,
             whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v6/whisperkit-ne-teacher-v2-q6.zip")!,
             whisperKitZipBytes: 1_199_427_423,
@@ -579,7 +809,9 @@ enum ModelCatalog {
             sizeBytes: 1_400_000_000,
             // SHA-256 of the release ZIP — verified by installWhisperKitModel.
             sha256: "cf4c8c206fd31e57821fcb2cf681c7db3c1052a831503a9ba72c9486f7d45f32",
-            minDeviceRAMBytes: 5_000_000_000,
+            // Same floor as its fine-tuned sibling above, and the same
+            // reading: the boundary line, named rather than copied.
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
             dependsOn: nil,
             whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v6/whisperkit-ne-large-base-q6.zip")!,
             whisperKitZipBytes: 1_225_257_321,
@@ -647,13 +879,21 @@ enum ModelCatalog {
             // v9 → iOS 18+.
             filename: "whisperkit-ne-medium-v6-q6",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v17/whisperkit-ne-medium-v6-q8.zip")!,
-            // Unpacked q6 mlmodelc trio + tokenizer (~613 MB zip).
+            // Unpacked q8 mlmodelc trio + tokenizer (~767 MB zip).
             sizeBytes: 800_000_000,
             // SHA-256 of the release ZIP — verified by installWhisperKitModel.
             sha256: "b894e0b4c39a200872b4266c7df2be00600a6bb19898aa784926277b379ebe52",
             minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil,
-            whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v11/whisperkit-ne-medium-v6-q6.zip")!,
+            // The URL the installer actually fetches (`whisperKitZipURL ??
+            // downloadURL` — ModelDownloadService), and it MUST be the asset
+            // the `sha256`/`whisperKitZipBytes` above describe. df12bd0 moved
+            // the hash to the q8 rebuild but left this field on v11, so every
+            // v6 install fetched the q6 zip and died on checksum verification
+            // (the model could not be installed at all). GitHub asset digests,
+            // checked 2026-09-16: v11 q6 = 88ff2a77… / 642,434,570 B, v17 q8
+            // = b894e0b4… / 766,945,619 B — the pair above is the v17 one.
+            whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v17/whisperkit-ne-medium-v6-q8.zip")!,
             whisperKitZipBytes: 766_945_619,
             requiresiOS18: true,
             // Language tag (2026-09-13): ne-only model.
@@ -796,13 +1036,480 @@ enum ModelCatalog {
             // progress bar and the disk pre-flight measure against.
             sizeBytes: 2_497_278_784,
             sha256: "1662e2178c37ad7ab4f4eff9188adee90fd404fe649e23cbe421084d78f7a45f",
-            // Same 4 GB floor as its seed-43 predecessor: 4B Q4_K_M is a
-            // ~2.5 GB file and ~3.5-4 GB live, and the gate reads the
-            // CURRENT free budget (`os_proc_available_memory`), not total
-            // RAM — a 6 GB device must still be able to download it.
+            // A 4 GB floor, below the compact line on purpose: a floor is a
+            // claim about the PHONE — 4B Q4_K_M is a ~2.5 GB file and
+            // ~3.5-4 GB live, and `MemoryProbe.canFit` compares that against
+            // physical RAM, not against the app's free budget — while the
+            // class budget is a separate gate. A `.compact` phone passes this
+            // floor and is refused by the class (`.overClassBudget`), and its
+            // row SHOWS that refusal instead of offering the download; see
+            // the reconciliation in `ModelBudgetPolicy.availability`.
             minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil,
             // Language tag: ne-only model.
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
+            id: nmtEnNeQwen17bR2bQ8,
+            kind: .llamaBase,
+            // HIDDEN from the Settings brain picker: it is the
+            // live-translate tier's translation brain (see the id's docs),
+            // not an assistant/intent brain — offering it as one would let
+            // a household hot-swap `LlamaCommandInterpreter` onto a model
+            // that answers `{"translations":[…]}`, breaking intent parsing.
+            //
+            // [TRANSLATION-MODEL-ROW] (2026-09-18) Hidden from the picker is
+            // not hidden from the screen: the AI-models screen offers it
+            // through `availableTranslationEntries`, its own download row.
+            // A download is not a selection — a device can hold the
+            // artifact (which is what the tier reads) without the picker
+            // ever offering it as a brain. It is deletable from that same
+            // row, so the declutter rule ("not offered, but still
+            // deletable") holds without the brain section's
+            // installed-hidden append (which now excludes it, so one model
+            // is one row).
+            // Name carries "(superseded)" since the round-3 Q4 took the head
+            // (2026-09-19): a device that installed this one before the
+            // upgrade holds BOTH artifacts, and the AI-models screen shows
+            // the installed-hidden one beside the new row — two rows with
+            // one name would leave the household guessing which to delete.
+            // Same convention as the superseded intent brain.
+            displayName: "Translate — English to Nepali (Qwen 1.7B, superseded)",
+            // Round-2b EN→NE translation fine-tune of Qwen3-1.7B
+            // (`tools/train-nmt/` on the server, run 20260914-…; the
+            // artifact is `translate-en-ne-qwen17b-r2b-q8_0.gguf`).
+            //
+            // THE SHIP QUANT IS Q8_0. The Q5_K_M export of the same
+            // checkpoint failed 2 of the 12 runtime probes and is NOT
+            // published; do not "save 500 MB" by pointing this entry at it.
+            //
+            // Runtime contract: the tier's RAW prompt + `json_schema`
+            // grammar (no chat template — the model was trained on the
+            // tier's exact header, `LocalBrainTranslationTier.prompt`).
+            // That is why the tier's prompt/grammar must not be rewritten
+            // around this entry.
+            //
+            // DELIVERY: 1.83 GB in ONE file — under GitHub's 2 GiB
+            // per-asset cap, so there are no part URLs (unlike
+            // `intentQwen4BSlotCanon`) and `ModelDownloadService` takes the
+            // ordinary single-file path.
+            //
+            // Device class ([MODEL-WARDEN], computed from
+            // `ModelLifecycleInventory.brainClasses`): 1_834_426_080 B is
+            // over the 1.5 GB "1.7B" rung, so it takes the 3B rung's
+            // 800 MB overhead → 2_634_426_080 B live. That is over the
+            // compact budget (2.0 GB) and, beside a warm ANE STT
+            // (2_634_426_080 + 1_000_000_000 > 3.2 GB), over the standard
+            // budget too: the policy refuses it on compact
+            // (`over_class_budget`) and on standard
+            // (`requires_evicting_warm_stt`) and admits it on roomy
+            // (`ModelBudgetPolicyTests` pins the three verdicts). A
+            // standard-class phone therefore keeps the intent-brain
+            // fallbacks below it in the tier list rather than this model.
+            filename: "translate-en-ne-qwen17b-r2b-q8_0.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v18/translate-en-ne-qwen17b-r2b-q8_0.gguf")!,
+            sizeBytes: 1_834_426_080,
+            // The ASSEMBLED file's digest, pinned literally (never
+            // `pendingSHA256`: the placeholder is not a digest, so
+            // `ModelStore.finalize` could only ever answer "mismatch" —
+            // a 1.83 GB download blamed on a checksum over a placeholder).
+            // Verified against the server original AND the uploaded
+            // release asset, which agree byte for byte:
+            //   1_834_426_080 B
+            //   -> cae02965ab261a16fd375de12ecc012a1138d0f589fd74386b14aa058b2690b3
+            sha256: "cae02965ab261a16fd375de12ecc012a1138d0f589fd74386b14aa058b2690b3",
+            // The 4 GB floor the other >1 GB brains carry
+            // (`intentQwen4BSlotCanon`, `intentQwen4BS43`): a ~1.83 GB
+            // file is ~2.6 GB live, and `minDeviceRAMBytes` reads the
+            // device probe, not the class policy — a 6 GB phone must still
+            // be able to download and keep it. Below the compact line, and
+            // exempt for a second reason: this rung is SUPERSEDED and never
+            // offered (its row appears only when the artifact is already on
+            // disk), so no `.compact` household is ever offered the download
+            // the class would refuse. `ModelBudgetPolicy.availability`.
+            minDeviceRAMBytes: 4_000_000_000,
+            dependsOn: nil,
+            // Language tag: ne-only model (it translates INTO Nepali).
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
+            id: nmtEnNeQwen17bR2bQ4,
+            kind: .llamaBase,
+            // TESTING-ONLY entry (owner device test, 2026-09-19): the
+            // standard-class quant of the same round-2b checkpoint,
+            // sideloaded — not in `availableTranslationEntries`, so the
+            // settings row never offers a download for it. Fails 1 probe
+            // row (S02); the reliability router gates those. SUPERSEDED by
+            // the round-3 Q4 below (2026-09-19) — kept in `all` so a device
+            // that sideloaded it can still delete it, and so it stays a
+            // resolvable fallback in the tier list.
+            displayName: "Translate — English to Nepali (Qwen 1.7B, Q4 test)",
+            filename: "translate-en-ne-qwen17b-r2b-q4_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v18/translate-en-ne-qwen17b-r2b-q4_k_m.gguf")!,
+            sizeBytes: 1_107_408_608,
+            // Server-original digest (round2b Q4 export):
+            sha256: "a557dc2a066c482a9127396c5d7836305c54112aee9dd721b11309c45c01a156",
+            minDeviceRAMBytes: 3_000_000_000,
+            dependsOn: nil,
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
+            id: nmtEnNeQwen17bR3Q4,
+            kind: .llamaBase,
+            // THE SHIP QUANT (round-3 head, 2026-09-19). Hidden from the
+            // Settings brain picker for the same reason as the round-2b
+            // entries above: the picker hot-swaps `LlamaCommandInterpreter`
+            // onto what it offers, and this artifact answers the tier's
+            // `{"translations":[…]}` contract instead of the intent schema.
+            // The AI-models screen offers it through
+            // `availableTranslationEntries`, its own download row, so the
+            // ship quant is reachable without being a brain choice.
+            //
+            // GATE: round 3 is the first checkpoint where every published
+            // quant cleared all 12 runtime safety-probe rows with 0
+            // polarity failures — the round-2b Q5 failed 2 rows and its Q4
+            // failed 1. Nothing has to be gated downstream, which is why
+            // the ship quant can finally be a small one.
+            //
+            // [HOSTING — LIVE] `translate-en-ne-qwen17b-r3-q4_k_m.gguf` is
+            // uploaded to tag `v19` of
+            // `anjan-poudel/elderly-ai-assistant-models` and the asset was
+            // verified against the digest below, so the row's Download
+            // resolves. The `sha256` here is the SERVER ORIGINAL's, read from
+            // its `.sha256` sidecar
+            // on the training box (2026-09-19), so a correct upload — one
+            // byte-identical to
+            // /mnt/nvme2/workspace/live-translate-nmt/finetune/round3/models/
+            // translate-en-ne-qwen17b-r3-q4_k_m.gguf (1_107_408_608 B) —
+            // verifies; any other bytes fail `ModelStore.finalize` loudly
+            // rather than installing a wrong model.
+            displayName: "Translate — English to Nepali (Qwen 1.7B)",
+            // Round-3 EN→NE translation fine-tune of Qwen3-1.7B. Runtime
+            // contract is unchanged from round 2b: the tier's RAW prompt +
+            // `json_schema` grammar, no chat template
+            // (`LocalBrainTranslationTier.prompt`), so the prompt/grammar
+            // must not be rewritten around this entry.
+            //
+            // DELIVERY: 1.1 GB in ONE file — under GitHub's 2 GiB
+            // per-asset cap, so no part URLs.
+            //
+            // DEVICE FIT is the point of this quant. 1_107_408_608 B lands
+            // in `brainClasses`' 1.7B rung (≤ 1.5 GB file, 700 MB overhead)
+            // → 1_807_408_608 B live, and beside the standard class's 1.0 GB
+            // warm STT that is 2_807_408_608 B — inside the standard 3.2 GB
+            // budget AND inside the class's 1.5 GB brain-file ceiling
+            // (`ModelBudgetPolicy.largestAllowedBrainFileBytes`), so the
+            // verdict is `.available` where the superseded 1.83 GB Q8 was
+            // refused with `requires_evicting_warm_stt`. This is the first
+            // ship quant a standard-class phone is not asked to refuse.
+            filename: "translate-en-ne-qwen17b-r3-q4_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v19/translate-en-ne-qwen17b-r3-q4_k_m.gguf")!,
+            sizeBytes: 1_107_408_608,
+            // SHA-256 of the server original (round-3 Q4_K_M export). A
+            // literal pin, never `pendingSHA256`: the placeholder is not a
+            // digest, so `finalize` could only answer "mismatch" — a 1.1 GB
+            // download blamed on a checksum over a placeholder.
+            sha256: "f0bde6a4946cc74504a6b705c067240c6a30733b11e44a47c297e89ea0206987",
+            // **5 GB**, and the number is the warden's own line, not a
+            // preference — `ModelLifecycleBudget.compactBoundaryBytes`, the
+            // constant rather than a copy of it, so this floor cannot drift
+            // off the line it sits on.
+            //
+            // The claim is about the DEVICE's physical RAM:
+            // `MemoryProbe.canFit` is `physicalMemoryBytes >= requiredBytes`,
+            // and `ModelLifecycleBudget.deviceClass` calls anything under
+            // 5 GB `.compact`, whose whole-model budget is 2 GB. 1.1 GB of
+            // file is ~1.8 GB live beside the standard class's 1.0 GB warm
+            // STT, so a 4 GB floor offered this download to a 4 GB phone that
+            // the warden then refuses it on (`requiresEvictingWarmSTT`) — a
+            // 1.1 GB download that never runs. A floor inside `.compact` is a
+            // floor that promises what the budget cannot deliver; 5 GB is the
+            // smallest device that can actually use it, which is what makes
+            // the row honest. (Other floors sit below the boundary and are
+            // exempt for their own stated reasons — the reconciliation is in
+            // `ModelBudgetPolicy.availability`.)
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
+            dependsOn: nil,
+            // Language tag: ne-only model (it translates INTO Nepali).
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
+            id: nmtEnNeQwen17bR3Q5,
+            kind: .llamaBase,
+            // ALTERNATE QUANT of the round-3 checkpoint — same 12/12, 0
+            // polarity failures as the Q4 above, so this is a size/quality
+            // knob and not a correctness one. Sideload-only: not in
+            // `availableTranslationEntries` (the household is offered the
+            // ship quant, not a menu of quants), and sitting directly behind
+            // the Q4 in `brainTranslationModelIDs` so a device that carries
+            // it uses it. Kept in `all` so it is resolvable and deletable.
+            //
+            // [HOSTING — LIVE] Same v19 release as the Q4, uploaded and
+            // verified against the digest below. Nothing in the app offers a
+            // download for it (it is sideload-only), so the asset is a
+            // convenience for the device that wants the size/quality knob —
+            // the pin is what makes a future re-upload provable.
+            displayName: "Translate — English to Nepali (Qwen 1.7B, Q5 test)",
+            filename: "translate-en-ne-qwen17b-r3-q5_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v19/translate-en-ne-qwen17b-r3-q5_k_m.gguf")!,
+            sizeBytes: 1_257_879_264,
+            // Server-original digest (round-3 Q5_K_M export), `.sha256`
+            // sidecar on the training box, 2026-09-19.
+            sha256: "c8557b9ab5704273079a32a502a5f282477755467d8b90719a8a989bb16dd5bf",
+            // 5 GB: the same floor as the Q4 above, and stated as
+            // `ModelLifecycleBudget.compactBoundaryBytes` so it cannot drift
+            // off the line. The reason is CO-RESIDENCY, not the whole-model
+            // budget — the arithmetic matters, because the two refusals are
+            // different sentences to a household:
+            //
+            //   live 1.958 GB (1.258 GB file + the 1.7B rung's 0.7 GB
+            //   overhead) < the 2.0 GB compact budget — it FITS the class
+            //   alone, with ~42 MB to spare;
+            //   live + the compact class's 0.65 GB warm STT = 2.608 GB
+            //   > 2.0 GB — so `.compact` refuses it as
+            //   `.requiresEvictingWarmSTT` ("it needs the memory the speech
+            //   model is holding"), not as `.overClassBudget`.
+            //
+            // Either way a floor inside `.compact` would offer a download the
+            // warden then refuses; 5 GB is the smallest device that can run
+            // it. The artifact is 150 MB larger than the Q4, so its floor can
+            // never be the lower of the two; the Q5 is sideload-only besides,
+            // so the floor only says what a device keeping it can actually
+            // run.
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
+            dependsOn: nil,
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
+            id: nmtEnNeQwen17bR4Q5,
+            kind: .llamaBase,
+            // Round-4 fine-tune (anti-transliteration mix), Q5_K_M — the
+            // owner's gibberish fix: the r3 checkpoint wrote English words
+            // in Devanagari letters; r4's mix upweights real parallel
+            // translations and teaches the meaning rule in the prompt.
+            // Gate sweep: 34/34 app-header, 0 polarity failures, probe
+            // 12/12 (post_train_r4, 2026-09-21).
+            // SUPERSEDED (2026-09-21, the same day it was pinned as head):
+            // it cleared the tier's own sweep but FAILS the gate under the
+            // SHIPPED prompt — (superseded: fails S11 under shipped prompt) —
+            // so the verdict passed to the Q6_K below. Sideload-only now: no
+            // offered row, but the entry is KEPT because it may already be
+            // installed on a device — the tier list keeps it resolvable so
+            // that device is not stranded by a head change.
+            //
+            // The name is left exactly as the string table has it
+            // (`model.name.nmt-en-ne-qwen17b-r4-q5_k_m`, "…, R4"), because a
+            // row's English string IS its `displayName` — pinned by
+            // `ModelCatalogLanguageTests` — and the string table is outside
+            // this workstream's scope. The demotion is therefore carried by
+            // *structure* (the entry is not in `availableTranslationEntries`,
+            // so no device is offered it) and not by new copy. The offered
+            // Q6_K's `model.name.<id>` row landed with the swap; [COPY OWED] a
+            // "superseded" wording for THIS row still needs a string-table
+            // entry.
+            displayName: "Translate — English to Nepali (Qwen 1.7B, R4)",
+            filename: "translate-en-ne-qwen17b-r4-q5_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v20/translate-en-ne-qwen17b-r4-q5_k_m.gguf")!,
+            sizeBytes: 1_257_879_264,
+            // Server-original digest (round-4 Q5_K_M export), `.sha256`
+            // sidecar on the training box, 2026-09-21.
+            sha256: "9b7d478ee33b58b142da137bceaa13c784324f61cde13cefd0cd76e568168100",
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
+            dependsOn: nil,
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
+            id: nmtEnNeQwen17bR4Q6,
+            kind: .llamaBase,
+            // Round-4 ship quant (2026-09-21) — the tier's head until the
+            // round-7 Q8 above superseded it (2026-09-22), and now the rung
+            // directly behind it. The round-4 anti-transliteration checkpoint
+            // at the size where it passes the gate under the SHIPPED prompt
+            // (S11), which the Q5 above failed, and a STANDARD-class fit at
+            // the shared 5 GB floor — 1.42 GB takes the 1.7B band (700 MB
+            // overhead → 2.12 GB live), so the class most households have
+            // runs it BESIDE the warm STT, which is exactly what the round-7
+            // head cannot do. A phone that cannot hold the Q8 translates on
+            // this; the order in `brainTranslationModelIDs` is what makes
+            // that a fallback rather than a choice.
+            //
+            // [HOSTING — VERIFIED] The asset is live on release v20 and this
+            // entry can download it: `translate-en-ne-qwen17b-r4-q6_k.gguf`,
+            // 1,417,754,336 B, sha256
+            // 9ed3fccea39b5a1ebe671e2cdad92b635497b983c2d73f8f4a61cd6a174e045e.
+            displayName: "Translate — English to Nepali (Qwen 1.7B, R4 Q6, superseded by R7 Q8)",
+            filename: "translate-en-ne-qwen17b-r4-q6_k.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v20/translate-en-ne-qwen17b-r4-q6_k.gguf")!,
+            sizeBytes: 1_417_754_336,
+            // Server-original digest (round-4 Q6_K export), `.sha256`
+            // sidecar on the training box, 2026-09-21.
+            sha256: "9ed3fccea39b5a1ebe671e2cdad92b635497b983c2d73f8f4a61cd6a174e045e",
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
+            dependsOn: nil,
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
+            id: nmtEnNeQwen17bR4Q4,
+            kind: .llamaBase,
+            // Round-4 ablation quant (Q4_K_M) — TEMPORARY OFFER for the
+            // Q6-vs-Q4 ARM-kernel A/B. The owner's phone cannot run the Q8
+            // ceiling, so the arm the device can hold is this one, and the
+            // A/B is against the Q6_K head.
+            //
+            // Gate-clean as its own artifact (67.6% exact, probe 12/12,
+            // 34/34 accepted). That is NOT an S11 result under the shipped
+            // prompt — the round-4 verdict's finding stands: the Q6_K is the
+            // ship quant, and this offer is an experiment, not a rival.
+            //
+            // STANDARD-class fit at the shared 5 GB floor: 1.1 GB is the
+            // same file size the round-3 Q4 shipped, so it takes the 1.7B
+            // band's 700 MB overhead — the Q6_K's own band — and the
+            // warden's verdict, not this catalog, decides the load.
+            //
+            // [HOSTING — VERIFIED] live on release v20,
+            // `translate-en-ne-qwen17b-r4-q4_k_m.gguf`, 1,107,408,608 B,
+            // sha256
+            // 4aad12a2fa133d50dd5946902442fa9ee77067ea818a5f57ad08d713d649128f
+            // — the digest below was re-read from the release's own asset
+            // record (2026-09-21), not copied from the training box.
+            displayName: "Translate — English to Nepali (Qwen 1.7B, R4 Q4)",
+            filename: "translate-en-ne-qwen17b-r4-q4_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v20/translate-en-ne-qwen17b-r4-q4_k_m.gguf")!,
+            sizeBytes: 1_107_408_608,
+            // Server-original digest (round-4 Q4_K_M export) — the `.sha256`
+            // sidecar on the training box and the v20 asset's own digest
+            // agree on these bytes.
+            sha256: "4aad12a2fa133d50dd5946902442fa9ee77067ea818a5f57ad08d713d649128f",
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
+            dependsOn: nil,
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
+            id: nmtEnNeQwen17bR4Q8,
+            kind: .llamaBase,
+            // Round-4 quality ceiling (Q8_0), normally SIDELOAD-ONLY: never
+            // offered as a download row (`availableTranslationEntries` is the
+            // head alone).
+            //
+            // TEMPORARY OFFER for the Q6-vs-Q8 ARM-kernel A/B — revert after
+            // the verdict. For the duration of that run this entry IS a member
+            // of `availableTranslationEntries`, which is the only reason the
+            // Settings translation row and the translate-test install card can
+            // fetch it at all (the card reads that list — #117). The A/B is a
+            // same-device, same-kernel comparison against the Q6_K head, so
+            // both quants have to be downloadable in one build. Nothing else
+            // about the entry moves: its ladder position, its floor and its
+            // bytes are the ship artifacts' and change with the verdict, not
+            // with the offer. The `displayName` below keeps its ", sideload"
+            // suffix for the same reason — renaming it is copy work that would
+            // have to be reverted too, and "R4 Q8" is what distinguishes the
+            // row on the device.
+            //
+            // 1_834_426_080 B is over the 1.5 GB "1.7B" rung, so it takes the
+            // 3B rung's 800 MB overhead → 2_634_426_080 B live — the same
+            // arithmetic, and the same three verdicts, as the round-2b Q8 this
+            // quant supersedes: refused on compact (`over_class_budget`) and
+            // on standard (`requires_evicting_warm_stt`), admitted on roomy.
+            // Kept so a device that sideloaded it works, and as the quality
+            // reference a roomy device can carry beside the shipped head.
+            //
+            // [HOSTING — VERIFIED] Same release as the rest of the round-4
+            // family: it is not downloaded by the app, so it only needs to
+            // exist at v20 for an operator's sideload — where it is live
+            // (0ed9dfdc…, 1,834,426,080 B).
+            displayName: "Translate — English to Nepali (Qwen 1.7B, R4 Q8, sideload)",
+            filename: "translate-en-ne-qwen17b-r4-q8_0.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v20/translate-en-ne-qwen17b-r4-q8_0.gguf")!,
+            sizeBytes: 1_834_426_080,
+            // Server-original digest (round-4 Q8_0 export), `.sha256` sidecar
+            // on the training box, 2026-09-21.
+            sha256: "0ed9dfdc9b2e8041f1bd2d9b6aeb9837ea560459ac998ca10c0bd96dfc505240",
+            minDeviceRAMBytes: 4_000_000_000,
+            dependsOn: nil,
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
+            id: nmtEnNeQwen17bR7Q8,
+            kind: .llamaBase,
+            // Round-7 ship quant (2026-09-22) — the tier's head until the
+            // round-8 Q8 above superseded it (2026-09-22), and now the rung
+            // directly behind it. The round-7 verdict was the first pass under
+            // the app's SHIPPED 4-line header: sign 82.4% (the round-4 Q6_K
+            // below measured 76.5%), safety probe 12/12, conversational
+            // 66.7%. The round-8 export below moved two of those three (85.3%
+            // sign, 72.2% conversational) at the same file size, which is
+            // what demotes this artifact — not a gate it failed.
+            //
+            // CLASS: 1,834,426,080 B is over the 1.5 GB "1.7B" file ceiling,
+            // so the file takes the 3B rung's 800 MB overhead → 2.63 GB live.
+            // The standard class therefore refuses it BESIDE a warm STT
+            // (`requires_evicting_warm_stt` — it fits that class alone), which
+            // the warden's escape hatch answers by evicting the STT rather
+            // than refusing the load; the Q6_K below stays the rung for a
+            // phone that cannot hold the Q8 at all. Both are `.available` on
+            // the roomy class, and the shared 5 GB floor keeps either off the
+            // compact class (`ModelBudgetPolicyTests`).
+            //
+            // [HOSTING — VERIFIED] The v21 asset is live: GitHub records the
+            // upload at sha256
+            // 57b246a42c4d10c5cbc175fbb1ef47f2adedea0d33503c704dec125b351cc7c8,
+            // 1,834,426,080 B. That digest was first read independently on the
+            // training box — from the artifact's `.sha256` sidecar AND
+            // re-computed with `sha256sum` over the whole file (2026-09-22) —
+            // and the two sources agree, so the pin below resolves to bytes a
+            // device can verify; an upload that did not match would install
+            // nothing.
+            displayName: "Translate — English to Nepali (Qwen 1.7B, R7 Q8, superseded by R8 Q8)",
+            filename: "translate-en-ne-qwen17b-r7-q8_0.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v21/translate-en-ne-qwen17b-r7-q8_0.gguf")!,
+            sizeBytes: 1_834_426_080,
+            // Server-original digest (round-7 withconv Q8_0 export), `.sha256`
+            // sidecar on the training box, re-verified over the whole
+            // artifact, 2026-09-22.
+            sha256: "57b246a42c4d10c5cbc175fbb1ef47f2adedea0d33503c704dec125b351cc7c8",
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
+            dependsOn: nil,
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
+            id: nmtEnNeQwen17bR8Q8,
+            kind: .llamaBase,
+            // Round-8 SHIP quant (2026-09-22) — the tier's head, and strictly
+            // better than the round-7 Q8 above at the same 1,834,426,080 B:
+            // sign 85.3% against 82.4%, safety probe 12/12 on both,
+            // conversational 72.2% against 66.7%.
+            //
+            // CLASS: the same arithmetic as the round-7 artifact it replaces,
+            // reached from the same byte count — 1,834,426,080 B is over the
+            // 1.5 GB "1.7B" file ceiling, so the 3B rung's 800 MB overhead
+            // applies and the live figure is 2.63 GB. The standard class
+            // therefore refuses it BESIDE a warm STT
+            // (`requires_evicting_warm_stt` — it fits that class alone), which
+            // the warden's escape hatch answers by evicting the STT rather
+            // than refusing the load. The Q6_K further down stays the rung for
+            // a phone that cannot hold a Q8 at all. All are `.available` on the
+            // roomy class, and the shared 5 GB floor keeps any off the compact
+            // class (`ModelBudgetPolicyTests`).
+            //
+            // [HOSTING — VERIFIED] The v22 asset is live: GitHub records the
+            // upload at sha256
+            // cb2a59eaaebdaa328fed97c4cdf8be9f2eee6af68bf52a2f0a0e083a06ed58d2,
+            // 1,834,426,080 B. That digest was first read independently on the
+            // training box — from the artifact's `.sha256` sidecar AND
+            // re-computed with `sha256sum` over the whole file (2026-09-22) —
+            // and all three sources agree, so the pin below resolves to bytes
+            // a device can verify; an upload that did not match would install
+            // nothing (`ModelStore.finalize` checks the pin).
+            displayName: "Translate — English to Nepali (Qwen 1.7B, R8 Q8)",
+            filename: "translate-en-ne-qwen17b-r8-q8_0.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v22/translate-en-ne-qwen17b-r8-q8_0.gguf")!,
+            sizeBytes: 1_834_426_080,
+            // Server-original digest (round-8 withconv Q8_0 export), `.sha256`
+            // sidecar on the training box, re-verified over the whole
+            // artifact, 2026-09-22.
+            sha256: "cb2a59eaaebdaa328fed97c4cdf8be9f2eee6af68bf52a2f0a0e083a06ed58d2",
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
+            dependsOn: nil,
             languages: ["ne"]
         ),
         ModelCatalogEntry(
@@ -867,9 +1574,60 @@ enum ModelCatalog {
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v14/intent-ne-qwen-s43-q4_k_m.gguf")!,
             sizeBytes: 1_107_408_576,
             sha256: "c2135f786ace9c1020a27bb115600d90f9e3c4d788c995730b379b67e1ae74ef",
+            // 3 GB floor, inside the compact band on purpose: a floor is the
+            // phone's own RAM claim, and on a `.compact` phone the class
+            // refuses this rung (`.requiresEvictingWarmSTT` — 1.8 GB live
+            // fits the 2 GB budget alone, not beside the warm STT), which
+            // its row shows instead of offering the download. See
+            // `ModelBudgetPolicy.availability`.
             minDeviceRAMBytes: 3_000_000_000,
             dependsOn: nil,
             // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
+        ),
+        // [CNR T-184] The v17 CHAT-AWARE retrain — BESIDE the seed-43
+        // entry above, never in place of it (FR-CNR-022: versioned +
+        // reversible; the previous entry is the rollback target and stays
+        // selectable). Identity from T-183's run `cnr-v17-20261015-0209`:
+        // artifact `intent-ne-qwen-s43-chat-v17-q4_k_m.gguf`, sha256
+        // e05cc8a2…, 1,107,408,736 bytes — the same
+        // `checkpoints/qwen-s43-merged` 1.7B lineage and the same Q4_K_M
+        // quantizer as the seed-43 file it retrains, 160 bytes larger.
+        // `ModelLifecycleBudget.brainClasses` keys on the file size and
+        // both files land in the same 1.5 GB / 1.7B rung, so the memory
+        // class is the previous entry's — the EVICTION question (which
+        // class may hold it beside a warm STT) is `ModelBudgetPolicy`'s
+        // and unchanged by this entry.
+        //
+        // PUBLISHED 2026-10-17: release v23 of the public models repo,
+        // titled "gates pending, test candidate" — the sha256 sidecar
+        // ships beside the asset. Publication is NOT promotion: the run
+        // remains unpromoted (see `chatVariantPromotionRecord` below —
+        // no gate report has landed and the latency gate is unmeasured
+        // until the Anzaan DV session), and the digest is the REAL
+        // artifact's identity, unchanged by publication. An untimely tap
+        // downloads the exact pinned bytes or fails honestly.
+        ModelCatalogEntry(
+            id: intentQwenS43ChatV17,
+            kind: .llamaBase,
+            displayName: "Brain — Qwen 1.7B · Nepali chat-aware (v17 · gates pending)",
+            // The NAME quotes the run state (FR-CNR-022 failure path: the
+            // entry may stay selectable only where its evidence posture is
+            // stated). It is offered for an explicit pick; no automatic
+            // path serves it while `chatVariantPromotionRecord` is blocked
+            // (`isAutomaticPickEligible`). A green run edits the record,
+            // not this row.
+            filename: "intent-ne-qwen-s43-chat-v17-q4_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v23/intent-ne-qwen-s43-chat-v17-q4_k_m.gguf")!,
+            sizeBytes: 1_107_408_736,
+            sha256: "e05cc8a266198336f508cef2f6d2a8887b3db1eee3f4a4159cdeb2ab3df59d71",
+            // Same 3 GB floor as the seed-43 sibling: the floor is the
+            // phone's own RAM claim (see that entry's note), and the
+            // `.compact` class's refusal of the 1.7B beside a warm STT is
+            // the policy's verdict, not this number's.
+            minDeviceRAMBytes: 3_000_000_000,
+            dependsOn: nil,
+            // Language tag (2026-10-16): ne-only model, same as its base.
             languages: ["ne"]
         ),
         ModelCatalogEntry(
@@ -928,7 +1686,12 @@ enum ModelCatalog {
             sizeBytes: 1_282_439_360,
             sha256: "b047d6617eba56dcfa3357566b06807f54b15816faf6182aabd12d7e2378e537",
             // ~2.2B params at Q4: 1.3 GB file, live footprint ~2 GB —
-            // one gate step above the LLaMA 1B entry.
+            // one gate step above the LLaMA 1B entry. The 3.5 GB floor sits
+            // inside the compact band on purpose: it fits the compact budget
+            // ALONE (1.98 GB against 2 GB) and not beside the warm STT, so
+            // `.compact` refuses it as `.requiresEvictingWarmSTT` — a refusal
+            // its row shows rather than a download behind it
+            // (`ModelBudgetPolicy.availability`).
             minDeviceRAMBytes: 3_500_000_000,
             dependsOn: nil,
             // Language-neutral: multilingual / any-language artifact.
@@ -973,10 +1736,13 @@ enum ModelCatalog {
             downloadURL: URL(string: "http://192.168.1.117:8765/intent-ne-qwen3-4b-nepali-q4_k_m.gguf")!,
             sizeBytes: 2_529_263_424,
             sha256: "eb5ce8059636e36123a86f8fc65b952122e91da573adc54eb18829bd515d6305",
-            // 4B Q4_K_M: 2.5 GB file, ~3.5-4 GB live. os_proc_available_memory
-            // is the CURRENT free budget, not total RAM — a 6 GB floor
-            // reads ~3-4 GB available mid-session and blocks the download.
-            // 4 GB floor = testable on 6 GB devices; tight but workable.
+            // 4B Q4_K_M: 2.5 GB file, ~3.5-4 GB live. The floor is a claim
+            // about the phone's total RAM (`MemoryProbe.canFit`; the app's
+            // free budget is deliberately NOT the comparator) and sits below
+            // the compact line like its sibling above — a `.compact` phone
+            // passes it and is refused by the class (`.overClassBudget`),
+            // which its row shows rather than offering the download.
+            // `ModelBudgetPolicy.availability` states the rule.
             minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil,
             // Language tag (2026-09-13): ne-only model.
@@ -1107,18 +1873,49 @@ enum ModelCatalog {
             // The installed DIRECTORY name inside the ModelStore; the zip
             // contains exactly this directory at its top level.
             filename: "t033-encoder-int8.mlmodelc",
-            // Non-routable placeholder, or the tester's own copy when
-            // INTENT_ENCODER_SPIKE_ZIP is set; the 109 MB spike zip itself
-            // is deliberately not committed and is installed by passing it
-            // to `installCoreMLEncoder(fromZip:for:)`. See
-            // `intentEncoderSpikeZipURL(environment:)`.
-            downloadURL: intentEncoderSpikeZipURL(),
+            // [ENCODER-REPROVISION] (2026-09-17) The REMOTE zip — the
+            // models-release copy the standard downloader fetches when the
+            // tester's local Documents copy is gone (an app update that
+            // replaced the container wiped it; the encoder then silently
+            // stopped serving). The local Documents/env handshake
+            // (`intentEncoderSpikeZipURL`) remains the installer's
+            // preferred source; this URL is the self-healing path. The
+            // zip must be PUBLISHED to the models repo release `v4`
+            // (server-side step, owned by Anjan) — until then the
+            // download fails honestly and the installer retries on the
+            // next readiness check.
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v4/t033-encoder-int8-mlmodelc.zip")!,
             sizeBytes: 109_079_441,
             sha256: "d8f549ecb2e37b44bbcf21a243cbfc00f917d47f7f4e7187d547f51168afbcdc",
             // int8 encoder body ~118 MB; ~2 GB device floor is generous
             // headroom for the 100–120M-param student.
             minDeviceRAMBytes: 2_000_000_000,
             dependsOn: nil
+        ),
+        // [YOLO] The point-ask object detector (see the `yolo11n` ID
+        // docs). The zip contains exactly one top-level
+        // `yolo11n.mlmodelc` directory — the entry's `filename` IS the
+        // installed directory name (the `.intentEncoder` shape).
+        // `sha256`/`sizeBytes` are the ZIP's own values (strict checksum),
+        // verified by `ModelStore.installCoreMLEncoder(fromZip:for:)`
+        // before unpacking — a corrupted or substituted artifact surfaces
+        // as an install failure, never as a silent install. Artifact
+        // provisioned 2026-09-19 at the models repo release v4.
+        ModelCatalogEntry(
+            id: yolo11n,
+            kind: .yoloDetector,
+            displayName: "Object detector — YOLO11n (point-ask)",
+            filename: "yolo11n.mlmodelc",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v4/yolo11n.mlmodelc.zip")!,
+            sizeBytes: 9_321_136,
+            sha256: "8c56bfca65691bb0a3c20241e454171c16af5a80192874e7bb3f74414845b8e1",
+            // YOLO11n is a ~2.6M-param / ~5 MB-weight detector whose ANE
+            // pass holds a 640×640 working set — the VAD-sized floor.
+            minDeviceRAMBytes: 500_000_000,
+            dependsOn: nil,
+            // Language-neutral: the COCO label set is object names, not
+            // speech — usable in every app language.
+            languages: []
         )
     ]
 
@@ -1152,9 +1949,12 @@ enum ModelCatalog {
 
     /// The STT engines the Settings "AI मोडेल" screen offers, best first.
     ///
+    /// [DEFAULTS 2026-09-16] v6 on the ANE leads: it is the best-measured
+    /// accuracy AND the fast path, and it is the per-language Nepali
+    /// default (`languageDefaultPicks`), so the picker's first row is the
+    /// model an auto-switch lands on.
+    ///
     /// Hidden (in `all`, not offered):
-    ///   - `whisperKitNepaliMedium` — superseded by the v6 ANE build
-    ///     (same medium class, better accuracy, same fast path).
     ///   - `whisperLargeV3Nepali` / `whisperLargeV3NepaliV2` — Large on
     ///     the CPU path: ~1.2 GB and minutes per utterance, and the v2
     ///     fine-tune never beat its own base on the FLEURS harness.
@@ -1162,9 +1962,17 @@ enum ModelCatalog {
     ///     the same checkpoint at better quality.
     ///   - `whisperSmallNepali` — the mid-training distill the small
     ///     fine-tune superseded.
+    ///
+    /// NOTE: `whisperKitNepaliMedium` is offered again, contrary to the
+    /// declutter note that used to live here — 02b2596 re-offered the v3
+    /// ANE on user request because the v6 **q6** quant mangled short
+    /// medication phrases. The v6 entry now DELIVERS the **q8** rebuild
+    /// (df12bd0, completed by the `whisperKitZipURL` fix on that entry),
+    /// which is token-identical to fp32 in verification, so v6 keeps the
+    /// lead.
     static let availableSTTEntries: [ModelCatalogEntry] = [
-        whisperMediumV6,
         whisperKitMediumV6,
+        whisperMediumV6,
         whisperKitNepaliMedium,
         whisperMediumV5,
         whisperKitMediumV5,
@@ -1177,9 +1985,10 @@ enum ModelCatalog {
     ].compactMap { entry(for: $0) }
 
     /// The brain models the Settings picker offers: the gate-passing
-    /// slot-canonical Qwen 4B (the default brain) and the two smaller
-    /// Nepali intent fine-tunes, then the two stock Qwen 3 sizes —
-    /// biggest first.
+    /// slot-canonical Qwen 4B (the default brain), the seed-43 1.7B and
+    /// its [CNR T-184] v17 chat-aware retrain (the two smaller Nepali
+    /// intent fine-tunes), then the two stock Qwen 3 sizes — biggest
+    /// first.
     ///
     /// Hidden (in `all`, not offered):
     ///   - `intentQwen4BS43` — the seed-43 4B, superseded by the
@@ -1191,11 +2000,191 @@ enum ModelCatalog {
     ///     (legacy; Qwen 3 supersedes both sizes).
     static let availableBrainEntries: [ModelCatalogEntry] = [
         intentQwen4BSlotCanon,
+        // [CNR T-184] The v17 chat-aware 1.7B sits BESIDE the seed-43
+        // entry it retrains — second only because `intentQwen4BSlotCanon`
+        // is the list leader (a multipart-download test pins `.first`),
+        // so the two 1.7B siblings read together. Being offered is NOT
+        // being promoted: `isAutomaticPickEligible` keeps a
+        // record-blocked chat variant out of the automatic ladder, and
+        // the resolved default only moves when the promotion record is
+        // green (see `chatVariantPromotionRecord`).
+        intentQwenS43ChatV17,
         intentQwenS43,
         qwen4BNepali,
         qwen3_4BInstruct,
         qwen3_1_7BInstruct
     ].compactMap { entry(for: $0) }
+
+    /// [TRANSLATION-MODEL-ROW] (2026-09-18) The models the AI-models screen
+    /// offers as their OWN download row — the live-translate tier's head,
+    /// and nothing else.
+    ///
+    /// **TEMPORARY OFFER for the Q6-vs-Q8 ARM-kernel A/B — revert after the
+    /// verdict.** The round-4 Q8_0 is a member of this list for the duration
+    /// of that A/B and for no other reason, so a device can download both
+    /// quants from one build and compare them on the same kernel. This is the
+    /// single exception to the "head alone" rule the paragraphs below argue
+    /// for; every "never offered" sentence in this file (and the ones in
+    /// `LiveTranslateConfigTests` about the Q8 ceiling) describes the state
+    /// this list returns to when the second id is deleted.
+    ///
+    /// A third list rather than a member of either above, because the tier's
+    /// model is a different KIND of row from a picker's:
+    ///   · not in `availableBrainEntries` — the picker hot-swaps
+    ///     `LlamaCommandInterpreter` onto what it offers, and this artifact
+    ///     answers the tier's `{"translations":[…]}` contract (see the
+    ///     entry's docs);
+    ///   · not in `availableSTTEntries` — it is not a recognizer;
+    ///   · not in the tier's own `brainTranslationModelIDs` wholesale — the
+    ///     two fallbacks behind the head are assistant brains with rows of
+    ///     their own in the brain section, and offering them twice would let
+    ///     one artifact be deleted from two places.
+    ///
+    /// What it is FOR: a download. `LocalBrainTranslationTier` reads what is
+    /// installed (`installedModel()` walks `brainTranslationModelIDs`), so
+    /// without a row here the shipped translation fine-tune can be in the
+    /// catalog, published at a release, sha-pinned — and still never reach a
+    /// device, because nothing in the app starts its download. The row is
+    /// also what keeps the promise honest in the other direction: it shows
+    /// the class verdict (`ModelLifecycleManager.availability(of:)`) beside
+    /// a Download that stays offered anyway, so the artifact is present when
+    /// a device can run it and when a later policy moves the line.
+    ///
+    /// The head is the ship decision (`brainTranslationModelIDs.first` is
+    /// what the tier prefers); a test pins the two together, so a list that
+    /// moved cannot leave the row fetching a model the tier no longer leads
+    /// with. As of 2026-09-22 that is the round-8 Q8 — the quant the round-8
+    /// verdict promoted on the numbers, 85.3% sign and 72.2% conversational
+    /// against the round-7 head's 82.4% / 66.7% at the same file size. The row
+    /// moving with the verdict is the whole
+    /// point: the household downloads exactly what the tier leads with, so a
+    /// demotion in the tier list can never leave the offered row fetching a
+    /// quant the gate already refused.
+    ///
+    /// Normally ONE row — the head only: the round-4 Q8 ceiling, the
+    /// superseded round-4 Q5, and the round-3/round-2b artifacts are
+    /// alternates, not choices the household should have to make. They stay
+    /// resolvable in the tier list and deletable from `all`, which is where a
+    /// leftover installation surfaces. The exceptions are the rungs behind the
+    /// head (2026-09-22): the round-7 Q8 directly behind it — the head it
+    /// superseded, kept offered so a device mid-upgrade can still fetch the
+    /// artifact it knows — and the round-4 Q6_K below that, the row a phone
+    /// that cannot hold a Q8 actually needs, since the head's admission is a
+    /// per-device class verdict. Both stay offered rather than living on in the
+    /// tier list alone. The [TEMPORARY] block is a device A/B rather than a
+    /// product decision.
+    ///
+    /// Adding the Q8 does not double-render an installed one: `managedRows`
+    /// subtracts the offered set from its installed leftovers, so a device
+    /// that already sideloaded the ceiling sees it once, as an offered row it
+    /// can finally Delete without sideloading it by hand.
+    ///
+    /// [HOSTING] The Q6_K artifact is live on release **v20**
+    /// (sha256 `9ed3fccea39b5a1ebe671e2cdad92b635497b983c2d73f8f4a61cd6a174e045e`,
+    /// 1,417,754,336 B), so that row's Download resolves on a device today.
+    /// The round-7 head's **v21 asset is live** (2026-09-22): GitHub records
+    /// the upload at `sha256:57b246a4…` / 1,834,426,080 B, the same digest
+    /// re-computed on the training box, so the rung's Download resolves to
+    /// bytes `ModelStore.finalize` will accept.
+    ///
+    /// The **round-8 head's v22 asset is live** (2026-09-22): GitHub records
+    /// the upload at `sha256:cb2a59ea…` / 1,834,426,080 B — the same digest
+    /// read on the training box from the artifact's `.sha256` sidecar and
+    /// re-computed over the whole file — so the head's Download resolves to
+    /// bytes `ModelStore.finalize` accepts. Three sources, one number.
+    static let availableTranslationEntries: [ModelCatalogEntry] =
+        // The round-8 Q8 leads (2026-09-22): the promoted head is the row a
+        // household downloads. The round-7 Q8 rides directly behind it — the
+        // head it superseded, at the same size and strictly worse numbers, so
+        // it is there for a device mid-upgrade rather than as a rival. The
+        // Q6_K rides behind that as the fallback rung for a phone that cannot
+        // hold a Q8 at all — that is the warden's per-device class verdict,
+        // not this list's decision.
+        //
+        // TEMPORARY OFFERS (revert each after its verdict): the Q4_K_M and
+        // the Q8_0 ride behind those three for the Q6-vs-Q4 and Q6-vs-Q8
+        // ARM-kernel A/Bs. Both are device A/Bs rather than product
+        // decisions, which is why they are the only ids here that the verdict
+        // did not put there. Deleting either id is that run's revert; the
+        // head must stay first.
+        [nmtEnNeQwen17bR8Q8, nmtEnNeQwen17bR7Q8, nmtEnNeQwen17bR4Q6,
+         nmtEnNeQwen17bR4Q4, nmtEnNeQwen17bR4Q8]
+            .compactMap { entry(for: $0) }
+
+    /// **Every** translation artifact in the catalog, offered or not: the ship
+    /// quant the translation section offers (the round-8 Q8 as of 2026-09-22),
+    /// the round-7 Q8 it superseded and keeps directly behind it, the round-4
+    /// Q6_K rung the ship before that pinned, the round-4 Q4_K_M
+    /// ablation offer (an A/B arm — offered, but not a head), the round-4 Q8
+    /// ceiling, the
+    /// superseded round-4 Q5 (kept so a device that sideloaded it can still
+    /// delete it — and so the id a round-4 tester may already be carrying
+    /// does not become undeletable when the verdict moves the head), and the
+    /// superseded round-3 and round-2b exports.
+    ///
+    /// One list, because two screens have to agree about which artifacts are
+    /// translation artifacts: the translation section appends its *installed*
+    /// leftovers from here (a device that sideloaded an alternate, or carried
+    /// the round-2b model, must still be able to delete it), and the brain
+    /// section must never append one of them — the same artifact with a row on
+    /// two cards is deletable from one while the other still shows it installed.
+    /// Derived from the ids rather than kept as a parallel hand-list, so a
+    /// future quant cannot be added to the catalog and forgotten here.
+    ///
+    /// [MODEL-KIND] (2026-09-21) The **head leads it**, and that is a fix
+    /// rather than a style choice: a round-4 export became the tier's head
+    /// without being added here, so the list that exists to say "this is a
+    /// translation artifact" called the head a BRAIN — `brainEntries` below is
+    /// derived by subtraction, so the head was offered a second row on the
+    /// brain card (the two-places hazard this list's own doc forbids), and a
+    /// picker that filters the ladder by translation-kind lost the head
+    /// entirely. The round-4 verdict moved the head from the Q5 to the Q6_K
+    /// (2026-09-21), the round-7 verdict moved it on to the Q8 (2026-09-22)
+    /// and the round-8 verdict moved it on again (2026-09-22), which is the
+    /// same trap one export later:
+    /// `testEveryTranslationArtifactIsClassifiedAsOne` therefore holds the
+    /// whole filename family to this list, so the next head cannot be
+    /// forgotten the same way.
+    static let allTranslationEntries: [ModelCatalogEntry] = [
+        nmtEnNeQwen17bR8Q8,
+        nmtEnNeQwen17bR7Q8,
+        nmtEnNeQwen17bR4Q6,
+        nmtEnNeQwen17bR4Q4,
+        nmtEnNeQwen17bR4Q8,
+        nmtEnNeQwen17bR4Q5,
+        nmtEnNeQwen17bR3Q4,
+        nmtEnNeQwen17bR3Q5,
+        nmtEnNeQwen17bR2bQ8,
+        nmtEnNeQwen17bR2bQ4
+    ].compactMap { entry(for: $0) }
+
+    /// Whether this build classifies `id` as a TRANSLATION model — one of the
+    /// artifacts that answer the tier's `{"translations":[…]}` contract, as
+    /// opposed to an assistant brain that fills slots.
+    ///
+    /// The classification is `allTranslationEntries`, and it is asked through
+    /// this function rather than by spelling the list again, because the two
+    /// questions that need it — "may the tier run this when a caller NAMES
+    /// it" (`LocalBrainTranslationTier`), and "which rows may the picker
+    /// offer" (the translate-test screen) — must not be able to disagree
+    /// about which artifacts are translations.
+    ///
+    /// The filename family is the invariant behind the list
+    /// (`translate-en-ne-qwen17b-*.gguf`), and the test named above holds the
+    /// two together, so a new export that is not added here fails a test
+    /// rather than quietly changing the answer to this question.
+    static func isTranslationModel(_ id: ModelID) -> Bool {
+        allTranslationEntries.contains { $0.id == id }
+    }
+
+    /// The brain artifacts proper: every `.llamaBase` entry that is not a
+    /// translation model. This is the pool the brain section's
+    /// installed-hidden append draws from — a translation artifact belongs to
+    /// the translation card, whether it is offered there or only installed.
+    static let brainEntries: [ModelCatalogEntry] = {
+        let translationIDs = Set(allTranslationEntries.map(\.id))
+        return entries(kind: .llamaBase).filter { !translationIDs.contains($0.id) }
+    }()
 
     /// The reply voices the language-aware default lookup draws from —
     /// curated the same way as the two lists above (the shipped voices,
@@ -1220,7 +2209,8 @@ enum ModelCatalog {
         case .whisperBase: return availableSTTEntries
         case .llamaBase:   return availableBrainEntries
         case .tts:         return availableTTSEntries
-        case .whisperLoRA, .llamaLoRA, .kws, .vad, .intentEncoder: return entries(kind: kind)
+        case .whisperLoRA, .llamaLoRA, .kws, .vad, .intentEncoder, .yoloDetector:
+            return entries(kind: kind)
         }
     }
 
@@ -1231,10 +2221,13 @@ enum ModelCatalog {
     /// pickers' preference order, which leads with the best-accuracy
     /// downloads, so an en household that had a Nepali brain selected used
     /// to trigger an implicit multi-GB download (qwen3-4B) it never asked
-    /// for. The map's picks are the small/bundled models instead:
-    ///   - STT `ne` → the BUNDLED medium fine-tune (`bundledResourceName`
-    ///     is set — the first-run install already put it on disk, so the
-    ///     switch downloads nothing);
+    /// for. The map's picks are the ones the household should land on:
+    ///   - STT `ne` → the v6 whisperKit build — the ANE fast path, the
+    ///     best measured accuracy, and the picker's own first row
+    ///     ([DEFAULTS 2026-09-16]: the default rule is "best and, where
+    ///     the catalog has one, ANE-accelerated". It is a download, so
+    ///     PR 3's auto-restore is what makes a fresh install converge on
+    ///     it without a Settings trip);
     ///   - STT `en` → whisper-base.en (60 MB, not the 190 MB multilingual);
     ///   - brain `ne` → the gate-passing slot-canonical 4B (the curated
     ///     list's own pick — a superseded entry must never be what an
@@ -1248,7 +2241,7 @@ enum ModelCatalog {
     /// narrows, what the catalog can answer.
     static let languageDefaultPicks: [ModelKind: [String: ModelID]] = [
         .whisperBase: [
-            "ne": whisperMediumFinetunedNepali,
+            "ne": whisperKitMediumV6,
             "en": whisperBaseEn
         ],
         .llamaBase: [
@@ -1264,15 +2257,39 @@ enum ModelCatalog {
     /// The explicit pick for `kind` + `language`, when the map has one AND
     /// the id still resolves to a live catalog entry (a removed entry must
     /// fall through to the generic logic, never strand the resolver).
-    static func explicitDefaultEntry(kind: ModelKind, language: String) -> ModelCatalogEntry? {
+    ///
+    /// [CNR T-184] A map pick that names a record-BLOCKED chat variant is
+    /// REFUSED here (nil — the generic steps answer). The map is reference
+    /// data a future promotion edit will touch, and promotion must be
+    /// impossible without the gate evidence: pointing this map at the v17
+    /// entry while `promotionRecord` is blocked does not promote it, it
+    /// falls through to the previous entry exactly as if the map had not
+    /// moved. Enforcement lives here (and in `resolvedAutomaticPick`'s
+    /// eligibility filter), not in a comment on the map.
+    static func explicitDefaultEntry(
+        kind: ModelKind, language: String,
+        promotionRecord: ChatVariantPromotionRecord? = chatVariantPromotionRecord
+    ) -> ModelCatalogEntry? {
         guard let id = languageDefaultPicks[kind]?[language.lowercased()] else { return nil }
-        return entry(for: id)
+        guard let entry = entry(for: id) else { return nil }
+        if let record = promotionRecord, record.modelID == entry.id,
+           case .blocked = promotionVerdict(for: record) {
+            return nil
+        }
+        return entry
     }
 
     /// The default entry of `kind` for an ISO 639-1 `language` code.
     ///
     /// Preference order (documented + pinned by
     /// `ModelCatalogLanguageTests`):
+    ///   -1. [CNR T-184] THE PROMOTED CHAT VARIANT, when `promotionRecord`
+    ///      resolves to `.promoted` and its entry serves this kind and
+    ///      language — a promotion IS the default-resolution change (see
+    ///      `chatVariantPromotionRecord`), so it is consulted before every
+    ///      other step. While the shipped record is blocked this step
+    ///      answers nothing and every step below is byte-identical to the
+    ///      pre-CNR behavior,
     ///   0. the EXPLICIT per-language pick (`languageDefaultPicks`) — the
     ///      curated auto-switch target, consulted first so an app-language
     ///      change lands on a small/bundled model (see the map's note),
@@ -1284,8 +2301,38 @@ enum ModelCatalog {
     ///   3. the first curated entry (the list's own preference order — the
     ///      honest answer when the catalog ships nothing for the language).
     /// Nil only when the kind has no curated entry at all.
-    static func defaultEntry(kind: ModelKind, language: String) -> ModelCatalogEntry? {
-        if let explicit = explicitDefaultEntry(kind: kind, language: language) {
+    ///
+    /// **[MODEL-WARDEN] This is the LANGUAGE answer, not the device one.**
+    /// The catalog is deliberately device-blind: nothing here reads
+    /// `physicalMemoryBytes`, `minDeviceRAMBytes` or the class policy, so a
+    /// 6 GB phone still resolves the ne brain to the 4B (`languageDefaultPicks`)
+    /// even though `ModelBudgetPolicy.standard` refuses it beside a warm ANE
+    /// STT. The memory-aware question — *which* of these can this class
+    /// actually hold? — is `LanguageModelResolver.resolvedAutomaticPick
+    /// (kind:language:policy:physicalMemoryBytes:warmSTTLiveBytes:)`, which
+    /// takes this function's answer as step 1 and steps down the ladder from
+    /// there. Keeping the two apart is what lets a caller ask for the
+    /// language default on purpose (the Settings picker's own ordering) and
+    /// keeps a device probe out of a pure catalog lookup.
+    static func defaultEntry(
+        kind: ModelKind, language: String,
+        promotionRecord: ChatVariantPromotionRecord? = chatVariantPromotionRecord
+    ) -> ModelCatalogEntry? {
+        // Step -1 [CNR T-184]: the promoted chat variant, for the kind and
+        // language it was promoted FOR. The compatibility rule is
+        // `LanguageModelResolver.isLanguageCompatible`'s (neutral `[]`
+        // entries serve every language; a tagged entry only its own),
+        // inlined because the resolver already depends on this type and a
+        // reverse call would make the pair mutually recursive for no
+        // behavioural gain.
+        if let promoted = promotedChatVariantEntry(record: promotionRecord),
+           promoted.kind == kind,
+           promoted.languages.isEmpty
+            || promoted.languages.contains(language.lowercased()) {
+            return promoted
+        }
+        if let explicit = explicitDefaultEntry(kind: kind, language: language,
+                                               promotionRecord: promotionRecord) {
             return explicit
         }
         let curated = curatedEntries(kind: kind)
@@ -1293,5 +2340,208 @@ enum ModelCatalog {
         return curated.first { $0.languages.contains(code) }
             ?? curated.first { $0.languages.isEmpty }
             ?? curated.first
+    }
+
+    // MARK: - [CNR T-184] The v17 chat-variant promotion (reference data, gated)
+
+    /// The evidence a chat-variant promotion must carry, and the shipped
+    /// state of the v17 promotion. This is REFERENCE DATA in the same
+    /// sense `languageDefaultPicks` is — a static data structure, not
+    /// logic: the resolution rules above and below read it, so promoting
+    /// (or rolling back) is an edit of THIS value and the swap's code
+    /// paths are untouched either way. Rollback needs no gate re-run: the
+    /// previous entry stays in `all` and `availableBrainEntries` carrying
+    /// its own shipped identity, and returning to it is this record's
+    /// value reverting, nothing else.
+    struct ChatVariantPromotionRecord: Equatable {
+
+        /// The artifact this record promotes. A record naming anything
+        /// else is inert.
+        let modelID: ModelID
+
+        /// The artifact identity the run's gate report and manifest name.
+        /// BINDING: a record whose digest or size disagrees with the
+        /// shipped entry below is `.artifactMismatch` — never a promotion.
+        let artifactSHA256: String
+        let artifactSizeBytes: Int64
+
+        /// The run's provenance manifest hash — binding piece one. nil
+        /// means no manifest is attached, which blocks promotion.
+        let provenanceManifestSHA256: String?
+
+        /// The FULL-GATE report: where it lives and its own digest —
+        /// binding piece two, recorded at promotion time so the evidence
+        /// the promotion was decided on stays addressable. A nil path OR
+        /// digest means there is no recorded gate evidence, which blocks.
+        let gateReportPath: String?
+        let gateReportSHA256: String?
+
+        /// The gate verdicts, in the report's own order. An empty list is
+        /// NOT "all gates green" — a report that records no verdicts is
+        /// `.noGatesRecorded`, blocked.
+        let gates: [GateVerdict]
+
+        struct GateVerdict: Equatable {
+            let name: String
+            let passed: Bool
+        }
+    }
+
+    /// Why a promotion is refused. A CLOSED vocabulary: `reasonCode` is
+    /// the stable token the launch record carries, so no report path and
+    /// no gate name ever reaches a log surface.
+    enum ChatVariantPromotionBlock: Equatable {
+        /// The record's artifact identity (digest or size) disagrees with
+        /// the shipped entry — FR-CNR-022's failure path: a GGUF whose
+        /// hash differs from the one the record names is not served.
+        /// Also answers for a record naming an id the catalog does not
+        /// ship. Checked first: identity is the root of trust.
+        case artifactMismatch
+        /// No full-gate report is recorded (path or digest missing).
+        case gateReportMissing
+        /// No provenance manifest hash is attached.
+        case manifestMissing
+        /// A report is recorded but lists no gate verdicts — vacuous
+        /// green is refused rather than read as "all gates passed".
+        case noGatesRecorded
+        /// A named gate is below its threshold. The name stays on the
+        /// verdict for tooling; the log token is the bare `gate_failed`.
+        case gateFailed(String)
+
+        /// The closed-vocabulary token for the launch record.
+        var reasonCode: String {
+            switch self {
+            case .artifactMismatch: return "artifact_mismatch"
+            case .gateReportMissing: return "gate_report_missing"
+            case .manifestMissing: return "manifest_missing"
+            case .noGatesRecorded: return "no_gates_recorded"
+            case .gateFailed: return "gate_failed"
+            }
+        }
+    }
+
+    /// The verdict on a promotion record: `promoted` names the entry the
+    /// record admits; `blocked` names the first failing precondition.
+    ///
+    /// `Equatable` by hand, exactly like `LanguageModelResolver
+    /// .AutomaticPick`: two promoted verdicts are the same verdict when
+    /// they name the same artifact, and `ModelCatalogEntry` deliberately
+    /// carries no conformance to lean on (its URLs and sizes are
+    /// properties of the artifact, not of the verdict).
+    enum ChatVariantPromotionVerdict: Equatable {
+        case promoted(entry: ModelCatalogEntry)
+        case blocked(ChatVariantPromotionBlock)
+
+        static func == (lhs: ChatVariantPromotionVerdict,
+                        rhs: ChatVariantPromotionVerdict) -> Bool {
+            switch (lhs, rhs) {
+            case (.promoted(let l), .promoted(let r)):
+                return l.id == r.id
+            case (.blocked(let l), .blocked(let r)):
+                return l == r
+            case (.promoted, .blocked), (.blocked, .promoted):
+                return false
+            }
+        }
+    }
+
+    /// The verdict on `record`. Block order is deterministic and
+    /// documented: artifact identity → gate report → manifest → gate
+    /// verdicts. `.promoted` is the LAST case, so evidence complete
+    /// enough to reach it is evidence complete enough to ship.
+    static func promotionVerdict(for record: ChatVariantPromotionRecord)
+    -> ChatVariantPromotionVerdict {
+        guard let entry = entry(for: record.modelID) else {
+            // A record naming an artifact the catalog does not ship is a
+            // mismatch of the same class: nothing is served from it.
+            return .blocked(.artifactMismatch)
+        }
+        if entry.sha256 != record.artifactSHA256
+            || entry.sizeBytes != record.artifactSizeBytes {
+            return .blocked(.artifactMismatch)
+        }
+        if record.gateReportPath == nil || record.gateReportSHA256 == nil {
+            return .blocked(.gateReportMissing)
+        }
+        if record.provenanceManifestSHA256 == nil {
+            return .blocked(.manifestMissing)
+        }
+        if record.gates.isEmpty {
+            return .blocked(.noGatesRecorded)
+        }
+        if let failed = record.gates.first(where: { !$0.passed }) {
+            return .blocked(.gateFailed(failed.name))
+        }
+        return .promoted(entry: entry)
+    }
+
+    /// The shipped promotion state of the v17 chat variant: a COMPLETE
+    /// attempt that is honestly BLOCKED, not a placeholder and not a
+    /// green hardcode.
+    ///
+    /// Run identity `cnr-v17-20261015-0209` (T-183): the artifact exists
+    /// (digest + size below are the local file's real identity, matching
+    /// the entry's pin), the provenance manifest is attached (sha256
+    /// fb7f7779c801706caddc74ef499198eb14c1ddc05dd89da1a7766cd476adab55),
+    /// and the held-out chat fixture scored against the candidate is
+    /// 40bec05d…. What does NOT exist is the run's full-gate report —
+    /// the chat judge is blocked on a funded API key and the latency
+    /// gate is unmeasured until the Anzaan device session — so
+    /// `gateReportPath`/`gateReportSHA256`/`gates` are empty ON PURPOSE
+    /// and the verdict resolves to `.blocked(.gateReportMissing)`:
+    /// `defaultEntry` does not serve v17 and `isAutomaticPickEligible`
+    /// refuses it on every automatic rung. The entry stays selectable by
+    /// hand (its name quotes the gate state), which is FR-CNR-022's
+    /// "never silently promoted" posture.
+    ///
+    /// PROMOTION (a later run, not this unit): fill in the gate report
+    /// path + digest and the gate verdicts from the green run, keeping
+    /// the identity and manifest fields as the binding pieces. ROLLBACK:
+    /// revert this value; the resolution logic re-reads it, the previous
+    /// entry keeps its own green evidence, and no gate re-runs. Both are
+    /// edits to this record alone — no test outside this pair changes.
+    static let chatVariantPromotionRecord = ChatVariantPromotionRecord(
+        modelID: intentQwenS43ChatV17,
+        artifactSHA256: "e05cc8a266198336f508cef2f6d2a8887b3db1eee3f4a4159cdeb2ab3df59d71",
+        artifactSizeBytes: 1_107_408_736,
+        provenanceManifestSHA256: "fb7f7779c801706caddc74ef499198eb14c1ddc05dd89da1a7766cd476adab55",
+        gateReportPath: nil,
+        gateReportSHA256: nil,
+        gates: []
+    )
+
+    /// The catalog entry a promotion record admits, or nil while it is
+    /// blocked. nil `record` means no promotion data at all — the
+    /// pre-CNR answer — so a caller can ask the promotion-free question.
+    static func promotedChatVariantEntry(
+        record: ChatVariantPromotionRecord? = chatVariantPromotionRecord
+    ) -> ModelCatalogEntry? {
+        guard let record else { return nil }
+        switch promotionVerdict(for: record) {
+        case .promoted(let entry): return entry
+        case .blocked: return nil
+        }
+    }
+
+    /// Whether the automatic ladder (`LanguageModelResolver
+    /// .resolvedAutomaticPick`) may serve `entry`.
+    ///
+    /// A chat variant the SHIPPED record names is eligible only once its
+    /// verdict is `.promoted` — the gate, expressed where serving
+    /// happens, not where the size comparison happens. Without this
+    /// filter the v17 file's 160 extra bytes would make it the step-2
+    /// "largest fitting" winner on classes the previous entry serves,
+    /// i.e. it would be silently promoted by arithmetic. nil `record`
+    /// gates nothing (the promotion-free question). Everything not named
+    /// by the record is untouched.
+    static func isAutomaticPickEligible(
+        _ entry: ModelCatalogEntry,
+        record: ChatVariantPromotionRecord? = chatVariantPromotionRecord
+    ) -> Bool {
+        guard let record, record.modelID == entry.id else { return true }
+        switch promotionVerdict(for: record) {
+        case .promoted: return true
+        case .blocked: return false
+        }
     }
 }

@@ -5,14 +5,15 @@ import Foundation
 /// a test (and the caller's event trail) can tell a real install attempt
 /// from a no-op without waiting on a 109 MB unzip.
 enum IntentEncoderInstallDecision: Equatable {
-    /// A zip is configured, the artifact is not installed, and the install
-    /// is now running on the installer's own queue.
+    /// A zip source resolved, the artifact is not installed, and the
+    /// install is now running on the installer's own queue.
     case started
     /// The artifact is already in the ModelStore — nothing to do.
     case alreadyInstalled
-    /// `INTENT_ENCODER_SPIKE_ZIP` is unset/blank: the internal-testing path
-    /// has no artifact source, so the encoder stays unavailable. This is
-    /// the shipped default — no UI, no placeholder URL, no network.
+    /// `INTENT_ENCODER_SPIKE_ZIP` is explicitly BLANK: the tester switched
+    /// the internal-testing install off, so the encoder stays unavailable.
+    /// No UI, no placeholder URL, no network. (The UNset case is not this:
+    /// it reads the app's Documents copy, see below.)
     case notConfigured
     /// An install from an earlier readiness check is still running.
     case inFlight
@@ -26,14 +27,19 @@ protocol IntentEncoderArtifactInstalling: AnyObject {
 }
 
 /// Installs the pinned internal-testing encoder artifact from the tester's
-/// own copy of the zip (`INTENT_ENCODER_SPIKE_ZIP`).
+/// own copy of the zip — the app's `Documents/`
+/// (`t033-encoder-int8-mlmodelc.zip`) by DEFAULT, or the path
+/// `INTENT_ENCODER_SPIKE_ZIP` overrides it to.
 ///
 /// ## Contract
 ///
 ///  - **Reachable only in `INTENT_ENCODER` builds.** The only caller is
 ///    `IntentEncoderInterpreter.requestReadiness()`, which refuses unless
 ///    `IntentEncoderFeature.isEnabled`; the coordinator calls that only on
-///    the gated path. A normal build has no reference to this type.
+///    the gated path. (`INTENT_ENCODER` is in this target's default
+///    compilation conditions — see `ios/project.yml` — so the condition is
+///    present in a normal build and the RUNTIME toggle is what keeps the
+///    encoder out of service: it defaults OFF.)
 ///  - **No UI, no network.** The zip is a local file the tester staged
 ///    (`ModelCatalog.configuredIntentEncoderSpikeZipURL`); the reserved-TLD
 ///    placeholder URL is deliberately NOT installed from.
@@ -56,6 +62,11 @@ final class IntentEncoderSpikeInstaller: IntentEncoderArtifactInstalling {
     private let observabilityBus: ObservabilityBus
     private let modelId: ModelID
     private let fileManager: FileManager
+    /// [ENCODER-REPROVISION] (2026-09-17) The standard downloader — the
+    /// self-healing path when the tester's local zip is gone (container
+    /// replaced by an app update). Nil in tests that only exercise the
+    /// local handshake.
+    private let downloadService: ModelDownloadService?
     private let queue = DispatchQueue(label: "intent.encoder.install", qos: .utility)
     private let lock = NSLock()
     private var installing = false
@@ -63,16 +74,18 @@ final class IntentEncoderSpikeInstaller: IntentEncoderArtifactInstalling {
     init(modelStore: ModelStore,
          observabilityBus: ObservabilityBus,
          modelId: ModelID = ModelCatalog.intentEncoderSpike,
-         fileManager: FileManager = .default) {
+         fileManager: FileManager = .default,
+         downloadService: ModelDownloadService? = nil) {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.modelId = modelId
         self.fileManager = fileManager
+        self.downloadService = downloadService
     }
 
     @discardableResult
     func installIfConfigured(environment: [String: String]) -> IntentEncoderInstallDecision {
-        guard let zipURL = ModelCatalog.configuredIntentEncoderSpikeZipURL(
+        guard let configured = ModelCatalog.configuredIntentEncoderSpikeZipURL(
                 environment: environment) else {
             return .notConfigured
         }
@@ -81,6 +94,35 @@ final class IntentEncoderSpikeInstaller: IntentEncoderArtifactInstalling {
                  extra: ["reason": "already_installed"])
             return .alreadyInstalled
         }
+
+        // [ENCODER-REPROVISION] (2026-09-17) Zip source resolution:
+        //  1. the tester's local copy (env override / Documents),
+        //  2. a zip the standard downloader already fetched into the
+        //     model directory (the self-healed case — the next readiness
+        //     check installs it),
+        //  3. else kick the download itself (the standard downloader
+        //     verifies the catalog's strict sha256 before anything is
+        //     unpacked), and report the honest in-flight state.
+        let zipURL: URL
+        if fileManager.fileExists(atPath: configured.path) {
+            zipURL = configured
+        } else if let downloaded = downloadedZipInModelDirectory() {
+            zipURL = downloaded
+        } else {
+            guard let entry = ModelCatalog.entry(for: modelId),
+                  let downloadService else {
+                // No local zip and no downloader: the honest failure the
+                // old path reported (zip_missing).
+                emit("encoder_spike_install_failed", outcome: "failure",
+                     errorCode: "zip_missing")
+                return .started
+            }
+            emit("encoder_spike_download_started", outcome: "info", errorCode: nil,
+                 extra: ["reason": "zip_missing_remote_fallback"])
+            downloadService.start(entry)
+            return .started
+        }
+
         lock.lock()
         let busy = installing
         if !busy { installing = true }
@@ -96,6 +138,17 @@ final class IntentEncoderSpikeInstaller: IntentEncoderArtifactInstalling {
             self.lock.unlock()
         }
         return .started
+    }
+
+    /// The first `.zip` file in the model directory — the downloader's
+    /// final placement, whatever the exact filename it chose. Listing
+    /// instead of guessing a name keeps the self-healed install robust
+    /// to the downloader's naming internals.
+    private func downloadedZipInModelDirectory() -> URL? {
+        guard let directory = modelStore.directoryURL(for: modelId) else { return nil }
+        let contents = (try? fileManager.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil)) ?? []
+        return contents.first { $0.pathExtension.lowercased() == "zip" }
     }
 
     /// Runs on `queue`. The only failure detail that leaves this method is

@@ -142,21 +142,29 @@ final class NotificationReader: SpeechSource, NotificationEventHandling {
     ///
     /// Text resolution order:
     ///  1. Medication lane with a structured name in `userInfo` → pinned key
-    ///     "notification.read.medication" (format arg = medication name).
+    ///     "notification.read.medication" (format arg = medication name),
+    ///     resolved with `L10n.fmt` in the app's persisted language
+    ///     (`AppLanguage.persisted()`) — bare `NSLocalizedString` follows
+    ///     the SYSTEM language, so a Nepali app on an English device used
+    ///     to speak the English template (audit item 3's app-locale trap).
     ///  2. Everything else → the notification's own localized content
     ///     (body, falling back to title) — already resolved in the app
     ///     language by its producer, so the reader needs no locale of its
-    ///     own in v1.
+    ///     own for that branch.
     private static func makeAnnouncement(for notification: UNNotification, lane: AnnouncementPriority) -> Announcement? {
         let content = notification.request.content
         let text: String
         switch lane {
         case .safety:
             if let name = medicationName(in: content.userInfo) {
-                text = String(format: NSLocalizedString(
-                    "notification.read.medication",
-                    comment: "Spoken when a medication reminder notification is read aloud; format argument is the medication name"
-                ), name)
+                // [AUDIT-SPOKEN] App language, not device language — the
+                // spoken lane must match what the app displays and the
+                // user hears everywhere else. `L10n.fmt` returns "" on a
+                // total catalog miss, which the emptiness guard below
+                // turns into "nothing spoken" rather than a raw key.
+                text = L10n.fmt("notification.read.medication",
+                                locale: AppLanguage.persisted().locale,
+                                name)
             } else {
                 // v1 payload has no structured name — speak what the
                 // scheduler already localized (honest, never fabricated).

@@ -142,7 +142,7 @@ def main() -> None:
                 wav = Path(tmp) / f"u{n}.wav"
                 try:
                     synthesize(row["utterance"], wav, cfg)
-                    noisy = transcribe(wav, cfg)
+                    noisy = transcribe(wav)
                 except Exception as e:  # noqa: BLE001
                     failed += 1
                     print(f"[stt_noise] {nid} failed: {e} — continuing")

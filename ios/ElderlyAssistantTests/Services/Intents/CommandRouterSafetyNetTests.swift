@@ -86,7 +86,10 @@ final class CommandRouterSafetyNetTests: XCTestCase {
     func testInterpreterAbstainFallsToKeywordRemainder() {
         // Interpreter available but abstains → the REMAINDER of the
         // keyword layer (not the safety net — that already ran) handles
-        // it: a call-ish phrase with no entity extraction stays blocked.
+        // it: a call-shaped phrase with no usable name ("कसै" — someone,
+        // an indefinite pronoun, dropped by the deterministic extractor)
+        // gets the honest name-unclear line, never the old
+        // "secure authentication" refusal.
         let interpreter = StubCommandInterpreter(result: nil)
         let (router, _, bus) = makeRouter(interpreter: interpreter)
 
@@ -95,7 +98,8 @@ final class CommandRouterSafetyNetTests: XCTestCase {
         _ = router.route(transcript: "कसैलाई फोन गर")
         waitForExpectations(timeout: 2)
 
-        XCTAssertTrue(bus.contains("command_sensitive_blocked_auth_unavailable"))
+        XCTAssertTrue(bus.contains("command_call_name_unclear"))
+        XCTAssertFalse(bus.contains("command_sensitive_blocked_auth_unavailable"))
     }
 }
 
@@ -104,18 +108,25 @@ extension CommandRouterSafetyNetTests {
     /// REPHRASE-as-question (spec §4 decision #6): a mid-band tier-free
     /// command is stated as a yes/no question, not dropped, not dispatched.
     func testMidBandTierFreeBecomesAQuestion() {
+        // [MUSIC-PATH] (2026-10-07, T-116) Transcript switched from
+        // "केही भजन जस्तो बजाउनुस्" to a marker-free request — a bare
+        // music-marked utterance (भजन + बजाउनुस्) now terminates in the
+        // deterministic Spotify/YouTube music turn at the keyword ladder,
+        // before the interpreter's mid-band rephrase flow this test pins
+        // (mirrors the [NO-GIBBERISH] precedent below). The mid-band
+        // .music rephrase behavior itself is unchanged.
         let interpreter = StubCommandInterpreter(
             result: makeCommand(action: .music, confidence: 0.5))
         let (router, coordinator, _) = makeRouter(interpreter: interpreter)
 
         let exp = expectation(description: "async interpret")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
-        _ = router.route(transcript: "केही भजन जस्तो बजाउनुस्")
+        _ = router.route(transcript: "केही राम्रो कुरा बताउनुस्")
         waitForExpectations(timeout: 2)
 
         XCTAssertNotNil(coordinator.rephrasePended,
                         "mid-band tier-free must pend as a question, not dispatch")
-        XCTAssertEqual(coordinator.rephrasePended?.sourceTranscript, "केही भजन जस्तो बजाउनुस्")
+        XCTAssertEqual(coordinator.rephrasePended?.sourceTranscript, "केही राम्रो कुरा बताउनुस्")
     }
 
     func testRephraseYesDispatchesThePendedCommand() {
@@ -409,8 +420,17 @@ extension CommandRouterSafetyNetTests {
                        "the fixture must actually rewrite, or this test proves nothing")
         XCTAssertNotEqual(pair.modelInput, pair.original)
         XCTAssertEqual(pair.safetyNetInput, utterance)
-        XCTAssertEqual(pair.pickerBrainInput, utterance,
-                       "the picker brain reads the original too (§4.6)")
+        // [CORRECTION-ANYBRAIN] …while the MODEL's input is the canonical form.
+        // The picker brain is a model, so it reads the canonical text now — the
+        // separation §4.6 protects is safety-consumer vs model, not
+        // router vs picker (§4.6 / E-17's "the picker reads the original" was
+        // the pre-relocation rule, when only the encoder's input was prepared).
+        XCTAssertEqual(pair.pickerBrainInput, pair.modelInput,
+                       "the picker brain reads the same prepared text the "
+                       + "encoder would tokenize")
+        XCTAssertNotEqual(pair.pickerBrainInput, pair.safetyNetInput,
+                          "the two consumers must not be handed the same string "
+                          + "in this fixture, or the test proves nothing")
         XCTAssertTrue(CanonicalSafetyFreeze.isKeywordLayerLossless(
             original: pair.original, canonical: pair.modelInput),
             "a legal rule must change no routing clause")
@@ -428,5 +448,149 @@ extension CommandRouterSafetyNetTests {
                        "the router hands the interpreter the ORIGINAL transcript")
         XCTAssertNotEqual(interpreter.lastTranscript, pair.modelInput,
                           "the canonical form must not reach the router")
+    }
+
+    // MARK: [TG-12] The corrector's version of the same hazard
+
+    /// The corrector's bank for the flip fixture: a denial word and the ack word
+    /// it contains, both in the candidate space.
+    ///
+    /// Two loader behaviours shape this JSON rather than convenience:
+    ///  - `entries` must be non-empty (`emptyEntries` refuses the bank whole),
+    ///    so a harmless measured row rides along — the SAME row
+    ///    `DialectIdentifierTests` uses for its corrector fixtures;
+    ///  - a row that touches the frozen safety set refuses the bank WHOLE
+    ///    (`safetySetTouched`, measured), so the `नखाए`/`खाए` pair lives in the
+    ///    LEXICON (the candidate space) and not in `entries`.
+    ///
+    /// The threshold is 0.20 deliberately: `नखाए → खाए` scores 0.2625 (one
+    /// deletion over a span of four, no prefix completion, no key hit), so it
+    /// clears the floor AND the margin rule — the only thing refusing it is
+    /// §5.8's veto. A fixture that leaned on the threshold would prove nothing
+    /// about the veto it exists to exercise.
+    private func nakhayeCorrectionBank() -> (CorrectionLexicon, STTCorrector.Policy) {
+        let lexicon = CorrectionLexicon.decode(
+            tableData: Data("""
+            { "formatVersion": 1, "generation": { "status": "FIXTURE" },
+              "entries": [ { "id": "fixture-hos", "kind": "orthographic",
+                             "variant": "होस", "canonical": "होस्",
+                             "evidence": { "source": "corpus", "errorClass": "truncation",
+                                           "occurrences": 5, "corpusRevision": "fixture-corpus" } } ],
+              "correctionBank": {
+                "formatVersion": 1, "toolRevision": "correction-fixture",
+                "runRevision": "correction-fixture/v1", "corpusRevision": "fixture-corpus",
+                "weights": { "similarity": 0.35, "prefixCompletion": 0.40,
+                             "phoneticKey": 0.15, "frameFit": 0.05,
+                             "pairedKeyword": 0.05 },
+                "scoring": { "levenshteinBound": 2, "lengthWindow": 2,
+                             "maxPrefixSlack": 4, "prefixPenaltyStep": 0.25,
+                             "maxCandidates": 8, "marginThreshold": 0.15 },
+                "calibration": { "correctThresholdDefault": 0.20, "kneeThreshold": 0.20,
+                                 "precisionAtDefault": 1.0, "recallAtDefault": 1.0,
+                                 "precisionFloor": 0.95, "appliedAtDefault": 2,
+                                 "bindingConstraint": "fixture", "calibratedFallback": 1.0,
+                                 "lowerBound": 0.0, "upperBound": 1.0, "stale": false,
+                                 "runRevision": "correction-fixture/v1",
+                                 "corpusRevision": "fixture-corpus" },
+                "lexicon": [ { "token": "नखाए", "occurrences": 7 },
+                             { "token": "खाए", "occurrences": 7 },
+                             { "token": "होस", "occurrences": 7 },
+                             { "token": "होस्", "occurrences": 9 } ],
+                "entities": { }, "priors": { "l1": [], "l2": [], "l3": [] } } }
+            """.utf8),
+            phoneticData: Data("""
+            { "formatVersion": 1, "tableID": "phonetic-key",
+              "resolvedKey": { "unify": { "श": "स" }, "elide": ["्"], "conflicts": [] },
+              "entries": [ { "id": "fold-0", "group": "g", "foldKind": "unify",
+                             "scalars": ["श", "स"],
+                             "evidence": { "source": "corpus", "occurrences": 12,
+                                           "corpusRevision": "fixture-corpus" } },
+                           { "id": "elide-0", "group": "g", "foldKind": "elide",
+                             "scalars": ["्"],
+                             "evidence": { "source": "corpus", "occurrences": 40,
+                                           "corpusRevision": "fixture-corpus" } } ],
+              "unsupportedGroups": [] }
+            """.utf8))!
+        XCTAssertTrue(lexicon.issues.isEmpty,
+                      "the flip fixture's bank must load: \(lexicon.issues.map(\.rawValue))")
+        let policy = STTCorrector.Policy(mode: .apply,
+                                         correctThreshold: 0.20,
+                                         marginThreshold: 0.15,
+                                         thresholdRange: 0.0...1.0,
+                                         maxCandidates: 8)
+        return (lexicon, policy)
+    }
+
+    /// "Never flips an intent", with the flip MEASURED rather than argued — the
+    /// corrector's version of the भया → भयो hazard, using the two phrases the
+    /// net's own lists are built around: `औषधि खाए` acknowledges (it is an
+    /// `acknowledgementPhrases` member), `औषधि नखाए` denies (it contains
+    /// `नखाए`) — and `नखाए` contains the acknowledgement TOKEN `खाए`, the
+    /// containment `CanonicalSafetyFreeze.touches` refuses. A correction that
+    /// repaired the denial into the ack would record a dose the user refused.
+    ///
+    /// Three independent locks are pinned here, in the order they would have to
+    /// fail: the veto refuses the repair at all; the seam hands the safety
+    /// consumer the ORIGINAL whatever the corrector decided; and the shipped net,
+    /// given what the router is given, denies before it acknowledges.
+    func testACorrectionCanNeverFlipARoutingDecision() {
+        let (lexicon, policy) = nakhayeCorrectionBank()
+        let utterance = "औषधि नखाए"
+
+        // 0. The flip is real: the corrected form IS an acknowledgement the net
+        //    acts on. Without this arm the test could pass on a fixture that
+        //    never had the power to do harm.
+        XCTAssertTrue(CanonicalSafetyFreeze.matchedClauses(in: utterance).contains(.denial))
+        XCTAssertTrue(CanonicalSafetyFreeze.matchedClauses(in: "औषधि खाए")
+            .contains(.acknowledgementPhrase))
+        let (ackRouter, ackCoordinator, _) = makeRouter(
+            interpreter: StubCommandInterpreter(
+                result: makeCommand(action: .ackMed, confidence: 0.99)))
+        ackCoordinator.pendingEntryId = UUID()
+        XCTAssertEqual(ackRouter.route(transcript: "औषधि खाए"), .acknowledgedMedication)
+
+        // 1. The corrector refuses the repair itself, at a threshold that would
+        //    otherwise admit it (measured: score 0.28 ≥ 0.20, margin 0.28).
+        let corrected = STTCorrector.correct(utterance, lexicon: lexicon, policy: policy)
+        XCTAssertEqual(corrected.corrected, utterance)
+        XCTAssertTrue(corrected.isIdentity)
+        XCTAssertTrue(corrected.applications.isEmpty)
+        let denial = corrected.decisions.first { $0.surface == "नखाए" }
+        guard case .safetyVeto(let rule)? = denial?.decision else {
+            XCTFail("नखाए → खाए was not vetoed: \(denial?.decision.reason ?? "no decision")")
+            return
+        }
+        XCTAssertEqual(rule, .safetySetTouched)
+        XCTAssertEqual(corrected.observabilityMetadata["correction_veto"],
+                       "safety_set_touched")
+
+        // 2. The seam: what the safety net reads is the original, by
+        //    construction, not by the corrector's good behaviour.
+        let pair = IntentInputCanonicalization.prepare(
+            sanitisedTranscript: utterance,
+            dialect: .default,
+            tables: VariantTableSet(orthographic: nil, panRegional: nil,
+                                    sttReductions: nil, dialectTables: [:],
+                                    loadIssues: []),
+            policy: IntentInputCanonicalization.Policy(enabled: false),
+            correctionPolicy: policy,
+            correctionLexicon: lexicon)
+        XCTAssertEqual(pair.modelInput, utterance)
+        XCTAssertEqual(pair.safetyNetInput, utterance)
+        XCTAssertEqual(pair.pickerBrainInput, utterance)
+
+        // 3. The shipped net, handed what the router is handed, DENIES.
+        let interpreter = StubCommandInterpreter(
+            result: makeCommand(action: .ackMed, confidence: 0.99))
+        let (router, coordinator, bus) = makeRouter(interpreter: interpreter)
+        coordinator.pendingEntryId = UUID()
+        let result = router.route(transcript: pair.safetyNetInput)
+
+        XCTAssertNotEqual(result, .acknowledgedMedication,
+                          "a refused dose was acknowledged")
+        XCTAssertEqual(interpreter.callCount, 0,
+                       "the denial guard must not wait on a model")
+        XCTAssertNil(coordinator.challengeIssuedFor)
+        XCTAssertTrue(bus.contains("command_ack_denied_keyword"))
     }
 }

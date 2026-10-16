@@ -1,0 +1,22 @@
+{
+  "schema": "cnr_manifest_reemission_record/v1",
+  "run_id": "cnr-v17-20261015-0209",
+  "date": "2026-10-16",
+  "action": "re-emit provenance-manifest.json corpus block over the post-repair corpus",
+  "reason": "the convert-time repair (corpus-repair-record.json) dropped one empty-user_turn row after the builder's manifest emission, leaving the manifest's corpus.sha256 pointing at a file that no longer exists (preserved as the .bak). The T-182 full harness hard-checks manifest corpus sha vs the on-disk corpus and would flag the gate report as 'evidence files were altered' — permanently blocking a clean gate report. The manifest must describe the corpus as it exists (the design's content_hash_scope names re-emissions of the same corpus as a stable concept).",
+  "changed_keys": [
+    "corpus.sha256",
+    "corpus.turns",
+    "content_hash"
+  ],
+  "unchanged": "every other key byte-meaning identical (style_spec, held_out, license_registry, classification/consent checks, ship_mix_assertion, ship_mix_eligible)",
+  "corpus_sha256_before": "5fd4262d69c2b0d87cf66376bc46884df807a0d22123066f230de7f4a510017f",
+  "corpus_sha256_after": "ec2eee2fc24c35f75cd81c6d26816dfb180282204acb8805a3b1956ed796ea4d",
+  "corpus_turns_before": 17736,
+  "corpus_turns_after": 17735,
+  "manifest_sha256_before": "25c55f6e0de044b576244f9cadd8399bb11bf16180ab389cee7352a3caac4db6",
+  "manifest_sha256_after": "fb7f7779c801706caddc74ef499198eb14c1ddc05dd89da1a7766cd476adab55",
+  "backup": "provenance-manifest.json.prereemission-20261016-230845.bak",
+  "verification": "eval_golden.provenance_evidence() on the re-emitted manifest: status=verified, content_hash recomputes; corpus pairing: manifest corpus.sha256 == on-disk == trained corpus sha (ec2eee2f...)",
+  "provenance": "origin of change: the run operator (T-183 Phase B coordinator), recorded here and in the run notes"
+}

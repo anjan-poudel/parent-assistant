@@ -16,7 +16,7 @@ final class EnergyVADTests: XCTestCase {
         var ended = false
         vad.onEndOfUtterance = { ended = true }
 
-        vad.start(endOfUtteranceMs: 100)   // 4-frame hangover at 32 ms/frame
+        vad.start(policy: .fixed(100))   // 4-frame hangover at 32 ms/frame
         for f in frames(3_000, count: 4) { vad.process(f) }
         XCTAssertFalse(ended, "must not fire while speech is still arriving")
         for f in frames(0, count: 4) { vad.process(f) }
@@ -29,7 +29,7 @@ final class EnergyVADTests: XCTestCase {
         var ended = false
         vad.onEndOfUtterance = { ended = true }
 
-        vad.start(endOfUtteranceMs: 100)
+        vad.start(policy: .fixed(100))
         for f in frames(0, count: 10) { vad.process(f) }
         XCTAssertFalse(ended)
     }
@@ -47,7 +47,7 @@ final class EnergyVADTests: XCTestCase {
 
         // Noise RMS ≈ 0.021 — ABOVE the old fixed speech threshold (0.018),
         // i.e. the exact scenario that used to wedge endpointing.
-        vad.start(endOfUtteranceMs: 100)
+        vad.start(policy: .fixed(100))
         for f in frames(700, count: 31) { vad.process(f) }      // ~1 s ambient before speech
         for f in frames(6_000, count: 16) { vad.process(f) }    // the utterance
         XCTAssertFalse(ended, "fired during speech")
@@ -64,7 +64,7 @@ final class EnergyVADTests: XCTestCase {
         var ended = false
         vad.onEndOfUtterance = { ended = true }
 
-        vad.start(endOfUtteranceMs: 100)
+        vad.start(policy: .fixed(100))
         for f in frames(100, count: 10) { vad.process(f) }      // quiet room
         for f in frames(6_000, count: 16) { vad.process(f) }    // speech
         for f in frames(700, count: 4) { vad.process(f) }       // TV switches on as speech ends
@@ -78,7 +78,7 @@ final class EnergyVADTests: XCTestCase {
         var fireCount = 0
         vad.onEndOfUtterance = { fireCount += 1 }
 
-        vad.start(endOfUtteranceMs: 100)   // 4-frame hangover
+        vad.start(policy: .fixed(100))   // 4-frame hangover
         for f in frames(3_000, count: 8) { vad.process(f) }
         for f in frames(0, count: 3) { vad.process(f) }          // 96 ms breath pause
         XCTAssertEqual(fireCount, 0, "brief pause must not end the utterance")
@@ -95,7 +95,7 @@ final class EnergyVADTests: XCTestCase {
         var ended = false
         vad.onEndOfUtterance = { ended = true }
 
-        vad.start(endOfUtteranceMs: 100)
+        vad.start(policy: .fixed(100))
         for f in frames(0, count: 10) { vad.process(f) }         // silent room → floor ≈ 0
         for f in frames(400, count: 8) { vad.process(f) }        // RMS 0.0122 ≥ min clamp 0.012
         for f in frames(0, count: 4) { vad.process(f) }
@@ -120,7 +120,7 @@ final class EnergyVADTests: XCTestCase {
         var ended = false
         vad.onEndOfUtterance = { ended = true }
 
-        vad.start(endOfUtteranceMs: 900)   // 29-frame hangover
+        vad.start(policy: .fixed(900))   // 29-frame hangover
         for f in frames(3_000, count: 4) { vad.process(f) }   // speech, RMS 0.0916
         XCTAssertFalse(ended, "must not fire while speech is still arriving")
         for f in frames(0, count: 28) { vad.process(f) }      // 896 ms silence
@@ -138,7 +138,7 @@ final class EnergyVADTests: XCTestCase {
         var fireCount = 0
         vad.onEndOfUtterance = { fireCount += 1 }
 
-        vad.start(endOfUtteranceMs: 900)
+        vad.start(policy: .fixed(900))
         for f in frames(3_000, count: 8) { vad.process(f) }   // speech
         for f in frames(0, count: 16) { vad.process(f) }      // 512 ms pause
         XCTAssertEqual(fireCount, 0, "a 0.5 s pause must not close the utterance")
@@ -160,7 +160,7 @@ final class EnergyVADTests: XCTestCase {
         var fireCount = 0
         vad.onEndOfUtterance = { fireCount += 1 }
 
-        vad.start(endOfUtteranceMs: 900)
+        vad.start(policy: .fixed(900))
         for f in frames(3_000, count: 8) { vad.process(f) }   // speech
         for f in frames(0, count: 22) { vad.process(f) }      // 704 ms pause
         XCTAssertEqual(fireCount, 0, "a 0.7 s pause must not close the utterance")
@@ -190,7 +190,7 @@ final class EnergyVADTests: XCTestCase {
         var ended = false
         vad.onEndOfUtterance = { ended = true }
 
-        vad.start(endOfUtteranceMs: 900)
+        vad.start(policy: .fixed(900))
         for f in frames(0, count: 4) { vad.process(f) }        // quiet room
         for f in frames(6_000, count: 16) { vad.process(f) }   // loud body, RMS 0.183
         XCTAssertFalse(ended, "must not fire during the loud body")
@@ -214,7 +214,7 @@ final class EnergyVADTests: XCTestCase {
         var ended = false
         vad.onEndOfUtterance = { ended = true }
 
-        vad.start(endOfUtteranceMs: 900)
+        vad.start(policy: .fixed(900))
         for f in frames(6_000, count: 16) { vad.process(f) }   // the utterance
         XCTAssertFalse(ended)
         // Noise cycle (320 ms): 8 quiet dips at RMS 0.0397 (below the end
@@ -254,7 +254,7 @@ final class EnergyVADTests: XCTestCase {
         vad.onForcedEndOfUtterance = { forced = true }
         vad.onEndOfUtterance = { normalEnded = true }
 
-        vad.start(endOfUtteranceMs: 900)
+        vad.start(policy: .fixed(900))
         for f in frames(3_000, count: 4) { vad.process(f) }   // speech, RMS 0.0916
         // Post-speech band noise: RMS 0.0610 — above the end line
         // (0.0916 x 0.5 = 0.0458) but below the reference, so the quiet
@@ -278,7 +278,7 @@ final class EnergyVADTests: XCTestCase {
         var frameIndex = 0
         vad.onForcedEndOfUtterance = { forcedAtFrame = frameIndex }
 
-        vad.start(endOfUtteranceMs: 900)
+        vad.start(policy: .fixed(900))
         // The fire happens INSIDE process — increment before the call so
         // `frameIndex` is the frame's number at fire time.
         for f in frames(3_000, count: 4) { frameIndex += 1; vad.process(f) }
@@ -304,7 +304,7 @@ final class EnergyVADTests: XCTestCase {
         vad.onForcedEndOfUtterance = { forced = true }
         vad.onEndOfUtterance = { normalEnded = true }
 
-        vad.start(endOfUtteranceMs: 100)   // 4-frame hangover
+        vad.start(policy: .fixed(100))   // 4-frame hangover
         for f in frames(3_000, count: 8) { vad.process(f) }    // speech
         for f in frames(2_000, count: 78) { vad.process(f) }   // 2.5 s band pause
         XCTAssertFalse(forced, "a 2.5 s band pause must not force-end")
@@ -324,7 +324,7 @@ final class EnergyVADTests: XCTestCase {
         var forced = false
         vad.onForcedEndOfUtterance = { forced = true }
 
-        vad.start(endOfUtteranceMs: 900)
+        vad.start(policy: .fixed(900))
         for _ in 0..<100 {
             for f in frames(3_000, count: 1) { vad.process(f) }
         }
@@ -339,7 +339,7 @@ final class EnergyVADTests: XCTestCase {
         var forced = false
         vad.onForcedEndOfUtterance = { forced = true }
 
-        vad.start(endOfUtteranceMs: 900)
+        vad.start(policy: .fixed(900))
         for f in frames(3_000, count: 2) { vad.process(f) }
         for _ in 0..<5 {
             for f in frames(2_000, count: 19) { vad.process(f) }   // band
@@ -357,7 +357,7 @@ final class EnergyVADTests: XCTestCase {
         vad.onForcedEndOfUtterance = { forced = true }
         vad.onEndOfUtterance = { normalEnded = true }
 
-        vad.start(endOfUtteranceMs: 100)   // 4-frame hangover
+        vad.start(policy: .fixed(100))   // 4-frame hangover
         for f in frames(3_000, count: 4) { vad.process(f) }
         for f in frames(0, count: 4) { vad.process(f) }
         XCTAssertTrue(normalEnded, "the normal hangover must fire in real quiet")
@@ -375,7 +375,7 @@ final class EnergyVADTests: XCTestCase {
         vad.onForcedEndOfUtterance = { forced = true }
         vad.onEndOfUtterance = { ended = true }
 
-        vad.start(endOfUtteranceMs: 100)
+        vad.start(policy: .fixed(100))
         for f in frames(0, count: 50) { vad.process(f) }
         XCTAssertFalse(forced, "no speech, no force end")
         XCTAssertFalse(ended)
@@ -399,7 +399,7 @@ final class EnergyVADTests: XCTestCase {
         var frameIndex = 0
         vad.onEndOfUtterance = { endFrame = frameIndex }
 
-        vad.start(endOfUtteranceMs: 900)   // production hangover
+        vad.start(policy: .fixed(900))   // production hangover
         // The fire happens INSIDE process — increment before the call.
         for f in frames(3_000, count: 4) { frameIndex += 1; vad.process(f) }
         for f in frames(0, count: 30) { frameIndex += 1; vad.process(f) }
@@ -420,7 +420,7 @@ final class EnergyVADTests: XCTestCase {
         vad.onEndOfUtterance = { ended = true; endFrame = endFrame ?? frameIndex }
         vad.onForcedEndOfUtterance = { forced = true; endFrame = endFrame ?? frameIndex }
 
-        vad.start(endOfUtteranceMs: 900)
+        vad.start(policy: .fixed(900))
         for f in frames(3_000, count: 4) { frameIndex += 1; vad.process(f) }
         // Post-speech noise parked in the band (RMS 0.0610 > end line
         // 0.0458, below the frozen reference) — the pathological case.
@@ -450,7 +450,7 @@ final class EnergyVADTests: XCTestCase {
     /// warm-up frames, no first-frame initialization drift).
     func testFirstFrameAfterStartDecidesIdenticallyToSteadyState() {
         let vad = EnergyVAD()
-        vad.start(endOfUtteranceMs: 900)
+        vad.start(policy: .fixed(900))
         // The first frame after start: constant speech energy → speech
         // begins immediately (the start threshold is seeded low on
         // purpose — first-turn sensitivity).
@@ -464,7 +464,7 @@ final class EnergyVADTests: XCTestCase {
         // And a fresh VAD deciding the same frame at frame 1 vs frame 1
         // of a second capture behaves identically (deterministic state).
         let vad2 = EnergyVAD()
-        vad2.start(endOfUtteranceMs: 900)
+        vad2.start(policy: .fixed(900))
         var secondCaptureFirstFrameSpeech = false
         vad2.onSpeechStateChange = { speaking in
             if speaking { secondCaptureFirstFrameSpeech = true }
@@ -483,7 +483,7 @@ final class EnergyVADTests: XCTestCase {
     /// undetectable in the end-to-end latency).
     func testFirstFrameHasNoLazyInitCost_PERFORMANCE() {
         let vad = EnergyVAD()
-        vad.start(endOfUtteranceMs: 900)
+        vad.start(policy: .fixed(900))
         let speech = [Int16](repeating: 3_000, count: 512)
         let quiet = [Int16](repeating: 0, count: 512)
 
@@ -517,7 +517,7 @@ final class EnergyVADTests: XCTestCase {
     /// the wall-clock nature.
     func testFrameProcessingBudget_PERFORMANCE() {
         let vad = EnergyVAD()
-        vad.start(endOfUtteranceMs: 900)
+        vad.start(policy: .fixed(900))
         // Alternate loud/quiet so every branch of the state machine
         // runs (speech start, clear speech, band, quiet, floor learning).
         let loud = [Int16](repeating: 6_000, count: 512)
@@ -570,16 +570,16 @@ final class EnergyVADTests: XCTestCase {
         }
         for _ in 0..<100 {
             vad.reset()
-            vad.start(endOfUtteranceMs: 900)
+            vad.start(policy: .fixed(900))
             vad.stop()
-            vad.start(endOfUtteranceMs: 100)
+            vad.start(policy: .fixed(100))
         }
         group.wait()
         // The meaningful assertion is reaching here without a crash
         // (torn state under the lock would assert/trap in debug) —
         // plus the detector still works afterwards.
         vad.reset()
-        vad.start(endOfUtteranceMs: 100)
+        vad.start(policy: .fixed(100))
         var endedAfterChurn = false
         vad.onEndOfUtterance = { endedAfterChurn = true }
         for f in frames(3_000, count: 4) { vad.process(f) }

@@ -913,13 +913,18 @@ enum CanonicalSafetyFreeze {
     //
     // That rule ships anyway, and the reason is the composition, not a
     // loophole: the router never sees canonical text (D-1/§4.6 —
-    // `safetyNetInput` and `pickerBrainInput` are the original), so a clause
-    // set computed over the canonical form is not a routing input at all. The
-    // invariant is kept because it is the authoring gate for the day someone
-    // changes that composition, and the exception is PINNED AS A FAILING CASE
-    // in the tests (`testLosslessnessTracksTheKeywordLayerNotJustTheNet`) so it
-    // cannot be forgotten: if canonical text ever reaches the router, that test
-    // is the one that already knows why it must not.
+    // `safetyNetInput` is the original, and it is the safety net, the
+    // emergency path and the med-ack path that read it), so a clause set
+    // computed over the canonical form is not a routing input at all. The
+    // canonical form reaches a MODEL — the encoder's tokenizer, or the picker
+    // brain's prompt ([CORRECTION-ANYBRAIN]: the layers act at the local
+    // slot's input whichever brain answers) — and never a keyword decision.
+    // The invariant is kept because it is the authoring gate for the day
+    // someone changes that composition, and the exception is PINNED AS A
+    // FAILING CASE in the tests
+    // (`testLosslessnessTracksTheKeywordLayerNotJustTheNet`) so it cannot be
+    // forgotten: if canonical text ever reaches the router, that test is the
+    // one that already knows why it must not.
 
     /// `CommandRouter.swift:1482-1486`, matched by `containsPhrase`.
     static let sensitiveCallPhrases: [String] = [
@@ -1557,7 +1562,10 @@ enum DialectCanonicalizer {
 /// the text a model reads, so serving it must be an explicit decision. The key
 /// is deliberately namespaced away from the shipped preferences, so it can be
 /// set or cleared from a debugger or a UITest launch argument without touching
-/// a user-facing setting. `Policy.runtime` is also gated on
+/// a user-facing setting. [CORRECTION-TOGGLES] That namespaced key is now the
+/// one the internal-testing card writes (`intentEncoder.canonicalizer`); the
+/// original key stays readable beside it — see `canonicalizerEnabled`.
+/// `Policy.runtime` is also gated on
 /// `IntentEncoderFeature.isEnabled`, so this toggle cannot switch
 /// canonicalization on in a build that cannot compile the encoder path either.
 final class CanonicalizerPreferences {
@@ -1570,16 +1578,40 @@ final class CanonicalizerPreferences {
     }
 
     /// True only when someone has explicitly switched canonicalization on.
+    ///
+    /// [CORRECTION-TOGGLES] Two keys can say yes, and either is enough:
+    ///
+    ///   - `intentEncoder.canonicalizer` — the Settings switch on the
+    ///     internal-testing card, in the encoder's namespaced family
+    ///     (`IntentEncoderPreferences`), which is what makes the four-way
+    ///     matrix (corrector only / canonicalizer only / both / neither)
+    ///     driven from one card;
+    ///   - `canonicalizer.enabled` — the key this class shipped with, kept
+    ///     READABLE so a device, a debugger or a UITest launch argument that
+    ///     set it is not silently switched off by the arrival of the switch
+    ///     above.
+    ///
+    /// Both read absent-as-false, so nothing here changes the shipped
+    /// default: a fresh install is inert.
     var canonicalizerEnabled: Bool {
+        if IntentEncoderPreferences(defaults: defaults).isCanonicalizerEnabled {
+            return true
+        }
         guard defaults.object(forKey: Self.canonicalizerEnabledKey) != nil else { return false }
         return defaults.bool(forKey: Self.canonicalizerEnabledKey)
     }
 
+    /// Writes BOTH keys, so a set→get round trip agrees whichever key a
+    /// reader consults — a debugger reading the legacy key sees the same
+    /// truth the runtime gate does, and `set…(false)` really is off
+    /// whichever key was previously on.
     func setCanonicalizerEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: IntentEncoderPreferences.canonicalizerKey)
         defaults.set(enabled, forKey: Self.canonicalizerEnabledKey)
     }
 
     func reset() {
+        defaults.removeObject(forKey: IntentEncoderPreferences.canonicalizerKey)
         defaults.removeObject(forKey: Self.canonicalizerEnabledKey)
     }
 }
@@ -1603,30 +1635,87 @@ struct IntentTranscriptPair: Equatable, Sendable {
     let degraded: Bool
     let tableRevision: String
     let notes: [String]
+    /// [TG-12] The STT-error corrector's result for this turn, when the layer
+    /// ran inside `IntentInputCanonicalization.prepare`. `nil` means "the
+    /// corrector did not run" (a pair built by hand, an older caller) — NOT
+    /// "it ran and found nothing", which is a result whose `mode` is `.off` or
+    /// `.shadow`, or whose `applications` is empty.
+    ///
+    /// The result is carried whole rather than reduced to a string because a
+    /// consumer needs three different things from it and they must not drift:
+    /// the corrected text (`canonical` above is the corrected text
+    /// CANONICALIZED), the per-token decisions (the debug readout) and the
+    /// count-only metadata (the event).
+    let correction: CorrectionResult?
+
+    init(original: String,
+         canonical: String,
+         applications: [CanonicalVariantApplication] = [],
+         degraded: Bool = false,
+         tableRevision: String,
+         notes: [String] = [],
+         correction: CorrectionResult? = nil) {
+        self.original = original
+        self.canonical = canonical
+        self.applications = applications
+        self.degraded = degraded
+        self.tableRevision = tableRevision
+        self.notes = notes
+        self.correction = correction
+    }
 
     /// What the *intent model* reads. Identity to `original` while the
     /// canonicalizer is inert (compile gate off, toggle off, policy disabled,
     /// or no rule matched).
+    ///
+    /// [TG-12] This is the CANONICALIZED CORRECTED text: the corrector runs
+    /// first (§4.6's order — typo-fix, then canonicalize, then the encoder), so
+    /// the canonicalizer's input is `correction.corrected`, never `original`.
+    /// While the corrector is off, `correction.corrected == original` and this
+    /// expression is byte-for-byte the one that ran before the layer existed.
     var modelInput: String { canonical }
+
+    /// [TG-12] The text the canonicalizer actually saw — the corrector's
+    /// output, or `original` when the corrector did not run. Exposed so a
+    /// consumer that must reason about the intermediate (a Phase-2 span
+    /// remap, a debugger) reads it from the pair rather than re-running the
+    /// corrector and hoping the two agree.
+    var correctedInput: String { correction?.corrected ?? original }
 
     /// What the *keyword safety net* reads: the original, forever (D-1,
     /// `CommandRouter.routeSafetyNet`). Canonicalization may never gate,
     /// suppress, rewrite or delay what the net sees.
     var safetyNetInput: String { original }
 
-    /// What the *picker brain* reads on a cascade escalation: the original
-    /// sanitised transcript, not the canonical one (§4.6, evidence row E-17
-    /// "HOLDS BY DESIGN"). The picker is a general-purpose LLM with no
-    /// canonical-form training, so a variant table is evidence about *this*
-    /// encoder's inputs, not about Qwen's; feeding it canonicalized text is an
-    /// unmeasured intervention on the one rung that currently works, and it
-    /// would make the §6 latency/quality comparison a comparison of two
-    /// changes instead of one. The canonical form rides alongside in
-    /// `canonical`, should a later task want that A/B.
-    var pickerBrainInput: String { original }
+    /// What the *picker brain* reads: the prepared text — the corrected,
+    /// canonicalized transcript (`modelInput`), the same string the encoder is
+    /// handed.
+    ///
+    /// [CORRECTION-ANYBRAIN] This SUPERSEDES the former §4.6 / evidence-row
+    /// E-17 rule (`pickerBrainInput == original`, "HOLDS BY DESIGN"). E-17
+    /// protected a measurement: while the canonicalizer's only job was to
+    /// feed the encoder, canonicalizing the picker's prompt was an unmeasured
+    /// intervention on the rung that already worked. The layers are now
+    /// switches on the LOCAL SLOT's input (`LocalBrainChain.InputSeam`), and
+    /// the point of those switches is to be measurable against EITHER local
+    /// brain — "corrector only against the 1.7B" is a configuration the card
+    /// offers, and it cannot exist if the picker's input ignores both layers.
+    ///
+    /// What is unchanged is the safety half: the keyword safety net, the
+    /// emergency path and the medication-ack path read `safetyNetInput` — the
+    /// original — and `CommandRouter`, the router's band policy and every
+    /// confirmation flow stay upstream of the slot.
+    var pickerBrainInput: String { canonical }
 
     /// True when nothing was rewritten, so `modelInput == original`.
-    var isIdentity: Bool { applications.isEmpty }
+    ///
+    /// [TG-12] BOTH layers have to be identity for the pair to be: a turn the
+    /// corrector rewrote and the canonicalizer passed through is not an
+    /// identity turn, and reporting it as one would tell the encoder (and the
+    /// event) that the model input is the transcript when it is not.
+    var isIdentity: Bool {
+        applications.isEmpty && (correction?.isIdentity ?? true)
+    }
 
     /// What the encoder emits when `isIdentity` is false: rule ids, table ids,
     /// kinds and counts, plus the table revision and the fixed-vocabulary
@@ -1634,12 +1723,39 @@ struct IntentTranscriptPair: Equatable, Sendable {
     /// transcript (§6.6, NFR-016, R-9) — assembled by the same builder the
     /// canonicalization result uses, so the pair cannot disclose more than the
     /// result it came from.
+    ///
+    /// [TG-12] The corrector's own count-only keys are merged in on the same
+    /// terms (A-16: buckets and row ids, never a surface form) — but only when
+    /// the layer actually PARTICIPATED. A corrector that is off adds no keys:
+    /// the metadata for a canonicalization-only turn stays exactly what it was
+    /// before this layer existed (the seam's own invariant, and the reason a
+    /// disabled layer cannot change the shape of an event).
     var observabilityMetadata: [String: String] {
+        var metadata = canonicalizationMetadata
+        if let correction, correction.mode != .off || correction.degraded {
+            for (key, value) in correction.observabilityMetadata {
+                metadata[key] = value
+            }
+        }
+        return metadata
+    }
+
+    /// The canonicalizer's own payload, exactly what `observabilityMetadata`
+    /// returned before the corrector existed. Kept as its own accessor because
+    /// `encoder_input_canonicalized` is the CANONICALIZER's event: a turn the
+    /// corrector rewrote and the canonicalizer passed through must not fire it,
+    /// and when it does fire it must carry the canonicalization keys alone.
+    var canonicalizationMetadata: [String: String] {
         CanonicalizationObservability.metadata(tableRevision: tableRevision,
                                                applications: applications,
                                                degraded: degraded,
                                                notes: notes)
     }
+
+    /// The canonicalizer's half of `isIdentity`. The encoder's existing
+    /// canonicalization event gates on this, so turning the corrector on cannot
+    /// change when that event fires or what it says.
+    var canonicalizationIsIdentity: Bool { applications.isEmpty }
 
     /// How a decoded span maps back onto the original transcript (§4.5).
     enum SpanMapping: Equatable, Sendable {
@@ -1712,8 +1828,14 @@ struct IntentTranscriptPair: Equatable, Sendable {
 }
 
 /// The composition seam between the sanitised transcript and the intent models
-/// (§4.6). Constructed and available; inert until a later wiring task flips it
-/// on.
+/// (§4.6).
+///
+/// [CORRECTION-ANYBRAIN] CALLED BY THE LOCAL SLOT (`LocalBrainChain.InputSeam`
+/// — see `IntentEncoderWiring.localSlotInputSeam`), once per turn, so the two
+/// layer switches are not tied to any one brain: the pair feeds the encoder's
+/// tokenizer and the picker brain's prompt alike, and the original stays with
+/// the safety net. The policies are resolved from the stored switches on every
+/// call, so a flip in Settings acts on the next turn.
 enum IntentInputCanonicalization {
 
     /// Computes the pair for one turn.
@@ -1726,20 +1848,119 @@ enum IntentInputCanonicalization {
     /// sanitised transcript byte-identical as both `original` and `canonical`,
     /// with no applications: the seam is a pass-through and no downstream
     /// behaviour differs from before this file existed.
+    ///
+    /// [TG-12] ORDER (§4.6, addendum §3.1): CORRECT, then CANONICALIZE, then
+    /// the intent model. The corrector sees the sanitised transcript and
+    /// nothing else; the canonicalizer sees the corrector's output;
+    /// `modelInput` is the result of both. The two layers share this one seam
+    /// and the same compile gate, and a correction can never reach anything
+    /// but the local brain — [CORRECTION-ANYBRAIN] whichever brain serves the
+    /// local slot reads it, and the seam is run ONCE, by the slot itself
+    /// (`LocalBrainChain.InputSeam`): `original` is still the sanitised
+    /// transcript, untouched by either layer, and `safetyNetInput` still hands
+    /// it over to the keyword safety net, the emergency path and the
+    /// medication-acknowledgement path.
+    ///
+    /// The corrector's policy is resolved HERE, from the lexicon that will
+    /// actually be read, rather than taken as a defaulted argument evaluated
+    /// before the caller's lexicon is known: a threshold fitted on one bank and
+    /// applied with another is the drift A-12 exists to prevent. Passing
+    /// `correctionPolicy` explicitly (tests, a future settings surface) skips
+    /// that resolution and uses exactly what was passed.
+    ///
+    /// [PIPELINE-TRACE] `traceRecorder` is PURE INSTRUMENTATION: it opens one
+    /// span per layer (the corrector's, then the canonicalizer's) so the
+    /// internal-testing card can show what each layer saw, what it produced and
+    /// which closed-vocabulary decision it took. Nil — every production call
+    /// site without the internal-testing gate, and every existing test — leaves
+    /// the two expressions below byte-for-byte what they were; the rows live in
+    /// memory for one turn and no decision anywhere reads them.
     static func prepare(sanitisedTranscript: String,
                         dialect: DialectLabel = DialectPreference.persisted(),
                         tables: VariantTableSet = VariantTableSet.bundled,
-                        policy: Policy = Policy.runtime()) -> IntentTranscriptPair {
-        let result = DialectCanonicalizer.canonicalize(sanitisedTranscript,
+                        policy: Policy = Policy.runtime(),
+                        correctionPolicy: STTCorrector.Policy? = nil,
+                        correctionLexicon: CorrectionLexicon? = CorrectionLexicon.bundled,
+                        traceRecorder: PipelineTraceRecorder? = nil)
+        -> IntentTranscriptPair {
+        let correctionPolicy = correctionPolicy
+            ?? STTCorrector.Policy.runtime(lexicon: correctionLexicon)
+        // The corrector runs FIRST and its output is what the canonicalizer
+        // reads. While its mode is `.off` (the shipped default: absent
+        // preference key, or the compile gate off) `corrected` is the input
+        // string itself, so the canonicalizer's input is byte-identical to the
+        // expression that ran before this layer existed.
+        let correctorSpan = traceRecorder?.start(
+            .corrector,
+            input: PipelineTraceSummary.text(sanitisedTranscript))
+        let correction = STTCorrector.correct(sanitisedTranscript,
+                                              lexicon: correctionLexicon,
+                                              policy: correctionPolicy)
+        if correction.mode == .off {
+            // The control arm did not participate: the row is marked off
+            // with the layer's own word for it, and the span opened above
+            // is simply never finished (an unfinshed span records
+            // nothing — `PipelineTraceSpan`).
+            traceRecorder?.recordOff([.corrector], reason: "disabled")
+        } else {
+            correctorSpan?.finish(
+                output: PipelineTraceSummary.text(correction.corrected),
+                decision: Self.correctorDecision(correction))
+        }
+        let canonicalizerSpan = traceRecorder?.start(
+            .canonicalizer,
+            input: PipelineTraceSummary.text(correction.corrected))
+        let result = DialectCanonicalizer.canonicalize(correction.corrected,
                                                        dialect: dialect,
                                                        tables: tables,
                                                        policy: policy)
+        if policy.enabled {
+            canonicalizerSpan?.finish(
+                output: PipelineTraceSummary.text(result.canonical),
+                decision: Self.canonicalizerDecision(result))
+        } else {
+            traceRecorder?.recordOff([.canonicalizer], reason: "disabled")
+        }
         return IntentTranscriptPair(original: sanitisedTranscript,
                                     canonical: result.canonical,
                                     applications: result.applications,
                                     degraded: result.degraded,
                                     tableRevision: result.tableRevision,
-                                    notes: result.notes)
+                                    notes: result.notes,
+                                    correction: correction)
+    }
+
+    /// [PIPELINE-TRACE] The corrector row's decision token — the layer's own
+    /// closed vocabulary (`CorrectionDecision.reason`, which the correction
+    /// event already carries), never a surface form:
+    ///
+    ///  · `corrected` (`CorrectionDecision.corrected(…).reason`) when at
+    ///    least one token was rewritten;
+    ///  · `shadow` for the counterfactual arm, which decides but applies
+    ///    nothing — its "why" is the arm itself;
+    ///  · else the first considered token's own reason (`no_candidate`,
+    ///    `below_threshold`, `ambiguous`, `safety_veto`, `required_span`,
+    ///    `degraded`) — the debugger's question is "why did nothing
+    ///    change", and the first token's reason is the layer's answer;
+    ///  · `no_tokens` for an empty transcript, which considers nothing.
+    ///
+    /// (`.disabled` cannot appear here: an off layer is marked off before
+    /// this is called.)
+    static func correctorDecision(_ correction: CorrectionResult) -> String {
+        if correction.mode == .shadow { return "shadow" }
+        if !correction.applications.isEmpty { return "corrected" }
+        return correction.decisions.first?.decision.reason ?? "no_tokens"
+    }
+
+    /// [PIPELINE-TRACE] The canonicalizer row's decision token — the applied
+    /// rule ids when anything fired (the layer's own reviewable row identities,
+    /// which its event already carries), else `identity` / `degraded` for a
+    /// table that fell out, so a pass-through says WHY it passed through.
+    static func canonicalizerDecision(_ result: CanonicalizationResult) -> String {
+        if !result.applications.isEmpty {
+            return "applied " + result.applications.map(\.ruleID).joined(separator: ",")
+        }
+        return result.degraded ? "degraded" : "identity"
     }
 
     typealias Policy = DialectCanonicalizer.Policy

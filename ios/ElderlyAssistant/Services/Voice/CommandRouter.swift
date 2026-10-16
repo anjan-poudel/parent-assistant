@@ -107,6 +107,76 @@ protocol VoiceCommandCoordinating: AnyObject {
     func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?)
     func takePendingRephraseCommand() -> (command: InterpretedCommand, sourceTranscript: String?)?
 
+    // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.1) The dialogue-frame
+    // surface the router's pre-ladder interception needs. The coordinator
+    // owns the single `DialogueManager`, the answer window and the state
+    // machine hop (T-136); the router only reads the live frame, arms a
+    // frame, notes an invalid attempt, resolves through the one funnel
+    // and prepares the answer text. Each member is a REQUIREMENT with an
+    // inert extension default below (the established pattern — the
+    // router holds its coordinator as a protocol reference, so an
+    // extension-only member would bind statically and AppCoordinator's
+    // implementation could never be reached).
+
+    /// The live dialogue frame, nil when absent OR expired (the
+    /// coordinator drops an expired frame on read — the interception's
+    /// half-open-window guarantee, design-l2 §8). Main-queue read; the
+    /// router calls it once per turn.
+    var activeDialogueFrame: DialogueFrame? { get }
+
+    /// Arms the frame AND opens the answer window (state machine hop), in
+    /// that order (design-l2 §21 step 3). false = a window is already
+    /// open (confirmation or frame) or the draft cannot resolve; the
+    /// caller then takes its non-probe fallback path (never a dead end).
+    func startDialogueFrame(_ frame: DialogueFrame) -> Bool
+
+    /// Invalid-answer accounting: attempts += 1, deadline restamped,
+    /// window timer refreshed (L2-D6). Returns the updated attempt count.
+    /// Silent — the router emits the event.
+    @discardableResult func noteDialogueAttempt() -> Int
+
+    /// The single resolution funnel: clear the frame, cancel the timer,
+    /// close the window through legal edges, emit `dialogue_frame_resolved`
+    /// for the resolutions the coordinator owns (timeout, emergency,
+    /// supersession — design-l2 §26's component split). Idempotent.
+    func resolveDialogueFrame(_ resolution: DialogueFrameResolution)
+
+    /// Emergency/supersession clear — `resolveDialogueFrame` with a
+    /// reason the caller states (L2-D16): the §12.3 emergency side-effect
+    /// and the session-transition supersession both travel here.
+    func clearDialogueFrame(reason: DialogueFrameResolution)
+
+    /// The answer text through the exact seam every turn uses: sanitise
+    /// (.quarantine) then the shared input seam (L2-D14). Never the
+    /// model. The router's fallback when unimplemented is the plain
+    /// `.quarantine` sanitise — the same text the default below returns.
+    func prepareDialogueAnswerText(_ raw: String) -> String
+
+    // [CORRECTION-REVIVE] The unrecognised path's correction surface:
+    // the LAST turn's `CorrectionResult` (with its judge-eligible items)
+    // and the semantic judge to ask about them. Both are read AFTER the
+    // interpret that produced them, inside `routeKeywordRemainder`.
+
+    /// The last turn's correction result — the judgeItems the banded gate
+    /// produced, or nil when the corrector did not participate. The
+    /// surfaces inside are the user's own words: on-device only, never
+    /// logged, never persisted.
+    var lastTurnCorrection: CorrectionResult? { get }
+
+    /// [JUDGE-PRE-INTERPRET] True when the semantic judge ALREADY ran
+    /// for this turn (before the interpreter). The failure path reads
+    /// it so a judged turn is never judged twice: it goes straight to
+    /// the spoken clarification.
+    var lastTurnCorrectionJudged: Bool { get }
+
+    /// The pluggable semantic judge (constitution: engines stay
+    /// selectable). The shipped implementation judges on the RESIDENT 4B
+    /// brain only; `isReady == false` (brain not resident, fine-tuned
+    /// brain serving, no LLM build) means the unrecognised path falls
+    /// straight through to the spoken clarification — never to a second
+    /// model load.
+    var correctionJudge: SemanticJudge { get }
+
     /// Call-confirmation correction hook (spec §7.2 correction protocol).
     /// While a call confirmation is outstanding, the router hands each
     /// response utterance here FIRST: an utterance carrying a method
@@ -224,6 +294,33 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// reference).
     var isAwaitingCalendarEventConfirmation: Bool { get }
 
+    /// [APP-LAUNCHER] (2026-09-16) True while a `launcher.open` app launch
+    /// is pended for the elder's yes/no (design D3: confirm-first before
+    /// every external launch). Widens the router's confirmation path
+    /// exactly like `isAwaitingCalendarEventConfirmation`: the yes/no on
+    /// the next transcript goes to `handleConfirmationResponse` (which
+    /// launches or cancels) and the medication-flavored generic yes/no
+    /// speech is skipped — the coordinator speaks "Opening X" or the
+    /// honest cancellation itself, and a plain "yes" is not a dose
+    /// acknowledgement. Requirement-with-extension-default pattern like
+    /// the members above (the router holds the coordinator as a protocol
+    /// reference, so an extension-only member would bind statically and
+    /// AppCoordinator's implementation could never be reached).
+    var isAwaitingAppLaunchConfirmation: Bool { get }
+
+    /// [APP-LAUNCHER] (2026-09-16) The app-launch confirmation seam the
+    /// `app_launcher` plugin calls (and the deterministic keyword stage may
+    /// call once it exists): pends a catalog app for the elder's spoken
+    /// yes/no and RETURNS the line to speak. The coordinator owns the
+    /// pending state, the 45 s window and the execution — the caller only
+    /// speaks what it is handed, exactly like
+    /// `requestCalendarEventConfirmation`. A launch that can only fail is
+    /// never pended: the returned line is then the honest not-installed
+    /// message (or, when the entry has a web fallback, a question that
+    /// discloses the swap). Same requirement-with-extension-default
+    /// pattern as the members above.
+    func requestAppLaunch(appID: String, confidence: Double?) -> String
+
     /// [ALARMS-TIMERS] (2026-09-07) Requests an ALARM at `time` (already
     /// the next future occurrence; only its hour/minute-of-day matters —
     /// the OS alarm is a DAILY-repeating local notification, see
@@ -329,6 +426,140 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// — the router adds no speech and no card of its own, exactly like
     /// the briefing stage. On-demand: no once-per-wake-window budget.
     func fireNewsReader()
+
+    /// [FEEDS-FULL-ARTICLE] (2026-09-19) "read the full article" — the
+    /// feeds feature's full-article reading (the item the feed is on, the
+    /// source's own body). The COORDINATOR owns every spoken line: the
+    /// article itself, the honest "this source shares only a summary"
+    /// line, and the honest "there's nothing in your feed" line — the
+    /// router adds no speech and no card of its own, exactly like the
+    /// news and briefing stages. The reading marks the item read through
+    /// the same completion seam the card's button uses.
+    func readFullFeedArticle()
+
+    /// [MED-PHOTO] (2026-09-17) The live medication schedule as the voice
+    /// photo query sees it: the entries the `.medicationPhoto` keyword rule
+    /// builds its vocabulary from (through
+    /// `MedicationVoiceVocabulary.voiceKeys(for:)`) AND the entries a
+    /// matched key resolves back to. One read serves both halves, which is
+    /// what keeps the two derivations from drifting.
+    ///
+    /// Never a fixed table: a medicine the elder actually has is the only
+    /// one that can be asked about, and one deleted between the read and
+    /// the resolution simply stops resolving. Inert default ([]): with no
+    /// entries the medication group is empty, an empty group can never
+    /// satisfy a variant, and the rule can never fire — every conformer
+    /// that does not opt in behaves exactly as it did before this member.
+    /// Requirement-with-extension-default pattern like the surfaces above
+    /// (the router holds the coordinator as a protocol reference, so an
+    /// extension-only member would bind statically and `AppCoordinator`'s
+    /// implementation could never be reached).
+    var medicationVoiceEntries: [MedicationEntry] { get }
+
+    /// [MED-PHOTO] (2026-09-17) The elder asked what a medicine looks
+    /// like: presents `entryId`'s photo full screen and RETURNS the line
+    /// to speak — the photo's caption, or the honest "no photo yet" line
+    /// when the entry carries none. nil means "nothing to say" (the entry
+    /// is gone). The caller only speaks what it is handed, exactly like
+    /// the launch seam above; the coordinator owns the presentation, the
+    /// caption and the honest fallback. Same
+    /// requirement-with-extension-default pattern as the members above.
+    func showMedicationPhoto(entryId: UUID) -> String?
+
+    /// [PROFILE-INTERVIEW T-094] The profile-personalization read seam the
+    /// interpreter contexts compose from (design-l2 §5.5): nil = "not
+    /// wired" (tests, pre-onboarding, or wiring disabled), and the prompt's
+    /// address-as clause composes to the byte-identical baseline. The
+    /// router READS the seam each turn and passes only the guarded prompt
+    /// term (`addressAsForPrompt`) into `InterpreterContext.addressAs` —
+    /// the verbatim spoken term never crosses this boundary (ADR-09).
+    /// Requirement-with-extension-default pattern like the tool surfaces
+    /// above: `CommandRouter` holds its coordinator as
+    /// `VoiceCommandCoordinating?`, so an extension-only member would bind
+    /// statically and `AppCoordinator`'s stored property could never be
+    /// reached (the exact failure mode the [INTENT-TOOLS] doc warns
+    /// about).
+    var profilePersonalization: ProfilePersonalizationReading? { get }
+
+    /// [CLOUD-CHAT T-177] (2026-10-14) True while the cloud-chat consent
+    /// question is up and its spoken answer is expected — the
+    /// coordinator's consent capture is the pended flow. Widens the
+    /// router's confirmation path exactly like
+    /// `isAwaitingAppLaunchConfirmation`: the yes/no on the next
+    /// transcript goes to `handleConfirmationResponse` (whose cloud-chat
+    /// block hands it to the prompt's one writer) and the medication-flavored
+    /// generic yes/no speech is skipped — the coordinator speaks the
+    /// state line itself, and a plain "yes" here is not a dose
+    /// acknowledgement. LOWEST priority of every pending flow: a call,
+    /// navigation, calendar-event, app-launch or dose confirmation keeps
+    /// its own claim on a yes/no (the coordinator's
+    /// `handleConfirmationResponse` checks every one of them first).
+    /// Requirement-with-extension-default pattern like the members above
+    /// (the router holds the coordinator as a protocol reference, so an
+    /// extension-only member would bind statically and `AppCoordinator`'s
+    /// implementation could never be reached).
+    var isAwaitingCloudChatConsentConfirmation: Bool { get }
+
+    /// [CLOUD-CHAT T-177] (2026-10-14) A deterministic cloud-chat voice
+    /// control was matched by `KeywordIntentRule.cloudChatVoiceRequest`:
+    /// the coordinator performs the withdrawal through the gate's ONE
+    /// writer (revoke) or answers the state query from the gate's
+    /// current decision, and owns every spoken line — the router adds no
+    /// speech and no card of its own, exactly like the briefing and news
+    /// stages. The router never writes consent and never reads the gate;
+    /// it only tells the coordinator what the keyword family resolved.
+    /// Same requirement-with-extension-default pattern as the members
+    /// above.
+    func handleCloudChatVoiceRequest(_ request: KeywordIntentRule.CloudChatVoiceRequest)
+
+    /// [MED-ACK-WALK] (T-013/T-014; design-l2 §C4, IF-7 + IF-8) The
+    /// clarification walk's seams. The walk's state lives in the
+    /// coordinator and ONLY the walk ops below write it; the router
+    /// consults the flag, hands the walk's ops their inputs and speaks
+    /// nothing of its own on any walk arm — the coordinator owns every
+    /// walk line and state transition (the navigation-walk precedent).
+    /// Requirements with inert extension defaults (the pattern described
+    /// above): `CommandRouter` holds its coordinator as
+    /// `VoiceCommandCoordinating?`, so an extension-only member would
+    /// bind statically and `AppCoordinator`'s implementation could never
+    /// be reached.
+
+    /// IF-7 — the pending reminders as resolver candidates, in the FIXED
+    /// order (`scheduledAt`, canonical medication name, entry id; never
+    /// firing order, pending order or recency). A pure in-memory read:
+    /// the empty case IS the empty array, which the T-004 resolver
+    /// reports as `.nothingPending`.
+    func medicationAckCandidates() -> [MedicationAckCandidate]
+
+    /// True while a clarification walk is open. The router's [MED-ACK-WALK]
+    /// consult sits immediately ahead of the confirmation block (R-4), so
+    /// while this is true the walk — not the shipped challenge yes/no
+    /// interpreter — owns the turn (`yes`/`no` route to the walk; the
+    /// generic ambiguous re-prompt is unreachable, N-4).
+    var isAwaitingAckClarification: Bool { get }
+
+    /// IF-8 — open the walk over these candidates. The coordinator
+    /// re-validates them against the live pending set, restores the fixed
+    /// order, cancels any prior walk (`.bargedIn` — the design's
+    /// begin-replaces rule) and speaks the first sanctioned question
+    /// itself ("did you mean X?" / "did you mean X or Y?" — never a
+    /// numbered list, never a leading question).
+    func beginAckClarification(orderedCandidates: [MedicationAckCandidate])
+
+    /// IF-8 — one spoken answer, with the router's SHIPPED yes/no
+    /// verdicts passed in (`isYesResponse`/`isNoResponse`; the walk mints
+    /// no vocabulary). The coordinator speaks its own lines on every
+    /// outcome and ends the walk on `.ended`/`.resolved`; only
+    /// `.resolved(entryId:)` asks the caller to continue the shipped
+    /// safety sequence for that entry.
+    @discardableResult
+    func ackClarificationResponse(raw: String, isYes: Bool, isNo: Bool) -> AckClarifyOutcome
+
+    /// IF-8 — end the walk. Idempotent. `.rejected`/`.expired` also speak
+    /// the honest ended line; `.denied` and `.bargedIn` stay silent
+    /// because the utterance's own path (the refusal ladder / the
+    /// acknowledgement path) speaks next.
+    func endAckClarification(reason: AckClarifyEndReason)
 }
 
 /// [INTENT-TOOLS] (2026-09-07) Tool-capability default. The default keeps
@@ -341,6 +572,13 @@ protocol VoiceCommandCoordinating: AnyObject {
 /// under test) opt in.
 extension VoiceCommandCoordinating {
     var canAnswerLiveQuestionsFromWeb: Bool { false }
+    // [CORRECTION-REVIVE] Inert defaults — a conformer that does not opt
+    // in (every mock/double) has no correction result to judge and no
+    // judge, so the unrecognised path falls through to its existing
+    // did-you-mean/reprompt behavior byte-identically.
+    var lastTurnCorrection: CorrectionResult? { nil }
+    var lastTurnCorrectionJudged: Bool { false }
+    var correctionJudge: SemanticJudge { NoSemanticJudge() }
     var isOnDeviceStack: Bool { false }
     // [DIRECTIONS] (2026-09-07) Navigation defaults — see the requirement
     // docs above. Every member is inert: no candidates, nothing pending,
@@ -390,6 +628,17 @@ extension VoiceCommandCoordinating {
     // explicitly implements the member (AppCoordinator, and the
     // scripted mock under test) creates anything.
     func requestCalendarEventConfirmation(title: String, startDate: Date) -> String? { nil }
+    // [APP-LAUNCHER] (2026-09-16) Inert defaults — a conformer that does
+    // not opt in (every mock/double) never pends an app launch, so the
+    // router's confirmation path behaves exactly as it did before this
+    // member, and the plugin's seam answers the honest "not available"
+    // line instead of pretending a launch was pended. Only a coordinator
+    // that explicitly implements the members (AppCoordinator, and the
+    // scripted mock under test) launches anything.
+    var isAwaitingAppLaunchConfirmation: Bool { false }
+    func requestAppLaunch(appID: String, confidence: Double?) -> String {
+        L10n.str("router.pluginUnavailable", locale: activeLocale)
+    }
     // [MORNING-BRIEFING] (2026-09-07) Inert default — a conformer that
     // does not opt in (every mock/double across app and test target)
     // never fires a briefing, so the deterministic ladder stage falls
@@ -400,6 +649,130 @@ extension VoiceCommandCoordinating {
     // fires a news digest, so the deterministic ladder stage falls
     // through to the interpreter/keyword remainder exactly as before.
     func fireNewsReader() {}
+    // [FEEDS-FULL-ARTICLE] (2026-09-19) Inert default — a conformer that
+    // does not opt in (every mock/double across app and test target)
+    // reads nothing, exactly like `fireNewsReader()` above. The stage
+    // still consumes the utterance (the phrasing is unambiguous), so a
+    // non-opted-in coordinator answers with silence rather than letting
+    // the request fall into the interpreter as small talk.
+    func readFullFeedArticle() {}
+    // [MED-PHOTO] (2026-09-17) Inert defaults — a conformer that does not
+    // opt in has no medications to ask about (`[]` leaves the rule's
+    // group empty, so the rule can never fire) and presents nothing. Only
+    // a coordinator that explicitly implements the members
+    // (AppCoordinator, and the scripted mock under test) shows a photo.
+    var medicationVoiceEntries: [MedicationEntry] { [] }
+    func showMedicationPhoto(entryId: UUID) -> String? { nil }
+    // [PROFILE-INTERVIEW T-094] Inert default — a conformer that does not
+    // opt in (every mock/double) has no personalization seam, so the
+    // prompt composes exactly as it did before the feature and every
+    // pre-feature expectation (pinned digests, byte-identity tests) holds.
+    var profilePersonalization: ProfilePersonalizationReading? { nil }
+    // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.1) Inert dialogue defaults —
+    // a conformer that does not opt in (every mock/double) has no frame,
+    // no window and no accounting: the interception block never fires
+    // (nil frame), a degenerate trigger's arm cannot succeed and falls
+    // back to the pre-feature request, and every pre-feature expectation
+    // holds. Only a coordinator that explicitly implements the members
+    // (T-136's AppCoordinator, and a scripted mock under test) opens
+    // frames. `prepareDialogueAnswerText`'s default is the same
+    // `.quarantine` sanitise the router's nil-coordinator fallback uses,
+    // so an un-opted-in conformer still never hands the classifier raw,
+    // unclamped text.
+    var activeDialogueFrame: DialogueFrame? { nil }
+    func startDialogueFrame(_ frame: DialogueFrame) -> Bool { false }
+    @discardableResult func noteDialogueAttempt() -> Int { 0 }
+    func resolveDialogueFrame(_ resolution: DialogueFrameResolution) {}
+    func clearDialogueFrame(reason: DialogueFrameResolution) {}
+    func prepareDialogueAnswerText(_ raw: String) -> String {
+        InputSanitiser.sanitise(raw, level: .quarantine)
+    }
+    // [CLOUD-CHAT T-177] (2026-10-14) Inert defaults — a conformer that
+    // does not opt in (every mock/double) never has the consent question
+    // up (so the confirmation path behaves exactly as it did before this
+    // member) and performs no withdrawal (the deterministic revoke stage
+    // consumes the utterance — the phrasing is unambiguous — and a
+    // non-opted-in coordinator answers with silence rather than letting
+    // it fall into the interpreter as small talk, the
+    // `readFullFeedArticle()` rule). Only a coordinator that explicitly
+    // implements the members (AppCoordinator, and the scripted mock
+    // under test) asks or revokes anything.
+    var isAwaitingCloudChatConsentConfirmation: Bool { false }
+    func handleCloudChatVoiceRequest(_ request: KeywordIntentRule.CloudChatVoiceRequest) {}
+    // [MED-ACK-WALK] (T-013/T-014; design-l2 §C4) Inert defaults — a
+    // conformer that does not opt in (every mock/double) has no pending
+    // reminders to resolve over (`medicationAckCandidates()` = `[]` ⇒ the
+    // resolver reports `.nothingPending` and the acknowledgement handler
+    // takes its shipped fallback leg), never has a walk open (so the
+    // [MED-ACK-WALK] consult never fires and every pre-feature
+    // expectation holds byte-identically) and answers every walk op with
+    // the honest silence of an empty state. Only a coordinator that
+    // explicitly implements the members (AppCoordinator, and a scripted
+    // mock under test) walks anything.
+    func medicationAckCandidates() -> [MedicationAckCandidate] { [] }
+    var isAwaitingAckClarification: Bool { false }
+    func beginAckClarification(orderedCandidates: [MedicationAckCandidate]) {}
+    @discardableResult
+    func ackClarificationResponse(raw: String, isYes: Bool, isNo: Bool) -> AckClarifyOutcome { .unanswered }
+    func endAckClarification(reason: AckClarifyEndReason) {}
+}
+
+// MARK: - [CNR T-174] Chat guard seam (flag resolution at the dispatch seam)
+
+/// [CNR T-174 / FR-CNR-005, FR-CNR-006, FR-CNR-007] The chat dispatch
+/// seam's guard inputs (design-l1 §7.1–§7.5): which shape served the reply
+/// being dispatched, whether this turn's routing decision allows cloud
+/// egress, and how to reach the cloud chat call for the escalation.
+///
+/// Every field is INJECTED (the T-173 `Inputs` pattern) and defaults to
+/// the dormant, fail-closed reading, so every pre-existing construction
+/// site and every existing router test keeps compiling and behaving
+/// exactly as before — no path is claimed, no escalation can be issued.
+/// The guard itself is NOT injectable and not a field here: it is T-169's
+/// pure static entry point (`NepaliGrammarGuard.verdict`), computed at the
+/// call site over the exact text that would be spoken.
+///
+/// The coordinator wiring (T-177) fills these from the real sources:
+/// `servingPath` from the chat lane that answered (the design's
+/// "provenance record" — today's only `.chat` producer is the local chat
+/// entry point, `IntentRouter.interpretLocalLadder`; the cloud chat
+/// responder once the cloud-first routing is wired), `cloudAllowed` from
+/// `CloudChatRouting.decide(...) == .cloud` for THIS turn, and
+/// `respondToChat` from the cloud chat responder (T-168's
+/// `ChatResponding.respondToChat`).
+struct ChatGuardSeam {
+
+    /// The serving path of the reply that reached the dispatch — the
+    /// design's `path` field (§7.5). Closed vocabulary, one token per
+    /// shape. Defaults to the on-device shape, today's only chat
+    /// producer; a wired coordinator overrides it per turn.
+    enum ServingPath: String, Equatable {
+        case onDevice = "onDevice"
+        case cloud = "cloud"
+    }
+
+    /// Which shape served the reply being dispatched. Read once per turn
+    /// at verdict time, never cached (`CloudChatRouting`'s per-turn read
+    /// discipline).
+    var servingPath: () -> ServingPath = { .onDevice }
+
+    /// The routing decision's cloud-allowed read for this turn — T-173's
+    /// `decide(...)` yielding `.cloud` (consent granted + online + key +
+    /// cost). `false` (the default) is the fail-closed reading: an
+    /// unwired or undecided turn never escalates — the design's single
+    /// chokepoint (§8.1) is the only source of egress permission
+    /// (FR-CNR-009).
+    var cloudAllowed: () -> Bool = { false }
+
+    /// The cloud chat call for the SAME turn's transcript — T-168's
+    /// `ChatResponding.respondToChat` (which owns sanitisation, the spec
+    /// persona and the explicit chat temperature on its side). The
+    /// completion is invoked exactly once, on the main queue, with nil on
+    /// any failure or timeout; the escalation issues exactly ONE attempt
+    /// (design §14 — no retry loop). nil (the default: no cloud chat lane
+    /// wired) means an escalation can never be issued — a flagged reply
+    /// then takes the safe-template path directly.
+    var respondToChat: ((String, @escaping (InterpretedCommand?) -> Void) -> Void)?
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -432,6 +805,14 @@ final class CommandRouter {
         /// (not a medication acknowledgement), which is why it is its own
         /// case rather than riding `.acknowledgedMedication`.
         case calendarEventConfirmed
+        /// [APP-LAUNCHER] (2026-09-16) A `launcher.open` confirmation was
+        /// answered YES — the coordinator has taken the pended app and
+        /// launched it (or, for the camera entry, switched to the in-app
+        /// capture). Its own case for the same reason
+        /// `.calendarEventConfirmed` has one: the outcome is a launch, not
+        /// a medication acknowledgement, and reporting
+        /// `.acknowledgedMedication` would make the router's result a lie.
+        case appLaunchConfirmed
         case unrecognised(transcript: String)
     }
 
@@ -528,6 +909,18 @@ final class CommandRouter {
     private let youtubeTransport: LocalToolTransport?
     private let youtubeLinkOpener: CallLinkOpening?
 
+    // [SPOTIFY] (2026-10-07) Music-path seams (T-116, C-SP-06 §13/§28) —
+    // every one defaults to dormant (nil), exactly like the YouTube
+    // seams above, so pre-existing router construction sites and every
+    // existing router test keep compiling and behaving as before
+    // (NFR-SP-012): without a session the turn reads as not linked (the
+    // honest unlinked treatment), without a transport no Spotify request
+    // can be built, and without an opener nothing is ever opened. Only
+    // `AppCoordinator` (T-119) and scripted test routers arm the seams.
+    private let spotifyAccountSession: SpotifyAccountSession?
+    private let spotifyTransport: LocalToolTransport?
+    private let spotifyLinkOpener: CallLinkOpening?
+
     /// [TOOL-DEBUG-LOG] (2026-09-07) Encrypted on-device debug log of
     /// every local-tool (weather/search) request + outcome — the store
     /// behind Settings → Tool requests. Nil = dormant (pre-existing
@@ -535,10 +928,49 @@ final class CommandRouter {
     /// `AppCoordinator` injects its store. See `logToolRequest`.
     private let localToolLogStore: LocalToolLogStore?
 
+    /// [CHAT] Stage 1 of the conversational-augmentation plan
+    /// (2026-09-23): the CHAT shape's confidence floor — applied here,
+    /// where every other "this model answer is not good enough to speak"
+    /// decision already lives (`ReplySanityGate`, `router.modelReplyUnclear`).
+    ///
+    /// The value comes from the brain's own config
+    /// (`LlamaCommandInterpreter.Config.chatConfidenceFloor`) so the two
+    /// cannot drift: the interpreter stops applying the command threshold
+    /// to chat turns and THIS layer decides what a sub-floor chat decode
+    /// means. Below the floor the model's text is not spoken at all — the
+    /// honest line is (`router.chatLowConfidence`), and the turn is
+    /// observable as `chatLowConfidence`. At or above it the reply is
+    /// spoken through the same sanity gate a `query` answer passes.
+    private let chatConfidenceFloor: Double
+
+    /// [CNR T-174] The chat dispatch's guard seam (design-l1 §7.1–§7.5):
+    /// which shape served the reply, whether this turn's routing allows
+    /// cloud, and the cloud chat call for the escalation. Dormant by
+    /// default — see `ChatGuardSeam`; the coordinator wiring (T-177)
+    /// fills it, and the definitional `ChatGuardSeam()` keeps every
+    /// pre-existing construction site and router test byte-identical.
+    private let chatGuard: ChatGuardSeam
+
+    /// [CNR T-174] True while a flagged chat turn's escalation hop is in
+    /// flight: the interpreter dispatch completion's tail must not resolve
+    /// the turn's reply-pending token while the reply is still
+    /// outstanding — the hop's completion resolves it (cloud reply or
+    /// safe template, whichever commits; design §7.3's bounded second
+    /// egress). Turn-scoped: reset at every `dispatchInterpreted` entry
+    /// and cleared by the hop's completion, which the responder's own
+    /// failure/timeout contract bounds — the pipeline's 45 s safety
+    /// timeout stays the backstop, exactly as for a hung interpreter.
+    private var chatEscalationInFlight = false
+
     init(coordinator: VoiceCommandCoordinating,
          observabilityBus: ObservabilityBus,
          speaker: Speaker? = nil,
          interpreter: CommandInterpreter = NullCommandInterpreter(),
+         // [CHAT] The chat shape's floor — defaults to the brain's own
+         // (`LlamaCommandInterpreter.Config.default.chatConfidenceFloor`,
+         // currently 0.6) so an unconfigured router and the brain it
+         // drives agree; a test can inject any value.
+         chatConfidenceFloor: Double = LlamaCommandInterpreter.Config.default.chatConfidenceFloor,
          pluginRegistry: PluginRegistry? = nil,
          geminiClient: GeminiClient? = nil,
          searchConfigStore: SearchConfigStore? = nil,
@@ -550,14 +982,24 @@ final class CommandRouter {
          youtubeConfigStore: YouTubeConfigStore? = nil,
          youtubeTransport: LocalToolTransport? = nil,
          youtubeLinkOpener: CallLinkOpening? = nil,
+         spotifyAccountSession: SpotifyAccountSession? = nil,
+         spotifyTransport: LocalToolTransport? = nil,
+         spotifyLinkOpener: CallLinkOpening? = nil,
          preAckPlayer: PreAckPlaying? = nil,
-         turnTracer: VoiceTurnLatencyTracer? = nil) {
+         turnTracer: VoiceTurnLatencyTracer? = nil,
+         // [CNR T-174] The chat dispatch's guard seam — dormant by default
+         // (see `ChatGuardSeam`): no path claimed, no escalation issuable,
+         // so a pre-existing construction site behaves exactly as before.
+         // T-177 fills it from the coordinator.
+         chatGuard: ChatGuardSeam = ChatGuardSeam()) {
         self.coordinator = coordinator
         self.observabilityBus = observabilityBus
         self.speaker = speaker
         self.interpreter = interpreter
+        self.chatConfidenceFloor = chatConfidenceFloor
         self.turnTracer = turnTracer
         self.preAckPlayer = preAckPlayer
+        self.chatGuard = chatGuard
         self.pluginRegistry = pluginRegistry
         self.geminiClient = geminiClient
         self.searchConfigStore = searchConfigStore
@@ -569,6 +1011,9 @@ final class CommandRouter {
         self.youtubeConfigStore = youtubeConfigStore
         self.youtubeTransport = youtubeTransport
         self.youtubeLinkOpener = youtubeLinkOpener
+        self.spotifyAccountSession = spotifyAccountSession
+        self.spotifyTransport = spotifyTransport
+        self.spotifyLinkOpener = spotifyLinkOpener
         // [LAT-M2] A fast-lane ack's playback settled (finished, decode
         // error, or cancelled) — the same per-utterance speak
         // bookkeeping the lane's tail fires for synthesized utterances.
@@ -579,7 +1024,28 @@ final class CommandRouter {
     }
 
     @discardableResult
-    func route(transcript raw: String) -> RoutingResult {
+    /// [CORRECTION-REVIVE] `safetyNetText` is the ORIGINAL transcript when
+    /// this route is a correction re-route (a judged or user-picked
+    /// reading spliced in): the safety-critical stages — the emergency
+    /// check, the confirmation path, `routeSafetyNet` and the keyword
+    /// remainder's sensitive-call block — read IT, never the corrected
+    /// text, so a correction can never gate, suppress or delay a safety
+    /// match (D-1, preserved on the re-route). Every semantic stage
+    /// (contact search, directions, topic, interpreter) reads `raw`,
+    /// which IS the corrected text on the re-route.
+    func route(transcript raw: String,
+               safetyNetText: String? = nil) -> RoutingResult {
+        let safetyRaw = safetyNetText ?? raw
+        // [CORRECTION-REVIVE] A FRESH turn resets the correction budget.
+        // Two shapes are NOT fresh turns: a re-route (`safetyNetText !=
+        // nil` — the same logical turn), and a dialogue ANSWER (a live
+        // frame is open, so this utterance is answering it, not starting
+        // a turn). The consumed flag is the recursion bound that keeps a
+        // failing re-route from arming a second correction question.
+        if safetyNetText == nil, coordinator?.activeDialogueFrame == nil {
+            correctionProbeConsumed = false
+            pendingCorrectionCommand = nil
+        }
         coordinator?.recordTranscript(raw)
 
         // Whisper hallucination guard: a repetition loop, low-entropy
@@ -595,6 +1061,15 @@ final class CommandRouter {
                 errorCode: reason.rawValue,
                 metadata: [:]
             ))
+            // [MULTI-TURN AUTO-LISTEN] A live frame makes a rejected
+            // transcript an invalid ANSWER, not a fresh turn: re-probe
+            // (whose speech end re-opens the mic) instead of the generic
+            // re-prompt, so a mumbled answer never strands the window.
+            // (`liveFrame`, not `frame`: the position-scan test anchors
+            // the interception block on the latter spelling.)
+            if let liveFrame = coordinator?.activeDialogueFrame {
+                return reprobeDialogueOrExhaust(frame: liveFrame, raw: raw)
+            }
             speak(key: "router.reprompt")
             return .unrecognised(transcript: raw)
         }
@@ -614,14 +1089,68 @@ final class CommandRouter {
         // re-prompt (device report 2026-09-08). The phrase lists are all
         // single-spaced, so canonicalizing can only turn misses into the
         // correct matches.
-        let preText = raw
+        let preText = safetyRaw
             .lowercased()
             .split(whereSeparator: { $0.isWhitespace })
             .joined(separator: " ")
         if Self.emergencyPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
             emit(eventType: "command_emergency_keyword", outcome: "success")
             handleEmergency()
+            // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.3) Emergency outranks
+            // any live dialogue frame: drop it (the coordinator emits the
+            // `.emergency` resolution event itself — §26's component
+            // split). POST-dispatch and side-effect only: it contributes
+            // no condition, delay or gate to the emergency path (L1
+            // ADR-MTC-02; a test pins dispatch with the clear forced to a
+            // no-op).
+            coordinator?.clearDialogueFrame(reason: .emergency)
             return .emergencyTriggered
+        }
+
+        // [MED-ACK-WALK] (T-014, R-4; design-l2 §C4 router wiring) The
+        // clarification walk consults HERE — a sibling IMMEDIATELY AHEAD
+        // of the confirmation block below, never if-inside it, so the
+        // block's first test and its body stay byte-identical and a walk
+        // answer can never be parsed as a challenge answer. Refusal
+        // first, then the barge-in acknowledgement, then the walk's own
+        // consume; every arm returns or falls through exactly as the
+        // design pins:
+        //   1. An explicit acknowledgement (the shipped gate, which
+        //      excludes denials itself) re-enters resolution from
+        //      scratch: the walk is ended FIRST as `.bargedIn`, then the
+        //      shipped acknowledgement handler runs — an ack is never
+        //      consumed as a yes/no answer (L1 §7.3 barge-in).
+        //   2. A refusal (the ONE shipped denial vocabulary, via the one
+        //      extracted helper — no second list) ends the walk `.denied`
+        //      and FALLS THROUGH unchanged: the walk's end flips
+        //      `isAwaitingConfirmation` false, so the confirmation block
+        //      cannot swallow the denial, and the refusal ladder's denial
+        //      arm below speaks its own line (FR-MSR-011).
+        //   3. Every other utterance belongs to the walk: yes/no verdicts
+        //      through the SHIPPED classifiers, anything else consumed as
+        //      the walk's own re-ask (the generic ambiguous re-prompt
+        //      below is unreachable while the walk is open, N-4). The
+        //      coordinator speaks its own lines; a resolution continues
+        //      the shipped safety sequence for the entry it names.
+        if coordinator?.isAwaitingAckClarification == true {
+            if Self.isExplicitMedicationAcknowledgement(raw) {
+                coordinator?.endAckClarification(reason: .bargedIn)
+                handleMedicationAcknowledgement(transcript: raw)
+                return .acknowledgedMedication
+            }
+            if Self.isMedicationDenial(raw) {
+                coordinator?.endAckClarification(reason: .denied)
+            } else {
+                let outcome = coordinator?.ackClarificationResponse(
+                    raw: raw,
+                    isYes: Self.isYesResponse(raw),
+                    isNo: Self.isNoResponse(raw))
+                if case .resolved(let entryId)? = outcome {
+                    continueMedicationAcknowledgement(entryId: entryId)
+                    return .acknowledgedMedication
+                }
+                return .unrecognised(transcript: raw)
+            }
         }
 
         // Confirmation-follow-up path: if a challenge is outstanding,
@@ -640,14 +1169,75 @@ final class CommandRouter {
                         // Cache learning keys the ORIGINAL utterance, not
                         // the "हो" that confirmed it.
                         pendingTranscript = taken.sourceTranscript
-                        dispatchInterpreted(taken.command)
+                        dispatchInterpreted(taken.command, raw: raw)
                         pendingTranscript = nil
                     }
                     return .unrecognised(transcript: raw)
                 }
-                _ = coordinator?.takePendingRephraseCommand()
+                // [MTC-T134] rephrase-discard upgrade (design-l2 §12.4
+                // edit 5; C-5 review-l2): the taken hypothesis was
+                // previously DROPPED here — it is now bound and re-offered
+                // as the candidate frame's LAST candidate alongside the
+                // original utterance's near-matches (R2: never alone).
+                // `speakDialogueDidYouMean` speaks the composed
+                // `dialogue.understood.no` honest lead plus the
+                // `dialogue.didYouMean` question in ONE utterance (the
+                // composer's candidateChoice body already carries the
+                // lead — speaking it separately would repeat the line);
+                // with zero candidates, or a window that cannot open, the
+                // shipped discard line stands byte-identically (never
+                // fabricate, FR-MTC-004; NFR-MTC-012).
+                let taken = coordinator?.takePendingRephraseCommand()
                 emit(eventType: "rephrase_discarded", outcome: "info")
-                speak(key: "router.rephrase.discard")
+                let rephraseSource = taken?.sourceTranscript ?? raw
+                let rephraseCandidates = DialogueCandidateBuilder.build(
+                    for: rephraseSource,
+                    excludingDomain: nil,
+                    rephraseHypothesis: taken?.command)
+                // [W4 review F-1, 2026-10-10] The arm + probe pair is
+                // DEFERRED by exactly one main tick. Ordering proof:
+                // `takePendingRephraseCommand()` has just QUEUED its
+                // `.awaitingConfirmation → .idle` hop (block A) on the
+                // main queue and this branch runs before that hop lands.
+                // Arming synchronously would bridge the still-
+                // `.awaitingConfirmation` session to `.awaitingSlotAnswer`
+                // (the opener's legal `.idle` bridge), and block A would
+                // then land on the freshly armed window: it closes it
+                // (`.awaitingSlotAnswer → .idle`, cancelling the slot
+                // timer) and the queued session-exit observer, seeing a
+                // live frame with the window gone, resolves it as
+                // `.superseded` — the just-spoken probe is answer-dead
+                // (T-134 Gherkin 4 / design-l2 §12.4 edit 5). Deferring
+                // makes the order: block A (`.awaitingConfirmation →
+                // .idle`; the observer hop finds no frame yet — a no-op)
+                // → block B below (`openSlotAnswerWindow` from `.idle`
+                // directly; the observer sees `.awaitingSlotAnswer` — a
+                // no-op; the frame arms; the probe is spoken exactly
+                // once). The synchronous legs stay synchronous: zero
+                // candidates or no coordinator keep the shipped line with
+                // no defer (NFR-MTC-012), and a deallocated router speaks
+                // nothing and opens nothing. The start call happens ONLY
+                // inside block B, immediately followed by the speak on
+                // success, so no window is ever opened without its probe;
+                // the arm-failure / deallocated-coordinator legs speak the
+                // shipped line byte-identically (NFR-MTC-012).
+                if coordinator != nil, !rephraseCandidates.isEmpty {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        guard let coordinator = self.coordinator,
+                              coordinator.startDialogueFrame(
+                                  DialogueFrame.candidateChoice(
+                                      candidates: rephraseCandidates,
+                                      sourceTranscript: rephraseSource)) else {
+                            self.speak(key: "router.rephrase.discard")
+                            return
+                        }
+                        self.speakDialogueDidYouMean(rephraseCandidates,
+                                                     locale: coordinator.activeLocale)
+                    }
+                } else {
+                    speak(key: "router.rephrase.discard")
+                }
                 return .unrecognised(transcript: raw)
             }
             // Call-confirmation correction protocol (spec §7.2): a
@@ -678,8 +1268,42 @@ final class CommandRouter {
             // dose was recorded.
             let isCalendarEventConfirmation =
                 coordinator?.isAwaitingCalendarEventConfirmation == true
+            // [APP-LAUNCHER] (2026-09-16) An app-launch confirmation speaks
+            // its own "Opening X" / honest cancellation too — the generic
+            // catalog yes/no is medication-flavored and would claim a dose
+            // was recorded for a plain "हो" answered to "क्यामेरा खोल्ने हो?".
+            let isAppLaunchConfirmation =
+                coordinator?.isAwaitingAppLaunchConfirmation == true
+            // [CLOUD-CHAT T-177] (2026-10-14) The consent question's
+            // spoken answer rides the same capture: its own block in
+            // `handleConfirmationResponse` hands the yes/no to the
+            // prompt's one writer, and the coordinator speaks the state
+            // line itself — the generic catalog yes/no would claim a
+            // dose. Checked LAST of every pending flow, so a call,
+            // navigation, calendar or launch confirmation keeps its own
+            // claim on the answer (T-177's own precedence rule; the
+            // coordinator's block enforces the same order).
+            let isCloudChatConsentConfirmation =
+                coordinator?.isAwaitingCloudChatConsentConfirmation == true
             let speaksItsOwnYesNo = isCallConfirmation || isNavigationDisambiguation
-                || isCalendarEventConfirmation
+                || isCalendarEventConfirmation || isAppLaunchConfirmation
+                || isCloudChatConsentConfirmation
+            // [APP-LAUNCHER F3] A dose acknowledgement is never a yes/no
+            // answer to an app-launch question. The safety net that owns
+            // this vocabulary runs BELOW this block, so without this the
+            // launch window turned "औषधि खाएँ" into an ambiguous answer to
+            // "क्यामेरा खोल्ने हो?" — and the dose went unrecorded, while
+            // the comment on the safety net still promised it "runs first,
+            // always". Only the launch branch is scoped this way: the
+            // call/navigation/calendar prompts have no such collision, and
+            // "होइन" must keep cancelling the launch question (a denial is
+            // not an acknowledgement — `isExplicitMedicationAcknowledgement`
+            // excludes it).
+            if isAppLaunchConfirmation, Self.isExplicitMedicationAcknowledgement(raw) {
+                emit(eventType: "confirmation_medication_ack", outcome: "success")
+                handleMedicationAcknowledgement(transcript: raw)
+                return .acknowledgedMedication
+            }
             if Self.isYesResponse(raw) {
                 coordinator?.handleConfirmationResponse(.yes)
                 emit(eventType: "confirmation_yes", outcome: "success")
@@ -688,6 +1312,13 @@ final class CommandRouter {
                 }
                 if isCallConfirmation { return .callConfirmed }
                 if isCalendarEventConfirmation { return .calendarEventConfirmed }
+                if isAppLaunchConfirmation { return .appLaunchConfirmed }
+                // [CLOUD-CHAT T-177] The consent question's yes reports
+                // plainly that the turn was consumed; it is not a
+                // medication acknowledgement and not any of the typed
+                // confirmations above (checked after them, matching the
+                // coordinator's precedence).
+                if isCloudChatConsentConfirmation { return .unrecognised(transcript: raw) }
                 return isNavigationDisambiguation ? .navigationRequested : .acknowledgedMedication
             }
             if Self.isNoResponse(raw) {
@@ -704,6 +1335,126 @@ final class CommandRouter {
             return .unrecognised(transcript: raw)
         }
 
+        // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.2) Dialogue-frame
+        // interception. Runs after the confirmation hook (whose body is
+        // untouched — a pending confirmation outranks a live frame) and
+        // before the safety net; consumes an answer, re-probes, or falls
+        // through to the ladder unchanged. Every state mutation goes
+        // through the coordinator hooks; this block never speaks a
+        // model-generated line and never writes to the console (V-2).
+        //
+        // Classification is the pure `DialogueAnswerPath.classify`; the
+        // live medication vocabulary is computed here exactly as the
+        // keyword stage computes it (one source, no drift) so B6's
+        // medication-photo reading is live at this call site (W2 review
+        // F-1 — the §12.2 snippet's erratum). Consumed arms (escape,
+        // cancel, answer, candidate, exhaustion) return BEFORE the
+        // interpreter and the transcript cache (FR-MTC-017); `.bargeIn`
+        // resolves and deliberately falls through so the ladder executes
+        // the strong command exactly once with its normal tiers
+        // (L2-D18); `.expired` falls through as a fresh command.
+        if let frame = coordinator?.activeDialogueFrame {
+            let prepared = coordinator?.prepareDialogueAnswerText(raw)
+                ?? InputSanitiser.sanitise(raw, level: .quarantine)
+            let medicationNames = (coordinator?.medicationVoiceEntries ?? []).flatMap {
+                MedicationVoiceVocabulary.voiceKeys(for: $0)
+            }
+            let classification = DialogueAnswerPath.classify(
+                raw: raw,
+                prepared: prepared,
+                frame: frame,
+                catalog: dialogueCatalog,
+                locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"),
+                now: Date(),
+                medicationNames: medicationNames
+            )
+            switch classification {
+            case .expired:
+                // The window closed before this utterance — it is a
+                // fresh command; the ladder below handles it unaltered.
+                break
+            case .escape:
+                coordinator?.resolveDialogueFrame(.escaped)
+                emitDialogueFrameResolved(.escaped)
+                speak(key: "dialogue.escape")
+                return .unrecognised(transcript: raw)
+            case .cancel:
+                coordinator?.resolveDialogueFrame(.cancelled)
+                emitDialogueFrameResolved(.cancelled)
+                // [CORRECTION-CONFLICT] "होइन" to the correction question
+                // means the heard word WAS the word — the stashed original
+                // interpretation dispatches verbatim (the typo was the
+                // user's intent, not an error).
+                if frame.probeKind == .correctionChoice,
+                   let deferred = takePendingCorrectionCommand() {
+                    pendingTranscript = deferred.raw
+                    dispatchInterpreted(deferred.command, raw: deferred.raw)
+                    pendingTranscript = nil
+                    return .unrecognised(transcript: raw)
+                }
+                speak(key: "dialogue.cancelled")
+                return .unrecognised(transcript: raw)
+            case .bargeIn:
+                // Resolve and fall through: the ladder below executes
+                // the strong command exactly once with its normal tiers
+                // (L1 ADR-MTC-05; the `.bargedIn` resolution has already
+                // cleared the frame and closed the window).
+                coordinator?.resolveDialogueFrame(.bargedIn)
+                emitDialogueFrameResolved(.bargedIn)
+            case .candidatePick(let index, let capture):
+                // The spoken position is 1-based; the executor addresses
+                // 0-based (design §12.2).
+                return executeDialogueCandidate(index - 1, capture: capture,
+                                                queryOverride: nil,
+                                                frame: frame, raw: raw)
+            case .correctionPick(let index, let capture):
+                // [CORRECTION-REVIVE] The elder picked a reading — the
+                // spoken position is 1-based; the executor splices the
+                // chosen reading and re-routes the ORIGINAL turn (safety
+                // net reading the raw transcript).
+                return executeCorrectionPick(index - 1, capture: capture,
+                                             frame: frame, raw: raw)
+            case .answer(let merge):
+                return executeDialogueAnswer(merge, frame: frame, raw: raw)
+            case .freeFormForCandidate(let index, let value):
+                // Already 0-based (design §12.2) — consumed directly.
+                return executeDialogueCandidate(index, capture: .freeText,
+                                                queryOverride: value,
+                                                frame: frame, raw: raw)
+            case .invalid(let reason):
+                // C-3 (review-l2 F-3): the `reason` metadata is built by
+                // direct `ObservabilityEvent` construction — the
+                // two-argument `emit` helper hardcodes empty metadata and
+                // would silently drop the reason vocabulary.
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "command_router",
+                    eventType: "dialogue_answer",
+                    durationMs: nil,
+                    outcome: "invalid",
+                    errorCode: nil,
+                    metadata: ["reason": reason.rawValue]
+                ))
+                // [DIALOGUE-NO-LOOP] (owner rule, field report
+                // 2026-10-14: the option list was built from the same
+                // garbled STT that mis-heard the question, so the user's
+                // own answer is the better evidence). An answer that
+                // matches none of the offered options but still carries
+                // the user's words is USED — the frame resolves and the
+                // ladder interprets the raw transcript exactly once
+                // (the `.bargeIn` shape) — never discarded into a
+                // re-probe. Content-free answers (empty after strip,
+                // degenerate, over-length) keep the ONE retry the frame
+                // allows.
+                if case .noCandidateClaimed = reason,
+                   !prepared.trimmingCharacters(in: .whitespaces).isEmpty {
+                    coordinator?.resolveDialogueFrame(.bargedIn)
+                    emitDialogueFrameResolved(.bargedIn)
+                    break
+                }
+                return reprobeDialogueOrExhaust(frame: frame, raw: raw)
+            }
+        }
+
         // Deterministic safety net FIRST (spec 2026-09-05 §4 routing
         // ladder): emergency and explicit med-ack never wait on — and
         // never depend on the correctness of — ANY model. Live testing
@@ -713,7 +1464,7 @@ final class CommandRouter {
         // always. The REMAINDER of the keyword layer (sensitive-call
         // blocking, generic unrecognised) still runs AFTER the LLM as
         // its fallback — only the safety-critical vocabulary moved.
-        if let safetyResult = routeSafetyNet(raw) {
+        if let safetyResult = routeSafetyNet(safetyRaw) {
             return safetyResult
         }
 
@@ -888,6 +1639,36 @@ final class CommandRouter {
             return .unrecognised(transcript: raw)
         }
 
+        // [FEEDS-FULL-ARTICLE] (2026-09-19) Deterministic voice stage for
+        // the feeds feature's full-article reading: "read the full
+        // article", "पूरा समाचार पढ", "पूरा लेख पढ्नुहोस्" — the elder
+        // heard a summary (or saw a card) and wants the whole story.
+        //
+        // Placement is LOAD-BEARING: this stage must run BEFORE the news
+        // digest stage, because the Nepali phrasing of a full-article
+        // request CONTAINS a news phrase ("समाचार पढ" ⊂ "पूरा समाचार
+        // पढ"). Without this stage first, the digest stage would swallow
+        // the utterance and the elder would hear headlines instead of the
+        // article. After the briefing stage (a briefing request can never
+        // be read as a full-article request) and before every model —
+        // no interpreter involvement, no IntentPrompt tokens.
+        //
+        // Vetoes, the same discipline as the news list: full-phrase
+        // containment only (the bare word "article" never matches), so an
+        // utterance that merely mentions an article cannot hijack the
+        // stage. The stage DECIDES and hands off — the coordinator owns
+        // every spoken line (the article, the honest "only a summary"
+        // line, the honest "nothing in your feed" line), so this ends the
+        // turn with the same `.unrecognised(transcript:)` the neighbouring
+        // stages return once they have already spoken.
+        if Self.fullArticlePhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
+            // [VOICE-ACK] The reading is composed then spoken — ack first.
+            speakPreAck()
+            coordinator?.readFullFeedArticle()
+            emit(eventType: "feed_full_article_command", outcome: "success")
+            return .unrecognised(transcript: raw)
+        }
+
         // [NEWS-READER] (2026-09-08) Voice-OS news digest: "read me the
         // news" / "what's the news" / "समाचार सुनाऊ" / "खबर सुनाऊ" — a
         // deterministic pre-answer stage like the briefing stage above:
@@ -960,8 +1741,9 @@ final class CommandRouter {
         // enumerated verb families, marker adjacency). When they all
         // declined, resolve intent from keyword CO-OCCURRENCE instead —
         // the small `KeywordIntentRule` table of SAFE domains only
-        // (news digest, YouTube play): every required keyword group must
-        // co-occur anywhere in the utterance, no grammar validation.
+        // (news digest, YouTube play, a named app launch): every
+        // required keyword group must co-occur anywhere in the
+        // utterance, no grammar validation.
         //
         // Placement: AFTER every strict deterministic stage (safety net
         // + confirmation flow + contact search + directions +
@@ -977,10 +1759,23 @@ final class CommandRouter {
         // stage's: news hands off to the reader exactly like the strict
         // stage (ack first, the reader owns every line), YouTube still
         // requires a survivable non-marker query from `YouTubeRoute`'s
-        // extraction and fires the same honest play/search path. Every
-        // relaxed claim is observable: `intent_keyword_match` (domain,
-        // matched keys — fixed rule vocabulary, never user text).
-        if let relaxed = KeywordIntentRule.match(transcript: preText) {
+        // extraction and fires the same honest play/search path, and an
+        // app launch hands its catalog id to the SAME coordinator seam
+        // the `launcher.open` plugin calls (the coordinator owns the
+        // confirmation question and the launch). Every relaxed claim is
+        // observable: `intent_keyword_match` (domain, matched keys —
+        // fixed rule vocabulary, never user text).
+        // [MED-PHOTO] (2026-09-17) The medication vocabulary the table's
+        // last rule matches against — read from the coordinator's live
+        // schedule (never a fixed table), and read ONCE here so the rule's
+        // group and this stage's resolution below work from the same
+        // snapshot.
+        let medicationVoiceEntries = coordinator?.medicationVoiceEntries ?? []
+        let medicationNames = medicationVoiceEntries.flatMap {
+            MedicationVoiceVocabulary.voiceKeys(for: $0)
+        }
+        if let relaxed = KeywordIntentRule.match(transcript: preText,
+                                                 medicationNames: medicationNames) {
             switch relaxed.domain {
             case .news:
                 emitIntentKeywordMatch(relaxed)
@@ -995,7 +1790,159 @@ final class CommandRouter {
                 emitIntentKeywordMatch(relaxed)
                 fireYouTubePlay(query: query)
                 return .unrecognised(transcript: raw)
+            case .music:
+                // [SPOTIFY] (2026-10-07) T-116: the real music path — the
+                // ladder's deterministic intake (FR-SP-015). The extractor
+                // resolves the search query from the same
+                // pre-canonicalized text the rule matched (zero prompt
+                // tokens, no interpreter round-trip); a transcript the
+                // extractor canonicalizes empty falls back to the whole
+                // utterance so the turn always has a query. Terminal for
+                // the turn, exactly like the YouTube arm above.
+                emitIntentKeywordMatch(relaxed)
+                // [MTC-T134] ladder-degenerate (design-l2 §12.4 edit 3;
+                // §23's ladder intake): a degenerate extraction
+                // (marker/transcript fallback) opens the slot-fill probe
+                // instead of a blind search of the fallback token; a
+                // content extraction fires the shipped blind request with
+                // the identical query — `musicQuery(from:)` is the thin
+                // wrapper over `musicQueryOutcome(from:)`, so a specific
+                // request stays byte-identical (NFR-MTC-012).
+                fireMusicRequestOrProbe(query: KeywordIntentRule.musicQueryOutcome(from: preText),
+                                        raw: raw,
+                                        intake: .ladder)
+                return .unrecognised(transcript: raw)
+            case .appLaunch:
+                // [APP-LAUNCHER] (2026-09-16) The launcher's voice fast
+                // path ("क्यामेरा खोल", "open WhatsApp", "फोटो खिच्न") —
+                // the highest-frequency launches without the encoder
+                // round-trip. The rule already resolved the utterance to
+                // a CATALOG id, which is the `app` entity the
+                // `launcher.open` plugin hands to `requestAppLaunch`:
+                // this stage calls that same seam, so the one launch
+                // executor, the pending state, the 45 s window and the
+                // confirmation question (design D3) are byte-for-byte the
+                // plugin path's — and a deterministic stage stays free of
+                // the plugin-dispatch machinery (registry + cloud client
+                // + an async hop) it would otherwise need.
+                //
+                // The returned line is the coordinator's: the
+                // confirmation question when the launch can still
+                // succeed, or the honest not-installed line when it
+                // cannot (nothing is pended in that case). The keyword
+                // path never inspects or recomposes it — exactly like
+                // the news/YouTube hand-offs above, where the
+                // coordinator/DOMAIN owners keep every spoken line.
+                guard let appID = relaxed.appID else { break }
+                emitIntentKeywordMatch(relaxed)
+                if let line = coordinator?.requestAppLaunch(appID: appID, confidence: nil) {
+                    // Carded like the plugin path's reply (see
+                    // `handlePluginCommand` above), so the question the
+                    // elder answers stays visible whichever path
+                    // resolved it.
+                    coordinator?.noteGenericReply(line)
+                    speak(text: line)
+                }
+                return .unrecognised(transcript: raw)
+            case .festivalDate:
+                // [FESTIVAL-DATE] (2026-09-17) Deterministic festival
+                // date answers ("दशैँ कहिले हो") — resolved from the
+                // festival catalog for the CURRENT Bikram Sambat year,
+                // so the answer never depends on encoder availability,
+                // band policy or model calibration. An unresolvable date
+                // (no panchang table, no astronomy fallback) says so
+                // honestly rather than guessing a day.
+                guard let festivalID = relaxed.festivalID,
+                      let festival = NepaliFestivalCatalog.all.first(where: { $0.id == festivalID }),
+                      let bsYear = BikramSambat.bsDate(from: clock())?.year,
+                      let resolved = festival.resolvedDate(inBSYear: bsYear),
+                      let gregorian = BikramSambat.adDate(from: resolved.bsDate) else {
+                    emit(eventType: "festival_date_unknown", outcome: "info")
+                    speak(key: "festival.dateUnknown")
+                    return .unrecognised(transcript: raw)
+                }
+                emitIntentKeywordMatch(relaxed)
+                let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+                let spokenName = locale.identifier.hasPrefix("ne")
+                    ? festival.nameNepali : festival.nameEnglish
+                let formatter = DateFormatter()
+                formatter.locale = locale
+                formatter.dateStyle = .long
+                formatter.timeStyle = .none
+                emit(eventType: "festival_date_answered", outcome: "success")
+                speak(text: L10n.fmt("festival.fallsOn", locale: locale,
+                                     spokenName, formatter.string(from: gregorian)))
+                return .unrecognised(transcript: raw)
+            case .medicationPhoto:
+                // [MED-PHOTO] (2026-09-17) "रक्तचापको औषधि कस्तो छ?" — the
+                // elder asks what one of their OWN medicines looks like.
+                // The rule resolved the utterance to a vocabulary key out
+                // of the live schedule; this stage turns that key back into
+                // the entry (or entries) carrying it and hands the one to
+                // show to the coordinator's seam. No model, no band, no
+                // calibration — a photo question the household can answer
+                // with a photo is answered with the photo.
+                //
+                // Every spoken line stays the coordinator's or the
+                // catalog's: the names line for the multi-match case is
+                // the one exception, composed here from the entries the
+                // vocabulary already resolved (the same shape the festival
+                // stage's line has), and carded like the launch seam's
+                // replies so it survives the full-screen cover.
+                guard let key = relaxed.medicationName,
+                      let coordinator else { break }
+                emitIntentKeywordMatch(relaxed)
+                let matches = medicationVoiceEntries.filter {
+                    MedicationVoiceVocabulary.voiceKeys(for: $0).contains(key)
+                }
+                guard let firstMatch = matches.first else {
+                    // The key resolved against this same read and names
+                    // nothing any more (an entry deleted in the pause
+                    // between): the honest "no photo yet" line, carded —
+                    // never a silent dead end.
+                    speakWithVisibleOutcome(key: "meds.photoMissing")
+                    return .unrecognised(transcript: raw)
+                }
+                if matches.count > 1 {
+                    // Several medicines answer to the same word: name them
+                    // first, then show the first one that actually has a
+                    // photo. Never a guess at which one was meant.
+                    let names = matches.map(\.medicationName).joined(separator: ", ")
+                    let line = L10n.fmt("meds.photoMultiple",
+                                        locale: coordinator.activeLocale, names)
+                    coordinator.noteGenericReply(line)
+                    speak(text: line)
+                }
+                let target = matches.first { !$0.visualAids.isEmpty } ?? firstMatch
+                if let line = coordinator.showMedicationPhoto(entryId: target.id) {
+                    // Carded exactly like the launch seam's line: the
+                    // honest no-photo line has no other surface once the
+                    // turn ends.
+                    coordinator.noteGenericReply(line)
+                    speak(text: line)
+                }
+                return .unrecognised(transcript: raw)
             }
+        }
+
+        // [CLOUD-CHAT T-177] (2026-10-14) Deterministic cloud-chat voice
+        // controls (design-l1 §8.6): the revoke phrase ("इन्टरनेटबाट जवाफ
+        // बन्द गर" / "turn off answers from the internet") and the spoken
+        // state query ("इन्टरनेटबाट जवाफ आउँदैछ?" / "are answers coming
+        // from the internet?"). The family is the same pure keyword table
+        // as the rules above (`KeywordIntentRule.cloudChatVoiceRequest` —
+        // no model, no NLU, no classifier widening), placed AFTER every
+        // existing claim so each pre-existing rule keeps its exact
+        // priority, and BEFORE the topic pre-answers and the interpreter
+        // so a state question is answered from the gate's recorded
+        // decision — never by a model — and a revoke never reaches one.
+        // The coordinator owns every consequence: the gate's one writer,
+        // the spoken lines, the surfaces. This stage only reports what
+        // the keyword family resolved.
+        if let request = KeywordIntentRule.cloudChatVoiceRequest(transcript: preText) {
+            emitCloudChatVoiceControl(request)
+            coordinator?.handleCloudChatVoiceRequest(request)
+            return .unrecognised(transcript: raw)
         }
 
         // [NO-GIBBERISH] Deterministic TOPIC PRE-ANSWERS (2026-09-07): the
@@ -1112,9 +2059,15 @@ final class CommandRouter {
         // Fast path — the LLM interpreter. Falls through to keyword when
         // the interpreter is unavailable or not confident.
         if interpreter.isAvailable {
+            // [PROFILE-INTERVIEW T-094] Compose the guarded address-as term
+            // through the coordinator's read seam (design-l2 §5.5). The
+            // seam is nil-safe end to end: no coordinator, no seam, or an
+            // absent/unreadable profile all yield nil here and the prompt
+            // stays byte-identical to the pre-feature baseline.
             let context = InterpreterContext(
                 pendingMedications: [],
-                userLanguageHint: coordinator?.activeLocale.languageCode ?? "en"
+                userLanguageHint: coordinator?.activeLocale.languageCode ?? "en",
+                addressAs: coordinator?.profilePersonalization?.addressAsForPrompt
             )
             // [REST-DIP-FIX] (2026-09-08) The interpreter round-trip is
             // ASYNC: this route returns before the reply exists, and the
@@ -1137,33 +2090,71 @@ final class CommandRouter {
                 // [TURN-TIMING] The model answered (or abstained).
                 self.turnTracer?.mark("llm_done")
                 if let command = command {
+                    // [CORRECTION-CONFLICT] The silent-failure gate (17
+                    // Pro Max field report 2026-10-13): the brain answered
+                    // CONFIDENTLY with a typo riding into its message —
+                    // "bajan" went to YouTube search. When the corrector
+                    // flagged a token whose surface appears in what the
+                    // brain is about to DO, the correction question is
+                    // asked BEFORE the dispatch; the command is stashed,
+                    // and the answer decides: "हो" re-routes the
+                    // corrected text, "होइन" dispatches the original.
+                    if self.armCorrectionConflictIfNeeded(command, raw: raw) {
+                        self.resolveTurnReplyPending()
+                        return
+                    }
                     // REPHRASE band (spec §4, decision #6): a mid-band
                     // tier-`free` command becomes a yes/no question rather
                     // than an immediate dispatch. Tier-`confirm` actions
                     // are unaffected — their executor confirmation
                     // already verifies aloud. `neverGated` never reaches
                     // here (safety net ran first).
-                    if command.confidence < 0.7,
+                    //
+                    // [CHAT-CONFIDENCE-FLOOR] …and a CHAT turn is never
+                    // rephrased. There is no interpretation for the user
+                    // to confirm — "did you mean…?" about small talk is
+                    // nonsense — and the chat shape already has its own
+                    // low-confidence outcome (the honest line below
+                    // `chatConfidenceFloor`, the reply above it). Without
+                    // this exclusion a chat reply in [floor, 0.7) would be
+                    // swapped for a confirmation question, which is
+                    // exactly what the floor exists to avoid.
+                    if command.action != .chat,
+                       command.confidence < 0.7,
                        ConfirmationTier.tier(for: command.action) == .free,
                        self.coordinator?.pendingRephraseCommand == nil {
                         self.coordinator?.startRephraseConfirmation(command, sourceTranscript: raw)
                         self.emit(eventType: "rephrase_question_started", outcome: "info")
                     } else {
                         self.pendingTranscript = raw
-                        self.dispatchInterpreted(command)
+                        self.dispatchInterpreted(command, raw: raw)
                         self.pendingTranscript = nil
                     }
                 } else {
-                    _ = self.routeKeywordRemainder(raw)
+                    _ = self.routeKeywordRemainder(safetyRaw,
+                                               isCorrectionReroute: safetyNetText != nil)
                 }
                 // The async dispatch has committed its reply (spoken /
                 // queued / declined) — the turn is no longer pending.
                 // This runs AFTER the commit, so the reply's speech-start
                 // hop is enqueued before the pipeline's deferred idle hop.
-                self.resolveTurnReplyPending()
-                // [TURN-TIMING] Dispatch resolved — the tracer finalizes
-                // now or once the reply speech finishes.
-                self.turnTracer?.endTurn()
+                //
+                // [CNR T-174] …unless THIS dispatch opened a chat guard
+                // escalation: the reply is still outstanding (the cloud
+                // chat call or its safe-template fallback owns it), so the
+                // resolve is deferred to the hop's completion and the
+                // turn-scoped flag clears here — a completion that never
+                // arrives cannot defer the NEXT turn's tail (the
+                // escalation's own responder contract bounds the wait;
+                // the pipeline's 45 s timeout is the backstop).
+                if self.chatEscalationInFlight {
+                    self.chatEscalationInFlight = false
+                } else {
+                    self.resolveTurnReplyPending()
+                    // [TURN-TIMING] Dispatch resolved — the tracer finalizes
+                    // now or once the reply speech finishes.
+                    self.turnTracer?.endTurn()
+                }
             }
             // We can't return a synchronous result once the LLM path fires;
             // report the transcript as "handled asynchronously".
@@ -1171,7 +2162,8 @@ final class CommandRouter {
             return .unrecognised(transcript: raw)
         }
 
-        return routeKeywordRemainder(raw)
+        return routeKeywordRemainder(safetyRaw,
+                                   isCorrectionReroute: safetyNetText != nil)
     }
 
     /// [INTENT-KEYWORDS] (2026-09-11) Observability for a fired relaxed
@@ -1190,6 +2182,25 @@ final class CommandRouter {
                 "domain": match.domain.rawValue,
                 "matched_keys": match.matchedKeys.joined(separator: ",")
             ]
+        ))
+    }
+
+    /// [CLOUD-CHAT T-177] (2026-10-14) The cloud-chat voice-control
+    /// event: provenance only ("this turn was resolved by the voice
+    /// keyword family, as a revoke / as a state query"). No metadata at
+    /// all — the consent write itself is the gate's own catalogue
+    /// (`consent_recorded` / `consent_revoked` / `consent_write_failed`),
+    /// so there is nothing content-bearing or identity-bearing for this
+    /// event to add (NFR-CNR-006), and no transcript, matched key or
+    /// device fact is available to it in the first place.
+    private func emitCloudChatVoiceControl(_ request: KeywordIntentRule.CloudChatVoiceRequest) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "cloud_chat_voice_control",
+            durationMs: nil,
+            outcome: request.eventToken,
+            errorCode: nil,
+            metadata: [:]
         ))
     }
 
@@ -1431,6 +2442,29 @@ final class CommandRouter {
         "samachar sunau", "samachar sunaunuhos", "khabar sunau"
     ]
 
+    /// [FEEDS-FULL-ARTICLE] (2026-09-19) Full-phrase forms for the feeds
+    /// feature's "read the FULL article" command. Both shipped languages
+    /// plus the romanized Nepali STT output, exactly like the news and
+    /// briefing tables. Every entry names the WHOLE story ("full",
+    /// "whole", "entire", "पूरा") — a bare "read the article" is
+    /// deliberately absent, because that is a request the summary read
+    /// already satisfies and the stage must not claim more than the
+    /// elder asked for.
+    ///
+    /// The Nepali entries OVERLAP the news table by construction
+    /// ("समाचार पढ" is inside "पूरा समाचार पढ") — the stage order in
+    /// `routeKeyword` is what resolves the overlap, and it is pinned by
+    /// `FullArticleStageRoutingTests`.
+    private static let fullArticlePhrases = [
+        "read the full article", "read the full story",
+        "read the whole article", "read the entire article",
+        "read full article", "read me the full article",
+        "पूरा समाचार पढ", "पूरा समाचार पढ्नुहोस्", "पूरा समाचार सुनाऊ",
+        "पूरा खबर पढ", "पूरा खबर सुनाऊ", "पूरा लेख पढ",
+        "पूरा लेख पढ्नुहोस्", "पूरा समाचार सुनाउनुहोस्",
+        "pura samachar pad", "pura samachar sunau", "pura lekh pad"
+    ]
+
     // MARK: - Keyword fallback
 
     /// Substring matching for multi-word phrases — STT output varies in
@@ -1472,17 +2506,95 @@ final class CommandRouter {
         "लड्नुभयो", "सास फेर्न सकिन", "सास फेर्न गाह्रो", "छाती दुख्यो"
     ]
 
-    /// Call-ish vocabulary shared by the post-LLM block
-    /// (`routeKeywordRemainder`) and the [NO-GIBBERISH] pre-answer guard:
-    /// an utterance that both names a topic word AND reads call-ish
-    /// ("मौसम बताउने मान्छेलाई फोन गर") must stay on the interpreter/
-    /// block path — a deterministic topic answer would shadow the call
-    /// intent. Hoisted from `routeKeywordRemainder` (2026-09-07) so the
-    /// pre-answer stage checks the SAME list that blocks.
-    private static let sensitiveCallPhrases = [
+    /// Call-ish vocabulary shared by the post-LLM fallback
+    /// (`routeKeywordRemainder`) and the [NO-GIBBERISH]
+    /// pre-answer guard (`:1360`): an utterance that both names a topic
+    /// word AND reads call-ish ("मौसम बताउने मान्छेलाई फोन गर") must stay
+    /// on the interpreter/deterministic-call path — a deterministic topic
+    /// answer would shadow the call intent. Hoisted from
+    /// `routeKeywordRemainder` (2026-09-07) so the pre-answer stage
+    /// checks the SAME list the remainder's fallback once blocked on.
+    ///
+    /// [DETERMINISTIC-CALL] (2026-10-11) The remainder no longer BLOCKS
+    /// on this vocabulary — direct-call utterances now route through the
+    /// deterministic fallback (`DeterministicCallRoute`), which reuses
+    /// `VoiceContactSearchRoute.isDirectCallUtterance` for the shape
+    /// test. This list survives for its two other consumers: the topic
+    /// pre-answer self-exclusion above and the [MTC L2-D2] dialogue
+    /// barge-in predicate (design-l2 §6 B2), both of which need the
+    /// BROADER vocabulary (a bare "whatsapp" mention is call-ish for a
+    /// topic answer even when it is not a direct call request).
+    static let sensitiveCallPhrases = [
         "call", "phone", "facetime", "messenger", "whatsapp",
         "फोन", "कल", "भिडियो कल", "म्यासेन्जर", "व्हाट्सएप", "वाट्सएप"
     ]
+
+    /// Explicit refusal vocabulary — "not yet", "I didn't take it", "औषधि
+    /// खाएको छैन". Guarded BEFORE the ack list everywhere it is used, because
+    /// refusal words contain ack words as substrings ("नखाए" ⊃ "खाए",
+    /// "भएन" ⊃ "भयो").
+    static let medicationDenialPhrases = [
+        "i didn't", "i did not", "not yet", "haven't", "havent",
+        "औषधि खाएको छैन", "औषधी खाएको छैन", "खाएको छैन",
+        "नखाए", "नखाएको", "लिएको छैन", "भएन", "छैन"
+    ]
+
+    /// The POSITIVE half of the medication-ack vocabulary: "I took my
+    /// medication" and its Nepali spellings, as phrases and as the single
+    /// tokens that carry the meaning on their own.
+    static let medicationAckPhrases = [
+        "i took", "i've taken", "ive taken", "took my medication",
+        "took my medicine", "taken my medication", "taken my medicine",
+        "yes i took it",
+        "औषधि खाएँ", "औषधि खाए", "औषधी खाएँ", "औषधी खाए",
+        "दवाई खाएँ", "दवाई खाए", "दबाइ खाएँ", "दबाइ खाए",
+        "औषधि लिएको छु", "औषधी लिएको छु", "दवाई लिएको छु",
+        "लिइसकेँ", "लिइसकें", "खाइसकेँ", "खाइसकें"
+    ]
+    static let medicationAckTokens = ["done", "taken", "took", "ate",
+                                      "खाएँ", "खाए", "भयो"]
+
+    /// [APP-LAUNCHER F3] Is this transcript an EXPLICIT dose
+    /// acknowledgement?
+    ///
+    /// Extracted from `routeSafetyNet` because the safety net is not the
+    /// only path that has to recognise it. While a confirmation window is
+    /// open the follow-up block above intercepts every utterance as a
+    /// yes/no — including an app-launch question, which made "औषधि खाएँ"
+    /// parse as an ambiguous answer to "क्यामेरा खोल्ने हो?" and the dose
+    /// go unrecorded. A dose acknowledgement is never a yes/no answer to
+    /// another question, so the follow-up path asks this first.
+    ///
+    /// Denials are excluded here too: the guard order lives with the
+    /// vocabulary instead of at one call site, so no caller can wire the
+    /// list up without it.
+    static func isExplicitMedicationAcknowledgement(_ raw: String) -> Bool {
+        if isMedicationDenial(raw) { return false }
+        let text = raw
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return medicationAckPhrases.contains(where: { containsPhrase($0, in: text) })
+            || medicationAckTokens.contains(where: { containsToken($0, in: text) })
+    }
+
+    /// [MED-ACK-WALK] (T-014; design-l2 §C4) The refusal-first guard's ONE
+    /// home — "one extracted helper, one list, no second vocabulary". The
+    /// shipped refusal list with the shipped containment; every caller
+    /// that has to tell a refusal from an acknowledgement asks this
+    /// (refusal semantics are never duplicated at a call site):
+    /// `isExplicitMedicationAcknowledgement` (an ack is never a denial,
+    /// including mixed denial-with-ack-token utterances),
+    /// `routeSafetyNet`'s refusal arm, and the clarification walk's
+    /// consult (a refusal ends the walk `.denied` and falls through to
+    /// the ladder). Behaviour is byte-identical to the two shipped call
+    /// sites it replaced — same lowercasing, same trim, same substring
+    /// containment.
+    static func isMedicationDenial(_ raw: String) -> Bool {
+        let text = raw
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return medicationDenialPhrases.contains(where: { containsPhrase($0, in: text) })
+    }
 
     /// The safety-critical slice of the keyword layer, runnable on its
     /// own AHEAD of the LLM (spec §4 ladder: keyword net first, always).
@@ -1503,42 +2615,253 @@ final class CommandRouter {
         }
 
         // Guard first: explicit negations must never fall through to the
-        // ack list, because refusal words contain ack words as substrings
-        // ("नखाए" ⊃ "खाए", "भएन" ⊃ "भयो").
-        let denialPhrases = [
-            "i didn't", "i did not", "not yet", "haven't", "havent",
-            "औषधि खाएको छैन", "औषधी खाएको छैन", "खाएको छैन",
-            "नखाए", "नखाएको", "लिएको छैन", "भएन", "छैन"
-        ]
-        if denialPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
+        // ack list (see `medicationDenialPhrases` — the one list, checked
+        // via the one extracted helper).
+        if Self.isMedicationDenial(text) {
             emit(eventType: "command_ack_denied_keyword", outcome: "info")
             speak(key: "router.ackDenied")
             return .unrecognised(transcript: raw)
         }
 
-        let ackPhrases = [
-            "i took", "i've taken", "ive taken", "took my medication",
-            "took my medicine", "taken my medication", "taken my medicine",
-            "yes i took it",
-            "औषधि खाएँ", "औषधि खाए", "औषधी खाएँ", "औषधी खाए",
-            "दवाई खाएँ", "दवाई खाए", "दबाइ खाएँ", "दबाइ खाए",
-            "औषधि लिएको छु", "औषधी लिएको छु", "दवाई लिएको छु",
-            "लिइसकेँ", "लिइसकें", "खाइसकेँ", "खाइसकें"
-        ]
-        let ackTokens = ["done", "taken", "took", "ate",
-                         "खाएँ", "खाए", "भयो"]
-        if ackPhrases.contains(where: { Self.containsPhrase($0, in: text) })
-            || ackTokens.contains(where: { Self.containsToken($0, in: text) }) {
-            handleMedicationAcknowledgement()
+        if Self.isExplicitMedicationAcknowledgement(raw) {
+            handleMedicationAcknowledgement(transcript: raw)
             return .acknowledgedMedication
         }
         return nil
     }
 
+    // MARK: - Correction rescue ([CORRECTION-REVIVE])
+
+    /// The unrecognised path's correction rescue — the semantic judge
+    /// first, the spoken question second, never a guess:
+    ///
+    ///   1. No judge-eligible token (or the budget is consumed) ⇒ false,
+    ///      the legacy ladder runs byte-identically.
+    ///   2. Judge ready ⇒ ONE batched call; a confident pick re-routes
+    ///      the corrected turn SILENTLY (safety net reading the raw
+    ///      original); an abstention arms the correction question.
+    ///   3. Judge not ready (brain not resident — the shipped Gemini-
+    ///      first state) ⇒ the correction question directly.
+    ///
+    /// Returns true when this turn was TAKEN (probe armed or re-route
+    /// fired) so the caller ends the ladder here.
+    private func attemptCorrectionRescue(_ raw: String) -> Bool {
+        guard !correctionProbeConsumed,
+              let correction = coordinator?.lastTurnCorrection,
+              correction.mode == .apply,
+              !correction.judgeItems.isEmpty else { return false }
+
+        // [JUDGE-PRE-INTERPRET] A turn the pre-interpret judge already
+        // answered is never judged twice — the spoken clarification is
+        // the next step, whatever the judge decided.
+        if coordinator?.lastTurnCorrectionJudged == true {
+            armCorrectionClarification(correction,
+                                       reason: .judgeRejected, raw: raw)
+            return true
+        }
+
+        let judge = coordinator?.correctionJudge ?? NoSemanticJudge()
+        guard judge.isReady else {
+            // The brain is not resident (the shipped Gemini-first turn) —
+            // the spoken question stands in the judge's place.
+            armCorrectionClarification(correction,
+                                       reason: .judgeUnavailable, raw: raw)
+            return true
+        }
+        let batch = JudgeBatch(source: correction.original,
+                               items: [correction.judgeItems[0]])
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "correction_judge_started",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: [:]))
+        judge.judge(batch) { [weak self] verdicts in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard let verdict = verdicts.first else {
+                    self.armCorrectionClarification(correction,
+                                                    reason: .judgeRejected,
+                                                    raw: raw)
+                    return
+                }
+                if verdict.pick != nil,
+                   verdict.confidence >= STTCorrector.judgeConfidenceFloor {
+                    // A confident pick — the vetoes run LAST inside
+                    // `reRank`; when they refuse it (the corrected text
+                    // stays the original), the spoken question follows.
+                    let reranked = STTCorrector.reRank(
+                        correction, judge: verdicts,
+                        lexicon: CorrectionLexicon.bundled)
+                    guard reranked.corrected != correction.original else {
+                        self.armCorrectionClarification(correction,
+                                                        reason: .judgeRejected,
+                                                        raw: raw)
+                        return
+                    }
+                    self.correctionProbeConsumed = true
+                    self.observabilityBus.emit(ObservabilityEvent(
+                        component: "command_router",
+                        eventType: "correction_judge_applied",
+                        durationMs: nil,
+                        outcome: "success",
+                        errorCode: nil,
+                        metadata: [:]))
+                    _ = self.route(transcript: reranked.corrected,
+                                   safetyNetText: raw)
+                } else {
+                    self.armCorrectionClarification(correction,
+                                                    reason: .judgeRejected,
+                                                    raw: raw)
+                }
+            }
+        }
+        return true
+    }
+
+    /// [CORRECTION-CONFLICT] The deferred command, taken exactly once —
+    /// the "होइन" path dispatches it; every other resolution abandons
+    /// it (the pick re-routes, an escape/barge-in starts fresh).
+    private func takePendingCorrectionCommand()
+        -> (command: InterpretedCommand, raw: String)? {
+        defer { pendingCorrectionCommand = nil }
+        return pendingCorrectionCommand
+    }
+
+    /// [CORRECTION-CONFLICT] True when the corrector's flagged token
+    /// appears in what the brain is about to DO — the command's message,
+    /// topic or contact. The question is armed and the command stashed;
+    /// the caller must NOT dispatch.
+    private func armCorrectionConflictIfNeeded(
+        _ command: InterpretedCommand, raw: String) -> Bool {
+        guard !correctionProbeConsumed,
+              let correction = coordinator?.lastTurnCorrection,
+              correction.mode == .apply,
+              let item = correction.judgeItems.first else { return false }
+        let fields = [command.message, command.topic, command.contact]
+            .compactMap { $0 }
+        let flagged = item.surface
+        let flaggedKey = STTCorrector.lexiconKey(of: flagged)
+        guard fields.contains(where: { field in
+            field.range(of: flagged) != nil
+                || STTCorrector.lexiconKey(of: field).range(of: flaggedKey)
+                    != nil
+        }) else { return false }
+        pendingCorrectionCommand = (command, raw)
+        armCorrectionClarification(correction, reason: .marginTooSmall,
+                                   raw: raw)
+        return true
+    }
+
+    /// Arms the correction question — the one-deep frame, at most once
+    /// per turn — and speaks it. On any failure (no coordinator, a live
+    /// window, no readings) the shipped reprompt line stands
+    /// byte-identically.
+    ///
+    /// [DOMAIN-ENRICHED] Before arming, the readings are enriched with
+    /// the DOMAIN near-matches the shipped keyword machinery already
+    /// knows (`DialogueCandidateBuilder` — the music rule's canonical
+    /// keys like भजन/bhajan). The device field report (2026-10-12) made
+    /// this load-bearing: the lexicographical top-2 for "बजन" were
+    /// बज्न/बचन — useless readings — while the music rule's keys
+    /// carried the intended भजन. Domain keys go FIRST; the heard word is
+    /// never offered back.
+    private func armCorrectionClarification(_ correction: CorrectionResult,
+                                            reason: ClarifyReason,
+                                            raw: String) {
+        correctionProbeConsumed = true
+        guard let clarification = CorrectionClarification.build(
+            from: correction, reason: reason),
+            let coordinator else {
+            speak(key: "router.reprompt")
+            return
+        }
+        let domainKeys = DialogueCandidateBuilder.build(
+            for: raw, excludingDomain: nil, rephraseHypothesis: nil)
+            .flatMap(\.matchKeys)
+        var readings = clarification.readings
+        if let first = readings.first {
+            var options = first.options
+            let heardKey = STTCorrector.lexiconKey(of: first.surface)
+            for key in domainKeys where
+                STTCorrector.lexiconKey(of: key) != heardKey
+                    && !options.contains(key) {
+                options.insert(key, at: 0)
+            }
+            readings = [CorrectionClarification.Reading(
+                tokenRange: first.tokenRange,
+                surface: first.surface,
+                options: Array(options.prefix(2)))]
+        }
+        let frame = DialogueFrame.correctionChoice(
+            readings: readings,
+            original: correction.original,
+            sourceTranscript: raw)
+        guard coordinator.startDialogueFrame(frame) else {
+            speak(key: "router.reprompt")
+            return
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "dialogue_probe_spoken",
+            durationMs: nil,
+            outcome: "success",
+            errorCode: nil,
+            metadata: [
+                "probe_kind": frame.probeKind.rawValue,
+                "attempt": String(frame.attempts),
+                "option_count": String(
+                    min(frame.correctionReadings.first?.options.count ?? 0,
+                        DialogueConfig.maxCandidates)),
+                "correction_clarify_reason": reason.rawValue
+            ]
+        ))
+        speak(text: DialogueProbeComposer.probeText(
+            for: frame, catalog: dialogueCatalog, retry: false,
+            locale: coordinator.activeLocale))
+    }
+
+    /// The correction-pick executor: resolve the frame, splice the chosen
+    /// reading into the SANITISED original at the reading's scalar range,
+    /// and re-route — the safety net reading the RAW transcript the frame
+    /// captured, so a correction can never gate or rewrite a safety
+    /// match. An out-of-range pick (defensive; classification already
+    /// bounds it) resolves the frame and speaks the honest reprompt.
+    private func executeCorrectionPick(_ index: Int,
+                                       capture: CaptureForm,
+                                       frame: DialogueFrame,
+                                       raw: String) -> RoutingResult {
+        // [CORRECTION-CONFLICT] A pick means the heard word WAS wrong —
+        // the deferred original interpretation is abandoned, never
+        // dispatched.
+        _ = takePendingCorrectionCommand()
+        coordinator?.resolveDialogueFrame(.correctionSelected(index: index))
+        emitDialogueFrameResolved(.correctionSelected(index: index))
+        guard let reading = frame.correctionReadings.first,
+              reading.options.indices.contains(index) else {
+            speak(key: "router.reprompt")
+            return .unrecognised(transcript: raw)
+        }
+        let spliced = STTCorrector.spliceReplacement(
+            reading.options[index],
+            into: frame.correctionOriginal,
+            at: reading.tokenRange)
+        guard spliced != frame.correctionOriginal else {
+            // The range did not address a token (defensive) — the honest
+            // reprompt, never a half-spliced turn.
+            speak(key: "router.reprompt")
+            return .unrecognised(transcript: raw)
+        }
+        return route(transcript: spliced,
+                     safetyNetText: frame.sourceTranscript)
+    }
+
     /// Post-LLM keyword fallback — everything in the keyword layer that
-    /// is NOT safety-critical: the blunt sensitive-call block (no entity
-    /// extraction available, so any call-ish phrase is blocked rather
-    /// than acted on) and the unrecognised handling. The unrecognised
+    /// is NOT safety-critical: the deterministic call fallback
+    /// (direct-call utterances get name extraction + the same
+    /// confirmation seam the LLM path uses; see [DETERMINISTIC-CALL]
+    /// below) and the unrecognised handling. The unrecognised
     /// branch speaks honestly against `coordinator.brainReadiness`
     /// (2026-09-06): the generic "I didn't understand" re-prompt is only
     /// truthful while an interpreter actually listened — when the chain
@@ -1546,17 +2869,60 @@ final class CommandRouter {
     /// the user hears THAT (spec §7 no dead ends), not a lie that blames
     /// their pronunciation.
     @discardableResult
-    private func routeKeywordRemainder(_ raw: String) -> RoutingResult {
+    private func routeKeywordRemainder(_ raw: String,
+                                       isCorrectionReroute: Bool = false) -> RoutingResult {
         let text = raw
             .lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if Self.sensitiveCallPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
-            emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
-            // Visible outcome, not just spoken — the live-caption pill is
-            // gone by now, so without a card the user's transcript and the
-            // refusal both vanish from the screen (field report 2026-09-05).
-            speakWithVisibleOutcome(key: "router.sensitiveBlocked")
+        // [DETERMINISTIC-CALL] (2026-10-11) The blunt sensitive-call block
+        // that lived here answered every call-shaped utterance the
+        // interpreter could not resolve with a fixed, misleading line
+        // (`router.sensitiveBlocked` — "calling stays off until secure
+        // authentication is ready"). No such auth gate exists: the
+        // speaker-biometric service's router gating was never wired, and
+        // the real gate is the spoken yes/no confirmation every call path
+        // already shares. A direct call request now gets deterministic
+        // name extraction (the contact-search stage's pattern) and routes
+        // through the EXISTING `requestCallConfirmation` seam —
+        // `ContactResolver` still refuses to guess a person, and nothing
+        // is dialed without the elder's yes.
+        if VoiceContactSearchRoute.isDirectCallUtterance(text)
+            || DeterministicCallRoute.barePhoneRequest(text) {
+            switch DeterministicCallRoute.decide(transcript: raw) {
+            case .call(let query):
+                if let prompt = coordinator?.requestCallConfirmation(
+                    contactQuery: query,
+                    callType: nil,
+                    requestedApp: nil,
+                    sourceTranscript: raw,
+                    sourceCommand: nil
+                ) {
+                    emit(eventType: "command_call_deterministic_confirmation", outcome: "success")
+                    speak(text: prompt)
+                } else {
+                    // A name survived extraction but matched no family
+                    // contact — the same honest line the LLM path speaks.
+                    emit(eventType: "command_call_contact_not_found", outcome: "blocked")
+                    speakWithVisibleOutcome(
+                        text: L10n.fmt("router.call.contactNotFound",
+                                       locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"),
+                                       query)
+                    )
+                }
+            case .callNoName:
+                emit(eventType: "command_call_name_unclear", outcome: "blocked")
+                // Visible outcome, not just spoken — the live-caption pill
+                // is gone by now, so without a card the user's transcript
+                // and the reply both vanish from the screen (field report
+                // 2026-09-05).
+                speakWithVisibleOutcome(key: "router.call.nameUnclear")
+            case .notDirectCall:
+                // Call vocabulary without a clear call request ("मेरो फोन
+                // कहाँ छ?") — fall through to the honest unrecognised
+                // branch below instead of the old blanket refusal.
+                break
+            }
             return .blockedSensitiveAction
         }
 
@@ -1570,6 +2936,16 @@ final class CommandRouter {
         // hearing assistance.
         switch coordinator?.brainReadiness ?? .available {
         case .available:
+            // [CORRECTION-REVIVE] The correction rescue, FIRST: the
+            // narrowest question — about what was SAID. When the banded
+            // gate marked a token judge-eligible, the resident judge gets
+            // one shot to settle it silently; a confident pick re-routes
+            // the corrected turn, anything less becomes a spoken
+            // correction question. With no judge-eligible token the
+            // legacy ladder below runs byte-identically.
+            if attemptCorrectionRescue(raw) {
+                return .unrecognised(transcript: raw)
+            }
             // [LOCAL-TOOLS] (2026-09-07) Web-search hook: this is the
             // post-interpreter ABSTENTION point (an interpreter listened
             // and did not understand — or did not exist), and the generic
@@ -1583,7 +2959,43 @@ final class CommandRouter {
             // generic re-prompt, so a capped day sounds exactly as
             // honest as an unanswered one.
             if !fireWebSearchIfDue(raw) {
-                speak(key: "router.reprompt")
+                // [GEMINI-SOLIDIFY] (2026-09-18) Chain honesty: when the
+                // whole ladder bottomed out AND the cloud leg failed for
+                // a real reason, the generic "I didn't understand"
+                // re-prompt would be a lie about what happened — the user
+                // hears the failure CLASS's honest line instead (never
+                // silence, never a false apology). The report is
+                // read-and-cleared here, so it can never leak into a
+                // later turn.
+                if let reporting = interpreter as? CloudFailureReporting,
+                   let failureClass = reporting.lastCloudFailureClass {
+                    reporting.clearCloudFailure()
+                    speakWithVisibleOutcome(
+                        text: failureClass.spokenLine(
+                            locale: coordinator?.activeLocale
+                                ?? Locale(identifier: "ne-NP")))
+                } else {
+                    // [MTC-T134] keyword-remainder upgrade (design-l2
+                    // §12.4 edit 6): with ≥1 near-match candidate the
+                    // honest `dialogue.retry`-prefixed candidateChoice
+                    // probe is spoken and its frame armed; with zero
+                    // candidates — or a window that cannot open — the
+                    // shipped `router.reprompt` line stands
+                    // byte-identically (NFR-MTC-012). The
+                    // cloud-failure-class branch above and both no-brain
+                    // branches below are untouched.
+                    //
+                    // [CORRECTION-CONFLICT] On a correction re-route the
+                    // upgrade is SUPPRESSED: the user already answered
+                    // one question this turn, and a second probe chain
+                    // is the measured "weird loop" (17 Pro Max field
+                    // report 2026-10-13). The plain reprompt stands.
+                    if isCorrectionReroute {
+                        speak(key: "router.reprompt")
+                    } else {
+                        speakDialogueDidYouMeanOrReprompt(raw)
+                    }
+                }
             }
         case .downloadingBrain:
             speakWithVisibleOutcome(key: "router.brainDownloading")
@@ -1953,6 +3365,30 @@ final class CommandRouter {
 
     // MARK: - [YOUTUBE] Voice YouTube search/play (youtube-plugin, 2026-09-08)
 
+    /// [T-114][M-1] Log projection for the reusable YouTube helpers
+    /// (`fireYouTubePlay` / `deliverYouTubeFailure`).
+    ///
+    /// Explicit-YouTube turns keep the shipped behavior — `.explicit` is
+    /// the default, so every pre-existing call site is untouched and the
+    /// query is logged verbatim (the FR-SP-005 baseline). Music turns
+    /// that fall back to YouTube (the §13 fallback rows) pass
+    /// `.queryFree`: there the music query is the sensitive value and
+    /// must never reach the tool log (NFR-SP-002 / security finding
+    /// M-1). The projection changes the LOGGED query only — routing,
+    /// speech and network behavior are identical for both cases.
+    enum YouTubeLogProjection {
+        case explicit
+        case queryFree
+
+        /// The `query` value the tool log records for a helper call.
+        func loggedQuery(_ query: String) -> String {
+            switch self {
+            case .explicit: return query
+            case .queryFree: return ""
+            }
+        }
+    }
+
     /// The YouTube stage's execution (see the stage comment in `route`).
     /// Called only after `YouTubeRoute.decide` matched with an extracted
     /// query. Two honest paths:
@@ -1965,7 +3401,9 @@ final class CommandRouter {
     ///     confirmation. The title goes through the SPOKEN path ONLY: no
     ///     visible card, never into the observability bus or the debug
     ///     log (the log entry for the success path carries the query +
-    ///     outcome, an EMPTY response by design — see `logToolRequest`).
+    ///     outcome, an EMPTY response by design — see `logToolRequest`;
+    ///     music-turn callers pass `.queryFree`, which blanks the logged
+    ///     query — [T-114][M-1]).
     ///   · No key: open the SEARCH deeplink directly
     ///     (`youtube://www.youtube.com/results` → https fallback) and
     ///     speak `youtube.openingSearch` — the user accepted
@@ -1977,7 +3415,8 @@ final class CommandRouter {
     ///   honest localized fallback — `youtube.notFound` for an empty
     ///   result set, `youtube.unavailable` otherwise — never a
     ///   fabricated title, never a dead end.
-    private func fireYouTubePlay(query: String) {
+    private func fireYouTubePlay(query: String,
+                                 logProjection: YouTubeLogProjection = .explicit) {
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         // [VOICE-ACK] The lookup/deeplink open takes a beat — ack before
         // the attempt, the outcome line follows through the lane.
@@ -1990,6 +3429,7 @@ final class CommandRouter {
         guard let apiKey = youtubeConfigStore?.apiKey else {
             guard let opener = youtubeLinkOpener else {
                 deliverYouTubeFailure(locale: locale, query: query,
+                                      logProjection: logProjection,
                                       fallbackKey: "youtube.unavailable",
                                       statusCode: nil, startedAt: attemptStartedAt)
                 return
@@ -2004,7 +3444,8 @@ final class CommandRouter {
             // convention); response stays EMPTY on the ok path so the
             // encrypted store never gains text the design keeps to
             // speech.
-            logToolRequest(kind: .youtube, query: query, response: "", outcome: "ok",
+            logToolRequest(kind: .youtube, query: logProjection.loggedQuery(query),
+                           response: "", outcome: "ok",
                            statusCode: nil,
                            durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
             return
@@ -2017,6 +3458,7 @@ final class CommandRouter {
             guard let transport = self.youtubeTransport else {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.unavailable",
                                                statusCode: nil, startedAt: attemptStartedAt)
                 }
@@ -2029,6 +3471,7 @@ final class CommandRouter {
                 await MainActor.run {
                     guard let opener = self.youtubeLinkOpener else {
                         self.deliverYouTubeFailure(locale: locale, query: query,
+                                                   logProjection: logProjection,
                                                    fallbackKey: "youtube.unavailable",
                                                    statusCode: nil, startedAt: attemptStartedAt)
                         return
@@ -2043,25 +3486,29 @@ final class CommandRouter {
                     // entry below records the attempt with an EMPTY
                     // response for exactly that reason.
                     self.speak(text: text, locale: locale)
-                    self.logToolRequest(kind: .youtube, query: query, response: "",
+                    self.logToolRequest(kind: .youtube, query: logProjection.loggedQuery(query),
+                                        response: "",
                                         outcome: "ok", statusCode: 200,
                                         durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
                 }
             } catch YouTubeTool.FetchError.noResults {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.notFound",
                                                statusCode: 200, startedAt: attemptStartedAt)
                 }
             } catch YouTubeTool.FetchError.invalidResponse(let statusCode) {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.unavailable",
                                                statusCode: statusCode, startedAt: attemptStartedAt)
                 }
             } catch {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.unavailable",
                                                statusCode: nil, startedAt: attemptStartedAt)
                 }
@@ -2072,14 +3519,18 @@ final class CommandRouter {
     /// Failure delivery for the YouTube stage — the honest localized
     /// fallback line (`youtube.notFound` / `youtube.unavailable`), a
     /// `youtube` component `fail` event, and one "fail" debug-log entry
-    /// carrying the line the user actually heard (never a title).
+    /// carrying the line the user actually heard (never a title; the
+    /// logged query follows `logProjection` — blanked on music turns,
+    /// [T-114][M-1]).
     private func deliverYouTubeFailure(locale: Locale, query: String,
+                                       logProjection: YouTubeLogProjection = .explicit,
                                        fallbackKey: String,
                                        statusCode: Int?, startedAt: Date) {
         emitYouTube(eventType: "youtube", outcome: "fail")
         speakWithVisibleOutcome(key: fallbackKey)
         let line = L10n.str(fallbackKey, locale: locale)
-        logToolRequest(kind: .youtube, query: query, response: line, outcome: "fail",
+        logToolRequest(kind: .youtube, query: logProjection.loggedQuery(query),
+                       response: line, outcome: "fail",
                        statusCode: statusCode,
                        durationMs: Self.elapsedMilliseconds(since: startedAt))
     }
@@ -2099,6 +3550,1078 @@ final class CommandRouter {
             errorCode: nil,
             metadata: [:]
         ))
+    }
+
+    // MARK: - [SPOTIFY] Music path (T-116, C-SP-06 §13/§28)
+
+    /// [SPOTIFY] (2026-10-07) What one music turn resolves to — the
+    /// selection step's total output (§28). Pure data: the enum carries
+    /// at most the validated track the search resolved — never a token,
+    /// a status or provider text.
+    enum MusicOutcome: Equatable {
+        /// Premium-capable and a usable track: attempt remote playback.
+        case spotifyRemote(SpotifyTool.TrackResult)
+        /// Hand the validated track to the app through the deep link
+        /// (free/unknown tier — L2-D14 — and never a remote attempt).
+        case spotifyDeepLink(SpotifyTool.TrackResult)
+        /// Unlinked account with no YouTube leg: hand the query to the
+        /// app's own search (`spotify:search:`).
+        case spotifySearchHandoff
+        /// The YouTube fallback owns the turn (`fireYouTubePlay`
+        /// verbatim, ADR-SP-06).
+        case youtube
+        /// An honest static line: `spotify.notFound` / `unavailable` /
+        /// `notLinked` / `appMissing`.
+        case honestLine(String)
+    }
+
+    /// §28's ordered conditions, total over every state the router can
+    /// reach, and the one place the 12-row matrix's selection logic
+    /// lives (pure — pinned data-driven by `CommandRouterMusicTests`).
+    ///
+    /// Order note: the design lists the unlinked condition last among
+    /// the *qualified* conditions (remote-capable / deep-link-capable /
+    /// search-failure are all stated for a linked account); as an
+    /// evaluation order the unlinked test must come first, because an
+    /// unlinked turn never runs a search and every later condition
+    /// presumes the linked state. `linked+transport missing` and the
+    /// defensive `search == nil` arm both take the row-7 shape exactly
+    /// as §28 states.
+    static func selectMusicOutcome(spotifyLinked: Bool,
+                                   spotifyTransportPresent: Bool,
+                                   search: Result<SpotifyTool.TrackResult, SpotifyTool.FetchError>?,
+                                   product: SpotifyAccountSession.Product,
+                                   deepLinkCapable: Bool,
+                                   youtubeServeable: Bool,
+                                   spotifySearchOpenerPresent: Bool) -> MusicOutcome {
+        guard spotifyLinked else {
+            if youtubeServeable { return .youtube }
+            if spotifySearchOpenerPresent { return .spotifySearchHandoff }
+            return .honestLine("spotify.notLinked")
+        }
+        guard spotifyTransportPresent else {
+            // §28: "linked+transport missing → the row-7 branch".
+            return youtubeServeable ? .youtube : .honestLine("spotify.unavailable")
+        }
+        guard let search else {
+            // Reached only through the row-11 token path (a search never
+            // ran): the same search-failure treatment.
+            return youtubeServeable ? .youtube : .honestLine("spotify.unavailable")
+        }
+        switch search {
+        case .success(let track):
+            if product == .premium { return .spotifyRemote(track) }
+            // [FIX 2026-10-15] A linked non-Premium (or unknown-product)
+            // account goes to the app's own SEARCH handoff when possible —
+            // the user sees results for the query, not a single opaque
+            // track link (device finding: the track link just opened the
+            // Spotify app with nothing usable on screen). The single-track
+            // deep link remains the fallback when the search handoff is
+            // not available.
+            if spotifySearchOpenerPresent { return .spotifySearchHandoff }
+            if deepLinkCapable { return .spotifyDeepLink(track) }
+            // Usable track but not remote-capable and the app cannot
+            // open it: row 4's "not capable" leg.
+            return youtubeServeable ? .youtube : .honestLine("spotify.appMissing")
+        case .failure(.noResults):
+            return youtubeServeable ? .youtube : .honestLine("spotify.notFound")
+        case .failure:
+            return youtubeServeable ? .youtube : .honestLine("spotify.unavailable")
+        }
+    }
+
+    /// §13's `youtubeAskable`, the selection's `youtubeServeable` — the
+    /// YouTube leg's own outcome decides success (ADR-SP-06).
+    private var musicYouTubeServeable: Bool {
+        youtubeConfigStore?.apiKey != nil || youtubeLinkOpener != nil
+    }
+
+    /// L2-R1: the concurrent YouTube leg runs only when the YouTube path
+    /// is KEYED (there is a fetch to join). The keyless path is askable
+    /// but is never pre-opened — its "search" is its outcome.
+    private var musicYouTubeKeyed: Bool {
+        youtubeConfigStore?.apiKey != nil && youtubeTransport != nil
+    }
+
+    /// The music path's entry (routes from the ladder's `case .music:`
+    /// and from the interpreted `.music` action). Sync main-thread entry
+    /// exactly like `fireYouTubePlay`: locale resolution, the pre-ack,
+    /// then the attempt on a Task; every delivery hop returns to the
+    /// main actor before speaking, emitting or logging.
+    private func fireMusicRequest(query: String) {
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        // [VOICE-ACK] The token/search/play round-trips take a beat —
+        // ack before the attempt, the outcome line follows through the
+        // lane (parity with `fireYouTubePlay`).
+        speakPreAck(locale: locale)
+        let attemptStartedAt = Date()
+        Task { [weak self] in
+            guard let self else { return }
+            await self.runMusicTurn(query: query, locale: locale, startedAt: attemptStartedAt)
+        }
+    }
+
+    // MARK: - [MTC] Dialogue frame (multi-turn conversation, design-l2 §12)
+
+    // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.5) The dialogue frame's
+    // router-side helpers: the degenerate trigger, probe speech, the
+    // did-you-mean compositions and the execution arms. Every spoken line
+    // is composed from `dialogue.*` keys (never the model); every event
+    // is closed-vocabulary and content-free (NFR-MTC-004); no arm here
+    // consults the interpreter or the transcript cache (FR-MTC-017),
+    // except the `executeDialogueAnswer`/`executeDialogueDefault` merge
+    // tail, which re-enters the pending command's OWN dispatch (a music
+    // command — terminal, cache-free).
+
+    /// The degenerate music query's intake — the
+    /// `dialogue_degenerate_query` event's closed `intake` metadata
+    /// (design-l2 §23/§26): which of the three trigger sites requested
+    /// the probe. Never content.
+    private enum DialogueDegenerateIntake: String {
+        case ladder
+        case interpreted
+        case candidate
+    }
+
+    /// The one cached catalog load (design-l2 §12.6): loaded lazily on
+    /// first use (main thread, inside a turn) and then immutable. A
+    /// missing or malformed resource degrades to nil — the free-text-only
+    /// probe path (E3), never a fabricated option.
+    private lazy var dialogueCatalog: DialogueOptionCatalog? = {
+        try? DialogueOptionCatalog.load()
+    }()
+
+    /// The slot-fill draft for one degenerate music query (§12.5): the
+    /// candidates are the catalog group the query claims (none when
+    /// nothing claims it — the free-text-only probe), the default is the
+    /// extracted degenerate query itself (the any-option fallback), and
+    /// `activeCommand` carries the pending interpreted command the answer
+    /// merges into (L2-D13) — nil on the keyword/candidate intakes.
+    private func dialogueSlotFillDraft(query: KeywordIntentRule.MusicQueryExtraction,
+                                       raw: String,
+                                       activeCommand: InterpretedCommand?) -> DialogueFrame {
+        let catalog = dialogueCatalog
+        let candidates: [DialogueCandidate]
+        if let group = query.query.flatMap({ catalog?.groupForMusicQuery($0) }),
+           let catalog {
+            candidates = DialogueCandidateBuilder.slotFillCandidates(from: group,
+                                                                     catalog: catalog)
+        } else {
+            candidates = []
+        }
+        return DialogueFrame.slotFill(candidates: candidates,
+                                      defaultQuery: query.query,
+                                      domain: .music,
+                                      activeCommand: activeCommand,
+                                      sourceTranscript: raw)
+    }
+
+    /// The one degenerate trigger helper (§12.5/§23), shared by both
+    /// ladder intakes and by candidate execution: a NON-degenerate
+    /// extraction fires the music request exactly as the pre-feature
+    /// expression did (`query ?? raw` — `musicQuery` is the thin wrapper
+    /// over the outcome extractor, so the ladder intake is byte-identical
+    /// to the shipped line). A degenerate one emits
+    /// `dialogue_degenerate_query {intake}`, arms the slot-fill frame
+    /// through the coordinator and speaks the first probe.
+    ///
+    /// `activeCommand` carries the arrived interpreted command on the
+    /// interpreted intake (nil elsewhere) — the §12.5 pinned signature
+    /// gained this additive, defaulted parameter because the pinned
+    /// three-argument shape had no way to deliver it (§12.5's prose
+    /// requires it: "the interpreted intake passes the arrived `command`
+    /// as `activeCommand`").
+    ///
+    /// Fallbacks, all non-probe (never a dead end): an arm that cannot
+    /// open a window (defensive — a live frame is intercepted before any
+    /// trigger can run; also the no-coordinator case) falls back to
+    /// today's exact blind request.
+    /// The shared invalid-answer tail (the sanity guard's rejection and
+    /// `DialogueAnswerPath.classify`'s `.invalid`): one honest re-probe
+    /// within the attempt budget — its speech end re-opens the mic via
+    /// the coordinator's auto-listen hook — then the exhausted close.
+    /// The frame stays live until resolution; the caller owns the event.
+    /// Attempt budget (FR-MTC-007/§24): `noteAttempt` returns the
+    /// post-increment count (>= 2 on the first invalid answer), so the
+    /// comparison is `<=` — §12.2's pinned `<` is an erratum that made
+    /// the retry branch unreachable (C-3, review-l2 F-3).
+    private func reprobeDialogueOrExhaust(frame: DialogueFrame,
+                                          raw: String) -> RoutingResult {
+        let attempts = coordinator?.noteDialogueAttempt()
+            ?? DialogueConfig.maxProbes
+        if attempts <= DialogueConfig.maxProbes {
+            var reprobe = frame
+            reprobe.attempts = attempts
+            speakDialogueProbe(frame: reprobe, retry: true)
+        } else {
+            return resolveDialogueExhaustion(frame: frame, raw: raw)
+        }
+        return .unrecognised(transcript: raw)
+    }
+
+    private func fireMusicRequestOrProbe(query: KeywordIntentRule.MusicQueryExtraction,
+                                         raw: String,
+                                         intake: DialogueDegenerateIntake,
+                                         activeCommand: InterpretedCommand? = nil) {
+        guard query.isDegenerate else {
+            fireMusicRequest(query: query.query ?? raw)
+            return
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "dialogue_degenerate_query",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: ["intake": intake.rawValue]
+        ))
+        let draft = dialogueSlotFillDraft(query: query, raw: raw,
+                                          activeCommand: activeCommand)
+        if coordinator?.startDialogueFrame(draft) == true {
+            speakDialogueProbe(frame: draft, retry: false)
+        } else {
+            fireMusicRequest(query: query.query ?? raw)
+        }
+    }
+
+    /// Speaks one probe (§12.5): composed by `DialogueProbeComposer` from
+    /// `dialogue.*` keys and catalog labels only (FR-MTC-016 — the model
+    /// is never consulted), announced as `dialogue_probe_spoken` with the
+    /// closed metadata (probe kind, the probe's own ordinal, the offered
+    /// option count), then spoken through the normal reply surface so the
+    /// assistant-bubble/speech bookkeeping matches every other reply.
+    /// `errorCode: "catalogUnavailable"` marks the degraded slot-fill
+    /// probe (no catalog — the free-text-only composition, E3); a
+    /// candidateChoice probe never reads the catalog and is never
+    /// degraded. The `locale` parameter is additive/defaulted for
+    /// `speakDialogueDidYouMean`'s pinned signature — call sites inside a
+    /// turn pass nothing and read the coordinator's locale.
+    private func speakDialogueProbe(frame: DialogueFrame, retry: Bool,
+                                    locale: Locale? = nil) {
+        let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let degraded = frame.probeKind == .slotFill && dialogueCatalog == nil
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "dialogue_probe_spoken",
+            durationMs: nil,
+            outcome: degraded ? "degraded" : "success",
+            errorCode: degraded ? "catalogUnavailable" : nil,
+            metadata: [
+                "probe_kind": frame.probeKind.rawValue,
+                "attempt": String(frame.attempts),
+                // [DIALOGUE-NO-LOOP] A GENUINE re-probe (attempts >= 2)
+                // offers no options — its body is a different question,
+                // never the option list again. Attempt-1 retry:true call
+                // sites (remainder-reprompt upgrade, rephrase-discard)
+                // still report the candidates they actually offer.
+                "option_count": String((retry && frame.attempts >= 2)
+                                       ? 0 : dialogueProbeOptionCount(for: frame))
+            ]
+        ))
+        speak(text: DialogueProbeComposer.probeText(for: frame, catalog: dialogueCatalog,
+                                                    retry: retry, locale: locale),
+              locale: locale,
+              speed: DialogueConfig.dialogueProbeSpeechSpeed)
+    }
+
+    /// The probe event's `option_count` (§26: 0…4): the capped
+    /// option/candidate count the probe actually offers. slotFill: the
+    /// group's options, 0 when no group claims the pending query (the
+    /// free-text-only probe offers no addressable options); the
+    /// any-option label is deliberately not counted (it is not a catalog
+    /// option, §11). candidateChoice: the capped candidate count.
+    private func dialogueProbeOptionCount(for frame: DialogueFrame) -> Int {
+        switch frame.probeKind {
+        case .slotFill:
+            guard let query = frame.defaultQuery,
+                  let group = dialogueCatalog?.groupForMusicQuery(query) else { return 0 }
+            // [CASUAL-COPY] A placeholder-less template (owner dictation
+            // 2026-10-13) speaks no options — the event's count must say
+            // zero, never a list that was not spoken.
+            let template = L10n.str(group.questionKey,
+                                    locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"))
+            guard template.contains("%@") else { return 0 }
+            return min(group.options.count, DialogueConfig.maxSlotOptions)
+        case .candidateChoice:
+            return min(frame.candidates.count, DialogueConfig.maxCandidates)
+        case .correctionChoice:
+            return min(frame.correctionReadings.first?.options.count ?? 0,
+                       DialogueConfig.maxCandidates)
+        }
+    }
+
+    /// Speaks the did-you-mean probe for a candidate list (§12.5; the
+    /// rephrase-discard helper, §12.4 edit 5): composed through the same
+    /// `DialogueProbeComposer` candidateChoice path (and emitting the same
+    /// `dialogue_probe_spoken` event) as the frame's own first probe — the
+    /// honest "I didn't understand." lead joined with the capped candidate
+    /// labels, in the caller's locale. The caller owns arming the frame it
+    /// built from the same candidates; this helper only speaks, so an
+    /// unanswerable probe is structurally impossible (no frame, no
+    /// call — the caller's zero-candidate branch keeps its shipped line).
+    private func speakDialogueDidYouMean(_ candidates: [DialogueCandidate], locale: Locale) {
+        let draft = DialogueFrame.candidateChoice(candidates: candidates,
+                                                  sourceTranscript: "")
+        speakDialogueProbe(frame: draft, retry: false, locale: locale)
+    }
+
+    /// The keyword-remainder reprompt upgrade (§12.5; §12.4 edit 6, T-134's
+    /// call site): with at least one near-match candidate the honest
+    /// `dialogue.retry`-prefixed candidateChoice probe is spoken and its
+    /// frame armed; with zero candidates — or a window that cannot open
+    /// (defensive; also the no-coordinator case) — the shipped
+    /// `router.reprompt` line stands byte-identically (NFR-MTC-012).
+    private func speakDialogueDidYouMeanOrReprompt(_ raw: String) {
+        let candidates = DialogueCandidateBuilder.build(for: raw,
+                                                        excludingDomain: nil,
+                                                        rephraseHypothesis: nil)
+        guard !candidates.isEmpty, let coordinator else {
+            speak(key: "router.reprompt")
+            return
+        }
+        let draft = DialogueFrame.candidateChoice(candidates: candidates,
+                                                  sourceTranscript: raw)
+        guard coordinator.startDialogueFrame(draft) else {
+            speak(key: "router.reprompt")
+            return
+        }
+        speakDialogueProbe(frame: draft, retry: true, locale: coordinator.activeLocale)
+    }
+
+    /// Executes a resolved music-slot answer (§12.5, FR-MTC-006):
+    /// resolution first (the funnel clears the frame and closes the
+    /// window), the two events, then the merge executes through the
+    /// pending command's own dispatch. Terminal for the turn — a consumed
+    /// answer never reaches the interpreter or the transcript cache
+    /// (FR-MTC-017).
+    private func executeDialogueAnswer(_ merge: DialogueMerge,
+                                       frame: DialogueFrame,
+                                       raw: String) -> RoutingResult {
+        coordinator?.resolveDialogueFrame(.answered(merge))
+        emitDialogueAnswer(capture: merge.capture, source: merge.source)
+        emitDialogueFrameResolved(.answered(merge))
+        dispatchDialogueMusicValue(merge.value, frame: frame, raw: raw)
+        return .unrecognised(transcript: raw)
+    }
+
+    /// The shared execution tail of the two music-value paths
+    /// (`executeDialogueAnswer`, `executeDialogueDefault`): a pending
+    /// interpreted music command merges the value into its `message` and
+    /// re-enters its own dispatch (every other field copied verbatim —
+    /// T-131's `merging`; the `.music` arm is terminal and cache-free);
+    /// a ladder frame fires the shipped music request directly. The
+    /// value is the user's own words or a catalog query — never model
+    /// text (the merge is deterministic, FR-MTC-006).
+    private func dispatchDialogueMusicValue(_ value: String,
+                                            frame: DialogueFrame,
+                                            raw: String) {
+        if let active = frame.activeCommand, active.action == .music {
+            dispatchInterpreted(active.merging(message: value), raw: raw)
+        } else {
+            fireMusicRequest(query: value)
+        }
+    }
+
+    /// Executes one candidate pick (§12.5) through the ladder arm that
+    /// owns the domain — "as if it had been understood" (ADR-MTC-07) —
+    /// resolution first, events after, then that arm's own seam. `index`
+    /// is 0-based (candidatePick's spoken position was decremented by the
+    /// interception block; the free-form claim arrives 0-based); a
+    /// non-nil `queryOverride` is the free-form claim's extracted value
+    /// (`.answered(capture: .freeText, source: .candidate)`), a nil one is
+    /// an enumerated pick (`.candidateSelected`).
+    ///
+    /// M-5 (security-design-review; the task's executor-bounds row): the
+    /// index is validated against the frame's candidate list BEFORE any
+    /// addressing. classify is total, so a hostile index cannot arrive
+    /// through `route()` — this guard exists so the executor is total too:
+    /// a crafted out-of-range index refuses with the honest exhausted
+    /// close (nothing addressed, nothing executed), never an out-of-range
+    /// read and never a crash. `internal` (not file-private) so the M-5
+    /// test can drive the hostile index directly; the interception block
+    /// is the only production caller.
+    @discardableResult
+    func executeDialogueCandidate(_ index: Int,
+                                  capture: CaptureForm,
+                                  queryOverride: String?,
+                                  frame: DialogueFrame,
+                                  raw: String) -> RoutingResult {
+        guard frame.candidates.indices.contains(index) else {
+            coordinator?.resolveDialogueFrame(.exhausted)
+            emitDialogueFrameResolved(.exhausted)
+            speak(key: "dialogue.exhausted")
+            return .unrecognised(transcript: raw)
+        }
+        let candidate = frame.candidates[index]
+        if let value = queryOverride {
+            let merge = DialogueMerge(value: value, capture: capture, source: .candidate)
+            coordinator?.resolveDialogueFrame(.answered(merge))
+            emitDialogueAnswer(capture: capture, source: .candidate)
+            emitDialogueFrameResolved(.answered(merge))
+        } else {
+            coordinator?.resolveDialogueFrame(.candidateSelected(index: index))
+            emitDialogueAnswer(capture: capture, source: .candidate)
+            emitDialogueFrameResolved(.candidateSelected(index: index))
+        }
+        switch candidate.domain {
+        case .news:
+            // C-2 (review-l2 F-2): the REAL relaxed news arm's hand-off
+            // (`:1210-1217`) mirrored — ack first, the reader owns every
+            // line from here; the strict stage (`:1131-1138`) is the same
+            // triplet. The relaxed stage's `intent_keyword_match`
+            // provenance event is stage-specific and deliberately not
+            // borrowed (no keyword rule fired here).
+            speakPreAck()
+            coordinator?.fireNewsReader()
+            emit(eventType: "news_reader_command", outcome: "success")
+        case .youtube:
+            // The strict YouTube stage's execution (`:1218-1221`): the
+            // builder guarantees an executable query for a youtube
+            // candidate (its executable-query rule); the guard is
+            // defensive totality.
+            guard let query = queryOverride ?? candidate.query else { break }
+            fireYouTubePlay(query: query)
+        case .music:
+            // A real query fires the shipped music arm; a degenerate
+            // pick chains a fresh slot-fill frame sequentially (§23's
+            // candidate intake).
+            fireMusicRequestOrProbe(
+                query: KeywordIntentRule.musicQueryOutcome(
+                    from: queryOverride ?? candidate.query ?? raw),
+                raw: raw,
+                intake: .candidate)
+        case .appLaunch:
+            // The relaxed app-launch arm's hand-off (`:1256-1264`): the
+            // returned line is the coordinator's (the confirmation
+            // question or the honest not-installed line); the caller only
+            // speaks what it is handed.
+            guard let appID = candidate.appID else { break }
+            if let line = coordinator?.requestAppLaunch(appID: appID, confidence: nil) {
+                coordinator?.noteGenericReply(line)
+                speak(text: line)
+            }
+        default:
+            // Not a framable domain — `DialogueCandidateBuilder` never
+            // produces these (defensive totality).
+            break
+        }
+        return .unrecognised(transcript: raw)
+    }
+
+    /// The attempt-cap close (§24; FR-MTC-007): a candidateChoice frame
+    /// closes honestly — `.exhausted`, the `dialogue.exhausted` line,
+    /// nothing executed (R3: executing an unasked candidate is the trap
+    /// FR-MTC-004/FR-MTC-010 forbid); a slotFill frame executes its
+    /// pending default instead (`.defaultExecuted`).
+    private func resolveDialogueExhaustion(frame: DialogueFrame, raw: String) -> RoutingResult {
+        switch frame.probeKind {
+        case .candidateChoice:
+            coordinator?.resolveDialogueFrame(.exhausted)
+            emitDialogueFrameResolved(.exhausted)
+            speak(key: "dialogue.exhausted")
+            return .unrecognised(transcript: raw)
+        case .correctionChoice:
+            // [CORRECTION-REVIVE] An exhausted correction question closes
+            // honestly like a candidate question — nothing executes
+            // unasked (the same R3 rule).
+            coordinator?.resolveDialogueFrame(.exhausted)
+            emitDialogueFrameResolved(.exhausted)
+            speak(key: "dialogue.exhausted")
+            return .unrecognised(transcript: raw)
+        case .slotFill:
+            return executeDialogueDefault(frame: frame, raw: raw)
+        }
+    }
+
+    /// The slotFill exhaustion default (§12.5/§24): resolve
+    /// `.defaultExecuted`, the two events, then the same dispatch an
+    /// answered frame uses, with the pending degenerate query as the
+    /// value (or the opening transcript when even that is absent —
+    /// `arm` guarantees one of the two exists for a live frame).
+    private func executeDialogueDefault(frame: DialogueFrame, raw: String) -> RoutingResult {
+        let value = frame.defaultQuery ?? frame.sourceTranscript
+        let merge = DialogueMerge(value: value, capture: .optionName, source: .defaultQuery)
+        coordinator?.resolveDialogueFrame(.defaultExecuted)
+        emitDialogueAnswer(capture: merge.capture, source: merge.source)
+        emitDialogueFrameResolved(.defaultExecuted)
+        dispatchDialogueMusicValue(value, frame: frame, raw: raw)
+        return .unrecognised(transcript: raw)
+    }
+
+    /// `dialogue_answer` for a consumed answer (§26): the closed
+    /// capture-form / merge-source vocabulary, count/enum only — never
+    /// the answer text, never the merged value.
+    private func emitDialogueAnswer(capture: CaptureForm, source: MergeSource) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "dialogue_answer",
+            durationMs: nil,
+            outcome: "success",
+            errorCode: nil,
+            metadata: [
+                "capture_form": capture.rawValue,
+                "merge_source": source.rawValue
+            ]
+        ))
+    }
+
+    /// `dialogue_frame_resolved` for the TURN-TIME resolutions the router
+    /// itself initiates (§26's component split: `command_router` for
+    /// answered/defaultExecuted/candidateSelected/exhausted/cancelled/
+    /// escaped/bargedIn; the coordinator's funnel emits the ones it owns
+    /// — timeout, emergency, supersession — with its own component). The
+    /// outcome rides both the event's outcome field and the `outcome`
+    /// metadata key §26 pins; the vocabulary is the closed ten-case enum,
+    /// mapped in one place.
+    private func emitDialogueFrameResolved(_ resolution: DialogueFrameResolution) {
+        let outcome: String
+        switch resolution {
+        case .answered: outcome = "answered"
+        case .defaultExecuted: outcome = "defaultExecuted"
+        case .candidateSelected: outcome = "candidateSelected"
+        case .correctionSelected: outcome = "correctionSelected"
+        case .exhausted: outcome = "exhausted"
+        case .cancelled: outcome = "cancelled"
+        case .escaped: outcome = "escaped"
+        case .bargedIn: outcome = "bargedIn"
+        case .timedOut: outcome = "timedOut"
+        case .superseded: outcome = "superseded"
+        case .emergency: outcome = "emergency"
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "dialogue_frame_resolved",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: ["outcome": outcome]
+        ))
+    }
+
+    /// One music turn, state machine B (§10) through to execution. The
+    /// turn writes at most one `.spotify` tool-log entry and speaks
+    /// exactly one outcome line (plus the pre-ack) on every branch.
+    @MainActor
+    private func runMusicTurn(query: String, locale: Locale, startedAt: Date) async {
+        let linked = spotifyAccountSession?.isLinked ?? false
+        let product = spotifyAccountSession?.product ?? .unknown
+        let transport = spotifyTransport
+        let youtubeServeable = musicYouTubeServeable
+        let searchOpenerPresent = spotifyLinkOpener != nil
+        let youtubePrefetch: (apiKey: String, transport: LocalToolTransport)? = {
+            guard musicYouTubeKeyed,
+                  let apiKey = youtubeConfigStore?.apiKey,
+                  let youtubeTransport else { return nil }
+            return (apiKey, youtubeTransport)
+        }()
+
+        var effectiveLinked = linked
+        // A linked account's turn always writes the turn entry (the
+        // matrix's linked rows 1–7 and row 11); the unlinked treatment
+        // writes one only when its own search hand-off attempts a link.
+        var entryRequired = linked
+        var token: String?
+        var search: Result<SpotifyTool.TrackResult, SpotifyTool.FetchError>?
+        var searchStatus: Int?
+
+        if linked, let transport {
+            let tokenResult = await spotifyAccountSession?.validAccessToken()
+            switch tokenResult {
+            case .success(let value):
+                token = value
+                let found = await performMusicSearch(query: query, token: value,
+                                                     transport: transport,
+                                                     youtubePrefetch: youtubePrefetch)
+                search = found.result
+                searchStatus = found.statusCode
+                // §28's `spotify_search` vocabulary — emitted uniformly
+                // whenever a search actually ran (the matrix rows that
+                // list it read as highlights of the rows' distinctive
+                // events, not an exhaustive log; "emit the event pair" in
+                // the turn flow presumes it on every searched turn).
+                switch found.result {
+                case .success:
+                    emitSpotify(eventType: "spotify_search", outcome: "usable",
+                                durationMs: nil, errorCode: nil)
+                case .failure(.noResults):
+                    emitSpotify(eventType: "spotify_search", outcome: "empty",
+                                durationMs: nil, errorCode: nil)
+                case .failure:
+                    emitSpotify(eventType: "spotify_search", outcome: "failed",
+                                durationMs: nil, errorCode: nil)
+                }
+            case .failure(.revoked):
+                // Row 10: the session wiped itself on the provider's
+                // `invalid_grant` (its `spotify_unlink` revoked event is
+                // the session's to emit). The turn is an unlinked turn;
+                // none of its own attempts happened.
+                effectiveLinked = false
+                entryRequired = false
+            case .failure, .none:
+                // Row 11: the record was kept (transport / refresh /
+                // store failure) — the search-failure shape. The matrix
+                // mandates the `.spotify` fail entry for this row even
+                // though no search ran; there is no HTTP status.
+                await executeMusicTurn(Self.selectMusicOutcome(spotifyLinked: true,
+                                                               spotifyTransportPresent: true,
+                                                               search: nil,
+                                                               product: product,
+                                                               deepLinkCapable: false,
+                                                               youtubeServeable: youtubeServeable,
+                                                               spotifySearchOpenerPresent: searchOpenerPresent),
+                                       query: query, locale: locale, startedAt: startedAt,
+                                       token: nil, transport: nil, searchStatus: nil,
+                                       entryRequired: true)
+                return
+            }
+        }
+        // (linked && transport == nil falls straight to the selection:
+        // §28 names the row-7 branch for it; §10B's askability wording
+        // would say unlinked — §28's ordered conditions win, recorded in
+        // the task notes.)
+
+        // §13's `spotifyDeepLinkCapable`: the opener seam exists AND the
+        // platform probe accepts the resolved track URI. Probed only
+        // where it can matter (the non-premium branch); premium selection
+        // never consults it.
+        var deepLinkCapable = false
+        if effectiveLinked, product != .premium,
+           case .success(let track)? = search,
+           let uri = SpotifyTool.trackURI(id: track.id),
+           let opener = spotifyLinkOpener {
+            deepLinkCapable = opener.canOpenURL(uri)
+        }
+
+        let outcome = Self.selectMusicOutcome(spotifyLinked: effectiveLinked,
+                                              spotifyTransportPresent: transport != nil,
+                                              search: search,
+                                              product: product,
+                                              deepLinkCapable: deepLinkCapable,
+                                              youtubeServeable: youtubeServeable,
+                                              spotifySearchOpenerPresent: searchOpenerPresent)
+        await executeMusicTurn(outcome, query: query, locale: locale, startedAt: startedAt,
+                               token: token, transport: transport, searchStatus: searchStatus,
+                               entryRequired: entryRequired)
+    }
+
+    /// The Spotify search phase with the §13 row-1 concurrency: when the
+    /// YouTube path is keyed, both fetches are fired together and joined
+    /// (NFR-SP-001: bounded by the larger provider budget, never the
+    /// sum). Returns the search verdict plus the HTTP status the turn
+    /// should record (the matrix's `statusCode` conventions: 200 for a
+    /// 2xx search, the failure status when the provider answered one).
+    private func performMusicSearch(query: String, token: String,
+                                    transport: LocalToolTransport,
+                                    youtubePrefetch: (apiKey: String, transport: LocalToolTransport)?)
+        async -> (result: Result<SpotifyTool.TrackResult, SpotifyTool.FetchError>, statusCode: Int?) {
+        let fetched: Result<SpotifyTool.TrackResult, SpotifyTool.FetchError>
+        if let youtubePrefetch {
+            async let spotifyLeg = fetchSpotifyResult(query: query, token: token,
+                                                      transport: transport)
+            async let youtubeLeg: Void = prefetchYouTubeLeg(query: query,
+                                                            apiKey: youtubePrefetch.apiKey,
+                                                            transport: youtubePrefetch.transport)
+            let (spotifyResult, _) = await (spotifyLeg, youtubeLeg)
+            fetched = spotifyResult
+        } else {
+            fetched = await fetchSpotifyResult(query: query, token: token, transport: transport)
+        }
+        switch fetched {
+        case .success:
+            return (fetched, 200)
+        case .failure(.noResults):
+            // 2xx with zero tracks (row 6's status convention).
+            return (fetched, 200)
+        case .failure(.invalidResponse(let statusCode)):
+            return (fetched, statusCode)
+        case .failure:
+            return (fetched, nil)
+        }
+    }
+
+    /// One Spotify search attempt, classified into the tool's closed
+    /// error vocabulary — exactly one request (the tool owns that
+    /// discipline).
+    private func fetchSpotifyResult(query: String, token: String,
+                                    transport: LocalToolTransport) async
+        -> Result<SpotifyTool.TrackResult, SpotifyTool.FetchError> {
+        do {
+            let track = try await SpotifyTool.fetchTopTrack(query: query,
+                                                            accessToken: token,
+                                                            transport: transport)
+            return .success(track)
+        } catch let error as SpotifyTool.FetchError {
+            return .failure(error)
+        } catch {
+            // `fetchTopTrack` only throws `FetchError`; anything else is
+            // a transport anomaly (row 7).
+            return .failure(.transportUnavailable)
+        }
+    }
+
+    /// L2-R1: the concurrent YouTube leg runs only on the keyed fetch
+    /// path, and its result is never consumed — when Spotify cannot
+    /// serve, the turn falls back through `fireYouTubePlay` verbatim
+    /// (ADR-SP-06), so the pre-fetched page can never change what is
+    /// opened or spoken. Errors are swallowed; the fallback's own call
+    /// owns every failure line. The keyless path is NOT pre-opened.
+    private func prefetchYouTubeLeg(query: String, apiKey: String,
+                                    transport: LocalToolTransport) async {
+        _ = try? await YouTubeTool.fetchTopResult(query: query, apiKey: apiKey,
+                                                  transport: transport)
+    }
+
+    /// Executes the selection's outcome. Every branch reaches exactly
+    /// one spoken outcome line (plus the pre-ack) before returning.
+    @MainActor
+    private func executeMusicTurn(_ outcome: MusicOutcome, query: String, locale: Locale,
+                                  startedAt: Date, token: String?,
+                                  transport: LocalToolTransport?, searchStatus: Int?,
+                                  entryRequired: Bool) async {
+        switch outcome {
+        case .spotifyRemote(let track):
+            guard let token, let transport else {
+                // Defensive: the selection yields remote only with a
+                // token and transport in hand. The honest terminal beats
+                // a crash.
+                deliverMusicLine(locale: locale, key: "spotify.appMissing",
+                                 statusCode: searchStatus, outcome: "app_missing",
+                                 startedAt: startedAt)
+                return
+            }
+            await executeRemoteMusicPlay(track: track, query: query, token: token,
+                                         transport: transport, locale: locale,
+                                         startedAt: startedAt, searchStatus: searchStatus)
+        case .spotifyDeepLink(let track):
+            executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                 playStatus: nil, playFailed: false,
+                                 searchStatus: searchStatus)
+        case .spotifySearchHandoff:
+            executeMusicSearchHandoff(query: query, locale: locale, startedAt: startedAt)
+        case .youtube:
+            deliverYouTubeFallback(query: query, locale: locale, startedAt: startedAt,
+                                   statusCode: searchStatus, writeEntry: entryRequired)
+        case .honestLine(let key):
+            if entryRequired {
+                deliverMusicLine(locale: locale, key: key, statusCode: searchStatus,
+                                 outcome: Self.musicFallbackOutcome(forKey: key),
+                                 startedAt: startedAt)
+            } else {
+                // Rows 9/10/12: nothing was attempted — the fallback
+                // event and the honest line, no tool-log entry (the
+                // matrix rows' "none").
+                emitSpotify(eventType: "spotify_fallback",
+                            outcome: Self.musicFallbackOutcome(forKey: key),
+                            durationMs: nil, errorCode: nil)
+                speakWithVisibleOutcome(key: key)
+            }
+        }
+    }
+
+    /// The remote-play leg (rows 1/2, §10B): one attempt; a 401 triggers
+    /// exactly one forced token acquisition and one retry; a second 401
+    /// wipes through the session (`markRevoked` — §26 names this
+    /// "the router's second-401 path") and takes the unlinked treatment
+    /// (row 10). Every other failure falls to the deep link (row 2) —
+    /// never to a second play attempt.
+    @MainActor
+    private func executeRemoteMusicPlay(track: SpotifyTool.TrackResult, query: String,
+                                        token: String, transport: LocalToolTransport,
+                                        locale: Locale, startedAt: Date,
+                                        searchStatus: Int?) async {
+        guard let uri = SpotifyTool.trackURI(id: track.id) else {
+            // Defensive: a validated `TrackResult` always builds a URI;
+            // if it ever did not, the honest app-absent terminal is the
+            // answer.
+            deliverMusicLine(locale: locale, key: "spotify.appMissing",
+                             statusCode: searchStatus, outcome: "app_missing",
+                             startedAt: startedAt)
+            return
+        }
+
+        var failure: SpotifyTool.PlayError
+        do {
+            try await SpotifyTool.playTrack(uri: uri, accessToken: token, transport: transport)
+            deliverRemoteMusicSuccess(track: track, locale: locale, startedAt: startedAt)
+            return
+        } catch let error as SpotifyTool.PlayError {
+            failure = error
+        } catch {
+            // `playTrack` only throws `PlayError`; anything else is a
+            // transport anomaly (row 2's network leg).
+            failure = .transportUnavailable
+        }
+        emitSpotify(eventType: "spotify_play", outcome: Self.spotifyPlayOutcome(failure),
+                    durationMs: nil, errorCode: nil)
+
+        if case .unauthorized = failure {
+            guard let session = spotifyAccountSession else {
+                executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                     playStatus: Self.spotifyPlayStatus(failure),
+                                     playFailed: true, searchStatus: searchStatus)
+                return
+            }
+            switch await session.validAccessToken() {
+            case .success(let refreshedToken):
+                do {
+                    try await SpotifyTool.playTrack(uri: uri, accessToken: refreshedToken,
+                                                    transport: transport)
+                    deliverRemoteMusicSuccess(track: track, locale: locale,
+                                              startedAt: startedAt)
+                    return
+                } catch let retryError as SpotifyTool.PlayError {
+                    emitSpotify(eventType: "spotify_play",
+                                outcome: Self.spotifyPlayOutcome(retryError),
+                                durationMs: nil, errorCode: nil)
+                    if case .unauthorized = retryError {
+                        // §10B: the second 401 is the provider's
+                        // definitive rejection — wipe (the session emits
+                        // `spotify_unlink` revoked) and take the unlinked
+                        // treatment.
+                        _ = await session.markRevoked()
+                        await deliverUnlinkedMusicTreatment(query: query, locale: locale,
+                                                            startedAt: startedAt)
+                        return
+                    }
+                    executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                         playStatus: Self.spotifyPlayStatus(retryError),
+                                         playFailed: true, searchStatus: searchStatus)
+                    return
+                } catch {
+                    emitSpotify(eventType: "spotify_play", outcome: "network_failed",
+                                durationMs: nil, errorCode: nil)
+                    executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                         playStatus: nil, playFailed: true,
+                                         searchStatus: searchStatus)
+                    return
+                }
+            case .failure(.revoked):
+                // The refresh itself was rejected: the session already
+                // wiped (and emitted) — the turn is unlinked (row 10).
+                await deliverUnlinkedMusicTreatment(query: query, locale: locale,
+                                                    startedAt: startedAt)
+                return
+            case .failure:
+                // No new token could be obtained honestly (transport /
+                // refresh / store failure): no second play attempt is
+                // possible — the deep link replaces it (row 2's shape),
+                // never a futile retry with a rejected token.
+                executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                     playStatus: Self.spotifyPlayStatus(failure),
+                                     playFailed: true, searchStatus: searchStatus)
+                return
+            }
+        }
+
+        executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                             playStatus: Self.spotifyPlayStatus(failure),
+                             playFailed: true, searchStatus: searchStatus)
+    }
+
+    /// Row 1's success delivery: the honest confirmation with the
+    /// provider's track name — SPOKEN ONLY (never carded, never logged,
+    /// never an event field; NFR-SP-002) — and the turn's `ok` entry
+    /// (204, empty query/response by the §21 contract).
+    private func deliverRemoteMusicSuccess(track: SpotifyTool.TrackResult, locale: Locale,
+                                           startedAt: Date) {
+        emitSpotify(eventType: "spotify_play", outcome: "ok", durationMs: nil, errorCode: nil)
+        speak(text: L10n.fmt("spotify.playing", locale: locale, track.title), locale: locale)
+        logToolRequest(kind: .spotify, query: "", response: "", outcome: "ok",
+                       statusCode: 204,
+                       durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    /// The deep-link leg (rows 2/3/4/5): probe and open `spotify:track:`
+    /// through the opener seam. `playFailed` marks a fallback that
+    /// followed a failed remote attempt — its verdict (row 2's `fail`)
+    /// and status survive into the entry; a clean free-tier hand-off is
+    /// row 3's `ok`/nil. A not-opened attempt is row 5's terminal: the
+    /// deeplink event is the turn's last observable, no chaining, and
+    /// the honest line is the entry's response.
+    @MainActor
+    private func executeMusicDeepLink(track: SpotifyTool.TrackResult, locale: Locale,
+                                      startedAt: Date, playStatus: Int?, playFailed: Bool,
+                                      searchStatus: Int?) {
+        guard let uri = SpotifyTool.trackURI(id: track.id) else {
+            deliverMusicLine(locale: locale, key: "spotify.appMissing",
+                             statusCode: playStatus ?? searchStatus,
+                             outcome: "app_missing", startedAt: startedAt)
+            return
+        }
+        guard let opener = spotifyLinkOpener else {
+            // No opener seam: nothing can be attempted (no deeplink
+            // event — the vocabulary counts attempts), the honest
+            // terminal is the entry's response.
+            emitSpotify(eventType: "spotify_fallback", outcome: "app_missing",
+                        durationMs: nil, errorCode: nil)
+            speakWithVisibleOutcome(key: "spotify.appMissing")
+            logToolRequest(kind: .spotify, query: "",
+                           response: L10n.str("spotify.appMissing", locale: locale),
+                           outcome: "fail",
+                           statusCode: playStatus ?? searchStatus,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+            return
+        }
+        switch SpotifyTool.open(uri, opener: opener) {
+        case .opened:
+            emitSpotify(eventType: "spotify_deeplink", outcome: "opened",
+                        durationMs: nil, errorCode: nil)
+            // Hand-off line: spoken only — the app itself shows what
+            // happens next (the `youtube.openingSearch` precedent).
+            speak(text: L10n.str("spotify.openApp", locale: locale), locale: locale)
+            logToolRequest(kind: .spotify, query: "", response: "",
+                           outcome: playFailed ? "fail" : "ok",
+                           statusCode: playFailed ? playStatus : nil,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+        case .notOpened:
+            emitSpotify(eventType: "spotify_deeplink", outcome: "not_opened",
+                        durationMs: nil, errorCode: nil)
+            speakWithVisibleOutcome(key: "spotify.appMissing")
+            logToolRequest(kind: .spotify, query: "",
+                           response: L10n.str("spotify.appMissing", locale: locale),
+                           outcome: "fail",
+                           statusCode: playFailed ? playStatus : searchStatus,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+        }
+    }
+
+    /// Row 8's search hand-off: unlinked, no YouTube leg, an opener
+    /// present — hand the query to the app's own search. An opened
+    /// hand-off is `ok` with no HTTP status (§21); a not-opened attempt
+    /// is the terminal not-linked line (its deeplink event marks it; no
+    /// fallback event — same no-chaining shape as row 5).
+    @MainActor
+    private func executeMusicSearchHandoff(query: String, locale: Locale, startedAt: Date) {
+        guard let opener = spotifyLinkOpener, let uri = SpotifyTool.searchURI(query: query) else {
+            // Defensive: the selection offers the hand-off only with the
+            // opener seam present; an unbuildable URI (empty/over-cap)
+            // degrades to the same honest line — no attempt, no entry.
+            emitSpotify(eventType: "spotify_fallback", outcome: "not_linked",
+                        durationMs: nil, errorCode: nil)
+            speakWithVisibleOutcome(key: "spotify.notLinked")
+            return
+        }
+        switch SpotifyTool.open(uri, opener: opener) {
+        case .opened:
+            emitSpotify(eventType: "spotify_deeplink", outcome: "opened",
+                        durationMs: nil, errorCode: nil)
+            speak(text: L10n.str("spotify.openSearch", locale: locale), locale: locale)
+            logToolRequest(kind: .spotify, query: "", response: "", outcome: "ok",
+                           statusCode: nil,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+        case .notOpened:
+            emitSpotify(eventType: "spotify_deeplink", outcome: "not_opened",
+                        durationMs: nil, errorCode: nil)
+            speakWithVisibleOutcome(key: "spotify.notLinked")
+            logToolRequest(kind: .spotify, query: "",
+                           response: L10n.str("spotify.notLinked", locale: locale),
+                           outcome: "fail", statusCode: nil,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+        }
+    }
+
+    /// The unlinked treatment rows 8/10/12 share: YouTube where it can
+    /// serve, else the search hand-off where an opener exists, else the
+    /// honest not-linked line. No `.spotify` entry of its own — only the
+    /// hand-off leg's attempt writes one (row 8's "only if a Spotify
+    /// attempt happened").
+    @MainActor
+    private func deliverUnlinkedMusicTreatment(query: String, locale: Locale,
+                                               startedAt: Date) async {
+        let outcome = Self.selectMusicOutcome(spotifyLinked: false,
+                                              spotifyTransportPresent: false,
+                                              search: nil,
+                                              product: .unknown,
+                                              deepLinkCapable: false,
+                                              youtubeServeable: musicYouTubeServeable,
+                                              spotifySearchOpenerPresent: spotifyLinkOpener != nil)
+        await executeMusicTurn(outcome, query: query, locale: locale, startedAt: startedAt,
+                               token: nil, transport: nil, searchStatus: nil,
+                               entryRequired: false)
+    }
+
+    /// §13's fallback contract: the `spotify_fallback` marker first, the
+    /// YouTube helper VERBATIM (ADR-SP-06 — the query-free projection
+    /// keeps the music query out of the tool log; [T-114][M-1]), then
+    /// the turn's own `.spotify` fail entry when a Spotify attempt
+    /// happened.
+    private func deliverYouTubeFallback(query: String, locale: Locale, startedAt: Date,
+                                        statusCode: Int?, writeEntry: Bool) {
+        emitSpotify(eventType: "spotify_fallback", outcome: "youtube",
+                    durationMs: nil, errorCode: nil)
+        fireYouTubePlay(query: query, logProjection: .queryFree)
+        guard writeEntry else { return }
+        logToolRequest(kind: .spotify, query: "", response: "", outcome: "fail",
+                       statusCode: statusCode,
+                       durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    /// The static-line delivery (§28's signature): the fallback event
+    /// with the key's closed outcome, the localized line made visible
+    /// (the honest lines are cards, the `deliverYouTubeFailure`
+    /// precedent), and the turn's `.spotify` fail entry carrying the
+    /// exact line the user heard — never a query, title, id or token.
+    private func deliverMusicLine(locale: Locale, key: String, statusCode: Int?,
+                                  outcome: String, startedAt: Date) {
+        emitSpotify(eventType: "spotify_fallback", outcome: outcome,
+                    durationMs: nil, errorCode: nil)
+        speakWithVisibleOutcome(key: key)
+        logToolRequest(kind: .spotify, query: "",
+                       response: L10n.str(key, locale: locale), outcome: "fail",
+                       statusCode: statusCode,
+                       durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    /// §28's closed event vocabulary, component `spotify`, `metadata: [:]`
+    /// on every event — no query, title, id or token can reach the bus.
+    private func emitSpotify(eventType: String, outcome: String,
+                             durationMs: Int?, errorCode: String?) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "spotify",
+            eventType: eventType,
+            durationMs: durationMs,
+            outcome: outcome,
+            errorCode: errorCode,
+            metadata: [:]
+        ))
+    }
+
+    /// `PlayError` → §28's closed `spotify_play` outcome set.
+    private static func spotifyPlayOutcome(_ error: SpotifyTool.PlayError) -> String {
+        switch error {
+        case .premiumRequired: return "premium_required"
+        case .restricted: return "restricted"
+        case .noActiveDevice: return "no_active_device"
+        case .unauthorized: return "unauthorized"
+        case .invalidResponse, .timedOut, .transportUnavailable, .invalidURI:
+            return "network_failed"
+        }
+    }
+
+    /// `PlayError` → the HTTP status the turn's entry records (the
+    /// matrix's 403/404/nil pair plus the general "from the last HTTP
+    /// response when one exists"); timeouts and transport failures carry
+    /// no status.
+    private static func spotifyPlayStatus(_ error: SpotifyTool.PlayError) -> Int? {
+        switch error {
+        case .premiumRequired, .restricted: return 403
+        case .noActiveDevice: return 404
+        case .unauthorized: return 401
+        case .invalidResponse(let statusCode): return statusCode
+        case .timedOut, .transportUnavailable, .invalidURI: return nil
+        }
+    }
+
+    /// Honest-line L10n key → §28's closed `spotify_fallback` outcome
+    /// set.
+    private static func musicFallbackOutcome(forKey key: String) -> String {
+        switch key {
+        case "spotify.notFound": return "not_found"
+        case "spotify.unavailable": return "unavailable"
+        case "spotify.notLinked": return "not_linked"
+        case "spotify.appMissing": return "app_missing"
+        default: return "unavailable"
+        }
     }
 
     // MARK: - [TOOL-DEBUG-LOG] Local-tool request log
@@ -2204,13 +4727,32 @@ final class CommandRouter {
     /// interpretation at a time (VoicePipeline serialises utterances).
     private var pendingTranscript: String?
 
+    /// [CORRECTION-REVIVE] The correction question's turn-scoped budget
+    /// (`DialogueConfig.maxCorrectionProbes`): reset at every `route`
+    /// entry, consumed when a correction frame is armed OR a judged
+    /// re-route fires — so a re-route can never arm a second correction
+    /// frame (the recursion bound). In-memory only.
+    private var correctionProbeConsumed = false
+
+    /// [CORRECTION-CONFLICT] The interpreted command deferred behind a
+    /// correction question: "होइन" dispatches it verbatim, a pick
+    /// abandons it in favour of the re-route. Turn-scoped; cleared at
+    /// fresh-turn entry and on every resolution.
+    private var pendingCorrectionCommand: (command: InterpretedCommand,
+                                           raw: String)?
+
     /// [NO-GIBBERISH] (2026-09-07) Clock seam for the deterministic
     /// time/date pre-answers (`TopicPreAnswer` reads the current time from
     /// this) — injectable so router tests can pin the exact spoken
     /// sentence without depending on the wall clock.
     var clock: () -> Date = { Date() }
 
-    private func dispatchInterpreted(_ command: InterpretedCommand) {
+    private func dispatchInterpreted(_ command: InterpretedCommand, raw: String) {
+        // [CNR T-174] A fresh dispatch: no earlier turn's chat escalation
+        // can still defer THIS turn's commit (the hop that issued one
+        // already resolved its own turn; this reset is the recursion
+        // bound the turn-scoped flag rests on).
+        chatEscalationInFlight = false
         switch command.action {
         case .ackMed:
             // [NO-GIBBERISH] (2026-09-07) The model's ack text is flavor
@@ -2219,22 +4761,55 @@ final class CommandRouter {
             // no-override path already speaks (router.confirmationYes),
             // and emits `llama_response_rejected_sanity`. The raw text
             // never reaches the speaker.
-            handleMedicationAcknowledgement(replyOverride: sanitisedModelReply(command.reply))
+            handleMedicationAcknowledgement(transcript: raw,
+                                            replyOverride: sanitisedModelReply(command.reply))
         case .emergency:
             emit(eventType: "command_emergency", outcome: "success")
             handleEmergency()
         case .call:
-            handleCall(command)
+            handleCall(command, raw: raw)
         case .setReminder:
-            handleSetReminder(command)
+            handleSetReminder(command, raw: raw)
         case .healthQuery:
             // First-class stub intent — honest "not yet" (spec §5.1).
             emit(eventType: "command_health_query_stub", outcome: "info")
             speakWithVisibleOutcome(key: "router.healthNotAvailable")
         case .music:
-            // First-class stub intent (spec §5.1).
-            emit(eventType: "command_music_stub", outcome: "info")
-            speakWithVisibleOutcome(key: "router.musicStub")
+            // [SPOTIFY] (2026-10-07) T-116: the model-resolved music
+            // intent routes to the same music path the ladder stage
+            // uses. The stub dies here — `command_music_stub` and
+            // `router.musicStub` have no reachable emission left
+            // (ADR-SP-11 keeps the catalog key, unreachable).
+            //
+            // The frozen 12-action grammar carries no query slot for
+            // this action, so the §13 order
+            // (`interpretedQuery ?? musicQuery ?? transcript`) reads
+            // against this repo's `InterpretedCommand` shape: the
+            // command's free-text `message` entity is the model's query
+            // when it set one, else the deterministic extractor, else
+            // the raw transcript.
+            let modelQuery = command.message?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let interpretedQuery = (modelQuery?.isEmpty == false) ? modelQuery : nil
+            if let interpretedQuery {
+                // The model set its own query — exactly today's request.
+                fireMusicRequest(query: interpretedQuery)
+            } else {
+                // [MTC-T134] interpreted-degenerate (design-l2 §12.4 edit
+                // 4; §23's interpreted intake): the model set no
+                // `message`, so the deterministic extractor reads the
+                // transcript — a degenerate reading opens the slot-fill
+                // probe instead of searching the fallback token, a
+                // content reading fires the identical blind request
+                // (byte-identity, NFR-MTC-012). The arrived command rides
+                // the frame as `activeCommand` (L2-D13) so an answer
+                // merges back into its own dispatch.
+                fireMusicRequestOrProbe(
+                    query: KeywordIntentRule.musicQueryOutcome(from: raw),
+                    raw: raw,
+                    intake: .interpreted,
+                    activeCommand: command)
+            }
         case .sendMessage:
             handleSendMessage(command)
         case .guide:
@@ -2242,7 +4817,7 @@ final class CommandRouter {
         case .createCalendarEvent:
             // [CALENDAR-EVENTS] (2026-09-13) Real executor — splits off
             // the stub this action shared with `suggest_video`.
-            handleCreateCalendarEvent(command)
+            handleCreateCalendarEvent(command, raw: raw)
         case .suggestVideo:
             // Honest not-yet stub (spec §7.3): the video executor lands
             // with the video phase — never pretend a video was queued.
@@ -2251,6 +4826,62 @@ final class CommandRouter {
         case .query:
             emit(eventType: "command_llm_query", outcome: "info")
             deliverModelReply(command.reply)
+        case .chat:
+            // [CHAT] Stage 1 of the conversational-augmentation plan
+            // (2026-09-23): a free-text conversational reply — a greeting,
+            // thanks, a farewell, small talk. It rides the SAME
+            // spoken-answer surface a `query` answer uses, through the
+            // same sanity gate (`deliverModelReply` → `sanitisedModelReply`
+            // → `speakWithVisibleOutcome` on rejection), so chat text gets
+            // exactly the sanitisation and abuse-gate every model answer
+            // gets.
+            //
+            // Nothing executes here, and the wiring is what makes that
+            // structural rather than a promise: the chat decode carries no
+            // slots (`LlamaGrammar.chatJSONSchema`), the intent cache
+            // refuses the action (`IntentCommandCache.isCacheable`), and
+            // the tier is free (`ConfirmationTier`). The event is distinct
+            // from `command_llm_query` so the field can tell a chat turn
+            // from an answered question.
+            //
+            // [CHAT-CONFIDENCE-FLOOR] The decoded object's own
+            // `confidence`, checked BEFORE a word of the model's text can
+            // be spoken: below the floor (see `chatConfidenceFloor`) the
+            // brain has told us it is guessing, and a guess spoken in the
+            // assistant's voice is worse than an admitted gap — so the
+            // honest line is spoken instead, the model's text never
+            // reaches the speaker or the card, and the turn is observable
+            // (`chatLowConfidence`, with both numbers in metadata). At or
+            // above the floor the reply is delivered exactly like a
+            // `query` answer, sanity gate included.
+            guard command.confidence >= chatConfidenceFloor else {
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "command_router",
+                    eventType: "chatLowConfidence",
+                    durationMs: nil,
+                    outcome: "info",
+                    errorCode: nil,
+                    metadata: ["confidence": String(format: "%.2f", command.confidence),
+                               "floor": String(format: "%.2f", chatConfidenceFloor)]))
+                speakWithVisibleOutcome(key: "router.chatLowConfidence")
+                return
+            }
+            emit(eventType: "command_llm_chat", outcome: "info")
+            // [CNR T-174 / FR-CNR-005, FR-CNR-006] The grammar guard wraps
+            // the DELIVERY sequence at this one case (design-l1 §7.1/§7.3):
+            // the verdict is computed AFTER the polisher's candidate text
+            // (inside `deliverGuardedChatReply` → `polishedModelReply` —
+            // the single polish call site, not duplicated) and BEFORE a
+            // word is spoken, over the exact text that would be spoken. A
+            // flag resolves honestly — escalate once when the local shape
+            // flagged and the routing decision allows cloud, otherwise the
+            // localized safe template — and the flagged text is never
+            // spoken. Both local and cloud chat replies arrive at this one
+            // case, so "every chat reply passes the guard" holds
+            // structurally; `raw` is the turn's transcript, in scope here
+            // precisely so the escalation can issue the cloud chat call
+            // for the same turn.
+            deliverGuardedChatReply(command.reply, transcript: raw)
         case .none:
             emit(eventType: "command_llm_no_action", outcome: "info")
             deliverModelReply(command.reply)
@@ -2266,13 +4897,267 @@ final class CommandRouter {
     /// text never reaches the speaker or the visible card either way, and
     /// every rejection is observable
     /// (`llama_response_rejected_sanity`, reason in errorCode).
+    ///
+    /// [CNR T-174] The gate itself is `polishedModelReply` below — THE
+    /// single sanity + polish call site for model text, shared with the
+    /// guard-wrapped chat delivery (`deliverGuardedChatReply`), so the
+    /// guard's verdict is always computed over the exact post-polish text
+    /// that would be spoken (design-l1 §7.1/§7.2). This function's
+    /// behaviour is unchanged, byte for byte.
     private func deliverModelReply(_ text: String) {
-        if let safe = sanitisedModelReply(text) {
-            coordinator?.noteGenericReply(safe)
-            speak(text: safe)
+        if let polished = polishedModelReply(text) {
+            coordinator?.noteGenericReply(polished)
+            speak(text: polished)
         } else {
             speakWithVisibleOutcome(key: "router.modelReplyUnclear")
         }
+    }
+
+    /// [NO-GIBBERISH] + [REPLY-POLISH] The single delivery gate for model
+    /// text: the sanity gate first (gibberish is rejected as gibberish —
+    /// the rejection is observable), then the deterministic polisher —
+    /// whitespace, punctuation runs, enumeration artifacts, stutters,
+    /// spoken-form units (temperature tokens like "15°C"/"15c" become "15
+    /// degrees Celsius", see `SpokenUnits`) and the brevity ceiling —
+    /// before the text reaches a human ear, whichever model produced it.
+    /// The active locale picks the Nepali/English spoken convention.
+    /// Returns nil when the candidate must not be delivered (rejected, or
+    /// empty after polishing); the caller speaks the honest fallback.
+    ///
+    /// [CNR T-174] Extracted unchanged from `deliverModelReply` so the
+    /// chat path can compute its candidate text and run the guard over it
+    /// WITHOUT duplicating the polish call site (design-l1 §7.1: "the one
+    /// polish call site is not duplicated").
+    private func polishedModelReply(_ text: String) -> String? {
+        guard let safe = sanitisedModelReply(text) else { return nil }
+        let polished = SpokenReplyPolisher.polish(
+            safe, locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"))
+        return polished.isEmpty ? nil : polished
+    }
+
+    // MARK: - [CNR T-174] Guard flag resolution (design-l1 §7.1–§7.5)
+
+    /// [CNR T-174 / FR-CNR-005, FR-CNR-006] The chat dispatch's guarded
+    /// delivery — the guard call site (§7.1). Runs AFTER the confidence
+    /// floor (unchanged, above) and AFTER the polisher's candidate text is
+    /// computed, so the verdict is computed over the exact text that would
+    /// be spoken: brevity trimming happens first, so a trimmed-away clause
+    /// cannot flag and a surviving one does (§7.2).
+    ///
+    ///  - `.pass` → the polished text is spoken byte-identically (the
+    ///    guard changes nothing), observable with the `notApplicable`
+    ///    outcome;
+    ///  - `.flag` → the flagged text is NEVER spoken:
+    ///    `resolveFlaggedChatReply` escalates once when the reply came
+    ///    from the local shape and the routing decision allows cloud
+    ///    (§7.3), otherwise the localized safe template owns the turn;
+    ///  - `.unavailable` → today's behaviour stands (the polished text is
+    ///    spoken — a guard that is not running must never block or replace
+    ///    speech) and the event records `degraded`: "a guard that is not
+    ///    running is visible rather than silently absent", and an
+    ///    unverified reply is never reported as if it had been verified
+    ///    (§7.4; the reason vocabulary is T-169's closed set).
+    ///
+    /// A candidate the sanity gate rejects (or that polishes to empty) is
+    /// answered with the existing honest line and emits NO guard event:
+    /// nothing was deliverable, so there was nothing to verify — the
+    /// rejection itself is already observable
+    /// (`llama_response_rejected_sanity`).
+    private func deliverGuardedChatReply(_ text: String, transcript: String) {
+        guard let polished = polishedModelReply(text) else {
+            speakWithVisibleOutcome(key: "router.modelReplyUnclear")
+            return
+        }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let path = chatGuard.servingPath()
+        switch NepaliGrammarGuard.verdict(spokenText: polished, locale: locale.identifier) {
+        case .pass:
+            emitChatGuardEvent(path: path, classes: [], outcome: "notApplicable", attempts: 0)
+            coordinator?.noteGenericReply(polished)
+            speak(text: polished)
+        case .unavailable:
+            emitChatGuardEvent(path: path, classes: [], outcome: "degraded", attempts: 0)
+            coordinator?.noteGenericReply(polished)
+            speak(text: polished)
+        case .flag(let classes):
+            resolveFlaggedChatReply(classes, path: path, locale: locale, transcript: transcript)
+        }
+    }
+
+    /// [CNR T-174 / FR-CNR-006] §7.3's two outcomes for a flagged reply.
+    /// Escalate only when the flagged reply came from the LOCAL shape AND
+    /// `CloudChatRouting` yields cloud for this turn (the injected
+    /// `cloudAllowed` read) AND a cloud chat lane is wired; otherwise —
+    /// and for a flagged CLOUD reply, always (§7.3's documented
+    /// asymmetry: escalating a cloud reply back to the same cloud would
+    /// repeat the failure) — the safe template owns the turn.
+    ///
+    /// The escalation is ONE attempt (design §14): the turn's reply is
+    /// outstanding across the hop, so it is marked pending (the same hold
+    /// the interpreter round-trip uses, `markTurnReplyPending`) and the
+    /// dispatch completion's tail defers its own resolve while
+    /// `chatEscalationInFlight`; the hop's completion resolves. The
+    /// once-guard drops a second completion from a wiring that violates
+    /// the responder's exactly-once contract — the flagged turn can never
+    /// receive two replies.
+    private func resolveFlaggedChatReply(_ classes: [GrammarCheckClass],
+                                         path: ChatGuardSeam.ServingPath,
+                                         locale: Locale,
+                                         transcript: String) {
+        guard path == .onDevice,
+              chatGuard.cloudAllowed(),
+              let respondToChat = chatGuard.respondToChat else {
+            speakChatSafeTemplate(for: classes, path: path, locale: locale, attempts: 0)
+            return
+        }
+        markTurnReplyPending()
+        chatEscalationInFlight = true
+        var finished = false
+        respondToChat(transcript) { [weak self] command in
+            // The responder's contract: completion on the main queue. The
+            // hop normalizes that (and never runs inside the dispatch
+            // frame, so the tail below always sees the deferral first).
+            DispatchQueue.main.async {
+                guard !finished else { return }
+                finished = true
+                self?.finishChatGuardEscalation(command, flagged: classes,
+                                                path: path, locale: locale)
+            }
+        }
+    }
+
+    /// [CNR T-174 / FR-CNR-005 property 3, FR-CNR-006] The escalation
+    /// hop's completion: the cloud reply is itself run through the SAME
+    /// guard before speaking (FR-CNR-005: verify, never rewrite — a
+    /// second verification site, the same guard). Disposition:
+    ///
+    ///  - verify pass → the cloud reply is spoken, observable as
+    ///    `escalated` with the ORIGINAL flag's classes (the flag that
+    ///    justified the escalation — the story the event must tell);
+    ///  - verify flag → the safe template owns the turn, keyed by the
+    ///    escalation reply's own classes (they are what flagged now);
+    ///  - verify unavailable → §7.4 uniformly: today's behaviour (the
+    ///    readable reply is spoken) plus `degraded` with empty classes —
+    ///    never reported as verified;
+    ///  - nil (failure/timeout per the responder's contract), a
+    ///    non-`.chat` shape (a chat turn never executes), or a
+    ///    sanity/polish rejection → the safe template owns the turn.
+    ///
+    /// The flagged text never reaches the speaker on any path, and the
+    /// turn's reply-pending hold is resolved HERE, after the commit —
+    /// mirroring the interpreter dispatch completion, so the reply's
+    /// speech-start hop precedes the pipeline's deferred idle hop.
+    private func finishChatGuardEscalation(_ command: InterpretedCommand?,
+                                           flagged classes: [GrammarCheckClass],
+                                           path: ChatGuardSeam.ServingPath,
+                                           locale: Locale) {
+        chatEscalationInFlight = false
+        // The escalation reply, gated exactly like the local candidate
+        // (sanity → polish), and shape-checked: only a `.chat` result is
+        // a reply (T-168's contract; anything else is a failure).
+        let reply: String? = {
+            guard let command, command.action == .chat else { return nil }
+            return polishedModelReply(command.reply)
+        }()
+        var spoken: String?
+        var eventClasses = classes
+        var outcome = "safeTemplate"
+        if let reply {
+            switch NepaliGrammarGuard.verdict(spokenText: reply, locale: locale.identifier) {
+            case .pass:
+                spoken = reply
+                outcome = "escalated"
+            case .flag(let reflagged):
+                eventClasses = reflagged
+            case .unavailable:
+                spoken = reply
+                eventClasses = []
+                outcome = "degraded"
+            }
+        }
+        if let spoken {
+            emitChatGuardEvent(path: path, classes: eventClasses,
+                               outcome: outcome, attempts: 1)
+            coordinator?.noteGenericReply(spoken)
+            speak(text: spoken)
+        } else {
+            speakChatSafeTemplate(for: eventClasses, path: path,
+                                  locale: locale, attempts: 1)
+        }
+        resolveTurnReplyPending()
+        // [TURN-TIMING] The escalation resolved the turn — the tracer
+        // finalizes now or once the reply speech finishes.
+        turnTracer?.endTurn()
+    }
+
+    /// [CNR T-174 / FR-CNR-006] §7.3 outcome (2): the localised safe
+    /// template — deterministic selection keyed by the flagging classes
+    /// (T-171's `L10n.safeTemplate(forCheckClasses:)`: the first known
+    /// class wins, an unknown name drops to `generic`, so a flag with no
+    /// known class still answers), resolved in the active locale through
+    /// the catalogue. No copy lives in code: this site speaks only what
+    /// the catalogue carries, and the flagged text is never a fallback.
+    private func speakChatSafeTemplate(for classes: [GrammarCheckClass],
+                                       path: ChatGuardSeam.ServingPath,
+                                       locale: Locale,
+                                       attempts: Int) {
+        emitChatGuardEvent(path: path, classes: classes,
+                           outcome: "safeTemplate", attempts: attempts)
+        let template = L10n.safeTemplate(forCheckClasses: classes.map(\.rawValue))
+        let text = L10n.safeTemplate(template, locale: locale)
+        guard !text.isEmpty else {
+            // A catalogue miss (unreachable with the shipped catalogue —
+            // `L10nCatalogCoverageTests` pins every template in en + ne)
+            // must still answer the turn: the existing honest line, never
+            // silence, never the flagged text.
+            speakWithVisibleOutcome(key: "router.modelReplyUnclear")
+            return
+        }
+        coordinator?.noteGenericReply(text)
+        speak(text: text, locale: locale)
+    }
+
+    /// [CNR T-174 / FR-CNR-007, NFR-CNR-007] The content-free
+    /// `reply_grammar_flag` event (design-l1 §7.5) — the feature's only
+    /// telemetry, on the existing sanitising bus. The frozen field set,
+    /// mapped onto the bus's shipped vocabulary (the allow-list is the
+    /// authority — `LogSanitiser.allowedKeys`; T-185 gates this site
+    /// against it):
+    ///
+    ///  - event kind → `eventType` ("reply_grammar_flag");
+    ///  - serving path → metadata `origin` ("onDevice" / "cloud" — the
+    ///    closed `ServingPath` vocabulary; the design's `path`);
+    ///  - check classes → metadata `reason`, space-joined
+    ///    `GrammarCheckClass` raw values (the design's `check`; empty
+    ///    when nothing flagged — pass and degraded);
+    ///  - outcome → the `outcome` field ("notApplicable" / "escalated" /
+    ///    "safeTemplate" / "degraded");
+    ///  - counters → metadata `count`, the escalation-attempt count
+    ///    ("0"/"1" — the only counter this decision produces; design
+    ///    §14's one-attempt rule is visible in the event itself);
+    ///  - timestamps → the channel's own: `ConsoleObservabilityBus`
+    ///    stamps every line at emission, so no field here duplicates it.
+    ///
+    /// FORBIDDEN, ever (NFR-CNR-007): the transcript, the reply text,
+    /// identity, health values, contacts, profile content and key
+    /// material. Every value passed here is a closed token, a space-joined
+    /// closed vocabulary or a count — the unit suite asserts this
+    /// payload's key set exactly and scans this site for a
+    /// content-bearing field.
+    private func emitChatGuardEvent(path: ChatGuardSeam.ServingPath,
+                                    classes: [GrammarCheckClass],
+                                    outcome: String,
+                                    attempts: Int) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "reply_grammar_flag",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: ["origin": path.rawValue,
+                       "reason": classes.map(\.rawValue).joined(separator: " "),
+                       "count": String(attempts)]
+        ))
     }
 
     /// [NO-GIBBERISH] (2026-09-07) Sanity-gates model-generated text
@@ -2299,7 +5184,17 @@ final class CommandRouter {
     /// `set_reminder`: parse the spoken time expression, create the
     /// reminder via scheduler storage, and confirm with the time spoken
     /// back (spec §5.1, §5.2).
-    private func handleSetReminder(_ command: InterpretedCommand) {
+    private func handleSetReminder(_ command: InterpretedCommand, raw: String) {
+        // [SLOT-PROVENANCE] (2026-09-17) A time the transcript never
+        // contained is an invention (the "दशैँ कहिले हो" → fabricated
+        // १०:३० case). Treat it as missing and ask — the elder's real
+        // answer costs one extra line, a hallucinated reminder costs
+        // their trust.
+        guard TimeSlotProvenance.timeSlotIsDefensible(raw: raw, time: command.time) else {
+            emit(eventType: "command_set_reminder_time_fabricated", outcome: "info")
+            speak(key: "router.reminderNoTime")
+            return
+        }
         guard let timeString = command.time,
               let time = NepaliTimeParser.parse(timeString) else {
             emit(eventType: "command_set_reminder_no_time", outcome: "info")
@@ -2337,11 +5232,20 @@ final class CommandRouter {
     ///
     /// The `clock()` seam (not `Date()`) feeds "now", so the
     /// bare-time-rolls-to-tomorrow decision is deterministic under test.
-    private func handleCreateCalendarEvent(_ command: InterpretedCommand) {
+    private func handleCreateCalendarEvent(_ command: InterpretedCommand, raw: String) {
         guard let topic = command.topic?.trimmingCharacters(in: .whitespacesAndNewlines),
               !topic.isEmpty else {
             emit(eventType: "command_calendar_event_no_title", outcome: "info")
             speak(key: "router.calendarEventNoTitle")
+            return
+        }
+
+        // [SLOT-PROVENANCE] Same fabrication guard as set_reminder: a
+        // calendar event time the transcript never contained is an
+        // invention — ask for the time instead of writing it.
+        guard TimeSlotProvenance.timeSlotIsDefensible(raw: raw, time: command.time) else {
+            emit(eventType: "command_calendar_event_time_fabricated", outcome: "info")
+            speak(key: "router.calendarEventNoTime")
             return
         }
 
@@ -2385,28 +5289,62 @@ final class CommandRouter {
     /// since it has no entity extraction to identify a real target; see
     /// `routeKeyword`'s `sensitiveCallPhrases`, unchanged). Only a
     /// specifically-resolved contact gets dialed for real.
-    private func handleCall(_ command: InterpretedCommand) {
-        guard let prompt = coordinator?.requestCallConfirmation(
-            contactQuery: command.contact, callType: command.callType, requestedApp: command.requestedApp,
-            sourceTranscript: pendingTranscript, sourceCommand: command
-        ) else {
-            // Distinguish WHY it failed instead of one generic "blocked"
-            // message: a name was extracted but didn't match anyone in
-            // family contacts (fixable by the user — add the contact) is
-            // a different situation from no name being understood at all
-            // (fixable by re-phrasing), and neither should sound like a
-            // permissions/auth problem, since neither is one.
-            if let contact = command.contact, !contact.isEmpty {
-                emit(eventType: "command_call_contact_not_found", outcome: "blocked")
-                speak(text: L10n.fmt("router.call.contactNotFound", locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"), contact))
-            } else {
-                emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
-                speakWithVisibleOutcome(key: "router.sensitiveBlocked")
-            }
+    ///
+    /// [DETERMINISTIC-CALL] (2026-10-11) An empty `contact` slot retries
+    /// deterministic extraction from the transcript before answering
+    /// "couldn't understand" — the same extraction the keyword fallback
+    /// uses, so a model that mislabels the entity no longer costs the
+    /// elder a dead-end refusal.
+    ///
+    /// [SLOT-VERIFY] (2026-10-11) A WRONG non-empty slot is worse than an
+    /// empty one: the model can hallucinate a common name ("syanu" →
+    /// "Seema" in the field) and the failure line then quotes a name the
+    /// elder never said. When the model's slot fails to resolve, the
+    /// transcript's own deterministic extraction gets a second attempt
+    /// through the SAME confirmation seam before the honest line — and
+    /// the failure line quotes the transcript's name when one survived
+    /// (the least-wrong reading), never the hallucinated slot.
+    private func handleCall(_ command: InterpretedCommand, raw: String) {
+        let llmContact = (command.contact?.isEmpty == false) ? command.contact : nil
+        let transcriptQuery = DeterministicCallRoute.callQuery(fromTranscript: raw)
+        let contactQuery = llmContact ?? transcriptQuery
+
+        func prompt(for query: String) -> String? {
+            coordinator?.requestCallConfirmation(
+                contactQuery: query, callType: command.callType, requestedApp: command.requestedApp,
+                sourceTranscript: pendingTranscript, sourceCommand: command
+            )
+        }
+
+        if let p = prompt(for: contactQuery ?? "") {
+            emit(eventType: "command_call_confirmation_requested", outcome: "success")
+            speak(text: p)
             return
         }
-        emit(eventType: "command_call_confirmation_requested", outcome: "success")
-        speak(text: prompt)
+        if let transcriptQuery, transcriptQuery != contactQuery, let p = prompt(for: transcriptQuery) {
+            // The transcript's own reading resolved a real family contact
+            // where the model's slot did not — same event vocabulary as
+            // the keyword fallback's deterministic win.
+            emit(eventType: "command_call_deterministic_confirmation", outcome: "success")
+            speak(text: p)
+            return
+        }
+
+        // Distinguish WHY it failed instead of one generic "blocked"
+        // message: a name was extracted but didn't match anyone in
+        // family contacts (fixable by the user — add the contact) is
+        // a different situation from no name being understood at all
+        // (fixable by re-phrasing), and neither should sound like a
+        // permissions/auth problem, since neither is one.
+        if let contact = transcriptQuery ?? contactQuery, !contact.isEmpty {
+            emit(eventType: "command_call_contact_not_found", outcome: "blocked")
+            speakWithVisibleOutcome(
+                text: L10n.fmt("router.call.contactNotFound", locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"), contact)
+            )
+        } else {
+            emit(eventType: "command_call_name_unclear", outcome: "blocked")
+            speakWithVisibleOutcome(key: "router.call.nameUnclear")
+        }
     }
 
     /// `send_message`. Never claims the message was SENT — only that a
@@ -2578,9 +5516,48 @@ final class CommandRouter {
                           locale: locale)
     }
 
-    private func handleMedicationAcknowledgement(replyOverride: String? = nil) {
-        guard let coordinator = coordinator,
-              let oldest = coordinator.oldestPendingReminderEntryId() else {
+    /// [MED-ACK] (T-014; design-l1 §7.2–§7.4, FR-MSR-007/008) One spoken
+    /// medication acknowledgement, resolved by WHAT THE ELDER SAID. The
+    /// oldest-pending selection is no longer the primary path — the
+    /// utterance and the coordinator's pending candidates (IF-7) go into
+    /// the T-004 resolver (IF-6): name first, then slot, then the simple
+    /// acknowledgement, never a guess and never firing/pending order.
+    ///
+    ///   - `.resolved(entryId:)` continues the SHIPPED safety sequence
+    ///     for that entry (`continueMedicationAcknowledgement`): the
+    ///     FR-D01 challenge and its next-transcript yes/no, then the
+    ///     FR-D03 double-dose detector. Nothing in that chain is touched
+    ///     — resolution only decides WHICH entry the chain runs for.
+    ///   - `.ambiguous(ordered:)` opens the clarification walk (IF-8)
+    ///     with exactly the resolver's candidate set, in the resolver's
+    ///     fixed order; the coordinator speaks the sanctioned question
+    ///     itself ("did you mean X / X or Y" — the router mints no copy).
+    ///   - `.nothingPending` keeps the shipped `router.noPendingReminder`
+    ///     leg byte-identically. The shipped `oldestPendingReminderEntryId`
+    ///     selection survives ONLY as this leg's fallback (C12): a
+    ///     conformer that does not implement the candidate read (inert
+    ///     default `[]` — every legacy mock/double) still gets the exact
+    ///     pre-feature behaviour, and in production IF-7 and the oldest
+    ///     read agree, so the fallback never fires there.
+    ///   - `.unmatched` (a slot named with nothing pending there) answers
+    ///     with the honest no-match line and opens nothing: no walk, no
+    ///     recording — the resolver's `orderedPending` exists so this
+    ///     answer can be honest, and design-l1 §7.6 fixes the outcome
+    ///     ("honest 'nothing to acknowledge' line", recorded? no).
+    ///
+    /// Resolution outcomes emit PII-free observations —
+    /// `medication_ack_resolved` / `_ambiguous` / `_unmatched` — with the
+    /// entry id HASH only (`IdHashing.shortHash`), never the raw id and
+    /// never a name. `transcript` is the text the calling gate admitted
+    /// (the safety-slice transcript at the safety-net call site — D-1:
+    /// the ORIGINAL transcript on a correction re-route). `replyOverride`
+    /// is unchanged: the interpreter arm's sanitised reply is what the
+    /// baseline leg speaks.
+    private func handleMedicationAcknowledgement(transcript: String,
+                                                 replyOverride: String? = nil) {
+        guard let coordinator = coordinator else {
+            // No coordinator at all: nothing can be pending, so the
+            // shipped honest no-pending leg stands (byte-identical).
             postLocalizedNotification(titleKey: "notif.nothingToAcknowledge.title",
                                       bodyKey: "notif.nothingToAcknowledge.body")
             emit(eventType: "command_ack_no_pending", outcome: "info")
@@ -2588,12 +5565,60 @@ final class CommandRouter {
             return
         }
 
-        // Dementia flow: issue the FR-D01 challenge before recording the
-        // dose. The user's yes/no on the next transcript runs through
-        // `handleConfirmationResponse`, which triggers the FR-D03
-        // double-dose check. Falls back to baseline ack only if the
-        // challenge cannot be issued (no pending reminder, etc).
-        if let prompt = coordinator.startVoiceAckConfirmation(for: oldest) {
+        let candidates = coordinator.medicationAckCandidates()
+        let resolution = MedicationAckResolver.resolve(utterance: transcript,
+                                                       candidates: candidates)
+        switch resolution {
+        case .resolved(let entryId):
+            emitAckResolution("medication_ack_resolved", entryId: entryId)
+            continueMedicationAcknowledgement(entryId: entryId,
+                                              replyOverride: replyOverride)
+
+        case .ambiguous(let ordered):
+            // No single entry named: nothing is recorded; the walk's
+            // sanctioned question is the only copy the elder hears (the
+            // coordinator's own op speaks it and owns the order).
+            emitAckResolution("medication_ack_ambiguous", entryId: ordered.first)
+            openAckClarification(ordered: ordered, candidates: candidates)
+
+        case .unmatched:
+            // A slot was named with nothing pending there: say so
+            // honestly — never the no-pending line (other slots ARE
+            // pending; that line would claim otherwise), never a guess,
+            // never a walk (there is nothing to walk over).
+            emit(eventType: "medication_ack_unmatched", outcome: "info")
+            speak(key: "meds.ack.clarifyEnded")
+
+        case .nothingPending:
+            // C12 fallback: the pre-candidate-read conformers (inert
+            // default `[]`) still owe the shipped behaviour — exactly
+            // one legacy path remains reachable, and only from here.
+            guard let oldest = coordinator.oldestPendingReminderEntryId() else {
+                postLocalizedNotification(titleKey: "notif.nothingToAcknowledge.title",
+                                          bodyKey: "notif.nothingToAcknowledge.body")
+                emit(eventType: "command_ack_no_pending", outcome: "info")
+                speak(key: "router.noPendingReminder")
+                return
+            }
+            continueMedicationAcknowledgement(entryId: oldest,
+                                              replyOverride: replyOverride)
+        }
+    }
+
+    /// The SHIPPED safety sequence's entry point, factored so both arms
+    /// that name one entry run it identically: the resolver's direct
+    /// `.resolved` and a walk that resolved to one candidate (T-013's
+    /// contract: "the caller continues the shipped safety sequence").
+    /// Body unchanged from the pre-T-014 handler — dementia flow: issue
+    /// the FR-D01 challenge before recording the dose; the user's yes/no
+    /// on the next transcript runs through `handleConfirmationResponse`,
+    /// which triggers the FR-D03 double-dose check. Falls back to the
+    /// baseline ack only if the challenge cannot be issued (no pending
+    /// reminder, etc).
+    private func continueMedicationAcknowledgement(entryId: UUID,
+                                                   replyOverride: String? = nil) {
+        guard let coordinator = coordinator else { return }
+        if let prompt = coordinator.startVoiceAckConfirmation(for: entryId) {
             emit(eventType: "command_ack_challenge_issued", outcome: "success")
             postLocalizedNotification(titleKey: "notif.confirmingDose.title",
                                       body: prompt)
@@ -2601,7 +5626,7 @@ final class CommandRouter {
             return
         }
 
-        coordinator.handleMedicationAcknowledgement(entryId: oldest)
+        coordinator.handleMedicationAcknowledgement(entryId: entryId)
         emit(eventType: "command_ack_medication_baseline", outcome: "success")
         postLocalizedNotification(titleKey: "notif.medicationAcknowledged.title",
                                   bodyKey: "notif.medicationAcknowledged.body")
@@ -2610,6 +5635,44 @@ final class CommandRouter {
         } else {
             speak(key: "router.confirmationYes")
         }
+    }
+
+    /// IF-8 open, from the resolver's answer: the walk's candidate set is
+    /// exactly the resolver's ambiguous set (a name/slot narrowing may
+    /// make it a PROPER subset of the pending candidates), restored from
+    /// the ids the resolver returned with their multiplicities preserved
+    /// (two pending doses of one medication are two candidates with one
+    /// id) and handed in the resolver's fixed order. The coordinator
+    /// re-validates against the live set, re-sorts and speaks the
+    /// sanctioned question — the router speaks nothing here.
+    private func openAckClarification(ordered: [UUID],
+                                      candidates: [MedicationAckCandidate]) {
+        var remaining = candidates
+        let orderedCandidates = ordered.compactMap { entryId -> MedicationAckCandidate? in
+            guard let index = remaining.firstIndex(where: { $0.entryId == entryId }) else {
+                return nil
+            }
+            return remaining.remove(at: index)
+        }
+        coordinator?.beginAckClarification(orderedCandidates: orderedCandidates)
+    }
+
+    /// PII-free ack-resolution observation: the event plus, when one
+    /// entry is named, its id HASH only — never the raw id, never a name
+    /// (the metadata key is the one the messaging/photo seams already
+    /// use; the full key inventory is declared at the release gate,
+    /// T-022). The router's `emit(eventType:outcome:)` helper hardcodes
+    /// empty metadata, so this builds the event directly, the way the
+    /// coordinator's `entry_id_hash` events do.
+    private func emitAckResolution(_ eventType: String, entryId: UUID?) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: "success",
+            errorCode: nil,
+            metadata: entryId.map { ["entry_id_hash": IdHashing.shortHash(of: $0)] } ?? [:]
+        ))
     }
 
     /// Whole-token match — the ONLY safe way to match "हो" (yes), because
@@ -2650,7 +5713,13 @@ final class CommandRouter {
     /// otherwise be spoken-only, same rationale as `noteGenericReply`.
     private func speakWithVisibleOutcome(key: String) {
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
-        let text = L10n.str(key, locale: locale)
+        speakWithVisibleOutcome(text: L10n.str(key, locale: locale), locale: locale)
+    }
+
+    /// The text variant — for already-resolved dynamic lines (e.g. the
+    /// [GEMINI-SOLIDIFY] cloud-failure-class lines), same visible-outcome
+    /// contract as the key variant.
+    private func speakWithVisibleOutcome(text: String, locale: Locale? = nil) {
         guard !text.isEmpty else { return }
         coordinator?.noteGenericReply(text)
         speak(text: text, locale: locale)
@@ -2660,7 +5729,8 @@ final class CommandRouter {
     /// prompts) — no catalog lookup, already in the right language.
     /// [VOICE-ACK] Commits through the serial `ReplySpeakLane`, so a
     /// pre-acknowledgment and a later result reply drain in commit order.
-    private func speak(text: String, locale: Locale? = nil) {
+    private func speak(text: String, locale: Locale? = nil,
+                       speed: Float? = nil) {
         #if DEBUG
         print("[command_router][DEBUG] speak() called, speaker=\(speaker != nil), text=\"\(text)\"")
         #endif
@@ -2685,7 +5755,7 @@ final class CommandRouter {
             // speak-finished marks below keep their exact per-utterance
             // semantics (they fire when this speech ends, not when a
             // later queued utterance does).
-            await lane.enqueue(text, locale: locale)
+            await lane.enqueue(text, locale: locale, speed: speed)
             #if DEBUG
             print("[command_router][DEBUG] speaker.speak() returned (finished or cancelled)")
             #endif
@@ -2742,6 +5812,33 @@ final class CommandRouter {
             // the existing synthesis path speaks the ack.
             emit(eventType: "ack_cache_miss", outcome: "miss")
         }
+        speak(text: text, locale: locale)
+    }
+
+    /// [CLOUD-CASCADE] Speaks the cloud cascade's HOLD CUE — the line the
+    /// user hears when the large local brain's answer was below the
+    /// configured threshold and the turn is about to go to the online
+    /// brain ("One moment — this is taking a little longer…" /
+    /// "एक छिन — अलि बढी समय लाग्दैछ…").
+    ///
+    /// Wired to `IntentRouter`'s cascade tier as its `holdCue` seam and
+    /// invoked from inside the router's escalation, BEFORE the cloud call
+    /// is made, so the cue is committed to the reply lane ahead of the
+    /// answer the cloud will produce (the same lane ordering the pre-ack
+    /// relies on). Empty catalog text is a silent no-op — same guard as
+    /// `speakPreAck`/`speak(key:)` — so a locale without the string never
+    /// speaks the raw key.
+    ///
+    /// Deliberately NOT routed through the ack fast lane's cached WAVs:
+    /// that cache holds the rotating "one moment…" pre-acks, and a cue
+    /// whose wording is its own would have to be built into it to belong
+    /// there. Its synthesis cost is paid while the cloud round trip is
+    /// already in flight, so it cannot delay the answer.
+    func speakCloudCascadeHoldCue(locale: Locale? = nil) {
+        let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let text = L10n.str("cloudCascade.holdCue", locale: locale)
+        guard !text.isEmpty else { return }
+        emit(eventType: "cloud_cascade_hold_cue", outcome: "spoken")
         speak(text: text, locale: locale)
     }
 

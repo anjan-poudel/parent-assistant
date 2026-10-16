@@ -169,7 +169,8 @@ final class IntentEncoderInterpreterTests: XCTestCase {
         tokenizer: IntentEncoderTokenizing,
         spy: IntentEncoderRunnerSpy,
         manifest: IntentEncoderManifest = .t033Spike,
-        config: IntentEncoderInterpreter.Config = .default
+        config: IntentEncoderInterpreter.Config = .default,
+        traceRecorder: PipelineTraceRecorder? = nil
     ) -> IntentEncoderInterpreter {
         IntentEncoderInterpreter(
             modelStore: store,
@@ -178,6 +179,7 @@ final class IntentEncoderInterpreterTests: XCTestCase {
             manifest: manifest,
             tokenizer: tokenizer,
             config: config,
+            traceRecorder: traceRecorder,
             modelRunnerFactory: spy.makeRunner)
     }
 
@@ -941,6 +943,189 @@ final class IntentEncoderInterpreterTests: XCTestCase {
     }
 
 
+    // MARK: - [CORRECTION-ANYBRAIN] the prepared entry point (the slot's)
+
+    /// A pair whose two halves are provably different, built by hand so the
+    /// strings below cannot be confused for one another: `original` is what a
+    /// safety consumer reads, `modelInput` is what a model reads.
+    private func preparedPair(original: String,
+                              canonical: String,
+                              correction: CorrectionResult? = nil)
+    -> IntentTranscriptPair {
+        IntentTranscriptPair(original: original,
+                             canonical: canonical,
+                             applications: [],
+                             degraded: false,
+                             tableRevision: "test-pair/v1",
+                             correction: correction)
+    }
+
+    @discardableResult
+    private func interpretPrepared(_ interpreter: IntentEncoderInterpreter,
+                                   _ pair: IntentTranscriptPair,
+                                   waitTimeout: TimeInterval = 5)
+    -> InterpretedCommand? {
+        var out: InterpretedCommand?
+        let exp = expectation(description: "interpret prepared")
+        interpreter.interpret(preparedInput: pair, context: ctx()) { result in
+            out = result
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: waitTimeout)
+        return out
+    }
+
+    /// The slot's entry point runs the model on the PAIR's text — the string
+    /// the layers produced — and prepares nothing itself.
+    ///
+    /// This is the double-apply guard, made observable: with the shipped
+    /// defaults both layer switches are absent, so an interpreter that
+    /// prepared the pair's `original` again would hand the tokenizer the raw
+    /// transcript (`भोलि सम्झाइदिनु`) instead of the pair's model text
+    /// (`भोलि सम्झाइदिनुस्`). The assertion below fails in exactly that case.
+    func testThePreparedEntryPointRunsOnThePairsTextAndNeverRePreparesIt() throws {
+        let store = try makeStore()
+        try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let spy = IntentEncoderRunnerSpy()
+        let model = StubIntentEncoderModel()
+        let manifest = IntentEncoderManifest.t033Spike
+        let interpreter = makeInterpreter(store: store, tokenizer: tokenizer,
+                                          spy: spy, manifest: manifest)
+        let pair = preparedPair(original: "भोलि सम्झाइदिनु",
+                                canonical: "भोलि सम्झाइदिनुस्")
+        // A confident `set_reminder` whose time span is the FIRST word, with
+        // the spike's tag order (B-time is index 3). Two rows: the pair's
+        // model text is two words ("भोलि सम्झाइदिनुस्"), and a one-row
+        // fixture would trip the alignment guard into an abstention.
+        model.logits = IntentEncoderLogits(
+            intentLogits: manifest.intents.map { $0 == "set_reminder" ? 6 : -6 },
+            slotLogits: [[-6, -6, -6, 6, 6], [-6, -6, -6, -6, 6]])
+        spy.make = { model }
+
+        let result = interpretPrepared(interpreter, pair)
+
+        XCTAssertEqual(tokenizer.lastSanitisedTranscript, "भोलि सम्झाइदिनुस्",
+                       "the tokenizer must read the pair's model text — a "
+                       + "re-preparation of the pair's `original` would show up "
+                       + "here as the raw transcript")
+        XCTAssertNotEqual(tokenizer.lastSanitisedTranscript, pair.original,
+                          "…and never the safety half")
+        XCTAssertEqual(result?.action, .setReminder,
+                       "the turn ran normally on the prepared text")
+    }
+
+    /// The direct entry point is unchanged: a caller that hands the
+    /// interpreter a RAW transcript (a test, a future call site) still gets
+    /// the sanitised boundary and the seam — which, with both layer switches
+    /// absent (the shipped default), is a byte-identical pass-through.
+    func testTheDirectEntryPointStillPreparesForRawTranscriptCallers() throws {
+        let store = try makeStore()
+        try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let spy = IntentEncoderRunnerSpy()
+        let interpreter = makeInterpreter(store: store, tokenizer: tokenizer, spy: spy)
+
+        interpret(interpreter, "  भोलि सम्झाइदिनु  ")
+
+        XCTAssertEqual(tokenizer.lastSanitisedTranscript,
+                       InputSanitiser.sanitise("  भोलि सम्झाइदिनु  ", level: .quarantine),
+                       "the direct path sanitises first, as every interpreter "
+                       + "does, and the inert seam leaves it at that")
+    }
+
+    /// An empty prepared text abstains the same way an empty sanitised
+    /// transcript does — an abstention with the `emptyAfterSanitise` reason
+    /// and no tokenizer call — rather than running the model on nothing.
+    func testAnEmptyPreparedTextAbstainsWithoutTouchingTheTokenizer() throws {
+        let store = try makeStore()
+        try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let interpreter = makeInterpreter(store: store, tokenizer: tokenizer,
+                                          spy: IntentEncoderRunnerSpy())
+
+        XCTAssertNil(interpretPrepared(interpreter,
+                                       preparedPair(original: "", canonical: "")))
+        XCTAssertEqual(tokenizer.callCount, 0)
+        let abstained = events("encoder_abstained")
+        XCTAssertEqual(abstained.last?.errorCode,
+                       IntentEncoderAbstention.emptyAfterSanitise.rawValue)
+    }
+
+    /// The seam's telemetry belongs to the turn the ENCODER ran, whichever
+    /// side prepared the pair: the correction event and the card's readout
+    /// still fire when the slot hands the pair over.
+    ///
+    /// This is the regression the relocation could have caused silently — the
+    /// readout is how the internal card answers "what did the corrector do
+    /// last turn", and the event is the only trail a shipped encoder turn
+    /// leaves for either layer.
+    func testThePreparedEntryPointStillReportsTheSeamsTelemetry() throws {
+        let store = try makeStore()
+        try installArtifact(store: store)
+        let interpreter = makeInterpreter(store: store,
+                                          tokenizer: StubIntentEncoderTokenizer(),
+                                          spy: IntentEncoderRunnerSpy())
+        var readouts: [CorrectionReadout] = []
+        interpreter.onCorrection = { readouts.append($0) }
+
+        let correction = syntheticCorrection(original: "भोलि होस",
+                                             corrected: "भोलि होस्")
+        let pair = preparedPair(original: "भोलि होस",
+                                canonical: "भोलि होस्",
+                                correction: correction)
+        interpretPrepared(interpreter, pair)
+
+        let event = try XCTUnwrap(events("turn_correction").last)
+        XCTAssertEqual(event.metadata["correction_state"], "applied")
+        XCTAssertEqual(readouts.count, 1,
+                       "the card's readout is forwarded on the slot's path too")
+        XCTAssertEqual(readouts.first?.rows.first?.label, "corrected",
+                       "…and it is the corrector's own readout, row for row")
+
+        // The direct path keeps reporting it as well — one emitter, two entry
+        // points, and nothing reported twice for a single turn.
+        interpret(interpreter, "भोलि होस")
+        XCTAssertEqual(events("turn_correction").count, 1,
+                       "the inert direct-path turn adds no correction event")
+    }
+
+    /// A correction result with one applied row, built by hand. Counts and
+    /// modes only — the surfaces stay out of every payload by construction.
+    private func syntheticCorrection(original: String,
+                                     corrected: String) -> CorrectionResult {
+        let evidence = CorrectionEvidence(similarity: 0.9, prefixCompletion: 0.9,
+                                          phoneticKey: 0.9, frameFit: 0.0,
+                                          pairedKeyword: 0.0, ngramPrior: 0.0)
+        let application = STTCorrectionApplication(
+            entryID: "fixture-hos",
+            lexiconID: "fixture-bank",
+            lexiconRevision: "fixture/v1",
+            errorClass: .truncation,
+            originalRange: 0..<4,
+            correctedRange: 0..<5,
+            score: 0.9,
+            margin: 0.5,
+            evidence: evidence)
+        let decision = TokenDecision(
+            originalRange: 0..<4,
+            surface: original,
+            decision: .corrected(application),
+            best: TokenDecision.BestCandidate(surface: corrected,
+                                              entryID: "fixture-hos",
+                                              errorClass: .truncation,
+                                              score: 0.9),
+            margin: 0.5)
+        return CorrectionResult(corrected: corrected,
+                                applications: [application],
+                                decisions: [decision],
+                                lexiconRevision: "fixture/v1",
+                                thresholdUsed: 0.65,
+                                degraded: false,
+                                mode: .apply,
+                                original: original)
+    }
+
     // MARK: - [TURN-TIMING-BREAKDOWN] encoder stage instrumentation
 
     /// The encoder's three stages — tokenizer, CoreML forward, decode —
@@ -1056,6 +1241,173 @@ final class IntentEncoderInterpreterTests: XCTestCase {
                        "timing adds, removes and reorders no event")
         XCTAssertEqual(timed.action, untimed.action)
         XCTAssertEqual(timed.reply, untimed.reply)
+    }
+
+    // MARK: - [PIPELINE-TRACE] the encoder's rows
+    //
+    // The same three stages the breakdown times now carry their full
+    // story: text in, tokens out, the interpreter's own gate as the
+    // decision — and, when the interpreter bails before the pipeline, all
+    // three MARKED off with the honest reason rather than disappearing
+    // (a stage that threw or timed out must not read as one that never
+    // ran). Instrumentation only: the outcome and the events are pinned
+    // unchanged by the tests above.
+
+    /// The trace fixture: the real interpreter on the stub seams, a
+    /// command-serving logits set, one recorder — everything a row needs.
+    private func makeTracedEncoderFixture(
+        intent: String = "set_reminder"
+    ) throws -> (interpreter: IntentEncoderInterpreter,
+                 tokenizer: StubIntentEncoderTokenizer,
+                 model: StubIntentEncoderModel,
+                 tokenization: IntentEncoderTokenization,
+                 recorder: PipelineTraceRecorder,
+                 transcript: String) {
+        let transcript = "भोलि बिहान ८ बजे औषधि खान सम्झाइदिनु"
+        let store = try makeStore()
+        _ = try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let spy = IntentEncoderRunnerSpy()
+        let manifest = testManifest()
+        let clean = InputSanitiser.sanitise(transcript, level: .quarantine)
+        let tokenization = try XCTUnwrap(tokenizer.tokenize(
+            sanitisedTranscript: clean, maxSequenceLength: 64))
+        let model = StubIntentEncoderModel()
+        model.logits = makeLogits(
+            manifest: manifest,
+            intent: intent,
+            // Time is the ONLY slot: with the medication word also tagged,
+            // the bounded summary could never fit its "[time=" substring.
+            wordTags: ["B-time", "I-time", "I-time", "I-time",
+                       "O", "O", "O"],
+            tokenization: tokenization)
+        spy.make = { model }
+        let recorder = PipelineTraceRecorder()
+        let interpreter = makeInterpreter(store: store, tokenizer: tokenizer,
+                                          spy: spy, manifest: manifest,
+                                          traceRecorder: recorder)
+        return (interpreter, tokenizer, model, tokenization, recorder, transcript)
+    }
+
+    func testTraceRecordsTheEncodersThreeStagesWithTokensAndDecisions() throws {
+        let fixture = try makeTracedEncoderFixture()
+        XCTAssertTrue(fixture.interpreter.isAvailable)
+
+        fixture.recorder.beginTurn()
+        let command = try XCTUnwrap(interpret(fixture.interpreter, fixture.transcript))
+        let trace = fixture.recorder.finishTurn()
+
+        XCTAssertEqual(command.action, .setReminder, "the traced turn still serves")
+        XCTAssertEqual(trace.rows.map(\.stage), PipelineTraceStage.allCases,
+                       "the encoder's rows are three of the full trace's stages, in order")
+        XCTAssertTrue(trace.rows.allSatisfy { $0.durationMs >= 0 })
+
+        let tokenCount = fixture.tokenization.tokenIds.count
+        let tokenize = try XCTUnwrap(trace.rows.first { $0.stage == .encoderTokenizer })
+        XCTAssertTrue(tokenize.ran)
+        XCTAssertEqual(tokenize.decision, "tokenized")
+        XCTAssertEqual(tokenize.tokenCount, tokenCount,
+                       "a REAL token count, not an estimate")
+        XCTAssertTrue(tokenize.outputSummary.contains("\(tokenCount) tok"))
+
+        let inference = try XCTUnwrap(trace.rows.first { $0.stage == .encoderInference })
+        XCTAssertTrue(inference.ran)
+        XCTAssertEqual(inference.decision, "ran")
+        XCTAssertEqual(inference.tokenCount, tokenCount,
+                       "the forward pass's input size")
+
+        let decode = try XCTUnwrap(trace.rows.first { $0.stage == .encoderDecode })
+        XCTAssertTrue(decode.ran)
+        XCTAssertEqual(decode.decision, "command",
+                       "the interpreter's own gate applied to the decode")
+        XCTAssertTrue(decode.outputSummary.contains("set_reminder"),
+                      "the card may name the decoded action")
+        XCTAssertTrue(decode.outputSummary.contains("[time="),
+                      "…and its slot surfaces — the on-device posture")
+        XCTAssertEqual(fixture.model.predictCount, 1,
+                       "instrumentation alters nothing: the graph ran once")
+    }
+
+    func testTraceMarksAllThreeEncoderStagesOffWhenTheModelIsNotCached() throws {
+        let store = try makeStore()          // nothing installed
+        let recorder = PipelineTraceRecorder()
+        let interpreter = makeInterpreter(store: store,
+                                          tokenizer: StubIntentEncoderTokenizer(),
+                                          spy: IntentEncoderRunnerSpy(),
+                                          traceRecorder: recorder)
+        XCTAssertFalse(interpreter.isAvailable)
+
+        recorder.beginTurn()
+        XCTAssertNil(interpret(interpreter, "भोलि औषधि खाने सम्झाउनु"))
+        let trace = recorder.finishTurn()
+
+        XCTAssertEqual(trace.rows.count, PipelineTraceStage.allCases.count)
+        XCTAssertEqual(trace.ranCount, 0)
+        for row in trace.rows
+        where IntentEncoderInterpreter.encoderStages.contains(row.stage) {
+            XCTAssertFalse(row.ran, "\(row.stage.rawValue) did not run")
+            XCTAssertEqual(row.decision, "model_not_cached",
+                           "the interpreter's own reason, not a generic one")
+            XCTAssertEqual(row.decisionText, "off(model_not_cached)")
+            XCTAssertEqual(row.durationMs, 0)
+        }
+    }
+
+    func testTraceMarksAllThreeEncoderStagesOffWhenTheTokenizerIsNotReady() throws {
+        let store = try makeStore()
+        _ = try installArtifact(store: store)
+        let recorder = PipelineTraceRecorder()
+        let interpreter = makeInterpreter(store: store,
+                                          tokenizer: StubIntentEncoderTokenizer(ready: false),
+                                          spy: IntentEncoderRunnerSpy(),
+                                          traceRecorder: recorder)
+
+        recorder.beginTurn()
+        XCTAssertNil(interpret(interpreter, "भोलि औषधि खाने सम्झाउनु"))
+
+        for row in recorder.finishTurn().rows
+        where IntentEncoderInterpreter.encoderStages.contains(row.stage) {
+            XCTAssertFalse(row.ran)
+            XCTAssertEqual(row.decision,
+                           IntentEncoderAbstention.tokenizerUnavailable.rawValue)
+            XCTAssertEqual(row.decisionText,
+                           "off(\(IntentEncoderAbstention.tokenizerUnavailable.rawValue))")
+        }
+    }
+
+    func testTraceMarksTheTimedOutStagesOffAndKeepsTheOneThatRan() throws {
+        let store = try makeStore()
+        _ = try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let spy = IntentEncoderRunnerSpy()
+        let model = StubIntentEncoderModel()
+        model.predictDelay = 0.5
+        model.logits = IntentEncoderLogits(intentLogits: [6, -6], slotLogits: [[0, 0]])
+        spy.make = { model }
+        let recorder = PipelineTraceRecorder()
+        let interpreter = makeInterpreter(
+            store: store, tokenizer: tokenizer, spy: spy,
+            manifest: testManifest(intents: ["query", "none"]),
+            config: IntentEncoderInterpreter.Config(confidenceThreshold: 0.4,
+                                                    timeoutSeconds: 0.05),
+            traceRecorder: recorder)
+
+        recorder.beginTurn()
+        XCTAssertNil(interpret(interpreter, "केही सोध्नु छ"))
+        let trace = recorder.finishTurn()
+
+        let tokenize = try XCTUnwrap(trace.rows.first { $0.stage == .encoderTokenizer })
+        XCTAssertTrue(tokenize.ran,
+                      "the tokenizer finished inside the budget — its row stays")
+        XCTAssertEqual(tokenize.decision, "tokenized")
+        for stage in [PipelineTraceStage.encoderInference, .encoderDecode] {
+            let row = try XCTUnwrap(trace.rows.first { $0.stage == stage })
+            XCTAssertFalse(row.ran, "\(stage.rawValue) never returned inside the budget")
+            XCTAssertEqual(row.decision, "inference_timeout")
+            XCTAssertEqual(row.decisionText, "off(inference_timeout)")
+        }
+        XCTAssertEqual(interpreter.lastInferenceFailureReason, "inference_timeout",
+                       "the row describes the same failure the status reports")
     }
 }
 

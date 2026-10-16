@@ -212,10 +212,17 @@ baseline now names the revision that contains this file.
    `testTheGateIsOffInThisBuildSoTheShippedDefaultIsUnchanged` counts closure
    invocations and
    `testSelectionEventMetadataOnlyWhenTheOfferedEncoderTakesTheSlot` covers
-   gate-off / unavailable / selected.
+   gate-off / unavailable / selected. **[ENCODER-ALWAYS-ON]** that first test
+   is now
+   `testEncoderUIIsUnconditionalAndTheToggleKeepsTheShippedDefault`: the
+   compilation condition is on in every build, so it pins the unconditional
+   card AND that the toggle still withholds service; the closure counts moved
+   with it.
 3. **[MINOR] Personal absolute path removed.**
    `ModelCatalog.intentEncoderSpikeZipURL(environment:)` returns a
-   reserved-TLD `https://invalid.invalid/…` placeholder by default and honours
+   reserved-TLD `https://invalid.invalid/…` placeholder only for an explicitly
+   BLANK `INTENT_ENCODER_SPIKE_ZIP` (**[ENCODER-ALWAYS-ON]**: unset now
+   defaults to `Documents/t033-encoder-int8-mlmodelc.zip`), and honours
    `INTENT_ENCODER_SPIKE_ZIP` (injectable environment for tests); no
    home-directory literal remains in source or in these notes. The zip on
    disk was not touched.
@@ -401,8 +408,12 @@ artifact's own note (`graph_contains_temperature: false`).
 - `INTENT_ENCODER_SPIKE_ZIP` names the tester's own copy of the pinned zip
   (sha256 `e0ff09231843…`, 109,086,647 bytes, pinned in
   `ModelCatalog.intentEncoderSpike`; `ModelStore` verifies it strictly before
-  unpacking). Unset or blank → decision `notConfigured`, no event, no
-  network, no placeholder URL.
+  unpacking). **[ENCODER-ALWAYS-ON] it is an override, not a requirement:**
+  unset → the source defaults to `Documents/t033-encoder-int8-mlmodelc.zip`
+  (the `devicectl` destination), so the install proceeds with no environment
+  variable; setting it explicitly BLANK is what yields decision
+  `notConfigured`, no event, no network, no placeholder URL. Either way a
+  missing file still fails honestly (`zip_missing`) — never a silent success.
 - Artifact already installed → `alreadyInstalled` +
   `encoder_spike_install_skipped` (reason `already_installed`).
 - Otherwise `started` + `encoder_spike_install_started`, then the install
@@ -508,10 +519,13 @@ The paths below are the ones the tests drive; the staging command is the
 standard `devicectl` route and was **not** exercised here (no device was
 attached in this session).
 
-1. **Build with the gate on.** `INTENT_ENCODER` is not defined in any shipped
-   configuration. Add it to the app target's Active Compilation Conditions in
-   Xcode, or build via
-   `xcodebuild … SWIFT_ACTIVE_COMPILATION_CONDITIONS="$(inherited) INTENT_ENCODER"`.
+1. **Build as usual.** **[ENCODER-ALWAYS-ON]** `INTENT_ENCODER` is now in the
+   app target's default Active Compilation Conditions (Debug and Release), so
+   every build — Xcode, `xcodebuild`, `./build.sh` — carries the card and the
+   encoder path. No Xcode edit, no
+   `xcodebuild … SWIFT_ACTIVE_COMPILATION_CONDITIONS=…` override. (Before that
+   change: add the condition by hand.) The persisted toggle still ships OFF,
+   so the encoder stays inert until step 3.
 2. **Stage the zip into the app's container** (the path must be readable by
    the app process):
 
@@ -522,12 +536,16 @@ attached in this session).
      --destination Documents/t033-encoder-int8-mlmodelc.zip
    ```
 
-3. **Set the environment variable** in the scheme (Run → Arguments →
-   Environment Variables) to the container path, e.g.
-   `INTENT_ENCODER_SPIKE_ZIP=/var/mobile/Containers/Data/Application/<uuid>/Documents/t033-encoder-int8-mlmodelc.zip`,
-   then launch from Xcode.
-4. **Install + select.** At boot the coordinator offers the encoder the local
-   slot and calls `requestReadiness()`; watch the console
+3. **[ENCODER-ALWAYS-ON] Flip the switch — no environment variable.** That
+   `Documents/` copy is the default source, so launch and open Settings →
+   long-press the title → AI मोडेल → the "Internal testing" card, then turn the
+   enable toggle ON; the flip re-arms the local slot and starts the install.
+   Set `INTENT_ENCODER_SPIKE_ZIP` in the scheme (Run → Arguments → Environment
+   Variables) only to point at a DIFFERENT copy — absolute, or relative to
+   Documents; setting it blank switches the install off.
+4. **Install + select.** Once the toggle is on, the coordinator offers the
+   encoder the local slot and calls `requestReadiness()` (at boot when the
+   toggle was already on, otherwise on the flip); watch the console
    (`ConsoleObservabilityBus`) for `encoder_spike_install_started` →
    `coreml_encoder_installed`, then `encoder_selected_as_local_brain`
    (component `intent_encoder_wiring`). No relaunch is needed: the deferred
@@ -559,9 +577,9 @@ attached in this session).
 For the "does the small tier fit this phone" question (encoder vs. the 1.7B
 brain on the same utterances):
 
-1. **Flagged build**: `INTENT_ENCODER` in the target's Active Compilation
-   Conditions (step 1 above) with `INTENT_ENCODER_SPIKE_ZIP` staged and set
-   in the scheme.
+1. **[ENCODER-ALWAYS-ON] Default build**: no flag, no environment variable —
+   just the zip staged into `Documents/` (steps 1–2 above). The toggle is the
+   only switch.
 2. **Open the switch**: Settings → long-press the title → AI मोडेल → the
    "Internal testing" card. The artifact line reads "Not downloaded yet"
    before the install lands and "Ready" after it.

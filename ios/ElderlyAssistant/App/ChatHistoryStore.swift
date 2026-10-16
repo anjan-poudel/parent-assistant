@@ -63,6 +63,21 @@ final class ChatHistoryStore {
     private let storage: EncryptedLocalStorage
     private var didLoadFromDisk = false
 
+    /// [RESPONSIVENESS] (2026-10-14) The serial queue that owns the
+    /// encode + file write. `append` used to do `storage.write` inline —
+    /// and `append` runs on the MAIN thread (the coordinator documents
+    /// "Always called on the main queue"), once per transcript AND once
+    /// per spoken reply LINE, so a three-line reply paid three
+    /// whole-array JSON encodes plus three encrypted atomic file writes
+    /// on the main thread mid-turn. Now only the mutation and the COW
+    /// snapshot stay on the caller; the disk half runs here, at utility
+    /// QoS — the same shape as `IntentLogStore`'s `ioQueue`
+    /// (`Services/Intents/IntentLogStore.swift:93`). Serial by design:
+    /// enqueue order IS append order, so the file always converges on
+    /// the newest snapshot (each write carries the full array — the last
+    /// one wins).
+    private let ioQueue = DispatchQueue(label: "chat.history.io", qos: .utility)
+
     /// All history known to this store, oldest → newest, never above
     /// `cap`. Slices (`recent`, `older`) read from here; `append` writes
     /// through after mutating.
@@ -95,6 +110,15 @@ final class ChatHistoryStore {
     /// the cap. If this store somehow hasn't loaded yet (an append before
     /// `load()`), loads first so an early append can never clobber the
     /// on-disk history with a partial read.
+    ///
+    /// [RESPONSIVENESS] (2026-10-14) The mutation and the value snapshot
+    /// stay on the caller (main, by the coordinator's contract — the
+    /// COW copy is O(1) and the in-memory array remains THE authority,
+    /// so reads like the turn-timing caption's newest-assistant lookup
+    /// see the append the instant it lands, exactly as before). Only
+    /// the encode + encrypted file write move to `ioQueue`; enqueues
+    /// happen in append order on one thread, so the serial queue
+    /// preserves the on-disk order. Callers never wait for disk.
     func append(_ exchange: Exchange) {
         if !didLoadFromDisk {
             load()
@@ -103,7 +127,20 @@ final class ChatHistoryStore {
         if all.count > Self.cap {
             all.removeFirst(all.count - Self.cap)
         }
-        _ = storage.write(key: Self.storageKey, value: all)
+        let snapshot = all
+        ioQueue.async { [storage] in
+            _ = storage.write(key: Self.storageKey, value: snapshot)
+        }
+    }
+
+    /// Blocks until every enqueued write has reached storage — the
+    /// synchronous seam for tests that read the persisted payload
+    /// through a second store instance right after appending (production
+    /// never needs it: the in-memory array is authoritative and the
+    /// queue drains on its own). `ioQueue.sync` cannot deadlock: its
+    /// blocks never hop back to the calling thread.
+    func flush() {
+        ioQueue.sync {}
     }
 
     /// The newest `limit` entries, oldest → newest. This IS

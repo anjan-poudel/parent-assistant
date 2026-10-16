@@ -1,0 +1,219 @@
+import SwiftUI
+import UIKit
+
+// MARK: - Settings: About me (profile-interview, T-103 / C08)
+//
+// The Settings-side editor for the same record the interview wizard
+// collects: name, address-as, optional DOB, GP and hospital — plus the
+// selfie (about-you selfie, 2026-10-06), shown as a read-only thumbnail
+// here; capture lives in the About-you step. One Save button writes the
+// complete record through the coordinator's single writer; success and
+// failure both surface inline. The next-of-kin designation is NOT edited
+// here — it rides on the Family screen's emergency flag (see the note
+// under the fields).
+
+struct ProfileSettingsView: View {
+    @EnvironmentObject private var coordinator: AppCoordinator
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.displayScale) private var displayScale
+    @StateObject private var model: ProfileSettingsModel
+    /// The stored selfie, resolved once per visit at its drawn size
+    /// (about-you selfie, 2026-10-06). Display-only — capture lives in
+    /// the About-you step; here the photo merely shows who this record
+    /// is about. nil (no photo on file, or an unreadable file) simply
+    /// renders nothing.
+    @State private var storedPhoto: UIImage?
+
+    init(coordinator: AppCoordinator) {
+        _model = StateObject(wrappedValue: ProfileSettingsModel(coordinator: coordinator))
+    }
+
+    var body: some View {
+        LeafScreen(titleKey: "settings.profile.title") {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("settings.profile.explanation")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
+
+                if let storedPhoto {
+                    storedPhotoThumbnail(storedPhoto)
+                }
+
+                nameField
+                addressAsSection
+                dateOfBirthSection
+                emergencySection
+
+                Text("profile.kin.note")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
+
+                saveArea
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 24)
+        }
+        .onAppear {
+            model.load()
+            storedPhoto = resolveStoredPhoto()
+        }
+    }
+
+    /// The selfie as a plain circular thumbnail — read-only, exactly the
+    /// photo the About-you step captured (the store's ≤512px JPEG).
+    private func storedPhotoThumbnail(_ image: UIImage) -> some View {
+        Image(uiImage: image)
+            .resizable()
+            .scaledToFill()
+            .frame(width: Self.photoDiameter, height: Self.photoDiameter)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(appearance.colors.separator, lineWidth: 1))
+            .accessibilityLabel(Text("profile.field.photo"))
+    }
+
+    private static let photoDiameter: CGFloat = 72
+
+    /// One cached decode at the drawn size, keyed by the stored file name
+    /// (the family list's `contactFace` pattern); a missing name or an
+    /// unreadable file resolves to nil, never an error.
+    private func resolveStoredPhoto() -> UIImage? {
+        guard let filename = model.photoFilename, !filename.isEmpty else { return nil }
+        return DownsampledImageCache.shared.thumbnail(
+            forKey: "profile:\(filename)",
+            pointSize: Self.photoDiameter,
+            displayScale: displayScale
+        ) { coordinator.contactPhotoStore.load(named: filename) }
+    }
+
+    // MARK: fields
+
+    private var nameField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("profile.field.name")
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .foregroundStyle(appearance.colors.textSecondary)
+            TextField("profile.field.name", text: clampedName)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
+                .padding(.horizontal, 16)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(appearance.colors.card)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .accessibilityLabel(Text("profile.field.name"))
+        }
+    }
+
+    private var addressAsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("profile.field.addressAs")
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .foregroundStyle(appearance.colors.textSecondary)
+            AddressAsField(text: $model.addressAs,
+                           locale: coordinator.activeLocale,
+                           bounds: model.bounds)
+        }
+    }
+
+    private var dateOfBirthSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle("profile.field.dateOfBirth", isOn: $model.hasDateOfBirth)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
+                // iOS 16 single-parameter onChange (the two-parameter
+                // closure overload is iOS 17-only; deployment target is
+                // 16.0 — same form as the rest of the codebase).
+                .onChange(of: model.hasDateOfBirth) { isOn in
+                    // Seed the wheel so an untouched picker still records
+                    // a date; the merge stores components only.
+                    if isOn, model.dateOfBirth == nil {
+                        model.dateOfBirth = Self.defaultBirthDate
+                    }
+                }
+            if model.hasDateOfBirth {
+                DatePicker("",
+                           selection: birthDateBinding,
+                           displayedComponents: [.date])
+                    .datePickerStyle(.wheel)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
+                    .accessibilityLabel(Text("profile.field.dateOfBirth"))
+            }
+        }
+    }
+
+    private var emergencySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("profile.field.doctor")
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .foregroundStyle(appearance.colors.textSecondary)
+            TextField("profile.field.doctor", text: $model.emergencyDoctor)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .padding(.horizontal, 16)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(appearance.colors.card)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            TextField("profile.field.hospital", text: $model.localHospital)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .padding(.horizontal, 16)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(appearance.colors.card)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    // MARK: save
+
+    @ViewBuilder
+    private var saveArea: some View {
+        Button {
+            model.save()
+        } label: {
+            Text("profile.save")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(appearance.colors.accent)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+
+        switch model.saveState {
+        case .idle:
+            EmptyView()
+        case .saved:
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(appearance.colors.accent)
+                Text("profile.saved")
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .foregroundStyle(appearance.colors.accent)
+            }
+        case .failed:
+            Text("profile.error.saveFailed")
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .foregroundStyle(DesignTokens.stateError)
+        }
+    }
+
+    // MARK: bindings
+
+    /// The grapheme-safe name binding (60 Characters) — same clamp helper
+    /// as the wizard step, so Devanagari conjuncts never split.
+    private var clampedName: Binding<String> {
+        Binding(
+            get: { model.name },
+            set: { model.name = ProfileText.clamped($0,
+                                                    maxGraphemes: model.bounds.nameMaxGraphemes) }
+        )
+    }
+
+    private var birthDateBinding: Binding<Date> {
+        Binding(get: { model.dateOfBirth ?? Self.defaultBirthDate },
+                set: { model.dateOfBirth = $0 })
+    }
+
+    private static let defaultBirthDate: Date = Calendar.current.date(
+        from: DateComponents(year: 1950, month: 1, day: 1)) ?? Date()
+}

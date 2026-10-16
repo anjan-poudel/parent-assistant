@@ -359,6 +359,32 @@ final class GeminiClientCostGovernorTests: XCTestCase {
         _ = try await client.generateJSON(prompt: "x")
         XCTAssertEqual(transport.callCount, 1)
     }
+
+    // MARK: - [GEMINI-SOLIDIFY] The retry is a second billable attempt
+
+    func testRetriedTransportAttemptCountsEachCallAtTheBoundary() async throws {
+        _ = makeGovernedClient(cap: 200)   // creates `governor` for the assertions below
+        transport.queuedResults = [
+            .failure(URLError(.timedOut)),
+            .success(FakeGeminiTransport.jsonResponse(text: "ok"))
+        ]
+        // The shipped client config retries once; force zero backoff so
+        // the test does not sleep.
+        let retryingClient = GeminiClient(configStore: configStore, observabilityBus: bus,
+                                          transport: transport,
+                                          config: .init(timeoutSeconds: 25,
+                                                        maxTransportRetries: 1,
+                                                        retryBackoffSeconds: 0),
+                                          costGovernor: governor)
+
+        _ = try await retryingClient.generateJSON(prompt: "x")
+        await drainMain()
+
+        XCTAssertEqual(transport.callCount, 2,
+                       "the retry is a second attempt and counts as a second billable call")
+        XCTAssertEqual(governor.callsToday, 2,
+                       "the governor sees both attempts — 'the cost is the attempt'")
+    }
 }
 
 /// `GeminiStreamingTransport` fake that fails loudly if ever invoked —
@@ -377,9 +403,18 @@ private final class CountingGeminiTransport: GeminiTransport {
     private(set) var callCount = 0
     var nextResult: Result<(Data, URLResponse), Error> =
         .success(FakeGeminiTransport.jsonResponse(text: "ok"))
+    /// [GEMINI-SOLIDIFY] A scripted queue for multi-attempt tests; when
+    /// non-empty each `send` consumes the first element.
+    var queuedResults: [Result<(Data, URLResponse), Error>] = []
 
     func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
         callCount += 1
+        if !queuedResults.isEmpty {
+            switch queuedResults.removeFirst() {
+            case .success(let value): return value
+            case .failure(let error): throw error
+            }
+        }
         switch nextResult {
         case .success(let value): return value
         case .failure(let error): throw error

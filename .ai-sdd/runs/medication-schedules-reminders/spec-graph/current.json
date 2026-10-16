@@ -1,0 +1,611 @@
+{
+  "version": "1",
+  "workflow_name": "medication-schedules-reminders",
+  "built_at": "2026-10-14T20:42:26.966Z",
+  "nodes": [
+    {
+      "id": "define-requirements",
+      "type": "task",
+      "label": "Elicit and document project requirements. Produce a structured folder of\nrequirements: one file per FR, one file per NFR, with Gherkin acceptance\ncriteria embedded in each file, and index files at each folder level.\nAfter stakeholder HIL sign-off, produce a requirements lock file that\ncaptures a stable snapshot for downstream drift detection.\n",
+      "hash": "sha256:f629d47aebb26467ca6ac2354521007578e6de26d722875083d5db06f32862b2",
+      "metadata": {
+        "agent": "ba",
+        "phase": "requirements",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "design-l1",
+      "type": "task",
+      "label": "Produce the L1 system architecture document. Define system components,\ntechnology stack, integration points, and key architectural decisions.\nConsult the requirements lock file (specs/<requirements-task-id>.lock.yaml)\nto ensure the architecture covers all locked FRs and NFRs.\n",
+      "hash": "sha256:a089f4eac72293f1562ea6d09994887d74c1b5489a802598b12710ddb3535eaf",
+      "metadata": {
+        "agent": "architect",
+        "phase": "design",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "review-l1",
+      "type": "task",
+      "label": "Review the L1 architecture document. Verify it addresses all requirements,\ncheck for architectural risks, and provide GO/NO_GO decision.\n",
+      "hash": "sha256:988a88b96a370e1cfbf96c6f62e00a638036429d558ad22d57fa1a865eac84ab",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "design-l2",
+      "type": "task",
+      "label": "Produce L2 component design documents. Define component interfaces,\ndata models, error handling strategy, and observability approach.\nConsult the requirements lock file (specs/<requirements-task-id>.lock.yaml)\nand the L1 architecture document to ensure component designs stay within scope.\n",
+      "hash": "sha256:bf5d4420c185b048f81719a4d7f389103ddd708ffa9c80c473bf7aa31d6432fa",
+      "metadata": {
+        "agent": "pe",
+        "phase": "design",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "review-l2",
+      "type": "task",
+      "label": "Review the L2 component design. Verify component interfaces are correct,\ndata models are complete, and the design aligns with L1 architecture.\nIssue GO/NO_GO decision.\n",
+      "hash": "sha256:7621f054b471e34bda2d07f8d5b7229aeb5b291fe4937339f9e01c2510702565",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "plan-tasks",
+      "type": "task",
+      "label": "Break down the component designs into concrete implementation tasks.\nDefine acceptance criteria (including Gherkin tests) per task, identify\ndependencies, and estimate effort. Output is a folder of one file per task\nplus an index.\n",
+      "hash": "sha256:a8c50f6435f7bffef83aa4ab4794eee69e9055c3bc1ddb403622e67b0a739eff",
+      "metadata": {
+        "agent": "le",
+        "phase": "planning",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "implement",
+      "type": "task",
+      "label": "Implement the feature per the task specification. Write unit tests,\nensure all acceptance criteria pass, fix lint and type errors.\n",
+      "hash": "sha256:9e845529f804e7936633b031c16b824dfa9f18d607b1af899f998c45039650be",
+      "metadata": {
+        "agent": "dev",
+        "phase": "implement",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "review-implementation",
+      "type": "task",
+      "label": "Review the implementation. Check code quality, test coverage, security,\nand conformance to the design. Issue GO/NO_GO decision.\n",
+      "hash": "sha256:e604de503319b459e3ff2ce2f685a18d651f0752641e02149509e9892aac4c3b",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "final-sign-off",
+      "type": "task",
+      "label": "Produce change summary document for human sign-off. Include:\n- Change summary: what was built and what changed\n- Requirements traceability: FR/NFR → implementation → test evidence\n- Security posture: summary of security design review + security test results\n- Open items: known issues, deferred items, post-deploy monitoring\n- Rollback plan: how to revert if the change causes production issues\n- Compliance checklist: confirm each applicable compliance item is satisfied\n",
+      "hash": "sha256:c02257caf7133e47e9fc718241db04570abdd910a05ca619d6e4ad888a029487",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "sign-off",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "define-requirements:output:specs/define-requirements.md",
+      "type": "output",
+      "label": "specs/define-requirements.md",
+      "hash": "sha256:75f555959adb405761e57ddefad9e79535a2e357758094a5f2c37a60ae934b55",
+      "metadata": {
+        "task_id": "define-requirements",
+        "contract": "requirements_doc"
+      }
+    },
+    {
+      "id": "define-requirements:output:specs/define-requirements.lock.yaml",
+      "type": "output",
+      "label": "specs/define-requirements.lock.yaml",
+      "hash": "sha256:ff55fba50f383d0f4040aa231552345cff57dc6ed227ff06c795a8374692ccf3",
+      "metadata": {
+        "task_id": "define-requirements",
+        "contract": "requirements_lock"
+      }
+    },
+    {
+      "id": "design-l1:output:specs/design-l1.md",
+      "type": "output",
+      "label": "specs/design-l1.md",
+      "hash": "sha256:cf8cb3c7df0a669a41ca006dc7c247669998f9e6e9bb5cbd6a56540928b44e28",
+      "metadata": {
+        "task_id": "design-l1",
+        "contract": "architecture_l1"
+      }
+    },
+    {
+      "id": "review-l1:output:specs/review-l1.md",
+      "type": "output",
+      "label": "specs/review-l1.md",
+      "hash": "sha256:83392347fa77540946fc35e1f839a6b303ab5a64a476b73bb39479128661dbd8",
+      "metadata": {
+        "task_id": "review-l1",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "design-l2:output:specs/design-l2.md",
+      "type": "output",
+      "label": "specs/design-l2.md",
+      "hash": "sha256:8cc30ccf2496102d889a5598e5d58b0dac9fdf9c1517e8b474f69634b19a91d8",
+      "metadata": {
+        "task_id": "design-l2",
+        "contract": "component_design_l2"
+      }
+    },
+    {
+      "id": "review-l2:output:specs/review-l2.md",
+      "type": "output",
+      "label": "specs/review-l2.md",
+      "hash": "sha256:13a5057e96f8878d8c74c89e933f88b0135c821973dea85f7e3f3f203d2d6f7c",
+      "metadata": {
+        "task_id": "review-l2",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "plan-tasks:output:specs/plan-tasks/plan.md",
+      "type": "output",
+      "label": "specs/plan-tasks/plan.md",
+      "hash": "sha256:ed7639b75f7530a91c81ae5509015c6a8b6b259185a0c6cffb89656d2837578d",
+      "metadata": {
+        "task_id": "plan-tasks",
+        "contract": "task_breakdown_l3"
+      }
+    },
+    {
+      "id": "plan-tasks:output:specs/plan-tasks/tasks/",
+      "type": "output",
+      "label": "specs/plan-tasks/tasks/",
+      "hash": "sha256:d9706c3405fa6930ed6e105a4fdddff050eefc61a8437ebb6aedf7eb1e1e76a2",
+      "metadata": {
+        "task_id": "plan-tasks"
+      }
+    },
+    {
+      "id": "implement:output:specs/implement-notes.md",
+      "type": "output",
+      "label": "specs/implement-notes.md",
+      "hash": "sha256:23f3b8cc53fe17d9bbd1673a382681ed1c7e6e12616a0984515b3f42e40b0114",
+      "metadata": {
+        "task_id": "implement",
+        "contract": "implementation"
+      }
+    },
+    {
+      "id": "review-implementation:output:specs/review-implementation.md",
+      "type": "output",
+      "label": "specs/review-implementation.md",
+      "hash": "sha256:2d03760237e8bf38e363556077047b79c5085e4d0c77c004db4d98024a9ce943",
+      "metadata": {
+        "task_id": "review-implementation",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "final-sign-off:output:specs/final-sign-off.md",
+      "type": "output",
+      "label": "specs/final-sign-off.md",
+      "hash": "sha256:9f59ea338bf799fed3b33c8e1bd28965821cf89e11ac313f61a7fba1c40aea03",
+      "metadata": {
+        "task_id": "final-sign-off",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "FR-CNR-001",
+      "type": "requirement",
+      "label": "Nepali conversation style spec — one source of truth for the conversational register",
+      "hash": "sha256:3d1b35abd5c864a9962f75e596fe1a1cd357223fdc3ac63087586d9f49e3a6a4",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-002",
+      "type": "requirement",
+      "label": "Persona upgrade in both seams — same style contract, local and cloud",
+      "hash": "sha256:acf1e3e702847ba4ccf92a94d97fff79c449449fa2007de61f2f4ab445afbd2d",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-003",
+      "type": "requirement",
+      "label": "Chat-turn sampling — fixed seed with temperature ~0.3, chat turns only",
+      "hash": "sha256:279cb18dc63c7f7b38bd290ecb4be83dc7dcc96e6d8a838393efdf56b5d96b62",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-004",
+      "type": "requirement",
+      "label": "Command-turn decode determinism preserved — temp-0 + fixed seed + GBNF untouched",
+      "hash": "sha256:1dc8cfbbd1ae957ea32dae3c4879814ebb899d6a5f2428183814b175bbd99f1c",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-005",
+      "type": "requirement",
+      "label": "Deterministic Nepali grammar guard at the polisher seam — verify, never rewrite",
+      "hash": "sha256:be6fd1588a2171631f23f948ac18915b1e6318530ca390b64e945f583158e88e",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-006",
+      "type": "requirement",
+      "label": "Guard flag outcome — escalate to the cloud persona or a safe template; honest degradation",
+      "hash": "sha256:00ff7ba8d320033e7f70d74249e9d998b949ee6c8ffde288e7cee0e231bacf12",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-007",
+      "type": "requirement",
+      "label": "`reply_grammar_flag` telemetry — observability without user content",
+      "hash": "sha256:e573bee1277ba254a9ab996fe44d424a04981b163643592513042b574a7224a0",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-008",
+      "type": "requirement",
+      "label": "Cloud-first chat routing toggle — online routes to Gemini, local brain is the floor",
+      "hash": "sha256:e95b8670cab96d7b2ae98e12bb8e3b5e9c28648610b7411ab790816a6263c6b6",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-009",
+      "type": "requirement",
+      "label": "Cloud chat consent, plain-language disclosure, visible indicator and revocation (the OD-12 shape)",
+      "hash": "sha256:84d170ea30660fe09a3fa9ae6e8cda9786794a428a414f12472235cbeb0ec24a",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-010",
+      "type": "requirement",
+      "label": "Cloud chat egress scope — the chat turn's user content and nothing else",
+      "hash": "sha256:45d922962056209c7d0d53cf434bc0d323cd0645c092dca4b230e92420c54683",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-011",
+      "type": "requirement",
+      "label": "Explicit Gemini chat temperature — a stated, reviewed value instead of a provider default",
+      "hash": "sha256:c261dff2f062ed5e0e6433ed82ba96eae88e67cad13649512d5565364179827f",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-012",
+      "type": "requirement",
+      "label": "Cloud chat credential and content hygiene — header-only key, content off the logs",
+      "hash": "sha256:e261ba287b72d0ed7564fe565248e21bfd2cd0ad517621d046ab91309c6113d9",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-013",
+      "type": "requirement",
+      "label": "Single-decode schema unchanged — one JSON, and an unreadable object abstains",
+      "hash": "sha256:0921f27ed333e5209ad453a606534c07b12f0d84a57ee2dcb8feea4476facfb3",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-014",
+      "type": "requirement",
+      "label": "Router ladder and the emergency path unchanged — emergency recall 1.00 is a gate, not a metric",
+      "hash": "sha256:bf124d3317a5b9416c2be96606db1d06361692aacea42320e7f6c513e3efc20a",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-015",
+      "type": "requirement",
+      "label": "STT pipeline, device permissions and data collection unchanged",
+      "hash": "sha256:92d13a05d37caeb589c038497e0d24739ae875d69fd2bbf3b15787f7666cda3c",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-016",
+      "type": "requirement",
+      "label": "v17 — a chat-aware QLoRA variant of the existing training suite (same model family)",
+      "hash": "sha256:34de9c701b6f019f5cbd95fd1f6d40bd3ce058f4e14bd2e79917a5cc7e926252",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-017",
+      "type": "requirement",
+      "label": "Four-layer conversation corpus construction shaped by the style spec",
+      "hash": "sha256:139a68832eb8299f57141e0df7aefcaf2065517baf9852fbf546de99849ef0e5",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-018",
+      "type": "requirement",
+      "label": "Ship-mix provenance manifest — no CC BY-NC contamination of a shipped artifact",
+      "hash": "sha256:efb061899bcf854bd524dcea9a5a259102d63a5540cc744fa6ef0aad19ede98a",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-019",
+      "type": "requirement",
+      "label": "`eval/chat_golden.jsonl` — a held-out chat evaluation set",
+      "hash": "sha256:5c2fe9b9da241153530d05da2821758ed6327cbd9c2848455d1285752f914fdd",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-020",
+      "type": "requirement",
+      "label": "The new chat gates — honorific agreement, no AI-isms, LLM-judge quality",
+      "hash": "sha256:63fb358dd01f4c479e22b1ad943bf3e24092c50e02dd0fa5a1235c2fe0353d39",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-021",
+      "type": "requirement",
+      "label": "The full gate harness is the ship gate — existing regressions are non-negotiable",
+      "hash": "sha256:23269325a5f744ffc107e987b6bf6883483a64f7609ae42d889ba6d9dec4a678",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-022",
+      "type": "requirement",
+      "label": "v17 catalog entry — versioned, reversible, gated, with per-device tier selection",
+      "hash": "sha256:6ec300f6b4506673e520fbed69293d85df3c1df05ae5fc8173918360a0c3fec2",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-023",
+      "type": "requirement",
+      "label": "Chat prompt/template discipline — seed byte-mirror, intent prompt untouched, no few-shot exemplars",
+      "hash": "sha256:0b46767fdfc67e8c3a73b7899ad814f3662419b838482653d2d1e165f6f0cba7",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-024",
+      "type": "requirement",
+      "label": "Feasibility honesty — every leg reported explicitly, no silent drop",
+      "hash": "sha256:6007051e1d9cae6fb234deb1e083d12da48911d566d72eb5de54f7e8b390c5ac",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-025",
+      "type": "requirement",
+      "label": "DV-1 … DV-6 device validation on Anzaan — the recorded completion gate",
+      "hash": "sha256:b8356f3bda4bc42c05754cc0487f08286cea42ca74f879b39396542057923154",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-026",
+      "type": "requirement",
+      "label": "P2 polish — DPO on judge preferences",
+      "hash": "sha256:29054f4a94695303658f714bdfbe217c0ccfe4b5d08d595db19dde85a11455bc",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-027",
+      "type": "requirement",
+      "label": "P2 polish — romanized-Nepali chat",
+      "hash": "sha256:08bf47a41bbb49135b35a808c62514da3cc945745939cb9aa3482b1cdc1436f8",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-028",
+      "type": "requirement",
+      "label": "P2 polish — the 4B chat tier, admitted only through the per-device resolver",
+      "hash": "sha256:d73cec23fb197298b30fc3f63fc988d6f63384f6d1e1472e9f51c7886f01f7f9",
+      "metadata": {}
+    },
+    {
+      "id": "FR-CNR-029",
+      "type": "requirement",
+      "label": "P2 polish — consent-based real conversation transcripts as the gold source",
+      "hash": "sha256:931cf5955508ebac4eb0c28a9bb0d3d307e8184b14886bb43e28d484b412115c",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-CNR-001",
+      "type": "requirement",
+      "label": "Chat reply reproducibility — fixed seed, same input, same reply",
+      "hash": "sha256:2d8ea3dbf6bced06c441a36fb0d9af7b37a92913ad87d4714de297dd48320062",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-CNR-002",
+      "type": "requirement",
+      "label": "Listening-turn latency envelope — chat replies stay within the spoken-conversation budget",
+      "hash": "sha256:97817170c874b326aaf8aaf98fe3479b09adf1cde9f99a85a861df274ed84be6",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-CNR-003",
+      "type": "requirement",
+      "label": "Memory and jetsam behaviour — one brain resident, zero feature-attributable terminations",
+      "hash": "sha256:1ffa9a451d793132757bdbe205a3b397cba920e09d82f10749e54324eecc363e",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-CNR-004",
+      "type": "requirement",
+      "label": "Chat prompt token budget — the 1,024-token ceiling holds",
+      "hash": "sha256:9cb4d44c5a147072e17b12886f714c3f73ea9927559766b0fd891736e07e953b",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-CNR-005",
+      "type": "requirement",
+      "label": "Prompt-template byte-mirror discipline — seed and code cannot drift",
+      "hash": "sha256:5157d28663b5e23eae7eaef3f754f52a7259ac01e4de8a5746bffdad3aea666f",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-CNR-006",
+      "type": "requirement",
+      "label": "Log safety — no conversation content, transcript or key material in any log",
+      "hash": "sha256:136bd5e8e1d57ff801d37379739396d4270d38d6f8846f37433593e15ff5951d",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-CNR-007",
+      "type": "requirement",
+      "label": "Telemetry content hygiene — every new event carries classification only",
+      "hash": "sha256:b3cedc96b4edfb1ee6b61863e0094e175d108a9716b1749756a53066ae8aa133",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-CNR-008",
+      "type": "requirement",
+      "label": "Gate thresholds — the measurable ship conditions for the v17 swap",
+      "hash": "sha256:265ab9cdd715b9a75dbf9b712f5feef856ef3dc23c7832e517cc0f40933088f0",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-CNR-009",
+      "type": "requirement",
+      "label": "Accessibility — voice-first, house touch standards, and no routing reasoning asked of the elderly user",
+      "hash": "sha256:4453a81a6d15b928e8813a3ad27c5c70834068034f93ab98a5c6500fcc0732c5",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-CNR-010",
+      "type": "requirement",
+      "label": "Localisation — every new user-visible string exists in Nepali and English",
+      "hash": "sha256:9d414fc86ce8def78edf81ba663d792fdd8a9dab60b5c535e4359e8158f162bc",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-CNR-011",
+      "type": "requirement",
+      "label": "Compliance and release gates — workflow gates, the log gate, and honest baseline reporting",
+      "hash": "sha256:73884b0175e7ea9e0d936154add495bd2f6c5409c3495b3a5201027b7e53d013",
+      "metadata": {}
+    }
+  ],
+  "edges": [
+    {
+      "source": "design-l1",
+      "target": "define-requirements",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-l1",
+      "target": "design-l1",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "design-l2",
+      "target": "review-l1",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-l2",
+      "target": "design-l2",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "review-l2",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "implement",
+      "target": "plan-tasks",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-implementation",
+      "target": "implement",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "final-sign-off",
+      "target": "review-implementation",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "define-requirements",
+      "target": "define-requirements:output:specs/define-requirements.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "define-requirements",
+      "target": "define-requirements:output:specs/define-requirements.lock.yaml",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "design-l1",
+      "target": "design-l1:output:specs/design-l1.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-l1",
+      "target": "review-l1:output:specs/review-l1.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "design-l2",
+      "target": "design-l2:output:specs/design-l2.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-l2",
+      "target": "review-l2:output:specs/review-l2.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "plan-tasks:output:specs/plan-tasks/plan.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "plan-tasks:output:specs/plan-tasks/tasks/",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "implement",
+      "target": "implement:output:specs/implement-notes.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-implementation",
+      "target": "review-implementation:output:specs/review-implementation.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "final-sign-off",
+      "target": "final-sign-off:output:specs/final-sign-off.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    }
+  ]
+}

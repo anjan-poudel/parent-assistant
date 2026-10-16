@@ -2,7 +2,9 @@ import Foundation
 
 /// One call or message the ASSISTANT initiated (call-history task,
 /// 2026-09-06) — plus ONE anonymous exception, the unanswered-call event
-/// (missed-calls task, 2026-09-07).
+/// (missed-calls task, 2026-09-07) — plus the cloud cascade's
+/// `cloudEscalation` row (cloud-cascade task, 2026-09-16), which records
+/// that a turn was sent to the online brain rather than to a channel.
 ///
 /// The app logs ONLY what it itself did through the channel vocabulary
 /// below — never the system call log and never other apps' messages (iOS
@@ -31,6 +33,16 @@ struct AppActivityEntry: Codable, Equatable, Identifiable {
         case call
         /// A chat/message surface was opened or a message drafted.
         case message
+        /// [CLOUD-CASCADE] (2026-09-16) The assistant OVERRULED its own
+        /// on-device answer and sent the request to the online brain —
+        /// the cloud cascade tier fired (the large local brain came back
+        /// below the configured confidence threshold). Not a channel
+        /// open: nothing was opened on the user's behalf, and the row
+        /// exists so the household (and the tester) can see that a turn
+        /// reached the cloud. Always paired with `Channel.cloud`, carries
+        /// no contact, no number and no content — the threshold and the
+        /// confidence live in the observability event, never in a row.
+        case cloudEscalation
     }
 
     /// Which surface the assistant opened.
@@ -50,7 +62,7 @@ struct AppActivityEntry: Codable, Equatable, Identifiable {
         /// a missed or declined incoming call, or an attempted outgoing
         /// call nobody picked up (iOS reports these indistinguishably).
         /// iOS masks the identity AND the number of calls that involve
-        /// other apps, so this row normally stores an EMPTY
+        /// other apps, so an unattributed row stores an EMPTY
         /// `contactName` and EMPTY `phone` — there is no name to store,
         /// no number to look up, and no address-book match possible. The
         /// UI renders the localized "Unanswered call" label
@@ -59,15 +71,30 @@ struct AppActivityEntry: Codable, Equatable, Identifiable {
         /// away) — the only surface where the caller's identity
         /// genuinely lives.
         ///
-        /// ONE attributed exception (call-tracking task, 2026-09-13): the
-        /// app's own opens are matched to the unanswered event by time
+        /// ONE attributed exception (call-tracking task, 2026-09-13,
+        /// WIRED by the missed-calls fix, 2026-09-18): the app's own
+        /// opens are matched to the unanswered event by time
         /// (`OpenedCallAttributor`), so a row for a call the APP placed
         /// that was never picked up carries the contact the app itself
-        /// dialed. The mask argument does not apply there — the app
+        /// dialed — INCLUDING THE NUMBER, captured at the source (the
+        /// dial). The mask argument does not apply there — the app
         /// already knew who it called, and the observer's ended-
-        /// unconnected event is the outcome of that dial. Nothing else
-        /// is ever filled in: an unattributed event stays anonymous.
+        /// unconnected event is the outcome of that dial. Such a row
+        /// shows its number, the contact name when the number matches a
+        /// saved contact (family contacts first, then the native address
+        /// book — `MissedCallContactResolver`), and its tap DIALS BACK
+        /// through the same channel a family contact's call button
+        /// resolves to (`AppCoordinator.dialBackMissedCall`). Nothing
+        /// else is ever filled in: an unattributed event stays anonymous.
         case unanswered
+        /// [CLOUD-CASCADE] (2026-09-16) The ONLINE brain — the cloud
+        /// cascade tier's destination. Not a surface the user can be
+        /// re-opened into: no number, no handle, no app. The row is
+        /// informational by design (it is not a button on the History
+        /// leaf), because there is nothing to re-open — the turn's
+        /// transcript and reply are the assistant's business, not a
+        /// channel's.
+        case cloud
     }
 
     let kind: Kind
@@ -94,6 +121,40 @@ struct AppActivityEntry: Codable, Equatable, Identifiable {
         self.messengerHandle = messengerHandle
         self.body = body
     }
+
+    /// Keys are declared explicitly because the decode below is custom
+    /// (the synthesized `init(from:)` would reject payloads missing any
+    /// non-optional key, and tolerance is the point here).
+    private enum CodingKeys: String, CodingKey {
+        case id, timestamp, kind, channel, contactName, phone
+        case messengerHandle, body
+    }
+
+    /// Tolerant decode (missed-calls fix, 2026-09-18): the row's identity
+    /// keys (`id`, `timestamp`, `kind`, `channel`) are REQUIRED — a row
+    /// missing them is not a row — but the contact fields tolerate
+    /// absence, because payloads written by older builds (and any
+    /// hand-edited export) may lack them:
+    ///  - `phone` and `contactName` default to "" — the exact shape of the
+    ///    ANONYMOUS unanswered rows the missed-calls feature has stored
+    ///    since 2026-09-07 (an unanswered call whose caller iOS masked);
+    ///    the migration contract is "entries without numbers still load
+    ///    and render honestly, new entries always carry one when the
+    ///    capture seam has one";
+    ///  - `messengerHandle` and `body` read as nil (their natural
+    ///    "absent" value — the store is unversioned and an optional field
+    ///    IS its migration, the same rule `FamilyContact` holds).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        kind = try container.decode(Kind.self, forKey: .kind)
+        channel = try container.decode(Channel.self, forKey: .channel)
+        contactName = (try? container.decode(String.self, forKey: .contactName)) ?? ""
+        phone = (try? container.decode(String.self, forKey: .phone)) ?? ""
+        messengerHandle = try? container.decodeIfPresent(String.self, forKey: .messengerHandle)
+        body = try? container.decodeIfPresent(String.self, forKey: .body)
+    }
 }
 
 /// The assistant's own call/message history (call-history task,
@@ -102,7 +163,10 @@ struct AppActivityEntry: Codable, Equatable, Identifiable {
 /// (missed-calls task, 2026-09-07), appended by the coordinator when
 /// live-call detection observes a call ending without ever connecting;
 /// anonymous unless the app itself placed the call that went unanswered
-/// (call-tracking task, 2026-09-13).
+/// (call-tracking task, 2026-09-13). The cloud-cascade row (cloud-cascade
+/// task, 2026-09-16) is appended by the coordinator from `IntentRouter`'s
+/// escalation seam — one row per turn the cloud cascade tier sent to the
+/// online brain.
 ///
 /// Append-only in spirit (rows are never edited or deleted by the app),
 /// newest-first on read, capped at `maxEntries` by dropping the OLDEST

@@ -58,6 +58,15 @@ final class GeminiConfigStoreTests: XCTestCase {
         XCTAssertEqual(store.model, "gemini-2.5-flash", "blank input should not overwrite a real selection")
     }
 
+    func testSaveModelTrimsWhitespace() {
+        // [GEMINI-SOLIDIFY] The status card reads the model id as the
+        // family saved it — a padded paste must not become a padded
+        // request URL.
+        let store = GeminiConfigStore(storage: GeminiInMemoryStorage())
+        store.saveModel("  gemini-2.5-flash-lite  ")
+        XCTAssertEqual(store.model, "gemini-2.5-flash-lite")
+    }
+
     func testModelPersistsAcrossInstances() {
         let storage = GeminiInMemoryStorage()
         GeminiConfigStore(storage: storage).saveModel("gemini-flash-latest")

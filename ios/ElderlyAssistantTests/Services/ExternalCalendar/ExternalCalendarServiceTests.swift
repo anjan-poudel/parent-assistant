@@ -67,15 +67,21 @@ final class ExternalCalendarServiceTests: XCTestCase {
             let title: String
             let body: String
             let fireDate: Date
+            /// The event deep link the banner was armed with, if any
+            /// (rich-events task, 2026-09-17) — nil for a plain reminder,
+            /// which is what "no address → no action" means here.
+            let action: ExternalReminderAction?
         }
 
         private(set) var scheduled: [ScheduledCall] = []
         private(set) var cancelled: [String] = []
 
         func scheduleExternalReminder(identifier: String, title: String,
-                                      body: String, at fireDate: Date) {
+                                      body: String, at fireDate: Date,
+                                      action: ExternalReminderAction?) {
             scheduled.append(ScheduledCall(identifier: identifier, title: title,
-                                           body: body, fireDate: fireDate))
+                                           body: body, fireDate: fireDate,
+                                           action: action))
         }
 
         func cancelExternalReminders(identifiers: [String]) {
@@ -116,11 +122,12 @@ final class ExternalCalendarServiceTests: XCTestCase {
     private func scannedEvent(id: String, at date: Date, isAllDay: Bool = false,
                               declined: Bool = false, notes: String? = nil,
                               hasAlarms: Bool = false,
-                              calendarIdentifier: String? = nil) -> ScannedEvent {
+                              calendarIdentifier: String? = nil,
+                              location: String? = nil) -> ScannedEvent {
         ScannedEvent(nativeIdentifier: id, title: "Event \(id)", notes: notes,
                      startDate: date, isAllDay: isAllDay, isDeclined: declined,
                      hasAlarms: hasAlarms, calendarIdentifier: calendarIdentifier,
-                     calendarName: "Family")
+                     calendarName: "Family", location: location)
     }
 
     private func scannedReminder(id: String, at date: Date?, isAllDay: Bool = false,
@@ -486,10 +493,12 @@ final class ExternalCalendarServiceTests: XCTestCase {
         let (service, _, _, opener) = makeService()
         let event = ExternalReminder(id: "e", source: .event, title: "t", notes: nil,
                                      startDate: fakeNow, isAllDay: false,
-                                     hasOwnAlarm: false, calendarName: "c")
+                                     hasOwnAlarm: false, calendarName: "c",
+                                     nativeEventIdentifier: "native-e", location: nil)
         let reminder = ExternalReminder(id: "r", source: .reminder, title: "t", notes: nil,
                                         startDate: fakeNow, isAllDay: false,
-                                        hasOwnAlarm: false, calendarName: "c")
+                                        hasOwnAlarm: false, calendarName: "c",
+                                        nativeEventIdentifier: nil, location: nil)
 
         service.open(event)
         service.open(reminder)
@@ -504,7 +513,8 @@ final class ExternalCalendarServiceTests: XCTestCase {
         opener.canOpenResult = false
         let event = ExternalReminder(id: "e", source: .event, title: "t", notes: nil,
                                      startDate: fakeNow, isAllDay: false,
-                                     hasOwnAlarm: false, calendarName: "c")
+                                     hasOwnAlarm: false, calendarName: "c",
+                                     nativeEventIdentifier: "native-e", location: nil)
 
         service.open(event)
 

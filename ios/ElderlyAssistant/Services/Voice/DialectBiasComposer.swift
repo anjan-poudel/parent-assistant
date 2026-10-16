@@ -81,17 +81,17 @@ enum DialectBiasSettings {
 
     /// Default is enabled — the toggle is an inspection/escape hatch, not
     /// an opt-in gate.
-    static func isEnabled(defaults: UserDefaults = .standard) -> Bool {
+    static func isEnabled(defaults: UserDefaults = SettingsPersistence.shared) -> Bool {
         defaults.object(forKey: defaultsKey) == nil
             ? true
             : defaults.bool(forKey: defaultsKey)
     }
 
-    static func setEnabled(_ enabled: Bool, defaults: UserDefaults = .standard) {
+    static func setEnabled(_ enabled: Bool, defaults: UserDefaults = SettingsPersistence.shared) {
         defaults.set(enabled, forKey: defaultsKey)
     }
 
-    static func reset(defaults: UserDefaults = .standard) {
+    static func reset(defaults: UserDefaults = SettingsPersistence.shared) {
         defaults.removeObject(forKey: defaultsKey)
     }
 }

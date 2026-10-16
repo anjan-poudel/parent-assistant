@@ -130,7 +130,33 @@ enum IntentEncoderModelError: Error, Equatable {
 ///    whose existing `ReplySanityGate` speaks the honest "didn't catch
 ///    that" fallback rather than silence. Answer generation is the LLM
 ///    brain's job, not the classifier's.
-final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureReporting {
+///
+/// ## [CORRECTION-ANYBRAIN] Where the pre-intent layers run
+///
+/// The STT-error corrector and the dialect canonicalizer are NOT this
+/// interpreter's private pre-processing any more: their composition
+/// (`IntentInputCanonicalization.prepare`) lives at the local SLOT's input
+/// (`LocalBrainChain.InputSeam`), so the two switches act on whichever brain
+/// answers — the encoder, or the picker brain standing in for it — and a
+/// tester can measure each layer in isolation against either.
+///
+/// This interpreter therefore has two entry points, and the difference
+/// between them is the double-apply guard:
+///
+///  - `interpret(preparedInput:)` — how the local slot reaches the encoder.
+///    The pair was prepared ONCE, upstream; nothing in this file runs the two
+///    layers on it, so the encoder can never correct an already-corrected
+///    transcript.
+///  - `interpret(transcript:)` — the direct-caller entry point (tests, and
+///    any future standalone use), which still sanitises and prepares its own
+///    pair. It is not the shipped path: the slot dispatches a conforming
+///    brain through the prepared entry point.
+///
+/// Both hand the tokenizer and the decoder the SAME string
+/// (`IntentTranscriptPair.modelInput`), because the decoder's span offsets
+/// index that exact text.
+final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureReporting,
+                                      PreparedTranscriptInterpreting {
 
     /// Every value is a parameter, not a constant buried in the
     /// implementation — mirrors `LocalIntentInterpreter.Config` and the
@@ -180,11 +206,40 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
     /// on every other configuration (tests, and any future non-spike use).
     private let artifactInstaller: IntentEncoderArtifactInstalling?
     /// [TURN-TIMING-BREAKDOWN] Turn-scoped stage stopwatch for the three
-    /// encoder stages (tokenizer / CoreML forward / decode). Nil — every
-    /// configuration except an `INTENT_ENCODER` build — makes each
+    /// encoder stages (tokenizer / CoreML forward / decode). Nil — no build
+    /// without `INTENT_ENCODER` ([ENCODER-ALWAYS-ON] the default one has
+    /// it) — makes each
     /// measurement a nil check around the UNCHANGED call: no clock read,
     /// no allocation, and no decision anywhere consults it.
     private let timingRecorder: TurnTimingRecorder?
+
+    /// [PIPELINE-TRACE] Turn-scoped summary recorder for this brain's rows
+    /// (the two pre-intent layers, the tokenizer, the forward pass and the
+    /// decode). Nil on every configuration that does not want a trace —
+    /// each call site is then a nil check around the UNCHANGED call.
+    /// Instrumentation only: nothing below branches on it.
+    private let traceRecorder: PipelineTraceRecorder?
+
+    /// [TG-12] Handed the corrector's readout after every turn in which the
+    /// layer PARTICIPATED (mode on; never for `.off`), on the calling thread —
+    /// the coordinator hops to main to publish the card's line. Mirrors
+    /// `TurnLatencyReporter.onReported`: nil on every non-gated
+    /// configuration, and with no reporter attached the readout is simply not
+    /// forwarded (the decisions and the event are unaffected).
+    ///
+    /// [CORRECTION-ANYBRAIN] Scoped to turns THIS interpreter ran. The layers
+    /// now act on the local slot's input whichever brain answers, so a turn
+    /// the picker brain answers is corrected and canonicalized but reports no
+    /// readout here — the card's line is the encoder telemetry, not the
+    /// seam's. Extending it to picker-brain turns means giving the slot an
+    /// owner for that report; until then the honest statement is "the last
+    /// turn the encoder ran".
+    ///
+    /// The readout carries the user's own words (the card is an on-device
+    /// debugger surface). It is never persisted, never logged and never
+    /// placed in an event — the event carries `observabilityMetadata` instead,
+    /// which is a different and count-only payload.
+    var onCorrection: ((CorrectionReadout) -> Void)?
 
     private let inferenceQueue = DispatchQueue(label: "intent.encoder",
                                                qos: .userInitiated)
@@ -194,6 +249,11 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
     private var loadedRunner: IntentEncoderModelRunning?
     /// Set by `handleMemoryPressure()`; cleared by the next `interpret()`.
     private var unloadedForMemoryPressure = false
+    /// [CASCADE-RESIDENCY] Set by `unloadForCascadeEscalation()`; cleared by
+    /// the next `interpret()`. Deliberately NOT read by `isAvailable`: the
+    /// cascade's release is a residency decision, never an availability
+    /// one — the encoder must be able to serve the next turn.
+    private var releasedForCascadeEscalation = false
 
     /// [LAT-EVIDENCE] The honest reason the LAST attempt failed —
     /// "inference_timeout", "model_load_failed", "inference_failed" or
@@ -210,6 +270,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
          config: Config = .default,
          artifactInstaller: IntentEncoderArtifactInstalling? = nil,
          timingRecorder: TurnTimingRecorder? = nil,
+         traceRecorder: PipelineTraceRecorder? = nil,
          modelRunnerFactory: @escaping (URL) throws -> IntentEncoderModelRunning
              = IntentEncoderInterpreter.defaultModelRunnerFactory) {
         self.modelStore = modelStore
@@ -220,6 +281,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
         self.config = config
         self.artifactInstaller = artifactInstaller
         self.timingRecorder = timingRecorder
+        self.traceRecorder = traceRecorder
         self.modelRunnerFactory = modelRunnerFactory
     }
 
@@ -263,85 +325,230 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
 
     // MARK: - CommandInterpreter
 
-    func interpret(transcript: String,
-                   context: InterpreterContext,
-                   completion: @escaping (InterpretedCommand?) -> Void) {
+    /// [CASCADE-RESIDENCY] Why the previous turn released the weights —
+    /// the reload event's `state` label, and nothing else. No decision
+    /// reads it: availability is `unloadedForMemoryPressure` alone, so a
+    /// cascade release can never take the encoder out of service.
+    private enum WeightRelease: String {
+        case none = "loaded"
+        case memoryPressure = "reloaded_after_memory_pressure"
+        case cascadeEscalation = "reloaded_after_cascade_escalation"
+    }
+
+    /// One attempt's timing + memory state, resolved by `beginTurn`.
+    private struct TurnStart {
+        let started: Date
+        let release: WeightRelease
+    }
+
+    /// The preamble BOTH entry points share, so the two paths cannot drift:
+    /// the failure reason belongs to the last attempt only, the
+    /// memory-pressure hold is cleared here, and the two availability guards
+    /// report through `completion`. Returns nil when the turn cannot run —
+    /// the completion has already been delivered.
+    private func beginTurn(completion: @escaping (InterpretedCommand?) -> Void) -> TurnStart? {
         // A fresh attempt starts clean — the reason belongs to the last one.
         lastInferenceFailureReason = nil
         // Every abstention/failure event carries the attempt's duration
         // (uniform stage-latency signal, C9-safe: a number, nothing else).
         let started = Date()
 
+        // [CASCADE-RESIDENCY] Both release flags clear here — this is the
+        // "re-arm" half of the cascade policy: `isAvailable` never went
+        // false for a cascade release, and the first use of the turn
+        // reloads the weights through `runnerForPrediction`.
         stateLock.lock()
-        let wasUnloaded = unloadedForMemoryPressure
-        if wasUnloaded { unloadedForMemoryPressure = false }
+        let release: WeightRelease
+        if unloadedForMemoryPressure {
+            release = .memoryPressure
+        } else if releasedForCascadeEscalation {
+            release = .cascadeEscalation
+        } else {
+            release = .none
+        }
+        unloadedForMemoryPressure = false
+        releasedForCascadeEscalation = false
         stateLock.unlock()
 
         // Artifact + vocabulary must both be present. The tokenizer check
         // is deliberately first-class: without it the encoder cannot run at
         // all, and reporting that honestly is better than failing per-turn.
         guard installedModelDirectory != nil else {
+            // [PIPELINE-TRACE] The encoder was offered the turn and could
+            // not run: its three rows say so, each with the honest reason,
+            // rather than falling back to the generic "not serving".
+            traceRecorder?.recordOff(Self.encoderStages, reason: "model_not_cached")
             emit("encoder_unavailable", outcome: "info", errorCode: "model_not_cached")
             DispatchQueue.main.async { completion(nil) }
-            return
+            return nil
         }
         guard tokenizer.isReady else {
+            traceRecorder?.recordOff(Self.encoderStages,
+                                     reason: IntentEncoderAbstention.tokenizerUnavailable.rawValue)
             emit("encoder_unavailable", outcome: "info",
                  errorCode: IntentEncoderAbstention.tokenizerUnavailable.rawValue)
             lastInferenceFailureReason = IntentEncoderAbstention.tokenizerUnavailable.rawValue
             DispatchQueue.main.async { completion(nil) }
-            return
+            return nil
         }
+        return TurnStart(started: started, release: release)
+    }
 
+    func interpret(transcript: String,
+                   context: InterpreterContext,
+                   completion: @escaping (InterpretedCommand?) -> Void) {
+        guard let turn = beginTurn(completion: completion) else { return }
         // Sanitise BEFORE any token reaches the encoder (NFR-013 / spec
         // §5.2 — `quarantine` level, same as every other interpreter).
         let clean = InputSanitiser.sanitise(transcript, level: .quarantine)
         guard !clean.isEmpty else {
+            traceRecorder?.recordOff(Self.encoderStages,
+                                     reason: IntentEncoderAbstention.emptyAfterSanitise.rawValue)
             emit("encoder_abstained", outcome: "info",
-                 durationMs: Self.elapsedMs(since: started),
+                 durationMs: Self.elapsedMs(since: turn.started),
                  errorCode: IntentEncoderAbstention.emptyAfterSanitise.rawValue)
             DispatchQueue.main.async { completion(nil) }
             return
         }
-        // [TG-12] Canonicalization seam — §4.6's composition, and the ONLY
-        // place in this file that knows the canonicalizer exists.
+        // [CORRECTION-ANYBRAIN] This entry point still owns the seam for
+        // DIRECT callers — a test, or a caller that hands this interpreter a
+        // raw transcript. The local slot does NOT reach the encoder this way:
+        // `LocalBrainChain` prepares the pair once and hands it over through
+        // `interpret(preparedInput:)`, which runs the layers not at all. That
+        // is what makes `correct∘correct` impossible on the shipped path: the
+        // seam is run by whoever owns the slot's input, and the pair below is
+        // exactly one run of it.
         //
-        // The sanitised transcript stays the boundary: `clean` is still what
-        // the emptiness guard above tests and still the ORIGINAL the pair
-        // carries. The pair's `modelInput` is what the tokenizer and the
-        // decoder are handed — and the decoder MUST be handed the same string
-        // the tokenizer was, because `IntentEncoderSpan` offsets index that
-        // exact text (its `sanitisedTranscript` is the span offset space).
-        // Passing the canonical text to one and not the other would produce
-        // spans that slice the wrong words.
-        //
-        // INERT BY DEFAULT. `IntentInputCanonicalization.prepare` reads an
+        // Inert by default: `IntentInputCanonicalization.prepare` reads an
         // absent preference as OFF and `Policy.runtime` additionally requires
         // the INTENT_ENCODER compilation condition, so on every shipped
         // configuration `modelInput == clean`, `applications` is empty, and
-        // the expressions below are the ones that ran before this seam
-        // existed. There is no branch on canonicalization anywhere else: not
-        // in this interpreter's control flow, not in `LocalBrainChain`, not in
-        // `CommandRouter`, whose safety net keeps reading the raw transcript
-        // upstream of every interpreter (D-1).
-        let input = IntentInputCanonicalization.prepare(sanitisedTranscript: clean)
-        if !input.isIdentity {
+        // every expression below is the one that ran before this seam existed.
+        // [PIPELINE-TRACE] The recorder rides along so the two pre-intent
+        // layers get their own rows (corrector, then canonicalizer) from
+        // the seam that owns them; nil everywhere else, where the seam is
+        // the expression it was before the trace existed.
+        let input = IntentInputCanonicalization.prepare(sanitisedTranscript: clean,
+                                                        traceRecorder: traceRecorder)
+        reportSeamParticipation(input, started: turn.started)
+        runTurn(input: input, turn: turn, completion: completion)
+    }
+
+    /// [CORRECTION-ANYBRAIN] The local slot's other entry point: the pair
+    /// `LocalBrainChain` prepared once for this turn, handed down to whichever
+    /// brain serves.
+    ///
+    /// The seam is NOT run again here — that is the point of the relocation
+    /// (the layers act on whichever brain answers, and they act exactly once).
+    /// The pair's `original` is `InputSanitiser.sanitise(_:level:.quarantine)`
+    /// output by the seam's own contract, so the sanitised boundary and the
+    /// span offset space (`modelInput`) are the same strings they were when
+    /// this interpreter prepared the pair itself.
+    ///
+    /// The pair's `modelInput` is what the tokenizer and the decoder are
+    /// handed — the decoder MUST get the same string the tokenizer did,
+    /// because `IntentEncoderSpan` offsets index that exact text; passing the
+    /// canonical text to one and not the other would slice the wrong words.
+    ///
+    /// The seam's TELEMETRY still belongs here: the readout the internal card
+    /// shows and the two count-only events describe the pair whichever side
+    /// prepared it, and this is the one participant that both knows the pair
+    /// and holds the artifact identity the event payload carries. The slot
+    /// never reports, so a turn is reported exactly once — by the encoder, on
+    /// the turns the encoder actually ran.
+    func interpret(preparedInput input: IntentTranscriptPair,
+                   context: InterpreterContext,
+                   completion: @escaping (InterpretedCommand?) -> Void) {
+        guard let turn = beginTurn(completion: completion) else { return }
+        // The emptiness guard the direct path applies to the sanitised
+        // transcript, applied to the text this turn would actually run on.
+        // An abstention, not a failure: the reason stays nil.
+        guard !input.modelInput.isEmpty else {
+            emit("encoder_abstained", outcome: "info",
+                 durationMs: Self.elapsedMs(since: turn.started),
+                 errorCode: IntentEncoderAbstention.emptyAfterSanitise.rawValue)
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+        reportSeamParticipation(input, started: turn.started)
+        runTurn(input: input, turn: turn, completion: completion)
+    }
+
+    /// [TG-12] The seam's own telemetry, emitted from BOTH entry points and
+    /// exactly once per turn the encoder ran — the slot does not report, so
+    /// there is no second emitter to double with. The payloads are
+    /// COUNT-ONLY and BINNED (A-16): mode, counts, reason histograms, table
+    /// ROW IDs, error classes and bucketed scores — never a surface form,
+    /// never a transcript, never a raw score. Nothing downstream branches on
+    /// either signal (A-14).
+    ///
+    /// [CORRECTION-ANYBRAIN] A turn the PICKER brain answers reports nothing
+    /// here, as before the relocation: these events carry this artifact's
+    /// identity and describe the layers' participation on the encoder's
+    /// input.
+    private func reportSeamParticipation(_ input: IntentTranscriptPair,
+                                         started: Date) {
+        if !input.canonicalizationIsIdentity {
             // Rule ids, table ids, kinds and counts ONLY — never the words
             // being rewritten (C9 / NFR-016 / §6.6). Unreachable while the
             // switch is off.
             emit("encoder_input_canonicalized", outcome: "info",
                  durationMs: Self.elapsedMs(since: started),
-                 extra: input.observabilityMetadata)
+                 extra: input.canonicalizationMetadata)
         }
+        // [TG-12] Phase 1's correction event — the layer's own observability.
+        // Unreachable while the mode key is absent (the shipped default): the
+        // corrector applies nothing, `applications` is empty, and no event is
+        // emitted — so a configuration nobody opted into cannot change the
+        // event stream.
+        if let correction = input.correction, !correction.applications.isEmpty {
+            emit("turn_correction", outcome: "info",
+                 durationMs: Self.elapsedMs(since: started),
+                 extra: correction.observabilityMetadata)
+        }
+        // [TG-12] The card's line, last turn only, in memory only. Forwarded
+        // when the layer participated at all — including a pass-through, whose
+        // readout says WHY nothing was corrected, which is the question a
+        // debugger actually has. `readout` is nil for an empty transcript.
+        if let correction = input.correction,
+           correction.mode != .off || correction.degraded,
+           let readout = correction.readout {
+            onCorrection?(readout)
+        }
+    }
+
+    /// Tokenize, run the graph, decode — the part of a turn that is identical
+    /// whichever entry point got here, and the only part that touches the
+    /// model.
+    private func runTurn(input: IntentTranscriptPair,
+                         turn: TurnStart,
+                         completion: @escaping (InterpretedCommand?) -> Void) {
+        let started = turn.started
+        let release = turn.release
         // [TURN-TIMING-BREAKDOWN] `encoder_tokenizer` — the tokenizer call
         // is wrapped, never restructured: nil recorder (every non-gated
         // build) runs the identical expression with no clock read.
+        // [PIPELINE-TRACE] The trace span opens beside the timing
+        // measurement and closes with the token COUNT the tokenizer
+        // actually produced (a real count, not an estimate).
+        let tokenizeTrace = traceRecorder?.start(
+            .encoderTokenizer,
+            input: PipelineTraceSummary.text(input.modelInput))
         let tokenization: IntentEncoderTokenization? =
             timingRecorder.measure(.encoderTokenizer) {
                 tokenizer.tokenize(sanitisedTranscript: input.modelInput,
                                    maxSequenceLength: manifest.maxSequenceLength)
             }
+        if let tokenization {
+            tokenizeTrace?.finish(
+                output: PipelineTraceSummary.tokens(tokenization.tokenIds.count),
+                decision: "tokenized",
+                tokenCount: tokenization.tokenIds.count)
+        }
         guard let tokenization else {
+            tokenizeTrace?.finish(output: "unavailable", decision: "tokenizer_unavailable")
+            traceRecorder?.recordOff(Self.encoderStages,
+                                     reason: IntentEncoderAbstention.tokenizerUnavailable.rawValue)
             emit("encoder_unavailable", outcome: "info",
                  errorCode: IntentEncoderAbstention.tokenizerUnavailable.rawValue)
             lastInferenceFailureReason = IntentEncoderAbstention.tokenizerUnavailable.rawValue
@@ -369,14 +576,21 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
             // machine reasons (`model_load_failed_*`).
             let runner: IntentEncoderModelRunning
             do {
-                runner = try self.runnerForPrediction(wasUnloaded: wasUnloaded)
+                runner = try self.runnerForPrediction(release: release)
             } catch let error as IntentEncoderModelError {
+                // [PIPELINE-TRACE] The load is outside the timed section
+                // and outside the trace's spans — the three encoder rows
+                // are marked off with the load's own machine reason.
+                self.traceRecorder?.recordOff(Self.encoderStages,
+                                              reason: Self.reason(for: error))
                 attempt.finish {
                     self.fail(Self.reason(for: error), started: started,
                               completion: completion)
                 }
                 return
             } catch {
+                self.traceRecorder?.recordOff(Self.encoderStages,
+                                              reason: "inference_failed")
                 attempt.finish {
                     self.fail("inference_failed", started: started,
                               completion: completion)
@@ -394,6 +608,14 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
                 deadline: .now() + self.config.timeoutSeconds) { [weak self] in
                 guard let self else { return }
                 attempt.finish {
+                    // [PIPELINE-TRACE] A fired timeout means the forward
+                    // pass never returned inside the budget: the two
+                    // stages it owns did not complete, and say so with the
+                    // budget's own token (`attempt.finish` is one-shot, so
+                    // a late result can never both serve and time out).
+                    self.traceRecorder?.recordOff(
+                        [.encoderInference, .encoderDecode],
+                        reason: "inference_timeout")
                     self.lastInferenceFailureReason = "inference_timeout"
                     self.emit("encoder_inference_timeout", outcome: "failure",
                               durationMs: Self.elapsedMs(since: started),
@@ -402,6 +624,15 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
                 }
             }
 
+            // [PIPELINE-TRACE] The forward pass's two rows. `decodeSpan`
+            // is declared OUTSIDE the do-block so a throw from either
+            // stage can close the row it owns with the failure token — an
+            // unfinished span records nothing, and a stage that threw must
+            // not read as one that never ran.
+            let inferenceTrace = self.traceRecorder?.start(
+                .encoderInference,
+                input: PipelineTraceSummary.tokens(tokenization.tokenIds.count))
+            var decodeTrace: PipelineTraceSpan?
             do {
                 // [TURN-TIMING-BREAKDOWN] `encoder_inference` and
                 // `encoder_decode` — the two stages the forward pass
@@ -412,6 +643,13 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
                     try runner.predict(tokenIds: tokenization.tokenIds,
                                        attentionMask: tokenization.attentionMask)
                 }
+                inferenceTrace?.finish(output: "logits row",
+                                       decision: "ran",
+                                       tokenCount: tokenization.tokenIds.count)
+                let span = self.traceRecorder?.start(
+                    .encoderDecode,
+                    input: PipelineTraceSummary.tokens(tokenization.tokenIds.count))
+                decodeTrace = span
                 let outcome = self.timingRecorder.measure(.encoderDecode) {
                     IntentEncoderDecoder.decode(
                         logits: logits,
@@ -419,16 +657,36 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
                         tokenization: tokenization,
                         sanitisedTranscript: input.modelInput)
                 }
+                span?.finish(output: Self.traceSummary(of: outcome),
+                             decision: Self.traceDecision(
+                                of: outcome,
+                                threshold: self.config.confidenceThreshold))
                 attempt.finish {
                     self.settle(outcome, started: started,
                                 completion: completion)
                 }
             } catch let error as IntentEncoderModelError {
+                let reason = Self.reason(for: error)
+                // Whichever stage was in flight owns the failure; the
+                // other one never ran.
+                if let decodeTrace {
+                    decodeTrace.finish(output: "failed", decision: reason)
+                } else {
+                    inferenceTrace?.finish(output: "failed", decision: reason)
+                    self.traceRecorder?.recordOff([.encoderDecode], reason: reason)
+                }
                 attempt.finish {
-                    self.fail(Self.reason(for: error), started: started,
+                    self.fail(reason, started: started,
                               completion: completion)
                 }
             } catch {
+                if let decodeTrace {
+                    decodeTrace.finish(output: "failed", decision: "inference_failed")
+                } else {
+                    inferenceTrace?.finish(output: "failed", decision: "inference_failed")
+                    self.traceRecorder?.recordOff([.encoderDecode],
+                                                  reason: "inference_failed")
+                }
                 attempt.finish {
                     self.fail("inference_failed", started: started,
                               completion: completion)
@@ -443,12 +701,15 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
     /// offers this interpreter the local-brain slot (the gated wiring site
     /// in `AppCoordinator`).
     ///
-    /// With `INTENT_ENCODER_SPIKE_ZIP` set to a tester's own copy of the
-    /// pinned zip, this starts a background install of
+    /// With a zip source configured — the app's `Documents/` copy by
+    /// default, or the tester's own copy via `INTENT_ENCODER_SPIKE_ZIP` —
+    /// this starts a background install of
     /// `ModelCatalog.intentEncoderSpike` through
     /// `ModelStore.installCoreMLEncoder(fromZip:for:)` (strict sha256
-    /// unchanged — see `IntentEncoderSpikeInstaller`). Without it, the call
-    /// is an explicit no-op decision (`notConfigured`), not a silent one.
+    /// unchanged — see `IntentEncoderSpikeInstaller`). A missing file
+    /// fails with an explicit `zip_missing` event, and only an explicitly
+    /// BLANK override is the no-op decision (`notConfigured`) — never a
+    /// silent one.
     ///
     /// The hard `IntentEncoderFeature.isEnabled` guard is intentional
     /// defense in depth: the compiler condition is what keeps this type out
@@ -468,7 +729,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
     /// the inference queue, so loading a CoreML model never blocks the main
     /// thread — including the reload after a memory-pressure unload, which
     /// is exactly why the reload lives here.
-    private func runnerForPrediction(wasUnloaded: Bool) throws -> IntentEncoderModelRunning {
+    private func runnerForPrediction(release: WeightRelease) throws -> IntentEncoderModelRunning {
         stateLock.lock()
         let existing = loadedRunner
         stateLock.unlock()
@@ -491,8 +752,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
                 loadedRunner = runner
                 stateLock.unlock()
                 emit("encoder_model_loaded", outcome: "success",
-                     extra: ["state": wasUnloaded
-                             ? "reloaded_after_memory_pressure" : "loaded"])
+                     extra: ["state": release.rawValue])
                 return runner
             } catch let error as IntentEncoderModelError {
                 lastError = error
@@ -525,6 +785,43 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
         runner?.unload()
         emit("encoder_model_unloaded", outcome: "info",
              errorCode: nil, extra: ["reason": "memory_pressure"])
+    }
+
+    /// [CASCADE-RESIDENCY] Releases the encoder's CoreML weights for the
+    /// CASCADE's residency budget, called when the chain escalates this turn
+    /// to the picker brain.
+    ///
+    /// WHY: with WhisperKit (ANE), the encoder and a multi-GB picker brain
+    /// all growing resident during one cascade, the phone hit the OS limit
+    /// (signal 9). The reference condition is the pipeline design's peak-RSS
+    /// bound (condition 1.10, T-018-b's 2.5 GB floor). The encoder's answer
+    /// for this turn is FINAL by the time the chain escalates — the chain
+    /// only escalates after this interpreter delivered its completion — so
+    /// while the picker brain's handle is allocated, the encoder's weights
+    /// are pure residency cost and nothing else.
+    ///
+    /// HOW this differs from `handleMemoryPressure()`, on purpose:
+    ///  - it does NOT set the availability hold, so `isAvailable` stays
+    ///    true and the encoder is still offered the next turn;
+    ///  - it therefore never needs `rearmAfterMemoryPressure()`: the next
+    ///    `interpret()` clears `releasedForCascadeEscalation` in
+    ///    `beginTurn` and the first use reloads through `runnerForPrediction`
+    ///    (the same lazy path the memory-pressure reload takes, reported as
+    ///    `reloaded_after_cascade_escalation`).
+    ///
+    /// Unloading when nothing is resident is a no-op that still reports
+    /// itself, so the policy is visible in a trace either way.
+    func unloadForCascadeEscalation() {
+        stateLock.lock()
+        let runner = loadedRunner
+        loadedRunner = nil
+        if runner != nil { releasedForCascadeEscalation = true }
+        stateLock.unlock()
+        runner?.unload()
+        emit("encoder_model_unloaded", outcome: "info",
+             errorCode: nil,
+             extra: ["reason": "cascade_escalation",
+                     "state": runner == nil ? "not_resident" : "released"])
     }
 
     /// The other half of the memory-pressure contract: the coordinator
@@ -631,6 +928,55 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
             confidence: max(0.0, min(1.0, confidence)),
             reply: ""
         )
+    }
+
+    // MARK: - Pipeline trace ([PIPELINE-TRACE]) summaries
+    //
+    // The three stages this interpreter owns, and the two renderings the
+    // trace needs from a decode outcome. The SUMMARY is the card's (and a
+    // Debug console's) view — it may name the decoded span surfaces, the
+    // same posture the "Last correction" line already ships. The DECISION
+    // is a closed-vocabulary token and is also what a Release console
+    // prints, so it never carries a slot value.
+
+    /// The interpreter's three trace stages, in the order they run. Used
+    /// to mark all three off together when the interpreter bails before
+    /// the pipeline (no model, no tokenizer, empty input).
+    static let encoderStages: [PipelineTraceStage] = [.encoderTokenizer,
+                                                      .encoderInference,
+                                                      .encoderDecode]
+
+    /// `set_reminder 0.82 [time=बिहान ८ बजे]` — the decoded action, its
+    /// confidence and the span surfaces, bounded and flattened by
+    /// `PipelineTraceSummary.text`. Slot types are sorted so the same
+    /// decode always renders the same row (a dictionary has no order).
+    static func traceSummary(of outcome: IntentEncoderDecodeOutcome) -> String {
+        switch outcome {
+        case .command(let action, let confidence, let slots):
+            var text = "\(action.rawValue) \(PipelineTraceSummary.score(confidence))"
+            let parts = slots.keys.sorted { $0.rawValue < $1.rawValue }.map {
+                "\($0.rawValue)=\(slots[$0]?.text ?? "")"
+            }
+            if !parts.isEmpty { text += " [" + parts.joined(separator: " ") + "]" }
+            return PipelineTraceSummary.text(text)
+        case .abstain(let reason):
+            return PipelineTraceSummary.text("abstain \(reason.rawValue)")
+        }
+    }
+
+    /// `command` / `abstained(low_confidence)` / `abstained(<reason>)` —
+    /// the encoder's own gate applied, so the row's decision is what the
+    /// interpreter actually did with the decode (the router's band policy
+    /// makes its own, separate call on the same number).
+    static func traceDecision(of outcome: IntentEncoderDecodeOutcome,
+                              threshold: Double) -> String {
+        switch outcome {
+        case .command(_, let confidence, _):
+            guard confidence < threshold else { return "command" }
+            return "abstained(\(IntentEncoderAbstention.lowConfidence.rawValue))"
+        case .abstain(let reason):
+            return "abstained(\(reason.rawValue))"
+        }
     }
 
     // MARK: - Observability (model id/version + duration + outcome only — C9)
