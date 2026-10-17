@@ -7122,16 +7122,16 @@ struct PrivacySettingsView: View {
         VStack(spacing: 16) {
             Image(systemName: "lock.shield.fill")
                 .font(.system(size: 44))
-                .foregroundStyle(DesignTokens.accent)
+                .foregroundStyle(appearance.colors.accentForeground)
             Text("settings.privacy.body")
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .lineSpacing(6)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
                 Text(L10n.fmt("settings.about.version", locale: locale, version))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
         }
         .padding(20)
@@ -7153,7 +7153,7 @@ struct PrivacySettingsView: View {
         return VStack(alignment: .leading, spacing: 10) {
             Text("settings.learningLoop.explanation")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.leading)
             Toggle(isOn: Binding(
                 get: { coordinator.learningLoopStatus != .off },
@@ -7163,17 +7163,17 @@ struct PrivacySettingsView: View {
             )) {
                 Text("settings.learningLoop.title")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
             }
-            .tint(DesignTokens.accent)
+            .tint(appearance.colors.accentForeground)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text(LocalizedStringKey(status.stringKey))
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundStyle(status.isRefusing ? DesignTokens.stateError
-                                                   : DesignTokens.textSecondary)
+                                                   : appearance.colors.textSecondary)
             Text("settings.learningLoop.neverLeaves")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.leading)
         }
         .padding(16)
