@@ -1647,7 +1647,19 @@ enum ModelCatalog {
             // serves it while the promotion record is blocked.
             displayName: "Brain — Qwen 4B · Nepali chat-aware (v17 · gates pending)",
             filename: "intent-ne-qwen4b-s43-chat-v17-q4_k_m.gguf",
-            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v24/intent-ne-qwen4b-s43-chat-v17-q4_k_m.gguf")!,
+            // [CNR-4B] 2.50 GB in one file → GitHub's 2 GiB per-asset cap:
+            // the v24 release publishes two ordered parts (`.partaa` /
+            // `.partab`, 2,000,000,000 + 497,278,912 bytes) that
+            // `ModelDownloadService` downloads concurrently and
+            // concatenates before the assembled-file sha256 + install —
+            // the same delivery shape as the 4B slotcanon sibling.
+            // `downloadURL` mirrors part 0 for older readers; the service
+            // always takes the parts.
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v24/intent-ne-qwen4b-s43-chat-v17-q4_k_m.gguf.partaa")!,
+            downloadPartURLs: [
+                URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v24/intent-ne-qwen4b-s43-chat-v17-q4_k_m.gguf.partaa")!,
+                URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v24/intent-ne-qwen4b-s43-chat-v17-q4_k_m.gguf.partab")!
+            ],
             sizeBytes: 2_497_278_912,
             sha256: "6bb4a8b8712714861d00da2429195c1405c644c9d3228917703aeb0d2602d376",
             // Same 4 GB floor as the 4B slotcanon sibling: the phone's own
