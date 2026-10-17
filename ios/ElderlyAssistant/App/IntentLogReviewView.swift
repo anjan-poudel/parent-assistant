@@ -110,7 +110,7 @@ struct IntentLogReviewView: View {
             Text(L10n.str(status.stringKey, locale: coordinator.activeLocale))
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundStyle(status.isRefusing ? DesignTokens.stateError
-                                                   : DesignTokens.textSecondary)
+                                                   : appearance.colors.textSecondary)
                 .multilineTextAlignment(.leading)
             Spacer(minLength: 0)
         }
