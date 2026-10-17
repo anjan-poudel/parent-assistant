@@ -252,6 +252,12 @@ enum ModelCatalog {
     /// a change to this constant; it is the data in
     /// `chatVariantPromotionRecord`, gated by `promotionVerdict(for:)`.
     static let intentQwenS43ChatV17 = ModelID("intent-ne-qwen-s43-chat-v17-q4km")
+    /// [CNR-4B] (2026-10-17) The 4B chat-aware sibling of the v17 variant
+    /// above — same corpus and recipe, seed-43 4B lineage, for the
+    /// newer-device tier (owner directive: 17 Pro Max class). Same
+    /// posture as the 1.7B row: explicit pick only, promotion gated on
+    /// the tier-admission measurement and the gate report.
+    static let intentQwen4BS43ChatV17 = ModelID("intent-ne-qwen4b-s43-chat-v17-q4km")
     /// 4B slim-template retrain seed 43 — the first gate-passing brain
     /// (all five gates, 2026-09-13) and the default brain until the
     /// slot-canonical retrain below superseded it. LAN-hosted for testing;
@@ -1631,6 +1637,28 @@ enum ModelCatalog {
             languages: ["ne"]
         ),
         ModelCatalogEntry(
+            id: intentQwen4BS43ChatV17,
+            kind: .llamaBase,
+            // [CNR-4B] (2026-10-17) The 4B chat-aware variant: same v17
+            // corpus + recipe, seed-43 4B lineage. End-probe PASSED the
+            // 0.90 floor (0.9056) — the tier admission (latency/memory on
+            // the 17 Pro Max class) is still unmeasured, so the row stays
+            // explicit-pick-only like its 1.7B sibling; no automatic path
+            // serves it while the promotion record is blocked.
+            displayName: "Brain — Qwen 4B · Nepali chat-aware (v17 · gates pending)",
+            filename: "intent-ne-qwen4b-s43-chat-v17-q4_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v24/intent-ne-qwen4b-s43-chat-v17-q4_k_m.gguf")!,
+            sizeBytes: 2_497_278_912,
+            sha256: "6bb4a8b8712714861d00da2429195c1405c644c9d3228917703aeb0d2602d376",
+            // Same 4 GB floor as the 4B slotcanon sibling: the phone's own
+            // RAM claim governs; the tier admission measurement on the
+            // 17 Pro Max is the gating evidence, not this number.
+            minDeviceRAMBytes: 4_000_000_000,
+            dependsOn: nil,
+            // Language tag (2026-10-17): ne-only model, same as its base.
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
             id: intentGemma1B,
             kind: .llamaBase,
             // HIDDEN from the picker (2026-09-12, catalog declutter):
@@ -2010,6 +2038,7 @@ enum ModelCatalog {
         // green (see `chatVariantPromotionRecord`).
         intentQwenS43ChatV17,
         intentQwenS43,
+        intentQwen4BS43ChatV17,
         qwen4BNepali,
         qwen3_4BInstruct,
         qwen3_1_7BInstruct
