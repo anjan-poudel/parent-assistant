@@ -106,7 +106,7 @@ struct IntentLogReviewView: View {
             Image(systemName: status.isRefusing ? "exclamationmark.triangle.fill"
                                                 : (status == .off ? "lock.fill" : "lock.open.fill"))
                 .foregroundStyle(status.isRefusing ? DesignTokens.stateError
-                                                   : DesignTokens.accent)
+                                                   : appearance.colors.accentForeground)
             Text(L10n.str(status.stringKey, locale: coordinator.activeLocale))
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundStyle(status.isRefusing ? DesignTokens.stateError
@@ -115,8 +115,7 @@ struct IntentLogReviewView: View {
             Spacer(minLength: 0)
         }
         .padding(16)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private func icon(for record: IntentLogStore.Record) -> String {
