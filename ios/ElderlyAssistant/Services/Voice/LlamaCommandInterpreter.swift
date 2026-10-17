@@ -1214,6 +1214,7 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         // offered-brain test requires SOME row, and the LLaMA 3.2 fallback
         // would mis-frame it.
         ModelCatalog.intentQwenS43ChatV17: .qwen3,  // inherited (see above)
+        ModelCatalog.intentQwen4BS43ChatV17: .qwen3,  // [CNR-4B] same lineage/family as the 1.7B sibling
         ModelCatalog.intentQwenS43:   .qwen3,
         ModelCatalog.qwen4BNepali:    .raw,
         ModelCatalog.qwen3_4BInstruct: .qwen3,
