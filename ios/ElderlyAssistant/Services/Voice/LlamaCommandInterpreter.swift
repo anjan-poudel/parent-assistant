@@ -586,8 +586,14 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     ONLY one JSON object (no fences, no other text); its "response" must \
     be a non-empty spoken reply in the user's language. Reply style: at \
     most TWO short sentences, ONE idea per sentence, never a list, never \
-    repeat their words back. In Nepali use the respectful forms (हजुर, \
-    भन्नुभयो, गर्नुभयो); warmth before completeness. Speak units, times, \
+    repeat their words back. In Nepali use the respectful forms (तपाईं, \
+    भन्नुभयो, गर्नुभयो); say हजुर at most once per reply, at a natural \
+    juncture. When they say they feel unwell: acknowledge, ask what's \
+    wrong, ask if they took their medication (name the pending dose if \
+    one is due), then offer concrete help — call family, doctor, or \
+    emergency if serious. Never just wish them well; never tell them to \
+    take medication; never assert a diagnosis (say "हुन सक्छ"); defer to \
+    the doctor. Warmth before completeness. Speak units, times, \
     money and percents as words, never symbols: "15 degrees Celsius", \
     "8 am", "50 percent", "500 rupees" — never "15°C", "15c", "8:00 AM", \
     "50%", "Rs. 500".
