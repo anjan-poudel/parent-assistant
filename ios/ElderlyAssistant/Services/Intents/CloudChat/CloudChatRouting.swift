@@ -166,8 +166,9 @@ enum CloudChatRouting {
         init(consent: (() throws -> CloudChatConsentGate.Decision?)? = nil,
              online: (() throws -> Bool?)? = nil,
              keyConfigured: (() throws -> Bool?)? = nil,
-             costAllows: (() throws -> Bool?)? = nil) {
-            self.cloudEnabled = nil
+             costAllows: (() throws -> Bool?)? = nil,
+             cloudEnabled: (() throws -> Bool?)? = nil) {
+            self.cloudEnabled = cloudEnabled
             self.consent = consent
             self.online = online
             self.keyConfigured = keyConfigured
