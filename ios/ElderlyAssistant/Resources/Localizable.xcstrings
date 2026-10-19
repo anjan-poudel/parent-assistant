@@ -17576,13 +17576,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Developer tool: a download starts even when this device class refuses the model. Disk, memory and iOS gates still apply."
+            "value": "Developer tool: models this device class refuses can be downloaded and chosen to run. Disk, memory and iOS gates still apply."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "विकासकर्ता उपकरण: यो यन्त्र वर्गले मोडेल अस्वीकार गरे पनि डाउनलोड सुरु हुन्छ। डिस्क, मेमोरी र iOS गेटहरू लागू रहन्छन्।"
+            "value": "विकासकर्ता उपकरण: यो यन्त्र वर्गले अस्वीकार गरेका मोडेल डाउनलोड गरेर चलाउन पनि छान्न सकिन्छ। डिस्क, मेमोरी र iOS गेटहरू लागू रहन्छन्।"
           }
         }
       }
@@ -17593,13 +17593,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ignore the model-fit policy for downloads"
+            "value": "Ignore the model-fit policy"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "डाउनलोडका लागि मोडेल-फिट नीति बेवास्ता गर्नुहोस्"
+            "value": "मोडेल-फिट नीति बेवास्ता गर्नुहोस्"
           }
         }
       }

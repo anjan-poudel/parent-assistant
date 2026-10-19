@@ -564,9 +564,11 @@ private struct TranslateTestInstallCard: View {
     @EnvironmentObject private var coordinator: AppCoordinator
     /// [DEVSCREEN-DOWNLOAD] The persisted bypass switch, read here for the
     /// CAPTION only — the download itself reads the same key inside
-    /// `ModelDownloadService.start`. `@AppStorage` rather than a plain read
-    /// so the sentence follows the switch: a developer who turns it on in
-    /// the technical sheet and comes back must not be told to turn it on.
+    /// `ModelDownloadService.start`, and the row's availability verdict is
+    /// read through `ModelLifecycleManager` (which honours the same key for
+    /// the class checks). `@AppStorage` rather than a plain read so the
+    /// sentence follows the switch: a developer who turns it on in the
+    /// technical sheet and comes back must not be told to turn it on.
     @AppStorage(ModelDownloadDebugSettings.ignoreFitPolicyKey)
     private var ignoresFitPolicy = false
     /// The selected row. Non-optional, because the view only draws this card

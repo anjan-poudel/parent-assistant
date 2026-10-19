@@ -422,6 +422,14 @@ final class ModelLifecycleManager {
     private let clock: () -> Date
     let idleEvictionSeconds: TimeInterval
 
+    /// [DEVSCREEN-DOWNLOAD] Whether the persisted developer switch
+    /// (`ModelDownloadDebugSettings.ignoresFitPolicyKey`) may skip the
+    /// class verdicts in `availability(of:)`. Injected the way
+    /// `ModelDownloadService` takes the same switch — the process default
+    /// reads the key, a test passes its own answer. Only the CLASS checks
+    /// move: the device floor and the ledger's own load gate are untouched.
+    private let ignoresFitPolicy: () -> Bool
+
     /// [MODEL-WARDEN] Step 1 — the load bounds. All configurable; see
     /// `ModelWardenConfig` for why each number is the number.
     var wardenConfig: ModelWardenConfig
@@ -544,12 +552,16 @@ final class ModelLifecycleManager {
          clock: @escaping () -> Date = { Date() },
          idleEvictionSeconds: TimeInterval = ModelLifecycleManager.defaultIdleEvictionSeconds,
          budgetOverrideBytes: UInt64? = nil,
-         wardenConfig: ModelWardenConfig = .default) {
+         wardenConfig: ModelWardenConfig = .default,
+         ignoresFitPolicy: @escaping () -> Bool = {
+             ModelDownloadDebugSettings.ignoresFitPolicy()
+         }) {
         self.probe = probe
         self.clock = clock
         self.idleEvictionSeconds = idleEvictionSeconds
         self.budgetOverrideBytes = budgetOverrideBytes
         self.wardenConfig = wardenConfig
+        self.ignoresFitPolicy = ignoresFitPolicy
     }
 
     // MARK: Registration
@@ -2671,6 +2683,15 @@ final class ModelLifecycleManager {
     /// unloadable, which is the property that keeps a stored preference
     /// reachable no matter what the row says.
     ///
+    /// [DEVSCREEN-DOWNLOAD] The one deliberate exception is the persisted
+    /// developer switch (`ModelDownloadDebugSettings.ignoresFitPolicyKey`):
+    /// with it on, the CLASS verdicts are skipped so a tester can pick and
+    /// run a model this class refuses (the 4B chat brain on a 6 GB phone).
+    /// The device floor (`minDeviceRAMBytes`) is not a class verdict and
+    /// still refuses, and the real-memory pressure gate at the load site is
+    /// untouched. The automatic ladder does not read this method — it asks
+    /// the policy directly — so the switch widens only the explicit pick.
+    ///
     /// `physicalMemoryBytes` is the probe's. `budgetOverrideBytes` is a test
     /// hook that pins the *class* only, so a test host whose RAM disagrees
     /// with the pinned class gets the probe's device in this answer — the
@@ -2680,9 +2701,11 @@ final class ModelLifecycleManager {
         lock.lock()
         let inputs = availabilityInputsLocked()
         lock.unlock()
-        return inputs.policy.availability(of: entry,
-                                          physicalMemoryBytes: inputs.physicalMemoryBytes,
-                                          warmSTTLiveBytes: inputs.warmSTTLiveBytes)
+        return inputs.policy.availability(
+            of: entry,
+            physicalMemoryBytes: inputs.physicalMemoryBytes,
+            warmSTTLiveBytes: inputs.warmSTTLiveBytes,
+            ignoringClassBudget: ignoresFitPolicy())
     }
 
     /// [MODEL-WARDEN 2026-09-18] The three numbers `availability(of:)`
@@ -2697,7 +2720,10 @@ final class ModelLifecycleManager {
     /// boundaries the admissions use, and the warm STT must be the ledger's
     /// own registration. It is the same triple either way — `availability(of:)`
     /// is now literally this struct applied to one entry — so a row and an
-    /// automatic pick cannot drift apart.
+    /// automatic pick cannot drift apart. The one deliberate exception is the
+    /// persisted [DEVSCREEN-DOWNLOAD] switch: `availability(of:)` may skip the
+    /// CLASS checks when a tester has turned it on (see that method), while
+    /// the automatic ladder keeps reading the policy unmodified here.
     struct AvailabilityInputs {
         let policy: ModelBudgetPolicy
         let physicalMemoryBytes: UInt64
