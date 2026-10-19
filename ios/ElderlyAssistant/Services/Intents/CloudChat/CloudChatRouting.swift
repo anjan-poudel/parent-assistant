@@ -185,10 +185,10 @@ enum CloudChatRouting {
     /// routing decision, never later and never earlier).
     static func decide(_ inputs: Inputs) -> ChatRoute {
         decide(consent: resolvedConsent(inputs.consent),
-               cloudEnabled: resolvedAllowance(inputs.cloudEnabled),
                online: resolvedAllowance(inputs.online),
                keyConfigured: resolvedAllowance(inputs.keyConfigured),
-               costAllows: resolvedAllowance(inputs.costAllows))
+               costAllows: resolvedAllowance(inputs.costAllows),
+               cloudEnabled: resolvedAllowance(inputs.cloudEnabled))
     }
 
     /// The pure core — the design's declared signature, and the single body
