@@ -817,6 +817,10 @@ final class CommandRouter {
     }
 
     private weak var coordinator: VoiceCommandCoordinating?
+
+    /// [PLAYBACK-ECHO-GUARD] The last text this router asked the speaker
+    /// to say — the echo guard's comparison basis.
+    private var lastSpokenText: String?
     private let observabilityBus: ObservabilityBus
     private let speaker: Speaker?
     /// [VOICE-ACK] Serial FIFO lane for interactive reply speech — built
@@ -1070,6 +1074,23 @@ final class CommandRouter {
             if let liveFrame = coordinator?.activeDialogueFrame {
                 return reprobeDialogueOrExhaust(frame: liveFrame, raw: raw)
             }
+            speak(key: "router.reprompt")
+            return .unrecognised(transcript: raw)
+        }
+
+        // [PLAYBACK-ECHO-GUARD] (2026-10-19) The assistant's own TTS tail
+        // re-heard as a transcript: plausible Nepali the sanity guard
+        // cannot reject. Re-prompt instead of answering the echo.
+        if let last = lastSpokenText,
+           TranscriptSanityGuard.isPlaybackEcho(raw, of: last) {
+            observabilityBus.emit(ObservabilityEvent(
+                component: "command_router",
+                eventType: "playback_echo_rejected",
+                durationMs: nil,
+                outcome: "rejected",
+                errorCode: "tts_echo",
+                metadata: [:]
+            ))
             speak(key: "router.reprompt")
             return .unrecognised(transcript: raw)
         }
@@ -2859,6 +2880,23 @@ final class CommandRouter {
             speak(key: "router.reprompt")
             return .unrecognised(transcript: raw)
         }
+
+        // [PLAYBACK-ECHO-GUARD] (2026-10-19) The assistant's own TTS tail
+        // re-heard as a transcript: plausible Nepali the sanity guard
+        // cannot reject. Re-prompt instead of answering the echo.
+        if let last = lastSpokenText,
+           TranscriptSanityGuard.isPlaybackEcho(raw, of: last) {
+            observabilityBus.emit(ObservabilityEvent(
+                component: "command_router",
+                eventType: "playback_echo_rejected",
+                durationMs: nil,
+                outcome: "rejected",
+                errorCode: "tts_echo",
+                metadata: [:]
+            ))
+            speak(key: "router.reprompt")
+            return .unrecognised(transcript: raw)
+        }
         let spliced = STTCorrector.spliceReplacement(
             reading.options[index],
             into: frame.correctionOriginal,
@@ -2866,6 +2904,23 @@ final class CommandRouter {
         guard spliced != frame.correctionOriginal else {
             // The range did not address a token (defensive) — the honest
             // reprompt, never a half-spliced turn.
+            speak(key: "router.reprompt")
+            return .unrecognised(transcript: raw)
+        }
+
+        // [PLAYBACK-ECHO-GUARD] (2026-10-19) The assistant's own TTS tail
+        // re-heard as a transcript: plausible Nepali the sanity guard
+        // cannot reject. Re-prompt instead of answering the echo.
+        if let last = lastSpokenText,
+           TranscriptSanityGuard.isPlaybackEcho(raw, of: last) {
+            observabilityBus.emit(ObservabilityEvent(
+                component: "command_router",
+                eventType: "playback_echo_rejected",
+                durationMs: nil,
+                outcome: "rejected",
+                errorCode: "tts_echo",
+                metadata: [:]
+            ))
             speak(key: "router.reprompt")
             return .unrecognised(transcript: raw)
         }
@@ -5756,6 +5811,7 @@ final class CommandRouter {
             #endif
             return
         }
+        lastSpokenText = text
         let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         let lane = speakLane ?? {
             let newLane = ReplySpeakLane(speaker: speaker)
