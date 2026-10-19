@@ -2624,13 +2624,22 @@ final class CommandRouter {
         // Guard first: explicit negations must never fall through to the
         // ack list (see `medicationDenialPhrases` — the one list, checked
         // via the one extracted helper).
-        if Self.isMedicationDenial(text) {
+        //
+        // [MED-CONTEXT-GATE] (2026-10-19, owner directive) The denial AND
+        // ack keyword arms only fire while a medication reminder is
+        // actually pending (`oldestPendingReminderEntryId`). Out of that
+        // context the vocabulary is not constrained — "छैन" is everyday
+        // speech — and arbitrary utterances must flow to the model, never
+        // into fixed copy. The emergency arm above stays unconditional.
+        if coordinator?.oldestPendingReminderEntryId() != nil,
+           Self.isMedicationDenial(text) {
             emit(eventType: "command_ack_denied_keyword", outcome: "info")
             speak(key: "router.ackDenied")
             return .unrecognised(transcript: raw)
         }
 
-        if Self.isExplicitMedicationAcknowledgement(raw) {
+        if coordinator?.oldestPendingReminderEntryId() != nil,
+           Self.isExplicitMedicationAcknowledgement(raw) {
             handleMedicationAcknowledgement(transcript: raw)
             return .acknowledgedMedication
         }
