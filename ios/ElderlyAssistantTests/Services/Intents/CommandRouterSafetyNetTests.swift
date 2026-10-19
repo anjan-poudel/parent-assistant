@@ -91,10 +91,27 @@ final class CommandRouterSafetyNetTests: XCTestCase {
         // with fixed router.ackDenied copy before any model ran.
         let interpreter = StubCommandInterpreter(
             result: makeCommand(action: .query, confidence: 0.9, reply: "के भयो हजुर?"))
-        let (router, coordinator, bus) = makeRouter(interpreter: interpreter)
-        coordinator.pendingEntryId = UUID()
+        let (router, _, bus) = makeRouter(interpreter: interpreter)
 
         _ = router.route(transcript: "आज स्वास्थ्य ठिक छैन")
+
+        XCTAssertEqual(interpreter.callCount, 1)
+        XCTAssertFalse(bus.contains("command_ack_denied_keyword"))
+    }
+
+    func testMedicationDenialWithoutPendingReminderReachesInterpreter() {
+        // [MED-CONTEXT-GATE] (2026-10-19, owner directive) The med
+        // ack/denial keyword arms only fire while a medication reminder
+        // is actually pending. No pending reminder + a denial-FORM
+        // utterance ("औषधि खाएको छैन") = free speech: the model answers,
+        // never fixed copy. This is the pin for the context gate — the
+        // blanket-matcher failure class.
+        let interpreter = StubCommandInterpreter(
+            result: makeCommand(action: .query, confidence: 0.9, reply: "के भयो हजुर?"))
+        let (router, _, bus) = makeRouter(interpreter: interpreter)
+        // No pendingEntryId set — no active medication context.
+
+        _ = router.route(transcript: "औषधि खाएको छैन भनेर सोच्दै थिएँ")
 
         XCTAssertEqual(interpreter.callCount, 1)
         XCTAssertFalse(bus.contains("command_ack_denied_keyword"))
