@@ -1,838 +1,134 @@
-# implement-notes — Medication Schedules & Reminders
+# implement — running unit log (conversational-nepali-replies)
 
-description: Implementation notes for the medication-schedules-reminders implement task (unit_based, 24 units in 10 waves): per-wave unit outcomes, consolidated scoped test passes, deviations, and the final full-suite comparison.
+Short per-unit summaries for the engine record (full notes per unit live in
+`specs/T-NNN-notes.md`).
 
-## Summary
+- **Description:** Implementation log for the unit-based `implement` task of the conversational-nepali-replies feature (worktree elderly-ai-assistant-conversational-nepali-replies, branch feat/conversational-nepali-replies). One section per unit, appended as waves complete.
 
-- Task: `implement` (contract `implementation`), feature `medication-schedules-reminders`.
-- Plan: `specs/plan-tasks/plan.md` — 24 units, 10 waves (W0:4, W1:4, W2:5, W3:3, W4:2, W5:2, W6:1, W6.5:1, W6.6:1, W7:1), file-disjoint within each wave (W6.5/T-023 and W6.6/T-024 inserted by amendments 6 and 7, owner-directed).
-- Cadence: per-unit code + typecheck; ONE consolidated scoped test pass per wave (`ios/build.sh test:unit <Classes...>`); a single full-suite run at W7 (compared against the documented pre-existing baseline).
-- Resolution pins carried: R-1(a) at T-019/T-021, R-2 at T-006, R-3 at T-019, R-4 at T-014.
+## T-166 — Nepali chat style spec and its loader — DONE
 
-## Wave ledger
+Wave 0. The single source of truth for Nepali conversation style plus its
+stdlib-only loader and executable drift check. Artifact
+`tools/train-intent/seeds/nepali-chat-style-spec`: sectioned text with prose
+rule text (byte-mirrorable) and JSON machine blocks; 10 required sections
+(register, particles, sentence_shape, small_talk, code_switch, ai_isms,
+persona_clause, rubric, guard_checks, coverage); style_spec_version 1;
+content sha256 recorded in the unit notes. Loader
+`tools/train-intent/src/style_spec.py`: typed accessors, no-default failures
+naming the missing section, version+sha256 evidence, executable consumer
+drift check with a documented marker contract, CLI exit 0/1/2, stdlib-only
+(proven under an isolated interpreter). Tests
+`tools/train-intent/tests/test_style_spec.py`: 42 tests, all OK (python3 -m
+unittest tests.test_style_spec). Recorded deviation: JSON machine blocks
+instead of a whole-file YAML document (the stdlib-only contract rules out
+PyYAML; JSON is a subset of YAML so the design intent holds). rubric and
+coverage are required sections beyond design section 6.1 because the
+acceptance criteria and T-178/T-181 cite them. Training-box (anjan-ubuntu)
+execution not performed here; owned by T-179/T-183. Full notes: the unit
+notes file in specs.
 
-| Wave | Units | Consolidated scoped pass | Result |
-|------|-------|--------------------------|--------|
-| W0 | T-001, T-006, T-007, T-012 | 6 classes — 92 tests (2026-10-15) | PASS — 92/92, 0 failures |
-| W1 | T-002, T-003, T-004, T-005 | 5 classes — 42 tests (2026-10-15) | PASS — 42/42, 0 failures |
-| W2 | T-008, T-009, T-011, T-013, T-015 | 7 classes — 176 tests (2026-10-15) | PASS — 176/176, 0 failures |
-| W3 | T-010, T-014, T-017 | 4 classes — 65 tests (2026-10-15) | PASS — 65/65, 0 failures |
-| W4 | T-016, T-018 | 4 classes — 77 tests (2026-10-15) | PASS — 77/77, 0 failures |
-| W5 | T-019, T-020 | code + typecheck only (speed directive) | GREEN — combined-tree module emit 0 errors; probes green |
-| W6 | T-021 | code + typecheck only (speed directive) | GREEN — combined-tree module emit 0 errors; 3 suites typechecked; probes exit 1 at injected lines |
-| W6.5 | T-023 | 7 classes — 139 tests (2026-10-15) | PASS — 139/139, 0 failures; xcresult result Passed |
-| W6.6 | T-024 | 3 classes — 72 tests (2026-10-15) | PASS — 72/72, 0 failures; xcresult result Passed |
-| W7 | T-022 | full suite vs documented baseline (the tail's single test gate) | GREEN (feature scope) — 7,746 executed / 7,708 passed / 28 failed / 10 skipped; every one of the 28 classified non-feature (4 documented baseline, 19 pre-existing on byte-identical code, 5 UI pre-existing-at-base); all 24 medication suites green; guards green ×3 |
+## T-172 — CloudChatConsentGate: fail-closed consent record — DONE
 
-> **Speed directive (owner, mid-run 2026-10-15):** W5 and W6 are code + typecheck
-> only — their consolidated scoped passes are skipped, and per-unit
-> report-vs-file spot-checks are dropped (typecheck is the per-unit bar). The
-> single test gate for the remaining tail is the W7 full-suite run against the
-> documented pre-existing baseline. Kept unchanged: the confidence overlay on
-> implement units, the W7 full-suite run + release-log-safety gate, and
-> final-sign-off (T2 + HIL + DV-1..7 + advisory safety pass). The trade-off is
-> owner-accepted: a defect introduced in W5/W6 surfaces only at the W7 suite.
-> Do not re-add the scoped passes.
+Wave 0. The cloud chat consent record and its one-writer gate in the shipped
+OD-12 shape (LiveTranslate/PointAsk precedent reused, not forked). Decision
+with four states (granted, notRecorded, denied, unreadable); allowsEgress
+true only for granted; ConsentRecord {granted, recordedAt,
+disclosureVersion} over the same encrypted-at-rest consent storage with the
+same key-store composition; stale disclosure version re-asks (notRecorded),
+never granted; unreadable distinct from notRecorded and denied, fail-closed,
+never crashes; one writer under NSLock with read-back verification, revoke
+clears memory before the stored record is rewritten, a write that does not
+persist is surfaced (never a false success); per-turn read with no caching.
+Disclosure stamp placeholder cloudchat.disclosure.draft.14oct2026.r1 (final
+copy owned by T-176). Classification-only events (component cloud_chat, five
+types, metadata only disclosureVersion). Tests: 37 executed, 0 failures
+(./build.sh test:unit CloudChatConsentGateTests; the release-log and
+prompt-mirror pre-test guards passed; full test log in the suite).
 
-> **Amendment 6 (owner-directed, 2026-10-15):** the owner-reported Settings
-> defect (the medication UI always showed the add-new form, never existing
-> schedules) inserts **T-023** (medication manage-list screen, W6.5) between W6
-> and W7. Its scoped (`-only-testing`) pass runs at the wave close — the strip
-> directive above does NOT extend to it — and the W7 full suite then covers it.
-> T-023 rides the W5–W7 PR. See
-> `specs/plan-tasks/amendments/amendment-6-t023-medication-manage-list-2026-10-15.md`.
+## T-167 — Local chat decode shape and upgraded local persona — DONE
 
-> **Amendment 7 (owner-directed, 2026-10-15):** a second owner defect — scanning
-> "one tablet twice a day" captures no schedule — inserts **T-024** (scanner
-> frequency→slot grouping, W6.6) between W6.5 and W7. Owned files:
-> `MedicationLabelOCR.swift`, `ScannedSchedule.swift`, `MedicationEditorDraft.swift`
-> (+ their suites); NOT `SettingsView` and NOT the capture seam. Delivered as a
-> patch from an isolated temp worktree (`/tmp/msr-scanner-frequency.patch`),
-> applied by the coordinator at wave close; its scoped pass runs at the wave
-> close (the strip directive does NOT extend to it). Quiescence: no unit in
-> flight may touch the three owned files until T-024 lands (W6.5/T-023 does
-> not). See
-> `specs/plan-tasks/amendments/amendment-7-t024-scanner-frequency-slots-2026-10-15.md`.
+Wave 1. New `ChatSampling.swift`: chat temperature 0.3 + fixed seed as named constants (command constant untouched), `DecodeParameters` record, per-turn awaited `ParameterHandle` override that always writes (never skips on equal values — the set-once defect the determinism tests catch). `LlamaCommandInterpreter.swift` extended: `lastDecodeParameters` written at the start of every decode path (command, chat, judge, test seam); additive parameter-carrying seam (pre-feature two-arg seam keeps working); `ResponseShape` derives its whole decode contract from one source; awaited override immediately before `generateWithConstraints` on the one resident handle (wrapper `LLM.temp` fire-and-forget rejected); judge re-asserts deterministic parameters after chat turns so 0.3 cannot leak into a judge run; new `chatPersonaSystemPrompt` = spec `persona_clause` under a transport wrapper, byte-identical to the artifact. Tests: ChatSamplingTests 20/20; scoped regression (ChatSampling + ChatResponseShape + ChatConfidenceFloor + IntentRouterChatRouting + LlamaCommandInterpreter + LlamaSemanticJudge + IntentPrompt) 123/123. Gates: style_spec --check-consumers clean; check-release-log-safety + check-prompt-mirror exit 0. Command system slot byte-identical to HEAD (633 chars, sha256 8ba8f380…). Deviations (reported, access-level/necessity only): vendored `LLM.swift` `setParameters` internal→public (required for the awaited per-turn override); judge determinism re-assert added; no `chat_sampling_override_failed` event (vendored setter is non-throwing — would be dead code); `chatSystemPrompt` private→internal (bytes pinned unchanged). Device items remain: DV-5 (command-after-chat determinism) + T-187 reproducibility.
 
-## Deviations
+## T-168 — Cloud chat responder and explicit temperature — DONE
 
-- None at unit level. One coordinator correction before W0 closure: the T-007
-  `MedicationEvidenceStore.maxPhotoBytes` cap was written initially as the
-  decimal `200_000`; it is corrected to the pinned PhotoVerifier precedent
-  constant `200 * 1024` (= 204,800), with the doc comments and the
-  source-scan test anchor realigned. The W0 pass below is green on the
-  corrected value.
-- W1 wave-build seam (coordinator-applied): T-003's two appended
-  `FamilyAlertType` cases left `FamilyNotifier.alertBody(for:)` non-exhaustive;
-  that switch lives in the T-011-owned file (W2). The two arms — exactly the
-  bodies design-l2 C6 assigns, resolving `family.alertIntakeRecorded` and
-  `family.alertEscalationStarted` — were landed ahead of the W1 consolidated
-  build so the wave compiles; T-011 (W2) remains the file's owner for its
-  transport-honesty work. No behavior change beyond the two bodies.
-- T-003 recorded deviation: `MedicationEntry.scheduleTimes` moved from `let`
-  to `var` — the spec-pinned copy-self remedy for the memberwise-rebuild trap;
-  all other call sites are reads, so source compatibility holds.
-- W1 coordinator fix before closure: the first W1 build failed on exactly one
-  compile error — the T-004 test referenced the parser type by a name that does
-  not exist (`MedicationLabelOCR`; the declaration is `MedicationLabelParser`).
-  One test line corrected, plus two prose comment references realigned
-  (`MedicationAckResolver.swift`, `ScannedSchedule.swift`); the rerun is green.
-- W2 coordinator test fix before closure: the first W2 pass was 175/176, red only
-  on T-015's `testReconcileDoesNotTombstoneWrittenOneOff`. The test drove two
-  auto-flushing passes (twin create, then tombstone) while supplying a single
-  canned family-calendar answer; the shipped fake consumes canned answers in call
-  order, so the second pass failed at the calendar lookup before the twin was ever
-  attempted (and the emptied-schedule pass then had nothing known to tombstone).
-  Two fresh `["family-cal"]` answers added ahead of each pass, mirroring the
-  shipped precedent's own comment on this exact trap; the rerun is 176/176. Test
-  file only — no production change.
-- T-008 recorded conflict resolution: design-l1 §4.3 says the unresolved-slot
-  event carries `entry_id_hash only`; design-l2 §5.2 and the unit spec pin "the
-  slot only". Implemented per design-l2/unit spec — metadata is exactly
-  `["slot": <slot>]`, pinned by test. Also recorded: the new `slotClockStore`
-  init parameter is defaulted (`nil` composes the store over the same storage
-  seam), so the W2 app behavior is correct without touching `AppCoordinator`;
-  T-020 may pass the shared instance explicitly.
-- T-009 recorded judgment calls: draft-init default stays `.times` (the `.slots`
-  new-entry default is the view's, per design C8); a slots-mode scan places the
-  rebuilt carrier rows on the draft's reference day. Integration note for W4: no
-  from-entry initializer was added (not in T-009's spec or IF-22) — T-018 prefill
-  is by field assignment, or the initializer becomes a follow-up edit here.
-- T-011 recorded deviations (5, all inside owned files): (1) a `PushTransport`
-  protocol seam with the provider's static type widened to `any PushTransport`
-  (default argument still `APNsProvider()`, pinned send signature unchanged) —
-  the mixed-outcome fan-out is unreachable through a stub that cannot deliver;
-  (2) `FamilyDeliveryRollup`/`deliveryRollup` so "partial" is a named state
-  (`.noRecipients` blocks the vacuous empty-fan-out "all delivered"); (3)
-  `buildPayload` private -> internal (the exact seam `notifyAll` sends through);
-  (4) the surviving diagnostics line reworded honestly and wrapped in `#if DEBUG`;
-  (5) one extra test beyond the named list (empty/failed fan-out rollup). Error
-  code vocabulary changed `apns_delivery_failed` -> `transport_unimplemented`
-  (no consumer reads the old literal).
-- T-013 recorded judgment calls (8, spec-conformant): both spec-pinned IF-8 op
-  spellings ship as thin overloads (one implementation each; T-014 compiles
-  against either); `medication_ack_clarify_ended` event per design-l2 §5.2
-  (`resolved` excluded); narrowed-pair "no" ends the walk (advance reserved for
-  3+); begin guards (live challenge outranks; candidates filtered to live
-  reminders; empty opens nothing); a candidate-set change ends as `.expired`; a
-  resolution ends silently returning the entryId (the T-014 caller continues the
-  shipped acknowledgement sequence; no recording path in the walk); new defaulted
-  init parameter `ackClarificationConfig`; the utterance-only spelling does not
-  interpret yes/no.
-- T-015 recorded deviations: type-name reconciliation via typealias (spec
-  `SignificantEventWriteResult` vs design `CalendarShareWriteResult` — one type,
-  both names); two extra honesty tests beyond the named list; two new
-  `calendar_share_*` observability events (shipped metadata keys, no PII);
-  write is enqueue-only (no outbound marker, no auto-flush — the shipped flush
-  path owns the Google write); test-harness store-failure knob.
-- T-010 recorded judgment calls: the finalize-in-flight guard is
-  deadline-inclusive (`Date() <= deadline`) — an unanswered challenge never
-  clears from the map, so a bare presence check would permanently lock an entry
-  out of every future re-arm (a lapsed window is not a live finalize; covered by
-  a lapsed-window control test); `keptLiveCount` counts reminders (guarded
-  entries' live reminders plus re-armed entries' fired reminders);
-  `createPendingReminders` gained `@discardableResult -> Int?` as the minimal
-  reuse seam (no second arming implementation); IF-12 deliberately lives on the
-  concrete scheduler, not `MedicationSchedulerProtocol` (T-020 calls the
-  concrete runtime-scoped instance).
-- T-014 recorded judgment calls (5): होइन inside a walk is consumed by the walk
-  as the resolver's `isNo: true` (the shipped denial vocabulary carries
-  छैन/भएन/नखाए but not होइन, per design-l2 step 3) — genuine refusals fall
-  through to the refusal ladder; pinned by both risk-5 tests. `.unmatched`
-  speaks the shipped `meds.ack.clarifyEnded` key and opens no walk (one
-  vocabulary, asserts nothing false); `oldestPendingReminderEntryId()` survives
-  only as the legacy-double fallback (production IF-7 and oldest agree); the
-  walk consult reads the raw transcript; observation metadata carries entry-id
-  hashes only (resolved: the resolved entry's; ambiguous: the first candidate's;
-  unmatched/nothing-pending: none).
-- T-017 recorded judgment calls (8): an unknown-id update degrades to add
-  (documented; no invented error key); gates — empty rows ->
-  `settings.meds.timeRequired`, mixed row shapes -> `settings.meds.slotRequired`
-  (fail-closed; the view emits single-shape rows from the draft);
-  `photoVerificationEnabled` false at every new-entry construction and carried
-  verbatim on edit; `editedEntry` names every field memberwise (copy-self
-  trap); copied visual aids re-save bytes under the new entry id (fail-soft);
-  a slot-resolution failure leaves an empty mirror and never fails the save
-  (arming surfaces the unresolved line later); the verification harness
-  typechecked a frozen module snapshot (deterministic under concurrent sibling
-  edits); no notes file per the binding rules.
-- T-016 recorded judgment calls (4): `escalationStarted` fires at the
-  `.fireReminder(let refireCount)` arm only when `refireCount == 1` — the
-  exactly-once decision is read from the engine's `currentRefireCount`, no
-  stored flag, and the arm is unreachable from `triggerReminder`/`recover`;
-  `.possibleDoubleDose` anchors `occurredAt`/`fireAt` at `acknowledgedAt`;
-  `intakeRecorded` deliberately makes no `onSignificantEvent` call (it writes
-  no calendar entry — the T-011 push path covers intake separately; comment at
-  the site); the retime-refusal order is emit observation -> fire hook ->
-  `return false`, no mutation, `outcome: "info"` on `medication_retime_refused`
-  with metadata exactly `entry_id_hash` + `slot`; legacy path unchanged.
-  Coordinator flags: T-020 must wire BOTH hooks at composition (an unset hook
-  is a safe no-op, but nothing reaches the calendar until wired) and must NOT
-  gate the four significant alert types on the caregiver medication toggle.
-- T-018 recorded judgment calls (6): the dose-line round trip reconstructs the
-  structured quantity only when the stored dose description is exactly
-  `DoseLine.compose(quantity, "")` or its rendered-plus-separator prefix; any
-  other text (including copy saved in the other language) keeps the stored line
-  verbatim in `strength` with the quantity step empty — verbatim, never
-  duplicated, but a cross-language edit degrades that entry to the legacy shape
-  on re-save (flagged for T-020/T-021 review); no from-entry initializer was
-  added (T-009 forbids it) — prefill is field assignment inside the pure static
-  factory; the coordinator's slot-clock store is private with no accessor, so
-  the view composes a stateless `MedicationSlotClockStore` over
-  `MigratingEncryptedStorage` at tap time (precedent: `MedicationScheduler`
-  init; never cached; follow-up: add a coordinator accessor); a legacy time
-  matching no slot default is left unassigned on family switch and blocks Save
-  with `settings.meds.slotRequired` (no fuzzy match, no silent conversion); a
-  tap on the selected meal chip clears the relation to nil (the model admits
-  nil); every new interactive element carries the 44pt/18pt floors pinned
-  line-by-line in the suite.
-- T-019 recorded judgment calls (4): the new `evidenceStore` init parameter is
-  defaulted nil — holds register but file deletions are skipped, and the
-  composition obligation (W6/T-021 passes the shared store) is stated at the
-  init site; `attachEvidence`'s unknown-log arm deletes nothing (a bare file
-  name cannot resolve its entry directory — guessing is not the seam's
-  business); observability ownership split — T-019 emits
-  `medication_evidence_discarded` (outcomes late_hold / replaced / denied /
-  persistence_failed / attach_failed) and `medication_evidence_attached` with
-  entry-id hashes only, while `medication_evidence_captured` remains T-021's;
-  the runtime harness used a Foundation-only store double (UIKit unavailable
-  off-Simulator) against the real frozen scheduler sources.
-- T-020 recorded judgment calls (8): hook wiring sits beside `onScheduleChanged`
-  (after all stored properties initialize) and the discarded calendar-write
-  result is deliberate (share-consent-gated, inert when unavailable; the
-  caregiver-notify toggle is consulted nowhere in the region — T-016's flag
-  held); the coordinator's injected `slotClockStore` is now passed through into
-  the `MedicationScheduler` construction so save gate, re-arm, arming feed and
-  `currentMedicationSlotClock` are one instance (nil keeps prior behavior
-  byte-identical); **boundary exception, disclosed:** a paired two-line edit to
-  `SettingsPersistenceTests.swift` (one comment + the new allow-list key) —
-  that suite pins the backfill list exactly, so without the edit the W5 gate
-  would be structurally red; no 40-char token introduced there (two
-  pre-existing names in that file remain untouched); the saved line reuses the
-  closest existing key (`profile.saved`) and the rearmed/kept counts ride
-  `SlotClockSaveResult` fields rather than interpolated copy (T-012 follow-up
-  flagged: a dedicated re-arm summary key if W6 wants counts spoken);
-  `settings.meds.times.unresolved` carries no placeholder, so unresolved slots
-  render as a plain sentence with the slot list riding the struct; reset = seed
-  the documented defaults (08:00/13:00/19:00) then save through the same IF-9
-  path (validated, persisted, re-armed, honest lines); `MedicineTimesDraft` is
-  internal for the reset round-trip test; a literal `.frame(minHeight: 56)` the
-  suite's own token pin caught was fixed in the source, not by weakening the
-  test.
-- T-021 recorded judgment calls (7): the frozen IF-14 case name
-  `recordedDose(logId:)` wins over the task prose's `.record(logId:entryId:)` —
-  the entryId is resolved from the log itself, which yields the
-  decline-before-store property for free; R-3 late hold → `.declinedNoContext`
-  (never a claimed hold; the caption and spoken line say the honest "could not
-  be saved" — the file really is gone); attach failure → idempotent
-  coordinator-side delete + `.failed(.storageUnavailable)` (no path can claim a
-  file that is not there); single-flight for the synchronous frozen signature =
-  a flow-level active-session flag (a second call answers nil = exactly "no
-  capture made") plus the serial store queue; "Taken today" day key =
-  `Calendar.current isDate(inSameDayAs:)` over `scheduledAt` (mirrors
-  `MedicalView.todaysReminders`), confirmed-only, rows only for surviving
-  entries, section hidden when empty; held-state line = the
-  `meds.evidence.notYetDelivered` one-shot caption; the capture affordance is a
-  property of the dose SCREEN, so `MedicationVisualAidFireHandler.swift` is
-  deliberately untouched (its suite hosts the IF-24 named test for the read
-  seam under the handler's presentation), and `MedicationVisualAidOverlay`
-  reads the coordinator from the environment (root injection verified present).
-  **Ownership extension (wave-coordinator, disclosed):**
-  `MedicationScheduler.swift` + `LeafViews.swift` — ONLY the IF-24 read seam
-  (`takenLogs(on:)`, internal, same visibility discipline as
-  `pendingReminders`) and the `MedicalView` "Taken today" section, both
-  mandated by the frozen design (design-l2 :82 / :133 / :845) while the plan's
-  owned-list omitted them; W6 is a single-unit wave, so the extension is
-  conflict-free. pbxproj wiring for the new test file was added by the unit;
-  the coordinator canonicalized the project via xcodegen at wave close (the
-  agent's hand-written UUIDs were the only diff — identical 4-point wiring).
-- W6.5/T-023 recorded judgment calls + deviations (all disclosed): (1)
-  `MedicationSchedulerProtocol.swift` edited — not in the enumerated owned
-  list; compilation-forced (the frozen-snapshot emit caught the `loadSchedule`
-  Void→Bool conformance break); a one-line signature mirror + doc; no other
-  conformer or existential exists; residual open 8 (the protocol extension
-  decision) closes here. (2) Editor presentation: `fullScreenCover` +
-  `EditorTarget` with fresh UUID identity per presentation (two taps on one
-  row present twice); a failed save leaves the cover up with the editor's own
-  error line. (3) The two shipped scheduler-suite pins the new semantics
-  require were read first and updated, never weakened:
-  `testPersistenceBeforeAlarmOnScheduleAll` now asserts the Bool and
-  nothing-adopted/nothing-armed; `testStorageFailureBlocksArming` was split to
-  also drive the reminders-key failure (entries land, one adoption,
-  `reminder_persistence_failed`, still nothing armed). (4) A coordinator-level
-  storage-failure drive is infeasible (the concrete `MigratingEncryptedStorage`
-  + Keychain fallback exposes no seam) — the failure path is driven at the
-  scheduler seam, and the coordinator propagation is pinned by source scan
-  (4 guard sites, 3 error renders, guard-before-`scheduleAll()` ordering).
-  (5) pbxproj canonicalized via xcodegen at wave close (diff vs the agent's
-  8 hand-added lines = ordering/UUIDs only; identical wiring); canonical sha
-  `f7514841…`; the wave-close build's own xcodegen regeneration re-produced
-  the same bytes. (6) The `medication.entries` write sites confirmed: :266
-  (`setVisualAids` precedent), :394 (the new write-first `loadSchedule` tail),
-  :587 (removal payload, guarded).
-- W6.6/T-024 recorded deviations (all disclosed): (1) delivery was an
-  isolated-worktree patch applied by the coordinator with `git am` (am
-  commit `58071bd4`), not an sdd-dev subagent run — provenance verified
-  cryptographically (all ten pre/post-image blob prefixes in the patch's
-  index lines matched the worktree before and after the apply; patch
-  `/tmp/msr-scanner-frequency.patch`, 34,978 B, source commit `79c915d0…`,
-  base master `85349303`); the commit's `Co-Authored-By` trailer is
-  preserved. (2) `ScannedSchedule.swift` production was NOT touched by the
-  delivered patch — narrower than the amendment's owned-file list; the
-  pinned hour-table conversion was already the correct seam, and no change
-  was needed there. (3) SEC-002: the patch
-  introduced five NEW test method names that are exactly 40 `[A-Za-z0-9]`
-  characters (new content must avoid the hash-like-token pattern: 42+ or
-  ≤39 are safe). Identifier-only renames of all five landed in the W6.6
-  close commit; the exactly-40 maximal-run scan over the five final files
-  is 0. The am commit stays byte-authentic in history. (4) Owner rule delta
-  folded in before the recorded pass (see the W6.6 verification block): the
-  after-food default for label-derived rows; the recorded pass covers its
-  new pins. (5) NO `SettingsView` changes and NO new strings: the L10n pins
-  were not re-measured (unchanged from the W6.5 close).
-- W7/T-022 recorded deviations + judgment calls (all disclosed): (1) the
-  tail's single test gate ran as a raw xcodebuild mirror of build.sh's
-  full-run flags (project xcodegen-regenerated first; guards green) WITH
-  `-test-timeouts-enabled YES -default-test-execution-time-allowance 2400`
-  added after two earlier attempts wedged 25+ minutes inside
-  `ASWebSpotifyAuthSessionTests.testAStartRefusalWithNoReportedReasonCodeCarriesTheUnreportedCode`
-  — root-caused to the 2026-10-14 iOS-27 browser-fallback workaround in
-  `ASWebSpotifyAuthSession.authorize(url:)` (a start refusal now falls through
-  to a real browser session; the pin expects the old throw; race-y — the test
-  PASSED on the third attempt under the guard). The guard converts any hang
-  into a recorded timeout failure and skips nothing; no scoping, ordering or
-  selection changed otherwise. Attempt logs: /tmp/msr-w7-gate.log,
-  /tmp/msr-w7-gate2.log (killed), /tmp/msr-w7-gate3.log (the gate). (2) TG-01
-  shared-sim hazard: the gate ran pinned to the private simulator MSR-Gate-UI
-  (B88FE9D2-…) after the first attempt collided with another worktree's
-  install on the shared default; bundle provenance re-checked (installed
-  bundle contains this feature's own new classes) before the run counted.
-  (3) `IOS_TEST_DESTINATION` in build.sh expects the FULL destination string;
-  a bare UDID exits 64 — operational note only. (4) The failure-classification
-  serial pass (`build.sh test:unit <16 classes>` — the wave's diagnostic
-  instrument, not a gate) proves four gate-3 failures are parallel-clone/load
-  artifacts: FrameAnchorEstimatorTests, LiveCameraCaptureGuaranteeTests,
-  QueryEndToEndRegressionTests, PointAskAutoAnalyzeOnAnchorTests — all green
-  serially. (5) Two non-owned pins updated with W7's own change (declared
-  additive pattern, coordinator-approved): LiveTranslateAllowListTests (+3
-  declared keys) and DialogueLogAndEgressTests (87→90); the allow-list
-  suite's residual failure is the three pre-existing [CORRECTION-REVIVE]
-  keys and is red on master identically (see verification). (6)
-  `check-release-log-safety.py` gained a 92-line precision fix (the
-  exactly-40 maximal-run rule + the medication FEATURE_ROOTS/EVENT_TYPES +
-  the `Texts?` pattern precision fix) inside W7's scope. (7) UI ×5: all five
-  UI failures are pre-existing at the branch base and state-sensitive, none
-  feature-caused — four (NepaliTalk :188, midnight :268, StartsListening,
-  ReturnsToIdle :389) fail byte-identically on the BASE worktree at the
-  branch point (fresh private sim, serial scoped), and the fifth (sky, the
-  same :268 assertion) failed on a BASE re-run with the identical
-  6.999999999999943 after passing once at base in the voice-unavailable
-  caption state (both outcomes on identical base code). The branch touches
-  no home-stage file (HomeView/HomeSubviews/HomePresentationState: zero
-  commits after the branch point). Full geometry and evidence in the W7
-  verification block.
+Wave 1. `GeminiClient.swift` extended: `GenerationConfig.temperature` (optional, declared after responseMimeType), threaded through `generateJSON`; every existing call site untouched and still passes no temperature. `GeminiCommandInterpreter.swift`: file-scope `GeminiChatConfig` (reviewed chat temperature 0.3, OD-5, chat-only), `ChatResponding` conformance, `respondToChat` pipeline (sanitise .quarantine → `IntentPrompt.buildChat` → `replyPersona` system instruction → generateJSON, useSearchGrounding false, temperature 0.3), `replyPersona` re-authored as ONE constant whose last line is the spec `persona_clause` byte-identical (519 bytes, drift markers in place; style_spec --check-consumers clean, exit 0). Egress scope pinned (FR-CNR-010): root keys exactly {contents, generationConfig, systemInstruction}; one content; plugins never consulted; pendingMedications constructed away; addressAs + userLanguageHint kept (the shared chat template renders them by design). Hygiene: key header-only; chat region zero console writes (whole-file DEBUG-gating scan). Failure paths: no key → nil + .notConfigured with zero network calls; empty-after-sanitise → nil; malformed or non-.chat answer → nil + .invalidResponse, never fabricated; governor shared with no bypass, cap → plain classified nil (T-175 owns the chat fallback); no confidence gate on the chat path — the .chat shape gate only. Tests: CloudChatResponderTests 27/27 (./build.sh test:unit CloudChatResponderTests; run 3 — runs 1/2 exposed cap-clamp and JSON member-order premises). Deviations (recorded with evidence): untouched-call-site pins compare canonical .sortedKeys bytes + exact key sets + raw temperature-absence because JSONEncoder emits unspecified member order on this Foundation (equal-length, order-only diffs observed at 1377/3348 bytes); governor soft cap clamps to a minimum of 10 so cap tests use 10 with persisted-payload assertions. Build contention hit once — waited 120 s, retried, DerivedData untouched.
 
-## Verification
+## T-173 — CloudChatRouting: the single fail-closed routing decision — DONE
 
-- **W0 consolidated scoped pass (2026-10-15):** `ios/build.sh test:unit
-  MedicationSlotClockTests ConfirmationChallengeTests MedicationSchedulerTests
-  MedicationEvidenceStoreTests L10nCatalogCoverageTests
-  CalendarShareConsentCopyTests` — 92 tests, 0 failures, `TEST SUCCEEDED`
-  (xcresult 92/92, result Passed). Guard scripts (release-log-safety,
-  prompt-mirror) green ahead of the run. Suite coverage: slot clock 10,
-  challenge 11, scheduler 15, evidence store 12, catalog coverage 40,
-  calendar-share consent copy 4. A scoped run does not advance the impact
-  baseline.
-- **Unit outcomes (W0):**
-  - T-001 — `MedicationSlotClock.swift` (new) + its suite (10 tests, parse-clean):
-    per-slot default/family mapping resolution, validate-before-persist, refusal
-    maps to a typed storage error, unreadable bytes load as the household
-    default (L1 4.2).
-  - T-006 — one named home for the challenge window
-    (`ConfirmationChallenge.defaultChallengeTimeoutSeconds` = 30 s, the shipped
-    FR-D02 value); `AckClarificationConfig` (new) derives its window from the
-    same home; both scheduler construction sites pass the value explicitly; no
-    literal timeout at any call site (grep evidence recorded by the unit).
-  - T-007 — `MedicationEvidenceStore.swift` (new) + its suite (12 tests):
-    entry/log-named file layout under `.completeFileProtection`, atomic writes,
-    never-oversize compression ladder, typed failures, fail-soft entry cascade.
-    Cap pinned to the PhotoVerifier precedent `200 * 1024` (see Deviations).
-  - T-012 — 42 new keys, ne + en (catalog 1,439 -> 1,481 on the branch);
-    M-1 consent amendment applied to `calendarShare.consent.whoCanSee` with
-    the shipped Nepali duplication repaired; `calendarShare.consent.body`
-    verified byte-unchanged in both locales; the four coverage count pins
-    rebased to the new total (1,481).
-- **W1 consolidated scoped pass (2026-10-15):** `ios/build.sh test:unit
-  DoseLineTests MedicationEntryMigrationTests FamilyNotifierTests
-  MedicationAckResolverTests ScannedScheduleTests` — 42 tests, 0 failures,
-  `TEST SUCCEEDED` (xcresult 42/42, result Passed). Suite coverage: dose line 5,
-  migration 5, family notifier 12, ack resolver 16, scanned schedule 4. The
-  first attempt aborted in the compile phase on the single symbol-name error
-  now fixed (see Deviations); guards green; a scoped run does not advance the
-  impact baseline.
-- **Unit outcomes (W1):**
-  - T-002 — `DoseLine.swift` (new) + its suite (5 tests): IF-5 composer,
-    localized unit labels through the `meds.unit.*` keys, verbatim unknown/custom
-    tokens (never repaired), trimmed strength, nil quantity composes nothing.
-    Copy-polish candidate for final sign-off: unit labels are singular-invariant
-    ("2 tablet") by catalog design — spec-conformant, flagged for the owner's
-    polish pass.
-  - T-003 — `Models.swift`: optional `quantity` / `slot` / `mealRelation` with
-    defaulted memberwise init and `decodeIfPresent` migration; the memberwise
-    `withScheduleTimes` trap replaced by a copy-self (recorded deviation above);
-    `MedicationAdherenceLog.evidencePhotoFileName` (nil encodes as no key); two
-    taxonomy cases appended with all seven shipped positions and raw values
-    unchanged; migration suite 5 tests; the notifier suite's wire-value list
-    extended (stub-success flips deliberately untouched — T-011 owns them).
-  - T-004 — `MedicationAckResolver.swift` (new) + suite (16 tests): name-first,
-    then slot (legacy nil-slot entries never match a slot word), then simple ack
-    (fired reminder preferred); `.nothingPending` is a value, not an error; walk
-    outputs in the fixed order; closed vocabulary mechanically matched to
-    design-l2 C3 in both languages; pure (no clock, no I/O, no router symbols).
-  - T-005 — `ScannedSchedule.swift` (new) + suite (4 tests): the pinned hour
-    table exactly matches the parser's emitted-hour union; unmapped or
-    out-of-range reads produce nothing (fail-closed, no clamping); dedup keeps
-    first-occurrence order; pre-fill only — the human save gate is untouched.
-- **W2 consolidated scoped pass (2026-10-15):** `ios/build.sh test:unit
-  MedicationSchedulerTests MedicationEditorDraftTests FamilyNotifierTests
-  NotifyChannelTests MedicationAckClarificationTests CalendarShareServiceTests
-  CalendarShareMapperTests` — 176 tests, 0 failures, `TEST SUCCEEDED` (xcresult
-  176/176, result Passed). Suite coverage: scheduler 20, editor draft 23, family
-  notifier 19, notify channel 10, ack clarification 10, calendar share service
-  67, calendar share mapper 27. The first attempt was 175/176 — the single red is
-  the T-015 test's canned-answer starvation now fixed (see Deviations). Guards
-  green; a scoped run does not advance the impact baseline.
-- **Unit outcomes (W2):**
-  - T-008 — `MedicationScheduler.swift`: IF-11 `resolvedScheduleTimes(for:)` —
-    legacy entries return the stored mirror verbatim, slot entries resolve
-    through the C1 slot clock read fresh on every call (the mirror is never read
-    or written by this path); `createPendingReminders` consumes the feed (an
-    unresolved slot arms nothing, the pass continues, PII-free
-    `medication_slot_unresolved` with metadata exactly `["slot": <slot>]`);
-    persist-before-arm order preserved and pinned by a call-order witness; new
-    defaulted `slotClockStore` init parameter. Suite 20 tests. Conflict
-    resolution recorded (see Deviations).
-  - T-009 — `MedicationEditorDraft.swift`: `ScheduleMode`, `slotRows` (parallel
-    count invariant), `MedicationDoseRow` (`.time`/`.slot` — T-017 consumes it in
-    W3), `MedicationQuantityDraft` (both-or-nothing stored value),
-    `mealRelation` passthrough; `applyScan` routes slots mode through the W1
-    scan converter; `applySlotPreselection` (nil rows only, exact equality,
-    fail-closed); `storedRows`/`canSaveRequest` (IF-22); `canSave` untouched
-    (name-only). Suite 23 tests (16 shipped + 7 named). W4 integration note in
-    Deviations.
-  - T-011 — `FamilyNotifier.swift`: `PushOutcome` (IF-19) and the `PushTransport`
-    seam; `APNsProvider.sendPush` now honestly reports
-    `.notDelivered("transport_unimplemented")` — no fabricated success, no
-    token-printing log line; per-contact outcomes flow through `notifyAll`;
-    `emitEventAlerted` carries the honest outcome; payload envelope `v: 1` with
-    `entry_id_hash` only for the four pinned significant events (never
-    substituted, nil context omits the key); `FamilyDeliveryRollup` makes
-    "partial" a named state. Suites: family notifier 19 (12 shipped + 7),
-    notify channel 10 (8 + 2).
-  - T-013 — `AppCoordinator.swift` `[MED-ACK-WALK]` section: file-scope walk
-    types, `@Published pendingAckClarification`, IF-7 `medicationAckCandidates()`
-    in the fixed order (scheduledAt -> canonical name -> uuid), IF-8
-    begin/response/end in both spec spellings (thin overloads, one
-    implementation each), expiry window from `AckClarificationConfig` only;
-    `isAwaitingConfirmation` folds the walk. The walk records nothing and always
-    ends deterministically. New suite 10 tests
-    (`MedicationAckClarificationTests.swift`; pbxproj regenerated).
-  - T-015 — CalendarSync significant-event write: `SignificantMedicationEvent`
-    (three kinds, deterministic UTC-stamped minute-truncated identity),
-    `CalendarShareWriteResult` (+ typealias), `writeSignificantEvent` (IF-17 —
-    consent gate, honest skip reasons for no-invitees/nil-entry, enqueue-only);
-    D7 snapshot narrowing (`reconcileSnapshotKeys`: prefix AND slot-shaped) wired
-    into the reconcile pass so a written one-off is never tombstoned; mapper
-    gains the M-1 family audience (every contact with an email, emergency-first)
-    and the one-off draft/title. Suites: calendar share service 67, mapper 27.
-- **W3 consolidated scoped pass (2026-10-15):** `ios/build.sh test:unit
-  MedicationSchedulerTests CommandRouterMedicationWalkTests AckFastLaneTests
-  MedicationSavePlumbingTests` — 65 tests, 0 failures, `TEST SUCCEEDED`
-  (xcresult 65/65, result Passed). Suite coverage: scheduler 25, router walk 9,
-  ack fast lane 21, save plumbing 10. Green on the first attempt; guards green;
-  a scoped run does not advance the impact baseline.
-- **Unit outcomes (W3):**
-  - T-010 — `MedicationScheduler.swift`: IF-12 `rearmForSlotClockChange()` —
-    slot entries walked deterministically; finalize-in-flight entries kept whole
-    (challenge-active guard, deadline-inclusive); resolution fail-closed with
-    the honest `medication_slot_unresolved`; staleness judged by resolution
-    equality so a second unchanged pass is a true no-op; mirrors persist before
-    in-memory apply and alarm movement; reminders re-placed through the standard
-    creation path (no parallel arming code); `SlotClockRearmReport`
-    (`rearmedCount`, `keptLiveCount`, `unresolvedSlots`, `persistenceFailed`)
-    for T-020's leaf lines. Suite 25 tests (20 shipped + 5 named); an 82-check
-    runtime harness ran green.
-  - T-014 — `CommandRouter.swift`: `handleMedicationAcknowledgement` resolves
-    through the T-004 resolver over the IF-7 candidates (resolved -> the shipped
-    challenge/baseline sequence; ambiguous -> the walk; unmatched -> the honest
-    line; nothingPending -> the shipped line; the oldest-pending selection
-    survives only as the fallback). The R-4 walk consult is a sibling at :1135
-    immediately ahead of the confirmation block (:1160): the denial guard runs
-    first (one `isMedicationDenial` helper over the shipped phrase list), a
-    refusal ends the walk and falls through to the refusal ladder, yes/no inside
-    a walk route to the walk. Five new `VoiceCommandCoordinating` requirements
-    with inert extension defaults; verified that AppCoordinator's concrete
-    members carry all five exact spellings (the app never hits the defaults).
-    PII-free `medication_ack_resolved`/`_ambiguous`/`_unmatched`. Suites: walk
-    9 (all named, incl. both risk-5 guards) and ack fast lane 21 (19 + 2).
-  - T-017 — `AppCoordinator.swift`: IF-21 slot-model save plumbing —
-    `MedicationSaveRequest` (file scope); `addMedication(_:)` /
-    `updateMedication(id:_:)` / `removeMedication(id:)`; one entry per slot row
-    (D1) with the D2 mirror composed through C1 at save time (resolution
-    failure leaves an empty mirror, never fails the save); `doseDescription`
-    through the T-002 composer; the SHIPPED duplicate expression verbatim
-    (exact name equality + effective-time intersection) — mixed legacy/slot
-    pairs flag, same-save entries participate, update excludes self, corrupt
-    mapping/empty mirror never flags; the evidence cascade on removal
-    (fail-soft); `photoVerificationEnabled` false at construction; the shipped
-    legacy path untouched. New suite 10 tests. Anchors for T-020: rows built
-    from `MedicationEditorDraft.storedRows`, errors are catalog keys
-    (`settings.meds.*`).
-- **W4 consolidated scoped pass (2026-10-15):** `ios/build.sh test:unit
-  MedicationSchedulerTests EscalationEngineTests MedicationEditorSurfaceTests
-  MedicationEditorDraftTests` — 77 tests, 0 failures, `TEST SUCCEEDED`
-  (xcresult 77/77, result Passed). Suite coverage: scheduler 34 (25 + 9),
-  escalation engine 14 (13 + 1), editor surface 6 (new suite), editor draft 23.
-  Green on the first attempt; guards green; a scoped run does not advance the
-  impact baseline.
-- **Unit outcomes (W4):**
-  - T-016 — `MedicationScheduler.swift`: the four significant-event triggers —
-    `intakeRecorded` after the successful adherence-log write in
-    `finalizeAcknowledgement` (deliberately no hook call); `escalationStarted`
-    exactly once per reminder at the first re-fire (`.fireReminder` arm,
-    `refireCount == 1`); `missedMedication`/`possibleDoubleDose` now carry real
-    context through the private `notifySignificantEvent`. Hooks
-    `onSignificantEvent` (:136) and `onSlotEntryRetimeRefused` (:145);
-    `raiseSignificantEvent` (:1299) invoked at exactly the three at-risk sites
-    (:757 / :898 / :953). Retime refusal: the `setScheduleTimes` slot guard
-    emits `medication_retime_refused`, fires the hook, returns false, no
-    mutation; legacy unchanged. The first-fire opt-in gate is untouched.
-    Tests: 9 named in the scheduler suite + 1 in escalation engine; additive
-    `MockFamilyNotifier` seam. Anchors for T-020: both hooks wired at
-    composition; the four significant alert types are never gated on the
-    caregiver toggle.
-  - T-018 — `SettingsView.swift` (+ new `MedicationEditorSurfaceTests.swift`):
-    slot-model rebuild of the medication editor form (schedule/quantity/meal/
-    purpose steps; family chips keep-times / use-slot-model; slot mode never
-    shows a clock time to the family) and the edit-existing flow (legacy entry
-    reopens `.times` exactly as stored — no fuzzy match, no silent conversion;
-    slot entry reopens `.slots` with its row, mirror never shown; family switch
-    is an explicit chip tap and nothing persists before Save). IF-21 save: the
-    pending-row gate (`settings.meds.slotRequired` for unassigned rows) is
-    ordered before the coordinator call; `updateMedication(id:request:)` on
-    edit, `addMedication(request)` on add; returned catalog key becomes the
-    error line; form resets on success. Pure static seams for T-020
-    (`newDraft`, `draft(from:)`, `saveRequest(from:photo:)`,
-    `pendingRowFailureKey`, `switchToSlots`, `switchToTimes`). Every string is
-    a T-012 catalog key (en+ne verified present); 44pt/18pt floors pinned.
-    Suite 6 named tests.
-- **W5 (code + typecheck only — speed directive; no scoped pass):**
-  - T-019: `swiftc -parse` 0 on both files; frozen-snapshot module emit exit 0
-    (164 warnings = the T-018 baseline, 0 errors); test-file typecheck exit 0;
-    both error-sensitivity probes exit 1 at the injected lines; optional
-    runtime harness over the real frozen scheduler sources ran 121 checks /
-    0 failures (the 7 T-019 scenarios plus T-016's 8 as a no-regression
-    signal); sha256 re-check matched the frozen bytes after all runs.
-  - T-020: `swiftc -parse` 0 on all five files; frozen-snapshot module emit
-    exit 0 / 0 errors over a snapshot that INCLUDED T-019's landed scheduler
-    (the combined W5 tree typechecks), 164 warnings unchanged; new suite and
-    the paired SettingsPersistenceTests edit both typecheck exit 0; both
-    probes exit 1 at the injected lines; all 11 consumed catalog keys
-    verified non-empty in en+ne; 23 in-suite source pins dry-run pass against
-    the final sources; sha256 re-check matched.
-  - Not run by directive: the W5 `-only-testing` pass (scheduler / slot-clock
-    settings / save plumbing) — the W7 full suite is the tail's single gate.
-- **W5 unit outcomes:**
+Wave 1. New `CloudChatRouting.swift`: `ChatRoute { cloud, local(reason: LocalReason) }` with the design's closed reason vocabulary (raw values are the case names; the file contains no string literal). Injected `Inputs` seam: four optional throwing closures (consent, online, keyConfigured, costAllows) all defaulting to nil, so every pre-feature construction site compiles and selects local honestly; the router's existing readiness closures slot in unchanged (compile-level test). `decide(_:)` reads every closure per turn, caches nothing; the pure core `decide(consent:online:keyConfigured:costAllows:)` is the single body holding the precedence (first blocking input in order consent → online → key → cost; the gate-state switch has no default:, so a fifth state cannot silently map). Fail-closed matrix: absent closure, nil return and throw ALL resolve local (consent reads NotRecorded/NotRecorded/Unreadable; online, key and cost read their own reasons for all three modes). `consentRevoked` reconciliation (recorded): the gate's `.denied` means "declined, or revoked" — no readable state distinguishes them and a second source would be the forbidden parallel consent store — so `.denied → consentDenied` and `decide` never fabricates `consentRevoked`; that token stays in the vocabulary for the revocation surfaces (T-177) that performed the withdrawal and know it. Tests: CloudChatRoutingTests 15/15 (32-cell table over the four-state consent axis — the design's "sixteen" strictly contained — exactly one cloud; precedence pins; revocation between two reads through the real gate; tombstone/relaunch/corrupt-record variants; 12 exact unknown-input cells plus all 81 absent/nil/throwing combinations never cloud; determinism; source hygiene — no import at all, no logging, no transport, no UI). Scope fence held: no router/coordinator wiring, no guard resolution, gate file untouched. Transient build contention: one run failed on a concurrent agent's mid-edit test file, cleared on retry.
 
-  - T-019 — `MedicationScheduler.swift`: IF-15 evidence hold —
-    `holdPendingEvidence(logId:fileName:for:)` (`@discardableResult -> Bool`;
-    R-3 late hold deletes the stored file, emits, registers nothing, returns
-    false; re-capture deletes the superseded file first);
-    `attachEvidence(fileName:toLog:) -> Result<Void, SafetyError>` attaches to
-    an existing log only (unknown log = `.reminderPersistenceFailed`, nothing
-    created); `finalizeAcknowledgement` mints `held?.logId ?? UUID()`, sets
-    `evidencePhotoFileName` before the single persist, and on the failure arm
-    deletes the held file, clears the hold, strips the retained record's name
-    (intakeRecorded already does not fire); deny arm discards; success emits
-    `_attached` once and clears the hold WITHOUT deleting the claimed file.
-    Holds are in-memory only (process death loses the claim — honest loss).
-    `MedicationSchedulerProtocol` unchanged (residual open 8 default held).
-    Suite 34 → 41 tests (7 named).
-  - T-020 — `SettingsView.swift` + `AppCoordinator.swift` +
-    `SettingsPersistence.swift` (+ new suite): the "Medicine times" card in
-    the medication settings — three slot rows with spoken times ONLY through
-    the SpokenTime formatter (zero interpolation on the card, pinned),
-    DatePickers at the 44pt/18pt floors, reset + save, honest result lines
-    (saveFailed / unresolved / saved), and the one-shot retime banner. IF-9
-    `saveMedicationSlotClock(_:) -> SlotClockSaveResult` ordered
-    validate → persist → `rearmForSlotClockChange()` (invalid or failed
-    persist = nothing stored, no re-arm; unresolved slots surface honestly;
-    re-arm persistence failure reuses the saveFailed line) with a pure
-    `lineKeys(for:)` mapper; `currentMedicationSlotClock()` accessor (closes
-    T-018's deviation-3 follow-up; the view constructs no store). One-shot
-    note mirrors the appointment-SMS precedent exactly (didSet persist,
-    `medicationRetimeNoteDismissed.v1` allow-listed, construction read,
-    presented-until-dismissed then never again). Composition wiring:
-    `onSignificantEvent` → main hop → `calendarShareService.writeSignificantEvent`
-    and `onSlotEntryRetimeRefused` → main hop → surface the note; no caregiver
-    toggle anywhere in the region. Suite 7 named tests.
-- **W6 (code + typecheck only — speed directive; no scoped pass):**
-  - T-021: `swiftc -parse` 0 on all 7 touched/created files; frozen-snapshot
-    module emit exit 0 / 0 errors over the combined tree (T-019/T-020 landed),
-    164 warnings = the unchanged baseline; all three test suites typecheck
-    exit 0 against the emitted module; three error-sensitivity probes (app +
-    evidence suite + tail probe on the extended fire-handler suite) exit 1 at
-    the injected lines; sha256 re-verified after every run with 0 drift, and
-    all 8 reported on-disk hashes matched the report at wave close; the
-    forbidden-symbol greps on the capture path are 0 (PhotoVerifier and the
-    whole network family — the doc comment was reworded so even the identifier
-    substring is absent; FR-MSR-020 clean with no caveat); all 8 consumed
-    catalog keys verified non-empty in en+ne; secret-scanner 40-char scan: 2
-    pre-existing hits only (pbxproj VariantTables path, presentation-suite
-    :179 pre-existing name), 0 introduced.
-  - Not run by directive: the W6 `-only-testing` pass — the W7 full suite is
-    the tail's single gate (T-021's 9 named tests are typechecked only; the
-    report lists the behaviors W7 should target, incl. serial-execution
-    storage-key discipline in the three new/extended suites).
-- **W6 unit outcomes:**
-  - T-021 — `AppCoordinator.swift` (IF-14 `captureEvidence` with the serial
-    `medication.evidence.store` queue and main-thread outcome;
-    `captureMedicationEvidence` single-flight flow with availability guard and
-    the D11 announce; `takenDosesToday()`; `medication_evidence_captured`
-    classification-only emission), `MedicationScheduler.swift` (IF-24
-    `takenLogs(on:)`), `LeafViews.swift` ("Taken today" section in
-    `MedicalView`), `MedicationVisualAidViews.swift` (dose-screen capture
-    affordance + one-shot outcome caption). Composition: the shared
-    `medicationEvidenceStore` now flows into the `MedicationScheduler`
-    construction (object-identity asserted in the first named test). Named
-    tests: 6 (evidence capture) + 2 (presentation) + 1 (fire handler) across
-    three suites — authored and typechecked; execution rides W7.
-- **W6.5 (scoped pass at wave close — amendment 6; NOT under the strip directive):**
-  - T-023 agent verification (frozen snapshot `/tmp/msr-t023`, 418 app sources ==
-    appfiles.txt exactly; 5 test files byte-equal to the worktree): module emit
-    exit 0 / 0 errors, 164 warnings with the normalized warning multiset
-    identical to the W6 baseline (60 unique templates, diff empty); the first
-    emit attempt caught a REAL compile defect (the `loadSchedule` Void→Bool
-    change broke `MedicationScheduler`'s protocol conformance) — fixed in-unit
-    by the one-line protocol mirror; test typecheck exit 0/0/0 after one
-    harness-set correction (a duplicate `MockObservabilityBus` shim the agent
-    had copied in, removed); three error-sensitivity probes exit 1 at the
-    injected lines (app :279, test suites :36/:272); zero hash drift across all
-    runs; 40-char scan adds none (the 2 pre-existing hits only — the
-    scheduler-suite pre-existing name and the pbxproj VariantTables path).
-  - Wave-close scoped pass (coordinator-run, feature worktree; release-log-safety
-    + prompt-mirror guard preflight green, 0 failures): 7 classes —
-    MedicationManageListTests 10, MedicationEditorSurfaceTests 6,
-    MedicationSlotClockSettingsTests 7, MedicationSchedulerTests 41,
-    MedicationSavePlumbingTests 10, L10nCatalogCoverageTests 40,
-    SettingsTabMappingTests 25 — **139/139 passed, 0 failures** (2026-10-15,
-    simulator), xcresult result "Passed". SettingsTabMappingTests joined the
-    pass because `SettingsTabs.swift` changed and L10nCatalogCoverageTests
-    because the catalog gained the new key (the plan row's conditional
-    resolved to included).
-  - All 11 reported on-disk hashes matched the T-023 report at wave close
-    (zero drift); the pbxproj re-hash after the build's own xcodegen
-    regeneration equals the canonical sha `f7514841…`.
-- **W6.5 unit outcomes:**
-  - T-023 — NEW `MedicationManageListView.swift` (list-first screen: one card
-    row per entry — name, composed dose line via the T-018 `doseTextHalf` +
-    `DoseLine.compose` call, slot/meal "when" line via the shipped
-    `slotKey`/`mealKey` statics or `timesText` for legacy, purpose caption;
-    explicit add control at the raised tap floor; row tap presents the editor
-    PRE-FILLED through `draft(from:)` + `editingEntryId` — a call, never a
-    copy; the add form never auto-opens — `editorTarget` nil until a control
-    sets it, no `onAppear`/`task` pathway; empty state reuses
-    `settings.meds.empty`; the T-020 Medicine-times card stays reachable on
-    the manage screen; delete keeps its shipped refusal render;
-    44pt/18pt floors pinned). `SettingsTabs.swift` `.meds` route now hosts the
-    manage list. `MedicationScheduler.loadSchedule` became write-first-or-fail
-    (`Bool`; on failure `entry_persistence_failed` emitted, nothing adopted,
-    the previous schedule intact and armed — FR-MSR-022/D2); `setScheduleTimes`
-    returns the load result; all four coordinator writer paths guard on it and
-    render `settings.meds.saveFailed` on failure, arming nothing. Redraw:
-    `AppCoordinator.medicationScheduleRevision` (`@Published private(set)`)
-    bumped at the `onScheduleChanged` seam, read explicitly in the list body.
-    New catalog key `settings.meds.saveFailed` (en+ne); re-measured pins:
-    catalog 1,481 → 1,482, medication family 42 → 43, baselines 1_463 / 1_477 /
-    1_459 / 1_464. Suite: exactly the 10 named tests; the persist-failure test
-    drives the real scheduler over the mock store (fail write → false + event
-    + nothing adopted + previous still armed + disk unchanged) and pins the
-    coordinator propagation by source scan.
-- **W6.5 root-cause verdict (required deliverable — owner report 2, "it just disappeared"):**
-  TWO independent mechanisms confirmed; both made impossible:
-  - **Display-only half:** `medicationEntries` is a computed read with no
-    observable storage of its own, and the shipped leaf had no dedicated
-    redraw signal — a saved entry could fail to draw until unrelated
-    `@Published` churn while it was on disk. Now: the revision counter (bumped
-    only by committed medication writes) is read in the list body path.
-  - **Real-loss half:** the old `loadSchedule` tail discarded the
-    `medication.entries` write (`_ = storage.write(...)`) while adopting the
-    entries in memory regardless; all four coordinator save paths funnelled
-    through it, so a failed write read as "saved" and was gone after
-    relaunch/process death. Now: write-first-or-fail with the shipped
-    `entry_persistence_failed` event, caller-visible failure, and nothing
-    armed behind an unpersisted schedule.
-  - On-device confirmation of the round trip (save → row → kill → relaunch →
-    row + re-armed) rides DV-1..DV-7 at final-sign-off.
-- **W6.6 (scoped pass at wave close — amendment 7; NOT under the strip directive; T-024, scanner frequency→slot grouping):**
-  Delivered as an isolated-worktree patch
-  (`/tmp/msr-scanner-frequency.patch`, 34,978 B; source commit `79c915d0…`
-  on a scratch branch, base master `85349303`) and applied with `git am` in
-  the feature worktree → commit `58071bd4` (5 files, +432/−25). Provenance
-  verified before and after the apply: all ten pre/post-image blob prefixes
-  in the patch's index lines matched the worktree; the commit message
-  carries the as-delivered evidence (65 tests, 0 failures — xcresult bundle
-  `…22-56-23`) and the `Co-Authored-By: Claude Code` trailer. An
-  as-delivered in-worktree pass also ran green (65/65, bundle `…23-00-41`).
-  SEC-002 (see deviations): five new 40-character test method names from
-  the patch were renamed identifier-only in the W6.6 close commit; the
-  exactly-40 maximal-run scan over all five final files is 0.
-- **W6.6 owner rule delta (coordinator relay, 2026-10-15 — folded in before the recorded pass):**
-  when the scanned label states NO before/after-meal context, the
-  label-derived schedule rows default to AFTER FOOD for EVERY row-producing
-  shape (frequency rows already carried it; time-word, day-pattern and
-  digit-count rows now do too). A relation the label states explicitly
-  ("before breakfast", "खानु अघि") always wins; a label mentioning BOTH
-  ("before breakfast, after dinner") states none — nothing is defaulted
-  over an explicit mention. Fill-blank-only semantics stay: manual entry
-  keeps the family's explicit choice (the editor shows the chosen value);
-  the default is for label-derived rows only. Implementation:
-  `MedicationLabelParser.rowMealRelation(in:)` + ne+en phrase lists, matched
-  on the whitespace-collapsed text; the draft's fill logic is unchanged.
-- **W6.6 design notes (as handed over; behavior pinned by the recorded pass):**
-  (1) the old count table's count-1 row (which guessed 08:00 morning for
-  "1 time a day") is REMOVED — refuse-to-guess; "1 time a day" falls
-  through to the once-daily phrases (frequency, no times). (2) "2 times a
-  day" (digit form) keeps the shipped count-table result [8:00, 20:00] —
-  pinned; under the owner delta its rows also carry the after-food default
-  like every shape. (3) Meal relation fills BLANK rows only. (4) The
-  abbreviation matchers are token-safe ("od" inside "food" cannot fire).
-  (5) Nepali phrase variants included. (6) Whitespace-collapsed matching
-  handles OCR line splits.
-- **W6.6 unit outcomes:** parser: 5 new pins (time-word / day-pattern /
-  digit-count rows default after food; explicit before-food kept; mixed
-  mentions state nothing) and 3 earlier nil pins flipped to the default
-  (the "mixed signals" test); draft: 2 new pins through the real parser
-  (time-word default; explicit before-food lands in the blank relation) and
-  1 earlier no-relation test rewritten to the default. No-rows shapes
-  (once-daily, weekly, refused phrases, no-schedule reads) keep nil — the
-  default reaches rows only.
-- **W6.6 recorded scoped pass (on the final close-commit bytes):** 3 classes
-  — `MedicationLabelOCRTests` 37, `ScannedScheduleTests` 5,
-  `MedicationEditorDraftTests` 30 — **72/72, 0 failures, TEST SUCCEEDED**
-  (xcresult `…23-09-06`, result Passed, iPhone 17 Pro simulator iOS 26.5;
-  "Scoped unit run passed (baseline not advanced)"). Guard preflights green
-  (release-log-safety self-tests + prompt-mirror drift classes). Final file
-  hashes (shortened): `MedicationEditorDraft.swift` `e47ef130…`,
-  `MedicationLabelOCR.swift` `6a3b097e…`, `MedicationEditorDraftTests.swift`
-  `14836550…`, `MedicationLabelOCRTests.swift` `5ed20863…`,
-  `ScannedScheduleTests.swift` `5a789f99…` (ScannedSchedule tests file
-  content unchanged from the am commit; still hashed at close).
-- **Carry-forward baseline note (for the W7 full-suite comparison):** the
-  Spotify localization suite's absolute key-count pin is red at the branch
-  base (pin 1,381 vs catalog 1,439 pre-W0) and is untouched by this feature —
-  it belongs to the documented pre-existing baseline, not to this feature's
-  regressions.
-- **Hygiene note:** two pre-existing camelCase test method names in touched
-  suites (challenge + scheduler) are exactly 40 alphanumeric characters and
-  trip the release scanner's hash-like-token pattern. They predate this feature
-  and stay untouched (renaming shipped tests is out of scope); they are kept
-  out of artifact content for the same reason. The W4 pre-flight scan over the
-  four touched files is clean; the single boundary-anchored hit in the
-  scheduler suite is that pre-existing name (present at HEAD before W4; its
-  line simply shifted as T-016's 9 tests were appended). T-018's
-  spec-mandated surface test name is 42 characters — boundary-broken, it does
-  not match the exactly-40 pattern; the name stays as spec-mandated.
+## T-169 — NepaliGrammarGuard core — DONE
 
-- **W7 (T-022 — the tail's single full-suite gate; owner-confirmed option 1:
-  full suite, no narrowing, no skip; warm test DerivedData, no test-clean;
-  parallel testing per build.sh default):**
-  - Command (raw mirror of `build.sh` full mode; project xcodegen-regenerated
-    first, release-log-safety + prompt-mirror guards green):
-    `xcodebuild test -project seniOS.xcodeproj -scheme ElderlyAssistant
-    -destination "platform=iOS Simulator,id=B88FE9D2-…"
-    -derivedDataPath build/DerivedDataTests -parallel-testing-enabled YES
-    -test-timeouts-enabled YES -default-test-execution-time-allowance 2400`.
-    The timeouts were added after two earlier attempts wedged 25+ minutes in
-    `ASWebSpotifyAuthSessionTests` (the 2026-10-14 iOS-27 browser-fallback
-    workaround races the old throw-pin; it PASSED under the guard) — the guard
-    converts hangs into recorded timeout failures and skips nothing.
-  - **Authoritative result: 7,746 tests / 7,708 passed / 28 failed / 10
-    skipped** — xcresult `Test-ElderlyAssistant-2026.10.16_03-29-06-+1100.xcresult`,
-    result "Failed".
-  - **All 24 medication suites green** (CommandRouterMedicationWalk,
-    LogSanitiser, MedicationAckClarification, MedicationAckResolver,
-    MedicationEditorDraft, MedicationEditorSurface, MedicationEntryMigration,
-    MedicationEntryVisualAid, MedicationEvidenceCapture, MedicationEvidenceStore,
-    MedicationLLMIndependence, MedicationLabelOCR, MedicationLabelScanner,
-    MedicationManageList, MedicationPurposeLookup, MedicationPurpose,
-    MedicationSavePlumbing, MedicationScheduler, MedicationSchedulesIntegration,
-    MedicationSlotClockSettings, MedicationSlotClock, MedicationVisualAidFireHandler,
-    MedicationVisualAidPresentation, ScannedSchedule).
-  - **Every one of the 28 failures classified non-feature:**
-    - **[Documented pre-existing baseline] 4:** InterpreterAvailabilityTests
-      ×2 + MultipartDownloadTests ×1 (both suites in the documented 11-suite
-      baseline, same assertions/same model-name drift), SpotifyLocalizationTests
-      ×1 (carry-forward pin: 1,482 vs 1,381 — red at the branch base, untouched
-      by this feature).
-    - **[Pre-existing mainline red — byte-identical to master] 19:**
-      SpotifyAccountSessionTests ×2 (the 2026-10-14 iOS-27 workaround drift:
-      `presentationFailed(7)` vs `presentationFailed`; test + both session
-      files verified identical to master); LiveTranslateAllowListTests ×1 (the
-      `added`-set difference is exactly the three [CORRECTION-REVIVE] keys —
-      `LogSanitiser.swift`'s whole delta vs master is this feature's three
-      additive keys, verified present on BOTH sides of the pin; red on master
-      identically); FamilyWizardPhotoSaveTests ×2 (every pinned marker
-      re-verified absent on both sides: `nicknameRow(_ entry: NicknameDraftEntry)`
-      at SettingsView :3502 in both, `nicknames: nicknames,` 0 occurrences in
-      both, the test file itself byte-identical); DialogueCacheBypassTests ×1
-      (the interception span is byte-equal on both sides and both contain
-      `pendingTranscript` — the only CommandRouter delta vs master is the
-      unrelated 2026-10-15 Spotify search-handoff fix); CloudChatResponderTests
-      ×1 (test file + `CloudChatResponder.swift` + `GeminiClient+Translate.swift`
-      byte-identical); LiveTranslateSessionModelTests ×5 (the :193
-      delivered-frame timeout mode), LiveTranslateEmptyOverlayTests ×1,
-      LiveTranslatePluginTests ×1, LiveTranslationPipelineTests ×1 — all four
-      files (and the whole `Services/LiveTranslate` tree they exercise)
-      byte-identical to master.
-    - **[Gate-3 parallel-clone/load artifacts — green in the serial re-run] 4:**
-      FrameAnchorEstimatorTests, LiveCameraCaptureGuaranteeTests,
-      QueryEndToEndRegressionTests, PointAskAutoAnalyzeOnAnchorTests.
-    - **[UI] 5 (ElderlyAssistantUITests) — pre-existing at the branch base
-      (state-sensitive), not feature-caused:** testHomeShowsNepaliTalkButton
-      (:188 "Idle status should be Nepali"), testHomeSpeechLayoutInDarkSkin
-      (:268), testTalkButtonStartsListening, and
-      testTalkButtonReturnsToIdleAfterListening (:389) fail byte-identically
-      on the BASE worktree at the branch point (private sim, serial scoped:
-      /tmp/msr-base-run.log, bundle Test-ElderlyAssistant-2026.10.16_04-26-50-+1100.xcresult).
-      The fifth — testHomeKeepsConfiguredAppsAndActionRowsVisible (the same
-      :268 assertion) — PASSED on the first base run (voice-unavailable state:
-      error caption "आवाज अहिले उपलब्ध छैन।" + retry button fill the sub-hero
-      slot above the carousel, holding home.hint.prompt clear of the 24pt
-      floor; passing-state screenshot 7204F641-0A58-40C3-A80A-C649D0102817.png)
-      then FAILED on the base re-run with the identical 6.999999999999943
-      (bundle Test-ElderlyAssistant-2026.10.16_04-55-19-+1100.xcresult under
-      /tmp/msr-base-check, log /tmp/msr-base-sky-rerun.log) — both outcomes on
-      identical base code. Failing geometry (branch hierarchy dump
-      48D62987-0E84-4C1D-91BE-64FC83D443A3.txt): healthy idle, no status
-      caption — home.talk a11y frame maxY 455.0, home.hint.prompt minY 462.0 →
-      7.0 < 24; the hero↔slot gap is a constant 16pt and the talk a11y frame
-      overhangs its layout frame, so the assertion can only pass while the
-      caption/retry chain occupies the slot (a voice-pipeline-boot state,
-      environmental). The branch changes no home-stage file (HomeView/
-      HomeSubviews/HomePresentationState: zero commits after the branch
-      point; the feature's App/ surface is the medication leaves + Settings/
-      Coordinator wiring). Master's not-on-branch medium-display series
-      (e3d624db…8c81de02) independently reworks this geometry; post-merge UI
-      behavior re-verifies there.
-  - **Serial classification pass (diagnostic instrument):** `build.sh
-    test:unit <the 16 suspect classes>` (serial, private sim, warm DD):
-    374 executed / 18 failed test cases / 1 skipped. The four artifacts above
-    green serially; LiveTranslateSessionModelTests re-failed with a DIFFERENT
-    case set (4 of 46 vs 5 of 46 in the gate) — unstable on identical code,
-    pre-existing; everything else failed identically in both runs
-    (deterministic, same messages).
-  - **Claim-audit:** no failure in any run traces to a W0–W7 file; every
-    family carries byte-identity-to-master, base-run, or documented-baseline
-    evidence; the feature's suites (24 medication + the two new W7 suites)
-    passed in every run.
+Wave 1. New `NepaliGrammarGuard.swift`: the pure, total, synchronous guard — `GrammarCheckClass {honorificAgreement, devanagariPurity, danglingParticle}` with raw values 1:1 with the spec's `guard_checks` ids (T-171's safe-template keys are 1:1 with the same names); `GrammarGuardVerdict {pass, flag(classes:), unavailable(reason:)}` is a classification only and carries no text. Compiled tables decoded from four spec machine blocks embedded byte-verbatim (`register`, `particles`, `code_switch`, `guard_checks`) behind `// @style-spec-block:` markers with `@style-spec-section:` rule citations; `style_spec --check-consumers` clean on the file. Checks: honorific = the curated banned-form sets exactly as the eval executes them (no pair-existence condition; the pair table is decoded, structure-validated and pinned as a data property); purity = mixed-script tokens plus Latin runs outside the spec's allowlist; particles = longest-match occurrences over the spec lexicon, spec budget, plus the positional dangling rule (a reply's first token, or one preceded only by a sentence terminator, is dangling; commas and spaces attach). Audit of the interrupted draft: fixed a compile break (`nouns.map(\.english)` over a `[String:String]`) and a real false-pass (the multi-word unit matched across a sentence terminator — `हुन्छ। नि, ठीक छ।` returned pass; reproduced with the draft algorithm first, then closed by requiring the unit contiguous inside one clause and judging the later clitic on its own position); added 7 DoD pins (positional rule, substring non-occurrence on नियम/अनिवार्य/निद्रा, grapheme tokenization, allowlist-as-data, no-rewrite declaration scan, byte-for-byte block/citation pins, reproducible-from-spec-bytes). Tests: NepaliGrammarGuardTests 37/37 (exit 0). `unavailable` carries a closed 4-member reason set (lexicon-load failure plus the input classes romanized / letterless / non-Nepali locale); never a pass; T-174 maps it to the degraded event. Coordinator re-verification at the wave gate (independent of the unit suite): the current guard recompiled and run over the final 500-turn golden fixture → 500 pass / 0 flag / 0 unavailable. No call site in this unit (T-174 wires it).
+
+## T-171 — Localisation: consent, disclosure, indicator, revocation, safe-template copy — DONE
+
+Wave 1. `Localizable.xcstrings`: the 18-key cloud-chat family in en+ne (every entry manual/translated, Nepali Devanagari-only, en≠ne), inserted at the house alphabetical positions as two contiguous blocks; catalogue 1,421 → 1,439 keys. Key-name contract frozen for T-174/T-176/T-177: consent title/body/allow/notNow; `cloud.chat.indicator` + `indicatorSpoken`; revoke title/body/done; `state.spoken.on/off`; `settings.cloudChat.title/toggleLabel/toggleNote`; and the four `chat.safeTemplate.*` keys (generic + one per guard class). `L10n.swift`: `L10n.SafeTemplate` enum raw values 1:1 with T-169's class names; deterministic `safeTemplate(forCheckClasses:)` (first known class wins; an unknown name drops to generic and is never echoed into a key) and a locale resolver (total miss → "", the shipped nothing-to-say contract). `L10nCatalogCoverageTests`: 13 T-171 tests (suite 39/39, exit 0): both-language resolution through `L10n.str`, verbatim copy pins, the zero-slot contract, bounded/enumerable template set, the register bar (sentence/character caps, ai-ism and apology bars, banned familiar forms and non-honorific verbs, `हजुर` in every template; four offence fixtures prove the check bites), the spec-mirror test reading T-166's seed blocks (mirror may be a superset, never a subset; the template cap IS the spec's `max_sentences`), no-internals term bans in both languages, failure fixtures naming the missing key and the language, the hardcoded-copy sweep (now covering T-174's `CommandRouter.swift`), alphabetical/contiguous span pins; rebased the two stale shared count pins (calling 1,416→1,434, family-contacts 1,398→1,416; the dialogue pin had already been rebased 1,402→1,420 — all four now sum to 1,439 with their family sizes). Draft audit: fixed a Nepali register slip in the consent disclosure (honorific agreement when the elder is the subject of refusing) and non-idiomatic English in the Settings note; converted the register-mirror provenance comment into a spec-reading test. Deviations recorded: `chat.cloudFallback.notice` (design §17, optional) deliberately omitted — §8.8 gives no user-visible error where a reply is expected; the templates' softener "न" is recorded for T-176's copy review (it is not one of the spec's six particle units, so the guard's lexicon never counts it); `SpotifyLocalizationTests` pins the global total at 1,381, already stale at HEAD before this unit (pre-existing red, recorded, untouched).
+
+## T-178 — Held-out chat evaluation set — DONE
+
+Wave 1. `tools/train-intent/eval/chat_golden.jsonl`: 500 turns / 50 batches, fixture revision 83283663, sha256 `83283663…fcb1519` (full value in `specs/T-178-notes.md`; the version record T-179/T-181 gate results must cite); 500 unique dedupe keys; coverage classes 40/40/40/50/50/40/40/50/50/50/50; hard cases short_turn 90 + code_switched_input 50 + reminiscence_prompt 50; 24 context entries across 20 turns; synthetic content only; every batch teacher-authored (`gemini-2.5-flash-lite` via openrouter, recorded per batch). `author_chat_golden.py`: plan derived from the spec (never a local copy), teacher loop, the mechanical review now executing the POSITIONAL particle rule aligned with T-169's guard (token-gap tokenization, longest-match, multi-word units contiguous-in-clause, dangling = first token or after only a terminator; the violation class is named `dangling_particle`), `record_review`, `correct_output` / `--correct-turn --new-output --correction-reason` with loader-validated `provenance.revisions`, the offline CLI, `held_out_keys()` and `require_gate_fixture()`. Coordinator course-correction from the T-169 cross-probe: the 4 reference replies that opened with a dangling clitic (`cg-b026-06`, `cg-b034-02`, `cg-b034-09`, `cg-b035-10`) were reworded through the recorded correction path — old text preserved in `provenance.revisions`, all four still `human: pending`, a pre-review authoring correction and not a review override. Pins: the 16 guard particle vectors cross-checked between the eval check and `NepaliGrammarGuardTests`, a whole-fixture pin that every reference reply passes the positional rule, and a reconstruction test proving all 50 recorded `teacher_output_sha256` values recompute after undoing exactly the documented mutations (review dispositions + the 4 revisions) — i.e. the revisions are the only divergence from teacher output. Tests: test_chat_golden 70/70 + test_style_spec 42/42 (exit 0); `--check` exit 0, `reference_outputs_clean=yes`, only the 50 human-pending findings. Coordinator re-verification at the wave gate: the real Swift guard over the final fixture → 500/500 pass; fixture sha256 matches the report. Deviations: b001 and b004 were re-authored via `--force-batch` to clear assistant-side mechanical flags (a 3-sentence reply; an over_politeness_stacking hit; pre-repair backup kept outside the repo); pre-alignment batches record the old check name `particle_budget` vs new `dangling_particle` (same spec check; history not rewritten); residual mechanical findings in elder `user_turn` texts are the elder's idiolect and do not gate eligibility. OPEN OWNER GATE: all 50 batches' human review is `pending` — the set is deliberately NOT yet an eligible gate fixture (`require_gate_fixture()` refuses it); the owner review pass is required before the T-182 harness gate run and is carried in the final report.
+
+## T-170 — Prompt mirror discipline: chat template seed, persona clauses, guard lexicons — DONE
+
+Wave 2. The T-094 intent-prompt checker grown into the seven-check mirror gate (`ios/tools/check-prompt-mirror.py`, +960/−93; the shell gate's two invocations and its `run_tests` wiring unchanged). Checks: the pinned intent prompt + seed byte-identical (T-094 semantics preserved verbatim) AND its recorded pin reproduced — the seed re-rendered through the training suite's own `intent_prompt.render_prompt` must reproduce `IntentPromptTests`' two digest constants (`18003ddd…24b8b78`, `bd47910d…16e00ff`); the new chat seed `tools/train-intent/seeds/chat_prompt_template.txt` (725 bytes, sha256 `abacefc6…34a8721`, generated by the one `--regen-chat-seed` path) ↔ `IntentPrompt.buildChat` (exactly three interpolations); both personas (`LlamaCommandInterpreter.chatPersonaSystemPrompt`, `GeminiCommandInterpreter.replyPersona`) embed the spec `persona_clause` byte-for-byte inside a transport wrapper; the guard's four `// @style-spec-block` regions byte-equal the spec's fence bodies, cross-checked through the spec's own loader; chat token-budget print (worst-case template ≈255 + persona ≈200 = ≈455 of the 512-token prompt side; margin ≈57 — T-186's reading point). Self-test grew 6→20 drift classes over temp-tree mutations; new `tools/train-intent/tests/test_prompt_mirror_chat.py` (64 tests, 10 classes). Deviations: the budget check is a documented conservative estimator (2 chars/Devanagari token, 3 chars/other; it over-counts the recorded 696/677-token reference measurement, so the margin is a lower bound — the exact-tokenizer legs are T-167's Character ceiling and T-186's sweep); the design's `chatSystemPrompt` label vs the shipped `chatPersonaSystemPrompt` name recorded; `--quiet` made consistent. Wave-close rework: first execution 63/64 — the duplicated-chat-interpolation test mutated `build()`'s twin line (@123) instead of `buildChat`'s (@207); probes proved the checker contract sound (no checker gap) and exposed a masked self-test gap (the chat-leg duplication rule had no class of its own); fixed region-scoped via a new `literal_line_range` helper + a new `chat-interpolation-duplicated` drift class; module 65/65. No assertion weakened; the intent prompt, its seed and its pin untouched.
+
+## T-174 — Guard flag resolution at the dispatch seam — DONE
+
+Wave 2. `CommandRouter.swift` +376/−21 (8 hunks). Injected `ChatGuardSeam` (`servingPath` default `.onDevice`, `cloudAllowed` default false, `respondToChat` default nil — the definitional defaults keep every pre-existing construction site byte-identical); the guard runs over the polished candidate at THE single polish call site (`deliverModelReply` refactored to delegate to `polishedModelReply` so the chat path computes its candidate without a second polish site); the `.chat` case delivers through `deliverGuardedChatReply` (sanity gate → polish → guard verdict → speak). Paths: `.pass` speaks byte-identically (event `notApplicable`); `.flag` never speaks the flagged text — escalates ONCE iff the reply is local-shaped AND `cloudAllowed()` AND a lane is wired (same-turn transcript; reply-pending hold armed before the hop; the hop's completion re-verifies through the same guard: pass → speak the cloud reply `escalated`, re-flag → safe template keyed by the escalated reply's classes, `unavailable` → speak + `degraded`, nil / non-`.chat` / sanity-rejected → template with the original classes; a once-guard drops a second completion); a flagged cloud reply or no lane → safe template only (design §7.3 asymmetry); `.unavailable` → today's behaviour + `degraded` (never reported as verified); the turn is always answered (the hop's completion resolves the hold and ends the turn). Templates resolve only through T-171's `L10n.SafeTemplate` API (pinned by source scan — no copy in code). Frozen event `reply_grammar_flag` (component `command_router`; outcome notApplicable|escalated|safeTemplate|degraded; metadata `origin`/`reason`/`count` — the design's `path` key maps to `origin`, recorded deviation). Tests authored: `ReplyGrammarFlagResolutionTests` 21 (class green in the consolidated pass). Open: T-177 fills the seam (for a lane-served cloud reply `servingPath` must report `.cloud`, or the guard would treat a cloud reply as local); T-185 adds the file to the release-log gate roots.
+
+## T-175 — Router chat lane: cloud-first decision, egress-disabled local floor, same-turn fallback — DONE
+
+Wave 2. `IntentRouter.swift` +299/−2. `[CLOUD-CHAT-LANE]` branch after cache/preparse and before the cloud-first selector, with an unconditional `return` — a chat turn can never fall into the selector or the legacy ladder's `canEscalate` computation. ONE `CloudChatRouting.decide(cloudChatLane.routingInputs)` read per turn, nothing cached (a consent change between turns is visible to the next turn's decision). `.cloud` → `interpretCloudChat`: responder unwired → fallback `notConfigured`; one attempt; main-queue hop with the once-claim taken on that queue (a contract-violating second completion is dropped); the reply is accepted only as an `action == .chat` command (a slot-bearing answer off a chat prompt is a misbehaving responder and is never delivered); success → additive `cloud_chat_served` event. Failure → `cloud_chat_fallback` (component `intent_router`, metadata `["reason": <token>]` — the reason string IS the whole payload) + same-turn on-device answer. `.local(reason)` → fallback event + on-device answer; the responder is never called (no retry, no check). `answerChatOnDevice` runs `interpretLocalLadder(canEscalate: false, chatEgressDisabled: true)` — closing BOTH ladder cloud doors for chat: the cascade tier (@560) and the `[LAT-EVIDENCE]` failure re-check (@592, the door that does not ride `canEscalate`). `chatEgressDisabled` defaults `false`, so both pre-lane call sites are byte-identical (reference test). `CloudChatLaneSeam` @987–1015 carries the T-177 wiring recipe. Tests authored: `IntentRouterCloudChatLaneTests` 32 — including a 13-cell byte-identity reference vs the pre-lane routing structure, integration through the real `CommandRouter`, both-doors controls and closures, and structural source pins. Deviations: `cloud_chat_served` is additive (the design names the fallback; the positive counterpart enables aggregate counting — a one-line rename if the owner prefers); the lane deliberately ignores `cloudEnabled`/`cloudFirstEnabled` (the routing decision is the single chat-egress chokepoint); the fallback reason vocabulary is closed at 11 tokens (6 producible `LocalReason` + 5 `GeminiFailureClass` raw values). Wave-close rework: the vocabulary test asserted a self-contradictory pair (line 445 forbids `consentRevoked` in the sweep; line 447 expected it in `seen`) — T-173's pinned contract (`decide` never produces it; `.denied` covers decline and withdrawal) is correct, so the expected set was fixed to `declared.subtracting(["consentRevoked"]).union(["cloud"])`; no production change; class 32/32.
+
+## T-176 — Consent prompt and plain-language disclosure at first cloud chat need — DONE
+
+Wave 2. `CloudChatConsentPrompt.swift` (302) + `Views/CloudChatConsentSheet.swift` (160). The ONE entry `consentNeedDetected(answerPendingTurnLocally:)` reads `gate.currentDecision()` fresh: `.granted` → `.cloudAllowed` (local seam NOT run — serving the turn twice would be the bug); `.notRecorded` → `.awaitingDecision` (local answer run once + the question shown + the spoken capture offered once); `.denied` → `.localOnly(.denied)` (closed, never re-shown this session); `.unreadable` → `.localOnly(.unreadable)` (never shown — fail closed; a broken record is not a question for the elder). `isPromptPresented` keeps repeated turns answering their own turns; `updateLocale` / `reofferSpokenAnswer` (a no-op when no question is live) / `refreshAfterDecisionChange`; the answers `grant()`/`decline()`/`submitSpokenAnswer` reach `gate.record(granted:)` exactly once and return `recorded | writeFailed | questionNotLive`; a spoken yes/no outside the live question writes nothing (a late voice "yes" cannot flip a recorded "no"). Sheet: exactly two actions (kind/title + derived accessibilityIdentifier), four catalogue keys resolved per locale, `.interactiveDismissDisabled(true)`. Tests authored: `CloudChatConsentPromptTests` 24 (class green in the consolidated pass). Deviations/proposals recorded: no observability events of its own (T-172's frozen catalogue is the schema; presentation is verified through `isPromptPresented` + seam spies, not invented telemetry); NO failure line in the sheet — a `cloud.chat.consent.failed` key + a `failureMessage` slot are PROPOSED for T-171's file if the owner wants the elder told on-screen (failure is otherwise honestly surfaced: `writeFailed` to the wiring, the gate's `consent_write_failed` event, and a failed grant leaving the question up); the disclosure-stamp `draft.` proposal (T-172's gate file, not applied) and the templates' "न" softener are recorded for the owner copy review. The T-172 gate suite's concurrency assertion flake (lines 373/377 vs 422/428) recorded for T-172's owner.
+
+## T-179 — Four-layer chat corpus pipeline with spec-driven filters and teacher GEC — DONE
+
+Wave 2. `tools/train-intent/src/build_chat_corpus.py` (2,294) + `tests/test_build_chat_corpus.py` (2,005; 126 cases). `SOURCE_REGISTRY` 18 entries (L1 5, L2 7, L3 1 generated, L4 5) driving the four layer stages, every layer reporting candidates/admitted/selected/target/target_rationale; mixture 70/30 conversation–claw-back (`CONVERSATION_SHARE` 0.70) with BOTH target and achieved recorded (the target is never changed at run time; an under-delivering layer is a named shortfall). Filters ARE the spec's machine checks — `author_chat_golden.mechanical_review`, one rule / one source, the same function the held-out fixture is authored under — plus the pipeline length rule (floor 2 word tokens, ceiling ~512 tokens), every rejection counted by the spec's own rule name; a drift test asserts no spec lexicon entry appears literally in the builder's source. `GecStage` runs over ALL kept candidates before admission: content-hash cache, temperature 0.0, call budget with `budget_exhausted`, resumable from `gec-cache.jsonl` at 0 calls; a turn with no result is HELD (`gec_missing`), never admitted; an unavailable transport is recorded, never fabricated. `HeldOutGuard` loads the 500 held-out keys VERBATIM + the normalize-skeleton sets of the golden corpus & emergency near-miss + a token-Jaccard near-duplicate pool (0.80 @ ≥4 tokens), checking the user turn AND the reply; it STOPS the run (exit 3) if the chat set or the golden corpus cannot load — nothing is admitted unguarded. Admission deliberately does not gate on `require_gate_fixture()` (human review pending): the keys protect either way and `eligible_gate_fixture: false` + a NOTE ride every run. STT-noise stage over claw-back (rate 0.60; backends none|recorded|hf|cli|auto; the `recorded` backend applies only exact clean→noisy pairs, as NEW turns with a `:noise` suffix and the carried GEC record; no-op round trips are not added). Deterministic outputs + offline CLI. Deviation recorded: the builder refuses any claw-back from the eval/held-out fixtures (recorded in counters/deviations, not silently worked around). The 13 absent source files and the real teacher/translation/piper round-trip are T-183 training-box items. Consolidated pass: module green in the 358-test Python pass (126/126 at unit time).
+
+## T-181 — Chat gate harness: honorific rate, AI-ism rate and the recorded judge — DONE
+
+Wave 2. `tools/train-intent/src/eval_chat_gates.py` (1,318; sha256 `e7ac148f…f4ac905`) + `tests/test_eval_chat_gates.py` (1,112; 55 cases). `thresholds_from_spec()` reads the spec's `rubric` block — honorific ≥0.98, AI-isms ≥0.98, judge mean ≥4.0 (`>=` semantics); a missing/non-numeric threshold is a refusal, never a default. The deterministic gates delegate per reply to `author_chat_golden`'s review functions (the same execution site as the fixture's own mechanical review; data-not-code tests mutate a spec copy and the gates move with it); the particle criterion ships `measure: count, threshold: null` — reported, never gated. Judge: temperature 0.0; transports `gemini` (lazy client, `response_mime_type: application/json`) and `fixture` (offline replay whose scores-file sha256 is part of the judge identity); every result records model / transport / temperature / prompt-builder + template + sha256 / rubric + sha256 / judge fingerprint / call + reuse counts; the parser is strict (a malformed response is a failed call, never a coerced score); a failed call leaves the gate `not_measured` and no partial mean is ever the gate value; the error limit + `aborted_early` / `unattempted_turns` are recorded; a measured result carries the mean WITH its spread (per-criterion means, per-turn mean min/max/stdev, a 2-decimal histogram — a 4.0 hiding a 2.0 is visible, pinned). One JSON result block (+ JSONL row): fixture identity (revision `83283663…fcb1519`), denominators, eligible; candidate artifact path + sha256; style-spec evidence; thresholds; the judge block; each gate's value/threshold/denominator/offenders (cap 20) + a `provenance` sub-block — the identity T-182 consumes; `swap.eligible` always false, naming the standing hard gates. Consolidated pass: module green in the 358-test Python pass (55/55 at unit time). Until the 50 human reviews land, the shipped fixture is (correctly) ineligible and the harness refuses it; the first real (billed) judge run is a T-182/T-183 step, resumable via the journal.
+
+## T-180 — Provenance manifest and ship-mix enforcement — DONE
+
+Wave 3. `tools/train-intent/src/build_chat_corpus.py` (3,192) + `tests/test_provenance_manifest.py` (1,214; 52 cases / 9 classes). Licence registry (18 sources + 5 tooling inputs) with a recorded `license_family`; the manifest is emitted BY THE BUILDER itself into the run directory (`build/<run-id>/provenance-manifest.json`; the dev mix writes `provenance-manifest.dev.json` so a dev build can never overwrite the ship compliance artifact; `--manifest-out` overrides) — after `assert_provenance`, before the counters, so the counters carry its `content_hash`: sha256 over canonical JSON minus the hash fields, byte-identical across re-emissions, the pairing value T-182 records beside the gate evidence. No user content by pinned construction: closed key sets (20 body / 18 source-entry / 14 tooling-entry), no fixture or corpus text, no Devanagari codepoint anywhere. Three checks, all CODE inside the build, all preflight-before-any-spend: (a) classification — an empty/unknown admissibility or a missing licence fails the build naming source and field, nothing defaulted (the recorded `unclassified` classification is distinct and clearly defined: refused from both mixes, counted); (b) consent (FR-CNR-029) — a real-transcript source without its consent record is REFUSED from both mixes with the reason (source-level refusal + preflight record `mix: none` + a bypass backstop that fails any build where such a source contributed turns; the P2 consent leg is T-191); (c) the ship-mix licence rule — only CC-BY/Apache-2.0/MIT/synthetic/own data, with the never-admissible pin (IndicDialogue, DailyDialog, PersonaChat, EmpatheticDialogues, research-gated call-center transcripts) verified against the CURRENT registry every run, so promoting or removing a named source is itself a violation. A violation returns `EXIT_PROVENANCE` = 5 (deliberately outside the guards 0–4 vocabulary), writes NO corpus and NO manifest, and leaves the counters recording `stopped` / `verdict: fail` / `ship_mix_eligible: false` + the named violations. Run-level `ship_mix_eligible` is the AND of every check (an unclassified failure can no longer record eligible: true); the direct-build preflight record itself carries `ship_mix_eligible: False` (same as the CLI path). Manifest completeness pinned: the held-out chat set and both eval fixtures recorded EXCLUDED (`mix: none`, no derived artifacts), the exact per-source counts {candidates, admitted, selected}, derived artifacts exact (a layer file iff admitted > 0, the corpus iff selected > 0, refused/excluded sources derive nothing), tooling inputs always classified (`not_exercised` + reason, never omitted). Wave-close rework (recorded narrow exception — single-module runs; the 6-module consolidated pass had found 5 reds, all in the new module): 2 test-side key-path defects (flat `admitted` read where the manifest nests `counts.admitted`; flat `reply` where corpus rows nest `assistant.reply`), 2 implementation defects (the preflight failure record did not carry `ship_mix_eligible` itself — only the CLI path stamped it; the `--plan` provenance line printed the literal `{EXIT_PROVENANCE}` — now an f-string printing `exit 5`), and 1 semantics correction (a pending L2 batch is layer-admitted but mixture-excluded per T-179's hold — `RealCountsTests` now asserts the split where it lives: layer file yes, `selected == 0`, no corpus row, `held.pending_spot_check ≥ 1`; production hold semantics untouched). Re-run after rework: the 6-module consolidated Python pass, 410 tests, OK. Deviations recorded in the unit notes: `EXIT_PROVENANCE = 5` (new vocabulary), refused/excluded entries record `mix: none` (agrees with `consent_refusals()`), dev manifest mix-qualified, the ship-rule witness over executed counts is the L1 CC BY-NC layer (L2 batches held pending spot-check), plan-text documents the rule from a real subprocess. Open (recorded): T-182 records `provenance.content_hash` beside its gate evidence; T-183 supplies the 13 absent source files and the real transports; T-191 supplies the consent record id; the manifest is a run artifact (`build/` is gitignored) — if release wants it archived, the publish step copies it beside the corpus it describes.
+
+## T-177 — Indicator, revocation surfaces and coordinator wiring — DONE
+
+Wave 3. `Services/Intents/CloudChat/CloudChatActivityIndicator.swift` (new, 245) + `AppCoordinator.swift` (+608/−3, 10 hunks) + `HomeSubviews.swift` (+8) + `SettingsView.swift` (+37) + `Services/Voice/KeywordIntentRule.swift` (+142) + tests `CloudChatIndicatorAndRevocationTests.swift` (new, 972; 25 cases) + `KeywordIntentRuleTests.swift` (+177; 9 new, file 63). The badge is structural, not a rendering guess: ONE open site (the wrapped responder's attempt-begin hook, so the window can only exist when a cloud call is actually issued — a local-only turn cannot light it) and three close funnels (speech end with the attempt settled; any decision change, revocation included; the next chat-turn decide); an unpaired end is ignored so a stray funnel cannot close a window it never opened; the surface renders only when window AND `cloudChatEnabled` (a revoked device shows nothing); zero-format-slot catalogue label, no content. One spoken notice per app session at the first cloud attempt, key `cloud.chat.indicatorSpoken` (T-171; the elder's language), committed before the network call is awaited (the `speakPreAck` discipline — it rides the wait, never delays the reply; a mid-notice answer takes the speaker by the shipped cancel discipline). Wiring (lane seam T-175 / guard seam T-174): every routing input READ PER TURN, never cached — `cloudChatConsentInput()` re-reads `currentDecision()`, `online`/`keyConfigured`/`costAllows` read live sources, and the guard's `cloudAllowed` re-runs the SAME lane decision (one chokepoint: consent cannot be bypassed at the escalation door); ONE wrapped responder shared by the lane's cloud leg and the guard's escalation, so every cloud attempt drives the same window and notice. The consent question fires only inside the consent closure when the decision is `.notRecorded` — never at launch, never in Settings, never speculatively; its spoken capture rides the shipped 45 s confirmation window; an answer outside a live question writes nothing and says nothing (T-176 `.questionNotLive`); an accepted answer speaks the state line read AFTER the write (truthful state, never the requested one); a lapsed capture re-offers, never expires; a failed grant keeps the question up and re-offers (branch pinned at T-176's prompt layer; honest note: this unit's coordinator-side re-offer branch is not directly exercised by its tests — the injected storage is healthy). Revocation, three surfaces, ONE writer: Settings toggle (ON = explicit grant / OFF = `revoke()`, silent like every Settings control, read-back is the gate's current decision on every render — no stale mirror), deterministic voice keywords (`cloudChatVoiceRequest` — revoke family before the state-query family, outside the `Domain` table so no existing exhaustive switch moves; an internet word alone never fires; pinned against claiming any utterance an existing rule claims), and the state query answered truthfully from `currentDecision().allowsEgress` (denied/withdrawn/unreadable all read fail-closed OFF). The voice revoke ends the turn deterministically before the interpreter (no model, no NLU) and emits classification only — `cloud_chat_voice_control`, `metadata: [:]` (no transcript, no content, no identity). Deviation (documented, additive only — needs wave-gate acknowledgement): `CommandRouter.swift` +100/−0, six hunks (2 protocol members + defaults `{ false }`/`{}` so every pre-existing conformer and construction site stays byte-identical; the consent question claims its own yes/no as the LAST flowed confirmation block and speaks its own state line; a typed `.unrecognised` return so the turn is consumed, never a medication ack; the keyword-stage block; the content-free emitter). Accessibility/NFR-009: no Info.plist, no permission, no entitlement change (pinned); indicator imports Foundation + SwiftUI only. Amendment-4 in-unit gate: compile only — run 1 EXIT 65 with ONE true error (private profile-payload double in the new test file; fixed with the house file-scope copy pattern), run 2 `** TEST BUILD SUCCEEDED **` EXIT 0, zero `error:` lines. Consolidated pass (coordinator, 2026-10-15, 13 classes / 325 tests): RED — 21 failures, ALL in this unit's two suites (the other 12 classes green; both house guards green inside the run). Two independent root causes, both fixed in the recorded wave-close rework (the unit notes' "Wave-close rework" section): (a) test-side — the suite's isolation assumed a fresh coordinator starts with a clean consent record, but the gate is built over the REAL `MigratingEncryptedStorage()` container (the injected `profileStorage:` double only backs the profile store), so a real record left by one test leaked into every later-constructed gate and 17 assertions across 4 tests were order-dependent; fixed with a `setUp`/`tearDown` purge of `plugin.cloud_chat.consent.v1` through the app's own storage channel, a clean-store guard in the question helper, and `makeFreshCoordinator()` for the multi-leg tests (no coordinator init-signature change). (b) impl-side — 4 of the 14 authored revoke utterances resolved nil: three honorific forms lost their stem to a Devanagari virama conjunct at Character-cluster level ("बन्द गर" ⊄ "बन्द गर्नुहोस्", "रोक" ⊄ "रोक्नुहोस्" — the family's own documented contract), plus the नपठाऊ (ऊ) spelling variant; fixed with a family-scoped scalar (`unicodeScalars`) phrase matcher + `.phrase("नपठाऊ")` — shared `Alternative`/`firstMatchingKey` semantics and the 2026-09-07 Search cluster pin untouched, no other rule changed. Rework verification: the two classes green twice cold+warm (88/88, exit 0) + compile gate re-run green (`** TEST BUILD SUCCEEDED **`). Coordinator re-run of the consolidated pass after the rework: 325/325, 0 failures, `** TEST SUCCEEDED **`, both house guards green.
+
+## T-182 — Chat-variant config and the full ship gate over one candidate — DONE
+
+Wave 4. `tools/train-intent/config.yaml` (+66/−0) + `src/eval_golden.py` (+1,388/−157; 2,133) + `tests/test_eval_golden_chat_variant.py` (new, 1,491; 80 cases / 10 classes). The chat training variant lives in an ADDITIVE `chat:` section (15 leaf keys, `enabled: false` in the checked-in file): run id / mix / corpus root, mixture 0.70/0.30, per-layer corpus paths (L1 3, L2 7, L3 `[]`, L4 3), and the filter constants (the 5 spec-check rule names, min word tokens 2, turn ceiling 512, held-out dedupe, near-duplicate Jaccard 0.80); recipe r16 / α32 / lr 1.5e-4 / 3 epochs / 1024 ctx / Q4_K_M. Nothing pre-existing is altered — the flat 64-key non-chat config digest is pinned `0fcf33a1…` and a variant constant changed anywhere is detected as a check failure, never a knob. A CONFIGURATION selects the variant, not a flag: flag absent/false → the variant object is `None` and the legacy path runs byte-identically (stdout + results.csv + committed-ledger safety pinned by `LegacyByteIdentityTests`); flag true → the variant is resolved with every missing or unknown key a named refusal, never a default. Three fixed-constant checks (recipe vs the shipped quantization plan; mixture vs T-179's `CONVERSATION_SHARE`; filter names read FROM `author_chat_golden`'s emittable rule set, not restated) fail the run as checks, never as moved thresholds. ONE `--full-gates` invocation runs T-181's three chat gates (thresholds via `thresholds_from_spec`) plus the existing hard gates (called through their own functions — `tests/test_eval_golden_gates.py` untouched) over one candidate and emits ONE `full_gate_report/v1`: every gate's value/threshold/denominator/status/tier (emergency 1.00 / abstention ≥0.90 / closed-intent ≥0.95 carried verbatim), fixture versions, the T-181 provenance block, the candidate artifact path + sha256, and the T-180 manifest hash INDEPENDENTLY recomputed from the manifest file (a mismatch is a named failure, never a copied value); latency replays `measure_device.py`'s own loader/scorer (nearest-rank percentiles, inclusive at exactly 1,000.0 ms, the 100-prompt floor enforced — a 50-prompt set is a partial measurement); exit 0 all-green / 1 red-or-incomplete / 2 refusal-before-scoring (a refusal writes no report). A red gate names its shortfall and keeps measuring the rest; an incomplete run (gate not measured, judge aborted, tampered/hash-less/ineligible manifest, absent measurements) writes the report MARKED incomplete with the reason and `swap.eligible: false` — incomplete evidence cannot serve as swap evidence; an unscorable measurements file is an input error (exit 2), not absent evidence. The real (billed) judge run remains blocked behind the standing owner gate — the 50-batch chat golden-set human review (the fixture is ineligible until then by T-181's design; every test/ad-hoc run uses T-181's offline `fixture` replay with `billed: False`). Wave-close rework (recorded narrow exception — single-module runs ×2; the suite's FIRST real execution WAS the wave's consolidated pass): (a) test-side — `GateInputs` wrote into the run layout without creating parent directories (6 `setUpClass` `FileNotFoundError`s across the six planning classes) → `mkdir(parents=True, exist_ok=True)` before every write, layout paths unchanged; (b) IMPL-SIDE, a real legacy regression the pre-existing `test_eval_golden_gates` caught (green at base `29ebf1a6` — verified from a `git archive` scratch copy, 35/35 — deterministically red alone in-tree): the refactor's `hard_gate_metrics` returned the per-intent counters as plain dicts, losing base's `defaultdict(int)` zero-read, so the legacy print loop raised `KeyError: 'query'` on the all-wrong `query` intent of `preds_abstention_fail` BEFORE the ledger row was written — the `'none'` the test read was the copied BASELINE's `gates_failed` and the exit 1 was the interpreter crash, not a gate; fixed by priming every `per_intent_total` key with 0 (mechanism-level; manual confirmation on the fixture: `GATES FAILED: ['abstention_precision']`), and the legacy helper/ledger assembly proven byte-equivalent to base by diff; (c) two further first-execution test-side defects — `cls.run` shadowed `TestCase.run` (renamed `cls.gate_result`) and `gate(golden=None)` meant omit-flag → a stale repo placeholder fixture (fixed with a `"default"` sentinel). Re-run after rework: both modules green ×2 (35/35, 80/80) + py_compile. Consolidated pass: the 8-module Python pass green — 525 tests, OK, exit 0.
+
+## T-185 — Release log-surface gate coverage for the new chat paths — DONE
+
+Wave 4. `ios/tools/check-release-log-safety.py` (897→1,376; +509/−30) + `check-release-log-safety.sh` (45→61; +24/−8). The CNR feature's sources join the STRICTER role (no Release-compiled console write at all; content forbidden in every configuration) via 8 new `FEATURE_ROOTS` entries (25 → 33 total; every entry must resolve — the coverage self-test fails if a root grades nothing): the whole `Services/Intents/CloudChat` directory, `ChatSampling`, `NepaliGrammarGuard`, `KeywordIntentRule`, `LlamaCommandInterpreter`, `GeminiClient`, `SettingsView`, `HomeSubviews`. The four shared files that cannot take the feature role without grading unrelated code (`CommandRouter`, `IntentRouter`, `GeminiCommandInterpreter`, `AppCoordinator`) get the additive rules 5–6 through a new `FEATURE_EVENT_TYPES` registry (7 events: the design's specified set plus `chat_respond_{unusable,done,failed}` found by the audit) applied STATEMENT-wise at every emission site — the judge splits so payload rules travel by event type, never by rule 3–4 file association; every violation now names the file AND the statement. A new `--self-test` (7 legs; the engine run as a subprocess over temp trees; wired as wrapper step 3) proves the coverage is load-bearing: 4 seeded violations each go RED by file + statement (a raw print in `CloudChatRouting`, a Debug-guarded content print in `NepaliGrammarGuard`, a `"transcript"` key in a `cloud_chat_voice_control` emit, interpolated reply text in a `cloud_chat_fallback` emit), an off-root control stays green, and mirror-copy falsifications go RED as predicted (removing the CloudChat root / the NepaliGrammarGuard root / the whole registry). One stated limitation (recorded, not hidden): deleting a single registry entry outright is not caught (the stale-entry check fires when an entry exists but its event is no longer emitted; removing the WHOLE registry is caught); the source comment beside the registry states this `ENGINE_FILES`-style. Existing fixtures unchanged: 24 cases / 12 rules before and after, every fixture green; `--falsify` 36 cases green; the gate exits 0 over the shipped sources (≈4.2 s). All 7 CNR emission sites validated against `LogSanitiser.allowedKeys` (no text interpolated). Coverage audit: all 29 CNR-changed Swift files classified with a per-hunk grading of the CNR-added lines in the shared files (0 offences); pre-existing findings in the un-rooted files recorded report-only with recommendations (`topic`/`domain`/`matched_keys`/`floor` keys and a Debug-guarded content print at `:5472` in `CommandRouter`, an `interpreter` key in `IntentRouter`, 21 Release prints + `cold_features` in `AppCoordinator`, a DEBUG transcript print in `GeminiCommandInterpreter`) — carried to the final report as follow-ups, not silently fixed; the AM-5 static-analysis limits (indirection, wrapper sinks, metadata-as-variable) remain stated in the docstring — a green gate means "no defect of these shapes", not "content cannot reach a sink". Build wiring confirmed unchanged (`ios/build.sh:431`, inside `run_tests()`, ahead of every test scope). Unit gate with amendment-4 cadence: gate script exit 0 + py_compile. Consolidated pass: iOS 4 classes / 126 tests, 0 failures, `** TEST SUCCEEDED **`, the extended guard green inside the run over the 33 roots + its 7 self-test legs.
+
+## T-184 — v17 catalog entry and the gated, reversible swap — DONE (entry PRESENT; promotion honestly blocked, not promoted)
+
+Wave 5 (P1 leg). `ModelCatalog.swift` (+318/−7) + `LanguageModelResolver.swift` (+45/−13) + `AppCoordinator.swift` (+70/−2) + `ModelCatalogChatVariantTests.swift` (new, 535; 20 tests), rebased `BrainModelSelectionTests.swift` (+38/−5; the curated-list/framing pins an entry must move), `project.pbxproj` (+4, xcodegen registration), and one documented necessity deviation `LlamaCommandInterpreter.swift` (+11 — the inherited `.qwen3` measured-framing row: an offered brain without a row fails the offered-brain test and would fall to the LLaMA 3.2 `default:` branch; `framing_check.py` replaces it at publication), plus `specs/T-184-notes.md` (full record). The new entry `intentQwenS43ChatV17` (`intent-ne-qwen-s43-chat-v17-q4km`) ships BESIDE `intentQwenS43` — the previous entry stays offered and selectable with unchanged evidence, that is the rollback target — with the real artifact identity (sha `e05cc8a2…`, 1,107,408,736 B = the sibling's `c2135f78…`/1,107,408,576 B +160 B, same 1.7B memory-class rung, 3 GB floor, `["ne"]`) and an RFC 2606 `.invalid` placeholder URL (publication pending; the digest is the REAL local artifact's, so an untimely tap is an honest failed download, never a wrong file — only the URL changes at publication). Promotion is REFERENCE DATA, not a code path: `chatVariantPromotionRecord` ships a complete attempt honestly BLOCKED — real artifact identity + the run manifest hash `fb7f7779…` carried, `gateReportPath`/`gateReportSHA256`/`gates` empty ON PURPOSE (no full-gate report exists: the chat judge is blocked on the funded key, latency unmeasured until the Anzaan DV session) → `promotionVerdict` resolves `.blocked(.gateReportMissing)` (closed vocabulary; no report path or gate name reaches a log surface). Enforced where serving happens, three points: `defaultEntry` step −1 serves the variant only when `.promoted` (blocked ⇒ every step below byte-identical to pre-CNR behaviour); `explicitDefaultEntry` refuses a `languageDefaultPicks` map entry naming a record-blocked variant (pointing the map at v17 is not promotion — it falls through as if the map had not moved); an `isAutomaticPickEligible` filter inside the automatic ladder blocks the 160-byte arithmetic hazard (the +160 B file would otherwise win the "largest fitting" step on seed-43 classes once the warm-STT footprint tightens the budget — a silent promotion by arithmetic; pinned by `testTheVariantsExtraBytes…WhileBlocked`). Rule 1 (explicit household pick) deliberately NOT gated — "selectable" is the spec's word and the display name quotes the state ("Brain — Qwen 1.7B · Nepali chat-aware (v17 · gates pending)"); `defaultBrainModelID` untouched (`intentQwenS43`). New `chat_variant_promotion` event (`slot`+`reason` only; both shipped `LogSanitiser.allowedKeys`; silent once promoted) + the tier-named decision field FR-CNR-022 asks for via new `AutomaticPick.deviceClass` (in the hand-written `==`: a 6 GB-tier pick is not the "same" pick as an 8 GB one). Scoped evidence (no full suite, no clean, no DerivedData deletion): baseline 102 tests / 1 pre-existing red (`MultipartDownloadTests:232` — stale `intentQwen4BSlotCanon` pin); unit run xcresult **182 passed / 3 failed / 1 skipped** (186 executed) — all 3 red cases are that same pre-existing stale `defaultBrainModelID` pin (`InterpreterAvailabilityTests:255/:173/:191/:197` + `MultipartDownloadTests:232`; the constant is already `intentQwenS43` at HEAD `AppCoordinator.swift:2202` and both files are byte-identical to base — git proof, no re-run needed); the new suite 20/20 green including the single-residency pair (`switchBaseModel` both directions, exactly one `llmInstance` pinned structurally) and the rollback tests. The result is the unit's own spec'd honest partial: promotion is the blocked action, not the unit's existence; the log-safety gate passes inside the run with the new emission.
+
+## T-186 — End-to-end acceptance, scoped sweep and the release gate — DONE (P0 accepting; v17 entry present, not promoted)
+
+Wave 7. Full record `specs/CNR-acceptance-notes.md` (351 lines, committed `bc19411c`). Scoped sweep over the integrated tree: 30 classes / 5 `./build.sh test:unit` runs — 716 tests, 711 passed, 4 red cases (1 CNR-suite flake + the 3 recorded pre-existing baseline cases), 1 skipped; per-class denominators in the record (console vs xcresult reconciled). The one red NOT attributable to the baseline: `CloudChatConsentGateTests.testConcurrentGrantAndRevoke…NeverLeaveATornOrMixedRecord` — red once at `:510` (the predicate rejects the cleanly-absent `.notRecorded` state its own message blesses), green 3/3 re-runs (37/37) → timing-dependent flake, recorded as a genuine finding with the recommendation for T-172's owner (widen the predicate or make the coda deterministic), NOT fixed here (this unit owns no other artifact). Pre-existing baseline reds proven by empty `git diff` at both `9cafa3cc..HEAD` and `14a008bf..HEAD`: `MultipartDownloadTests:232` + `InterpreterAvailabilityTests:255/:173/:191/:197` (stale `intentQwen4BSlotCanon` pins vs the shipped `intentQwenS43`; already false at the CNR base). Full iOS bundle NOT run — the substitution is recorded explicitly per the owner policy (§5: scoped `-only-testing` runs are the honest gate; the full bundle carries a known baseline and no full-bundle number is claimed). Python: 9 CNR modules, 539 tests OK exit 0 each (the 8-module wave-close set grew via P1's +6 in `test_eval_golden_gates` and the ninth pre-existing intent-prompt-pin module; denominator note in the record). Release-log gate exit 0 verbatim (33 feature roots, 7 event types, 24 fixtures/12 rules, 7-leg self-test — also green inside all five sweep runs via `build.sh:431`). Journey acceptance: the four journeys (local chat; consented cloud + indicator + lossless toggle-back; offline honest degradation; guard-flagged with AND without a cloud lane) green through named shipped seams, with the device-only limits explicitly ceded to T-187 — no seam-level test presented as a device observation. Preservation audit walked at the named range boundaries (P0 `14a008bf..5169c040`, P1 `5169c040..HEAD`): single-decode schema unchanged (the one P1 parse change is training-tooling-only and additive — the canonical-intent bridge); router ladder additive-only (`[CLOUD-CHAT-LANE]` branch; zero emergency-path lines changed in either range — only added doc comments match an emergency grep); STT/Whisper path untouched (name-grep empty across both ranges); no Info.plist/entitlement change anywhere in CNR (the file's history carries no CNR commit); the 160-byte arithmetic hazard pinned green (Run D 153/153). Headline honesty, required by the spec: **the P0 runtime slice ACCEPTS; the v17 catalog entry is PRESENT but NOT PROMOTED** (`.gateReportMissing` — the full-gate report was in flight at authoring, the chat-judge leg is behind the owner money gate, the latency leg is unmeasured) — and **T-187 (DV-1..6) remains the completion gate**.
+
+## T-187 — DV-1..6 device-validation protocol and the record — DONE (protocol written; every item BLOCKED — no Anzaan session; feature DEVICE-VALIDATION-OUTSTANDING)
+
+Wave 7 (second unit). Full record `specs/CNR-device-validation-protocol.md` (367 lines, committed `aaf0143c`). House 10-section device-validation format, mirrored from `specs/MTC-device-validation-protocol.md`: why/binding (FR-CNR-025 completion gate), environment and build identity with `[OWNER INPUT]` cells (device, iOS version, app build, branch/HEAD sha — a result without recorded build identity is not gate evidence), step-zero hard prerequisite, how to run (one session; nothing authored on the device; the house install recipe — the installer derives the bundle identifier from the built artifact, per the PR #157 fix), record fields, the six item sections, the record, the completion gate, capture discipline, recording rules. DV items carried VERBATIM from the unit spec: local chat quality (warm, grammatical, honorific agreement, particles within budget, no AI-isms, plus a seeded guard flag engaging the safe template); cloud chat consent plus visible indicator, toggling off returning to the on-device brain without losing chat; offline chat degrading honestly to the local brain (no crash, no false success); emergency phrasing triggering exactly with recall untouched; command determinism at temperature zero (reminders and alarms); the elderly listening panel's side-by-side verdict. Every item recorded **BLOCKED with its named reason** — per-item prerequisites enumerated in the record (§7.3): DV-1 needs a device session on a working-STT build with the shipped-tier brain present plus forced-local state and one genuinely flagged reply for the guard leg; DV-2 needs the session plus the cleanly-absent consent starting state, online, key, cost; DV-3 needs the session plus the airplane-mode control, including the failure-in-force mid-turn leg; DV-4 needs the session plus granted/online state and a configured emergency contact; DV-5 needs the session plus the previous build for the side-by-side; DV-6 needs the session plus the elderly listening panel present. No PASS is inferred anywhere from unit tests, the T-186 sweep, or training-box gates; completion status stated explicitly as **DEVICE-VALIDATION-OUTSTANDING** (never a fabricated pass). NFR-CNR-002/003 observation slots per chat item: felt latency on the reference tier and any eviction/reload observed — a second resident model or a per-turn reload is a finding, not a curiosity. Release-log gate re-observed by the unit itself at authoring HEAD (`8b64c01c`): the gate script (`tools/check-release-log-safety.sh`) invoked from `ios/` exits 0 (`RELEASE_GATE_EXIT=0`), verbatim coverage lines recorded (33 feature roots / 7 payload-graded event types; 24 fixtures over 12 rules; 7-leg self-test — seeded violations caught by name, off-root control quiet). Honest state recorded at authoring: v17 PRESENT but NOT PROMOTED (`.blocked(.gateReportMissing)`), the full-gate report in flight with the chat-judge leg behind the owner money gate and the latency leg unmeasured. The promoted-v17 serve/rollback smoke (T-184's open item) is carried as the record's appendix cell — explicitly not a DV-1..6 substitution. Capture discipline stated: telemetry is read for classification fields only; a content-bearing field in a log is itself a finding. Recording rules: any failed item keeps its reproduction steps; nothing tuned away.
+
+## T-188, T-189, T-190, T-191 — P2 legs: owner-descope records (2026-10-15) — DESCoped
+
+P2 (conversation polish) is separated from this run as its own initiative — `docs/features/2026-10-15-p2-conversation-polish-initiative.md` (main checkout). Per the owner decision of 2026-10-15 (relayed via the main session), the four P2 legs are descoped from `conversational-nepali-replies`; the plan rule applied is risk 10 ("descoping never silent"). Per-leg owner-descope records: T-188 → `specs/CNR-p2-dpo-notes.md` (DPO on judge preferences), T-189 → `specs/CNR-p2-romanized-notes.md` (romanized Nepali chat), T-190 → `specs/CNR-p2-4b-tier-notes.md` (4B tier candidate/admission), T-191 → `specs/CNR-p2-transcripts-notes.md` (consent-based real transcripts) — each cites the 2026-10-15 decision, states the declared code files were not produced, and claims no outcome. Umbrella record: `specs/plan-tasks/amendments/amendment-6-p2-descoped-2026-10-15.md` (+ the plan.md summary bullet and wave-table annotation). T-192 stays in this run and must account for all four legs in the feasibility honesty statement. The workflow's 5-task shape is unchanged (the legs were units inside implement); the run's scope now closes the critical path at T-187.
+
+## T-192 — Feasibility honesty statement — DONE (statement written; every leg carries a verdict + pointer; gate verdicts awaited)
+
+Statement `specs/CNR-feasibility-honesty-report.md` (174 lines, committed `582b6fd6`), mirroring design section 20 row for row (design verified at the section's table lines): 11 rows — the seven section-20 legs plus the DPO and transcripts P2 legs called out beyond the table, the device-validation state, and latency. Verdicts as written: (a)+(b) chat sampling at the fixed seed and recorded temperature + the command schema/determinism — DELIVERED at the implementation layer, on-device form BLOCKED (T-187); (c) guard coverage — DELIVERED AS THE STATED BOUND (lexicon-bounded honorific catch, script-classification scope), the seeded guard-flag device leg BLOCKED; (d) cloud routing (per-turn decision, fallback, no leak) — DELIVERED at the implementation layer, the recorded transcription exception on the Gemini stack stated plainly; DV-2/DV-3 BLOCKED; (e) 1.7B reference-tier chat quality — MEASURED AT THE RUN (the 0.8940 end-probe stated as 0.006 below the 0.90 default — evidence, not a gate; both floor aborts, 0.862 at 300 and 0.884 at 1000, preserved red), gate verdicts NOT YET LANDED (report #1 in flight at authoring — the file confirmed absent locally, its recorded identity stated, no verdict claimed), no swap ships; (f) the four P2 legs — OWNER-DESCOPED (2026-10-15), pointers to the four notes files + amendment 6; (g) device validation — BLOCKED all six, DEVICE-VALIDATION-OUTSTANDING, pointer to the T-187 record; the section-20 chat-classified-surface-scope row — DELIVERED AS THE STATED BOUND; latency (NFR-CNR-002) — NOT MEASURED. Failure-path self-check run against the spec's three defect scenarios: no leg without a verdict; no red restated green (the HTTP-402 judge-key block, the one flake — red 1/4, green 3/3 re-runs, the three pre-existing baseline reds all stated as recorded); every verdict pointer grep-verified to contain its claim — ten precision edits applied where the draft's pointer or wording overreached (e.g. the v17 smoke cell's section number corrected). Cross-references explicit: manifest `fb7f7779…`, the gate report identity, the DV record revision `aaf0143c`. Quote discipline held: values verbatim from the recorded evidence with file+section pointers; interpretation only where the design defines a threshold. No code, no other evidence — composes, checks, points.
+
+## T-190 — P2 4B tier: RE-OPENED (owner 2026-10-17) — executing (amendment 7)
+
+Dated annotation to the P2 descope block above (which stands as the 2026-10-15..17 record). Owner decision 2026-10-17 (relayed via the main session, recorded with owner provenance): T-190 is carved back into this run — the owner wants the 4B chat variant for the iPhone 17 Pro Max; T-188/T-189/T-191 remain descoped. Umbrella record `specs/plan-tasks/amendments/amendment-7-t190-4b-reopened-2026-10-17.md`; execution record `specs/CNR-p2-4b-tier-notes.md` ("RE-OPENED" section — base choice with rationale, corpus/recipe identity, launch, discipline, outstanding). Launched 2026-10-17T04:37 box-local, in parallel with the in-flight v17 full-gate decode (GPU verified idle before launch; the decode is CPU-bound — zero GPU conflict): base `checkpoints/qwen4b-s43-merged` (the 4B seed-43 lineage merged checkpoint — the structural mirror of `qwen-s43-merged`, which the 1.7B v17 run trained on), unchanged v17 corpus (17,235/500 verified on disk) and pinned recipe (r=16/alpha=32/lr 1.5e-4/3 epochs/seq 1024 → trainer-printed ~3,234 steps), in-run floor guard disabled per the ratified restart-#2 discipline, run id `cnr-v17-4b-20261017-0437`, box-side detached chain `chain-train-4b.sh` (train → end-of-run probe → Q4_K_M export + sha; CPU-only export), ETA ~9-10 h. No measured outcome is claimed anywhere yet; T-192 §5 carries the dated amendment annotation.

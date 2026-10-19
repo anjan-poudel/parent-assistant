@@ -1,0 +1,44 @@
+{
+  "record": "v17-model-publication",
+  "date": "2026-10-17",
+  "actor": "CNR run (owner-directed publication, coordinator-relayed)",
+  "release": {
+    "repo": "anjan-poudel/elderly-ai-assistant-models",
+    "tag": "v23",
+    "title": "v23: intent Qwen 1.7B chat-aware v17 (Nepali conversational, Q4_K_M — gates pending, test candidate)",
+    "state_at_application": "isDraft=false, isPrerelease=false (verified via gh release view; independently corroborated by the armed publication poller firing PUBLISHED-LIVE)",
+    "assets": [
+      {"name": "intent-ne-qwen-s43-chat-v17-q4_k_m.gguf", "size": 1107408736, "state": "uploaded"},
+      {"name": "intent-ne-qwen-s43-chat-v17-q4_k_m.gguf.sha256", "size": 106, "state": "uploaded"}
+    ],
+    "url_liveness": "HTTP 200 (HEAD, followed redirects) at application time"
+  },
+  "edit": {
+    "files": [
+      "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift",
+      "ios/ElderlyAssistantTests/Services/ModelStore/ModelCatalogChatVariantTests.swift"
+    ],
+    "catalog": {
+      "url_change": "https://invalid.invalid/cnr-v17/intent-ne-qwen-s43-chat-v17-q4_k_m.gguf -> https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v23/intent-ne-qwen-s43-chat-v17-q4_k_m.gguf",
+      "sha256_pin": "UNCHANGED — e05cc8a266198336f508cef2f6d2a8887b3db1eee3f4a4159cdeb2ab3df59d71 (the real artifact identity; publication changes delivery only)",
+      "comment_block": "the 'PUBLICATION PENDING' paragraph rewritten to state publication as a labeled test candidate; promotion explicitly still blocked"
+    },
+    "test_pin_move": {
+      "why": "the T-184 suite pinned the .invalid HOST as a deliberate honest-pin for the placeholder state; the publication moves that property, so the pin moves with it — recorded, not a silent change",
+      "before": "XCTAssertEqual(entry.downloadURL.host, \"invalid.invalid\")",
+      "after": "exact absoluteString equality on the v23 asset URL (the house pattern for published-asset pins, cf. IntentEncoderArtifactTests / ModelCatalogYOLOTests / MultipartDownloadTests)",
+      "stale_message_fixed": "'only delivery is pending' -> 'never the placeholder' (the delivery assertion itself unchanged)"
+    }
+  },
+  "promotion_untouched": {
+    "statement": "PUBLICATION, NOT PROMOTION: chatVariantPromotionRecord still resolves .blocked(.gateReportMissing); defaultEntry / explicitDefaultEntry / isAutomaticPickEligible unchanged; displayName still quotes 'gates pending'",
+    "evidence": "scoped suite green incl. testTheShippedPromotionRecordIsBlockedAndSaysWhy and testTheVariantsExtraBytesNeverWinTheLargestFittingStepWhileBlocked"
+  },
+  "scoped_gate": {
+    "command": "./build.sh test:unit ModelCatalogChatVariantTests (from ios/)",
+    "result": "20 tests, 0 failures; TEST SUCCEEDED; xcresult Test-ElderlyAssistant-2026.10.17_04-27-46-+1100.xcresult; release-log + prompt-mirror gates ran first inside build.sh",
+    "cadence_note": "scoped class run per the owner's no-full-suite policy; the class is the only suite asserting this entry's URL"
+  },
+  "commit": "ec02a844",
+  "no_other_changes": "no other file touched; decode + gate chain on the box undisturbed (this change is Mac-local; nothing pushed)"
+}

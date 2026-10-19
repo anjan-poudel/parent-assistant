@@ -249,6 +249,11 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
     private var loadedRunner: IntentEncoderModelRunning?
     /// Set by `handleMemoryPressure()`; cleared by the next `interpret()`.
     private var unloadedForMemoryPressure = false
+    /// [CASCADE-RESIDENCY] Set by `unloadForCascadeEscalation()`; cleared by
+    /// the next `interpret()`. Deliberately NOT read by `isAvailable`: the
+    /// cascade's release is a residency decision, never an availability
+    /// one — the encoder must be able to serve the next turn.
+    private var releasedForCascadeEscalation = false
 
     /// [LAT-EVIDENCE] The honest reason the LAST attempt failed —
     /// "inference_timeout", "model_load_failed", "inference_failed" or
@@ -320,10 +325,20 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
 
     // MARK: - CommandInterpreter
 
+    /// [CASCADE-RESIDENCY] Why the previous turn released the weights —
+    /// the reload event's `state` label, and nothing else. No decision
+    /// reads it: availability is `unloadedForMemoryPressure` alone, so a
+    /// cascade release can never take the encoder out of service.
+    private enum WeightRelease: String {
+        case none = "loaded"
+        case memoryPressure = "reloaded_after_memory_pressure"
+        case cascadeEscalation = "reloaded_after_cascade_escalation"
+    }
+
     /// One attempt's timing + memory state, resolved by `beginTurn`.
     private struct TurnStart {
         let started: Date
-        let wasUnloaded: Bool
+        let release: WeightRelease
     }
 
     /// The preamble BOTH entry points share, so the two paths cannot drift:
@@ -338,9 +353,21 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
         // (uniform stage-latency signal, C9-safe: a number, nothing else).
         let started = Date()
 
+        // [CASCADE-RESIDENCY] Both release flags clear here — this is the
+        // "re-arm" half of the cascade policy: `isAvailable` never went
+        // false for a cascade release, and the first use of the turn
+        // reloads the weights through `runnerForPrediction`.
         stateLock.lock()
-        let wasUnloaded = unloadedForMemoryPressure
-        if wasUnloaded { unloadedForMemoryPressure = false }
+        let release: WeightRelease
+        if unloadedForMemoryPressure {
+            release = .memoryPressure
+        } else if releasedForCascadeEscalation {
+            release = .cascadeEscalation
+        } else {
+            release = .none
+        }
+        unloadedForMemoryPressure = false
+        releasedForCascadeEscalation = false
         stateLock.unlock()
 
         // Artifact + vocabulary must both be present. The tokenizer check
@@ -364,7 +391,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
             DispatchQueue.main.async { completion(nil) }
             return nil
         }
-        return TurnStart(started: started, wasUnloaded: wasUnloaded)
+        return TurnStart(started: started, release: release)
     }
 
     func interpret(transcript: String,
@@ -497,7 +524,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
                          turn: TurnStart,
                          completion: @escaping (InterpretedCommand?) -> Void) {
         let started = turn.started
-        let wasUnloaded = turn.wasUnloaded
+        let release = turn.release
         // [TURN-TIMING-BREAKDOWN] `encoder_tokenizer` — the tokenizer call
         // is wrapped, never restructured: nil recorder (every non-gated
         // build) runs the identical expression with no clock read.
@@ -549,7 +576,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
             // machine reasons (`model_load_failed_*`).
             let runner: IntentEncoderModelRunning
             do {
-                runner = try self.runnerForPrediction(wasUnloaded: wasUnloaded)
+                runner = try self.runnerForPrediction(release: release)
             } catch let error as IntentEncoderModelError {
                 // [PIPELINE-TRACE] The load is outside the timed section
                 // and outside the trace's spans — the three encoder rows
@@ -702,7 +729,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
     /// the inference queue, so loading a CoreML model never blocks the main
     /// thread — including the reload after a memory-pressure unload, which
     /// is exactly why the reload lives here.
-    private func runnerForPrediction(wasUnloaded: Bool) throws -> IntentEncoderModelRunning {
+    private func runnerForPrediction(release: WeightRelease) throws -> IntentEncoderModelRunning {
         stateLock.lock()
         let existing = loadedRunner
         stateLock.unlock()
@@ -725,8 +752,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
                 loadedRunner = runner
                 stateLock.unlock()
                 emit("encoder_model_loaded", outcome: "success",
-                     extra: ["state": wasUnloaded
-                             ? "reloaded_after_memory_pressure" : "loaded"])
+                     extra: ["state": release.rawValue])
                 return runner
             } catch let error as IntentEncoderModelError {
                 lastError = error
@@ -759,6 +785,43 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
         runner?.unload()
         emit("encoder_model_unloaded", outcome: "info",
              errorCode: nil, extra: ["reason": "memory_pressure"])
+    }
+
+    /// [CASCADE-RESIDENCY] Releases the encoder's CoreML weights for the
+    /// CASCADE's residency budget, called when the chain escalates this turn
+    /// to the picker brain.
+    ///
+    /// WHY: with WhisperKit (ANE), the encoder and a multi-GB picker brain
+    /// all growing resident during one cascade, the phone hit the OS limit
+    /// (signal 9). The reference condition is the pipeline design's peak-RSS
+    /// bound (condition 1.10, T-018-b's 2.5 GB floor). The encoder's answer
+    /// for this turn is FINAL by the time the chain escalates — the chain
+    /// only escalates after this interpreter delivered its completion — so
+    /// while the picker brain's handle is allocated, the encoder's weights
+    /// are pure residency cost and nothing else.
+    ///
+    /// HOW this differs from `handleMemoryPressure()`, on purpose:
+    ///  - it does NOT set the availability hold, so `isAvailable` stays
+    ///    true and the encoder is still offered the next turn;
+    ///  - it therefore never needs `rearmAfterMemoryPressure()`: the next
+    ///    `interpret()` clears `releasedForCascadeEscalation` in
+    ///    `beginTurn` and the first use reloads through `runnerForPrediction`
+    ///    (the same lazy path the memory-pressure reload takes, reported as
+    ///    `reloaded_after_cascade_escalation`).
+    ///
+    /// Unloading when nothing is resident is a no-op that still reports
+    /// itself, so the policy is visible in a trace either way.
+    func unloadForCascadeEscalation() {
+        stateLock.lock()
+        let runner = loadedRunner
+        loadedRunner = nil
+        if runner != nil { releasedForCascadeEscalation = true }
+        stateLock.unlock()
+        runner?.unload()
+        emit("encoder_model_unloaded", outcome: "info",
+             errorCode: nil,
+             extra: ["reason": "cascade_escalation",
+                     "state": runner == nil ? "not_resident" : "released"])
     }
 
     /// The other half of the memory-pressure contract: the coordinator

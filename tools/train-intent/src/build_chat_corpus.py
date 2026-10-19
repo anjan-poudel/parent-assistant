@@ -161,6 +161,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import random
 import re
 import subprocess
@@ -1197,6 +1198,43 @@ def default_teacher(cfg: dict, transport: str, fixture_path: Optional[Path],
     return teacher
 
 
+# --- speed deviation (owner directive 2026-10-15, recorded in the run notes) ---
+# Bounded teacher concurrency: the recorded prompts, the content-hash caches
+# and every counter/refusal stay exactly as the serial builder produced them —
+# the pool only overlaps the serial transport latency of the teacher calls, and
+# results are always consumed in plan/chunk order.
+TEACHER_CONCURRENCY = max(1, int(os.environ.get("CNR_TEACHER_CONCURRENCY", "1") or "1"))
+
+
+def _teacher_pool(jobs: Sequence[Callable[[], dict]]) -> List[Tuple[bool, object]]:
+    """Run teacher invocations concurrently; results keep submission order.
+
+    Returns ``(ok, payload_or_exception)`` per job — a failed call is returned,
+    never raised (each stage's existing per-call error handling stays in charge).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    if not jobs:
+        return []
+    workers = max(1, min(TEACHER_CONCURRENCY, len(jobs)))
+    if workers == 1:
+        out: List[Tuple[bool, object]] = []
+        for fn in jobs:
+            try:
+                out.append((True, fn()))
+            except Exception as exc:  # noqa: BLE001 — surfaced to the caller's notes
+                out.append((False, exc))
+        return out
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(fn) for fn in jobs]
+        out = []
+        for future in futures:
+            try:
+                out.append((True, future.result()))
+            except Exception as exc:  # noqa: BLE001
+                out.append((False, exc))
+        return out
+
+
 GEC_PROMPT_HEADER = (
     "You are the grammar-correction stage of a Nepali chat corpus build. For each "
     "assistant reply below, return the SAME reply with any grammar, honorific, "
@@ -1268,19 +1306,31 @@ class GecStage:
                 results[index] = (record["corrected"], True)
             else:
                 pending.append(index)
-        for start in range(0, len(pending), self.batch_turns):
-            chunk = pending[start:start + self.batch_turns]
-            if self.calls >= self.budget:
+        # speed deviation (owner directive 2026-10-15): dispatch up to the
+        # remaining budget's worth of chunks through the bounded teacher pool
+        # first; refusals/records are then walked in chunk order, so the
+        # cache, usage and refusal accounting are unchanged.
+        starts = list(range(0, len(pending), self.batch_turns))
+        chunks = [pending[start:start + self.batch_turns] for start in starts]
+        allowed = 0
+        while allowed < len(chunks) and self.calls + allowed < self.budget:
+            allowed += 1
+        gec_prompts = [build_gec_prompt([texts[i] for i in chunk])
+                       for chunk in chunks[:allowed]]
+        self.calls += len(gec_prompts)
+        gec_results = _teacher_pool(
+            [lambda p=prompt: self.teacher(p, self.cfg) for prompt in gec_prompts])
+        for index, chunk in enumerate(chunks):
+            start = starts[index]
+            if index >= allowed:
                 self.budget_exhausted = True
                 self.refusals.append({
                     "reason": "gec budget exhausted",
                     "detail": f"{len(pending) - start} turn(s) left uncorrected"})
                 break
-            prompt = build_gec_prompt([texts[i] for i in chunk])
-            self.calls += 1
-            try:
-                payload = self.teacher(prompt, self.cfg)
-            except Exception as exc:  # noqa: BLE001 — recorded, never hidden
+            ok, payload = gec_results[index]
+            if not ok:
+                exc = payload
                 self.refusals.append({"reason": "teacher call failed",
                                       "detail": f"{type(exc).__name__}: {exc}"})
                 log(f"[gec]   call failed: {type(exc).__name__}: {str(exc)[:160]}")
@@ -1891,15 +1941,20 @@ def _l2_translate_and_post_edit(candidates: List[Candidate], source: SourceSpec,
         "exemplar(s)" if exemplars else
         f"L2/{source.id}: post-edit prompts carry no Layer-1 exemplars in this build "
         "(recorded)")
-    for key, batch in sorted(batches.items()):
-        if not opts.execute:
-            continue
-        reply_texts = [c.reply for c in batch]
-        prompt = build_postedit_prompt(spec, list(zip(
-            [c.user_turn for c in batch], reply_texts)), exemplars=exemplars)
-        try:
-            payload = teacher(prompt, _teacher_cfg())
-        except Exception as exc:  # noqa: BLE001
+    # speed deviation (owner directive 2026-10-15): dispatch the source's
+    # post-edit calls through the bounded teacher pool first; results are then
+    # consumed in batch order (the serial loop's accounting, unchanged).
+    ordered_batches = sorted(batches.items()) if opts.execute else []
+    pe_prompts = [
+        build_postedit_prompt(spec, list(zip(
+            [c.user_turn for c in batch], [c.reply for c in batch])),
+            exemplars=exemplars)
+        for _key, batch in ordered_batches]
+    pe_results = _teacher_pool(
+        [lambda p=prompt: teacher(p, _teacher_cfg()) for prompt in pe_prompts])
+    for (key, batch), (ok, payload) in zip(ordered_batches, pe_results):
+        if not ok:
+            exc = payload
             counters.notes.append(f"L2/{source.id}: post-edit call for {key} failed "
                                   f"({type(exc).__name__}: {exc}) — batch held")
             counters.hold("postedit_unavailable")
@@ -2021,18 +2076,31 @@ def _stage_l3(opts: BuildOptions, spec: style_spec.StyleSpec, counters: Counters
                 done[record["key"]] = record
     candidates: List[Candidate] = []
     written: List[dict] = sorted(done.values(), key=lambda rec: rec["key"])
+    # speed deviation (owner directive 2026-10-15): dispatch every missing L3
+    # call through the bounded teacher pool first; records are then assembled
+    # in plan order (the serial loop's accounting, unchanged).
+    missing = [entry for entry in plan if done.get(entry["key"]) is None]
+    l3_prompts = [build_l3_prompt(spec, entry["class"], L3_TURNS_PER_CALL,
+                                  batch_id=entry["key"]) for entry in missing]
+    l3_results = _teacher_pool(
+        [lambda p=prompt: teacher(p, _teacher_cfg()) for prompt in l3_prompts])
+    l3_payloads: Dict[str, dict] = {}
+    l3_errors: Dict[str, BaseException] = {}
+    for entry, (ok, value) in zip(missing, l3_results):
+        if ok:
+            l3_payloads[entry["key"]] = value
+        else:
+            l3_errors[entry["key"]] = value
     for entry in plan:
         record = done.get(entry["key"])
         if record is None:
-            prompt = build_l3_prompt(spec, entry["class"], L3_TURNS_PER_CALL,
-                                     batch_id=entry["key"])
             counters.stages["l3_generation"]["calls_executed"] += 1
-            try:
-                payload = teacher(prompt, _teacher_cfg())
-            except Exception as exc:  # noqa: BLE001
+            if entry["key"] in l3_errors:
+                exc = l3_errors[entry["key"]]
                 counters.notes.append(f"L3 call {entry['key']} failed "
                                       f"({type(exc).__name__}: {exc})")
                 continue
+            payload = l3_payloads[entry["key"]]
             for name, value in (payload.get("usage") or {}).items():
                 usage = counters.stages["l3_generation"]["usage"]
                 usage[name] = usage.get(name, 0) + int(value)

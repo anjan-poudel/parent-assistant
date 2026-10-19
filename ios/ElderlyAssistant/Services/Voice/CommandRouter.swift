@@ -817,6 +817,10 @@ final class CommandRouter {
     }
 
     private weak var coordinator: VoiceCommandCoordinating?
+
+    /// [PLAYBACK-ECHO-GUARD] The last text this router asked the speaker
+    /// to say — the echo guard's comparison basis.
+    private var lastSpokenText: String?
     private let observabilityBus: ObservabilityBus
     private let speaker: Speaker?
     /// [VOICE-ACK] Serial FIFO lane for interactive reply speech — built
@@ -1070,6 +1074,23 @@ final class CommandRouter {
             if let liveFrame = coordinator?.activeDialogueFrame {
                 return reprobeDialogueOrExhaust(frame: liveFrame, raw: raw)
             }
+            speak(key: "router.reprompt")
+            return .unrecognised(transcript: raw)
+        }
+
+        // [PLAYBACK-ECHO-GUARD] (2026-10-19) The assistant's own TTS tail
+        // re-heard as a transcript: plausible Nepali the sanity guard
+        // cannot reject. Re-prompt instead of answering the echo.
+        if let last = lastSpokenText,
+           TranscriptSanityGuard.isPlaybackEcho(raw, of: last) {
+            observabilityBus.emit(ObservabilityEvent(
+                component: "command_router",
+                eventType: "playback_echo_rejected",
+                durationMs: nil,
+                outcome: "rejected",
+                errorCode: "tts_echo",
+                metadata: [:]
+            ))
             speak(key: "router.reprompt")
             return .unrecognised(transcript: raw)
         }
@@ -2536,7 +2557,14 @@ final class CommandRouter {
     static let medicationDenialPhrases = [
         "i didn't", "i did not", "not yet", "haven't", "havent",
         "औषधि खाएको छैन", "औषधी खाएको छैन", "खाएको छैन",
-        "नखाए", "नखाएको", "लिएको छैन", "भएन", "छैन"
+        "नखाए", "नखाएको", "लिएको छैन"
+        // [DENIAL-OVERMATCH-FIX] (2026-10-19) The bare tokens "भएन" and
+        // "छैन" were REMOVED: substring-matching them stole any utterance
+        // containing "isn't"/"didn't happen" into the med-denial path and
+        // answered it with fixed router.ackDenied copy BEFORE the LLM ran
+        // (device evidence: "aja swasthya thik chhaina" -> "ठीक छ, म पछि
+        // फेरि सम्झाउँछु।" on every brain). The med-specific phrases
+        // above carry the actual denial forms ("खाएको छैन" etc.).
     ]
 
     /// The POSITIVE half of the medication-ack vocabulary: "I took my
@@ -2617,13 +2645,22 @@ final class CommandRouter {
         // Guard first: explicit negations must never fall through to the
         // ack list (see `medicationDenialPhrases` — the one list, checked
         // via the one extracted helper).
-        if Self.isMedicationDenial(text) {
+        //
+        // [MED-CONTEXT-GATE] (2026-10-19, owner directive) The denial AND
+        // ack keyword arms only fire while a medication reminder is
+        // actually pending (`oldestPendingReminderEntryId`). Out of that
+        // context the vocabulary is not constrained — "छैन" is everyday
+        // speech — and arbitrary utterances must flow to the model, never
+        // into fixed copy. The emergency arm above stays unconditional.
+        if coordinator?.oldestPendingReminderEntryId() != nil,
+           Self.isMedicationDenial(text) {
             emit(eventType: "command_ack_denied_keyword", outcome: "info")
             speak(key: "router.ackDenied")
             return .unrecognised(transcript: raw)
         }
 
-        if Self.isExplicitMedicationAcknowledgement(raw) {
+        if coordinator?.oldestPendingReminderEntryId() != nil,
+           Self.isExplicitMedicationAcknowledgement(raw) {
             handleMedicationAcknowledgement(transcript: raw)
             return .acknowledgedMedication
         }
@@ -2783,16 +2820,33 @@ final class CommandRouter {
         var readings = clarification.readings
         if let first = readings.first {
             var options = first.options
+            // [NEAR-DUP-SUPPRESSION] (2026-10-19, owner) The propose judge
+            // offers tense variants / near-identical readings of the SAME
+            // word ("dukheko" vs "dukhekai") — a conjugation, not a
+            // correction. Drop options within scalar edit distance 1 of
+            // the heard surface; the domain keys above carry the real
+            // alternatives. Nothing meaningful left -> plain re-prompt,
+            // never a fake X-or-Y question.
+            let surfaceScalars = Array(first.surface.unicodeScalars)
+            options = options.filter {
+                STTCorrector.editDistance(Array($0.unicodeScalars),
+                                          surfaceScalars) >= 2
+            }
             let heardKey = STTCorrector.lexiconKey(of: first.surface)
             for key in domainKeys where
                 STTCorrector.lexiconKey(of: key) != heardKey
                     && !options.contains(key) {
                 options.insert(key, at: 0)
             }
+            options = Array(options.prefix(2))
+            guard !options.isEmpty else {
+                speak(key: "router.reprompt")
+                return
+            }
             readings = [CorrectionClarification.Reading(
                 tokenRange: first.tokenRange,
                 surface: first.surface,
-                options: Array(options.prefix(2)))]
+                options: options)]
         }
         let frame = DialogueFrame.correctionChoice(
             readings: readings,
@@ -2843,6 +2897,23 @@ final class CommandRouter {
             speak(key: "router.reprompt")
             return .unrecognised(transcript: raw)
         }
+
+        // [PLAYBACK-ECHO-GUARD] (2026-10-19) The assistant's own TTS tail
+        // re-heard as a transcript: plausible Nepali the sanity guard
+        // cannot reject. Re-prompt instead of answering the echo.
+        if let last = lastSpokenText,
+           TranscriptSanityGuard.isPlaybackEcho(raw, of: last) {
+            observabilityBus.emit(ObservabilityEvent(
+                component: "command_router",
+                eventType: "playback_echo_rejected",
+                durationMs: nil,
+                outcome: "rejected",
+                errorCode: "tts_echo",
+                metadata: [:]
+            ))
+            speak(key: "router.reprompt")
+            return .unrecognised(transcript: raw)
+        }
         let spliced = STTCorrector.spliceReplacement(
             reading.options[index],
             into: frame.correctionOriginal,
@@ -2850,6 +2921,23 @@ final class CommandRouter {
         guard spliced != frame.correctionOriginal else {
             // The range did not address a token (defensive) — the honest
             // reprompt, never a half-spliced turn.
+            speak(key: "router.reprompt")
+            return .unrecognised(transcript: raw)
+        }
+
+        // [PLAYBACK-ECHO-GUARD] (2026-10-19) The assistant's own TTS tail
+        // re-heard as a transcript: plausible Nepali the sanity guard
+        // cannot reject. Re-prompt instead of answering the echo.
+        if let last = lastSpokenText,
+           TranscriptSanityGuard.isPlaybackEcho(raw, of: last) {
+            observabilityBus.emit(ObservabilityEvent(
+                component: "command_router",
+                eventType: "playback_echo_rejected",
+                durationMs: nil,
+                outcome: "rejected",
+                errorCode: "tts_echo",
+                metadata: [:]
+            ))
             speak(key: "router.reprompt")
             return .unrecognised(transcript: raw)
         }
@@ -5740,6 +5828,7 @@ final class CommandRouter {
             #endif
             return
         }
+        lastSpokenText = text
         let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         let lane = speakLane ?? {
             let newLane = ReplySpeakLane(speaker: speaker)

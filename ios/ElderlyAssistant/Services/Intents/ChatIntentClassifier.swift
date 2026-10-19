@@ -215,7 +215,7 @@ enum ChatIntentClassifier {
 
     /// Whole-token cue scan. Tokens are compared exactly, and multi-word
     /// cues ("how much") are checked as a phrase over the normalized text.
-    private static func containsCommandCue(in text: String) -> Bool {
+    static func containsCommandCue(in text: String) -> Bool {
         let tokens = Set(text.split(separator: " ").map(String.init))
         if !tokens.isDisjoint(with: commandCues) { return true }
         // Multi-word cues that are not single tokens.

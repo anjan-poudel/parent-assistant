@@ -494,6 +494,12 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         /// 4.0 s keeps the judge bounded (a hung call never blocks the
         /// turn forever) while giving the on-device 4B its real budget.
         let judgeTimeoutSeconds: Double
+        /// [CNR-4B-ANZAAN] (2026-10-19, owner directive) The CHAT shape's
+        /// inference budget — separate from the command budget because the
+        /// 4B chat variant on the 6 GB class needs 15-30 s per turn (the
+        /// field-measured slotcanon timing) and the command lane's 10 s
+        /// family bound must not stretch for it.
+        let chatTimeoutSeconds: Double
         // [NO-GIBBERISH] (2026-09-07): sampling temperature/seed are NOT
         // configurable — determinism is a correctness invariant here, so
         // every interpreter samples through `OnDeviceSampling` (temp 0,
@@ -502,7 +508,8 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                                       maxTokens: 128,
                                       timeoutSeconds: 10,
                                       chatConfidenceFloor: 0.6,
-                                      judgeTimeoutSeconds: 8.0)
+                                      judgeTimeoutSeconds: 8.0,
+                                      chatTimeoutSeconds: 30)
     }
 
     private let modelStore: ModelStore
@@ -586,8 +593,11 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     ONLY one JSON object (no fences, no other text); its "response" must \
     be a non-empty spoken reply in the user's language. Reply style: at \
     most TWO short sentences, ONE idea per sentence, never a list, never \
-    repeat their words back. In Nepali use the respectful forms (हजुर, \
-    भन्नुभयो, गर्नुभयो); warmth before completeness. Speak units, times, \
+    repeat their words back. In Nepali use the respectful forms (तपाईं, \
+    भन्नुभयो, गर्नुभयो); say हजुर at most once per reply, at a natural \
+    juncture. When they say they feel unwell: acknowledge briefly, ask ONE question — what is wrong — and answer in at most TWO short sentences, every sentence ending with '।'. The medication question and the help offer come in the turns that follow. Never just wish them well; never tell them to \
+    take medication; never assert a diagnosis (say "हुन सक्छ"); defer to \
+    the doctor. Warmth before completeness. Speak units, times, \
     money and percents as words, never symbols: "15 degrees Celsius", \
     "8 am", "50 percent", "500 rupees" — never "15°C", "15c", "8:00 AM", \
     "50%", "Rs. 500".
@@ -1203,6 +1213,18 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     static let measuredFramings: [ModelID: ChatFormat.Kind] = [
         // — offered picker brains (ModelCatalog.availableBrainEntries) —
         ModelCatalog.intentQwen4BSlotCanon: .raw,   // inherited (see above)
+        // [CNR T-184] The v17 chat-aware retrain of the seed-43 1.7B: the
+        // same `qwen-s43-merged` base lineage and the same training
+        // pipeline (train_qlora.py) as the seed-43 row below, so its row
+        // is INHERITED from that measurement — `.qwen3`, the one fine-tune
+        // the app-faithful check put the official Qwen3 wrap ahead of the
+        // bare shape for. Inherited-row precedent: `intentQwen4BSlotCanon`
+        // above. Re-run `framing_check.py` on the v17 artifact when it is
+        // published and replace this row with its own measurement; the
+        // offered-brain test requires SOME row, and the LLaMA 3.2 fallback
+        // would mis-frame it.
+        ModelCatalog.intentQwenS43ChatV17: .qwen3,  // inherited (see above)
+        ModelCatalog.intentQwen4BS43ChatV17: .qwen3,  // [CNR-4B] same lineage/family as the 1.7B sibling
         ModelCatalog.intentQwenS43:   .qwen3,
         ModelCatalog.qwen4BNepali:    .raw,
         ModelCatalog.qwen3_4BInstruct: .qwen3,
@@ -1690,7 +1712,10 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                     }
                 }
                 group.addTask {
-                    try? await Task.sleep(nanoseconds: UInt64(self.config.timeoutSeconds * 1_000_000_000))
+                    let budget = shape == .chat
+                        ? self.config.chatTimeoutSeconds
+                        : self.config.timeoutSeconds
+                    try? await Task.sleep(nanoseconds: UInt64(budget * 1_000_000_000))
                     // Interrupt the in-flight generation so the next
                     // utterance does not race a still-decoding context.
                     llm.stop()

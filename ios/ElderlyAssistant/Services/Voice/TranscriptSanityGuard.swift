@@ -131,6 +131,43 @@ enum TranscriptSanityGuard {
         return best
     }
 
+    // MARK: - Playback echo
+
+    /// [PLAYBACK-ECHO-GUARD] (2026-10-19) The mic hears the assistant's
+    /// own TTS tail between turns and Whisper re-transcribes it as
+    /// plausible Nepali — repetition/entropy checks cannot catch it
+    /// because it IS language. When the new transcript echoes the last
+    /// spoken reply, the caller re-prompts instead of feeding the echo
+    /// to the model. Conservative by design: the candidate must be at
+    /// least 3 words and the last reply at least 4, so a legitimate
+    /// short answer ("हो हजुर") can never trip it.
+    static func isPlaybackEcho(_ candidate: String, of spoken: String) -> Bool {
+        let c = normalize(candidate)
+        let s = normalize(spoken)
+        guard c.count >= 8, s.count >= 8, s.count >= 12 else { return false }
+        let cWords = c.split(separator: " ").map(String.init)
+        let sWords = s.split(separator: " ").map(String.init)
+        guard cWords.count >= 3, sWords.count >= 4 else { return false }
+        if s.contains(c) { return true }
+        let cSet = Set(cWords)
+        let sSet = Set(sWords)
+        let overlap = cSet.intersection(sSet).count
+        return Double(overlap) / Double(cSet.count) >= 0.6
+    }
+
+    private static func normalize(_ text: String) -> String {
+        let folded = text.lowercased()
+        let stripped = folded.map { ch -> Character in
+            if ch.isLetter || ch.isNumber || ch == " " { return ch }
+            return " "
+        }
+        return String(stripped)
+            .split(whereSeparator: { $0 == " " })
+            .map(String.init)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
     // MARK: - Entropy
 
     /// Ratio of distinct characters to total characters, ignoring

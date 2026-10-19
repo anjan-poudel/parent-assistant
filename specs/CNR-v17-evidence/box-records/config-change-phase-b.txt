@@ -1,0 +1,16 @@
+T-183 Phase B — config change record (2026-10-16T23:03:14+11:00)
+config: tools/train-intent/config.yaml (v17 checkout; tracked, clean before this change)
+before sha256: 1f176ce07a5bf42dafdb169d80e2e0e519720a1c7d39a3cb334a0b9d971e6bbd  (copy kept: config.yaml.before-phase-b)
+after  sha256: 3a151ad5224446dee2147d65c5b502faa2ed651f501e4c595604edef295f684d   (diff: config-change-phase-b.diff)
+changes (chat section only):
+  chat.enabled:        false -> true
+  chat.run_id:         v17   -> cnr-v17-20261015-0209
+  chat.corpus_root:    build/chat-corpus -> /mnt/nvme1/cnr-v17/corpus
+rationale: the full ship gate reads the variant from configuration ("the
+selection is configuration, never a flag"): it refuses while chat.enabled is
+false, and the run layout (design 11.5) resolves as <corpus_root>/<run_id>/<mix>
+with the provenance manifest one directory up in the run directory — pointing
+at the real run (corpus/cnr-v17-20261015-0209/ship + provenance-manifest.json).
+No other key changed. The standard (non-full-gates) path provably never reads
+a chat key (single chat_variant_config call site, inside _run_full_gate only) —
+standard downstream runs remain byte-identical.
