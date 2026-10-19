@@ -4760,7 +4760,11 @@ final class AppCoordinator: ObservableObject {
             consent: { [weak self] in self?.cloudChatConsentInput() },
             online: { [weak self] in self?.cloudChatReachability.isReachable },
             keyConfigured: { [weak self] in self?.geminiConfigStore.isConfigured ?? false },
-            costAllows: { [weak self] in self?.geminiCostGovernor.allowsCall() ?? false }
+            costAllows: { [weak self] in self?.geminiCostGovernor.allowsCall() ?? false },
+            // [MASTER-SWITCH-GATE] The app-level cloud switch (the
+            // voice-engine stack) is the master override: off = no chat
+            // egress regardless of the chat consent record.
+            cloudEnabled: { [weak self] in self?.voiceEngineStack == .gemini }
         )
         // [CNR T-177] The ONE wrapped cloud responder: the lane's cloud
         // leg and the guard's escalation share this instance, so every
@@ -7040,7 +7044,11 @@ self.noteTalkContractChanged()
         let providers = CloudBrainProviders(gemini: CloudBrainRegistration(
             interpreter: gemini,
             isConfigured: { [weak self] in self?.geminiConfigStore.isConfigured ?? false },
-            costAllows: { [weak self] in self?.geminiCostGovernor.allowsCall() ?? false }
+            costAllows: { [weak self] in self?.geminiCostGovernor.allowsCall() ?? false },
+            // [MASTER-SWITCH-GATE] The app-level cloud switch (the
+            // voice-engine stack) is the master override: off = no chat
+            // egress regardless of the chat consent record.
+            cloudEnabled: { [weak self] in self?.voiceEngineStack == .gemini }
         ))
         // Resolved through the seam — the coordinator never names a cloud
         // interpreter for a provider id; the registry does (adding a
