@@ -494,6 +494,12 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         /// 4.0 s keeps the judge bounded (a hung call never blocks the
         /// turn forever) while giving the on-device 4B its real budget.
         let judgeTimeoutSeconds: Double
+        /// [CNR-4B-ANZAAN] (2026-10-19, owner directive) The CHAT shape's
+        /// inference budget — separate from the command budget because the
+        /// 4B chat variant on the 6 GB class needs 15-30 s per turn (the
+        /// field-measured slotcanon timing) and the command lane's 10 s
+        /// family bound must not stretch for it.
+        let chatTimeoutSeconds: Double
         // [NO-GIBBERISH] (2026-09-07): sampling temperature/seed are NOT
         // configurable — determinism is a correctness invariant here, so
         // every interpreter samples through `OnDeviceSampling` (temp 0,
@@ -501,6 +507,7 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         static let `default` = Config(confidenceThreshold: 0.7,
                                       maxTokens: 128,
                                       timeoutSeconds: 10,
+                                      chatTimeoutSeconds: 30,
                                       chatConfidenceFloor: 0.6,
                                       judgeTimeoutSeconds: 8.0)
     }
@@ -1705,7 +1712,10 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                     }
                 }
                 group.addTask {
-                    try? await Task.sleep(nanoseconds: UInt64(self.config.timeoutSeconds * 1_000_000_000))
+                    let budget = shape == .chat
+                        ? self.config.chatTimeoutSeconds
+                        : self.config.timeoutSeconds
+                    try? await Task.sleep(nanoseconds: UInt64(budget * 1_000_000_000))
                     // Interrupt the in-flight generation so the next
                     // utterance does not race a still-decoding context.
                     llm.stop()
