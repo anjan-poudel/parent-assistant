@@ -494,6 +494,25 @@ final class IntentRouter: CommandInterpreter {
                                       completion: @escaping (InterpretedCommand?) -> Void) {
         if shouldTakeChatLane(transcript),
            let chatBrain = localBrain as? ChatResponding {
+            guard chatBrain.isAvailable else {
+                // [SILENT-FALLBACK-FIX] (2026-10-20, owner directive) A
+                // picked brain that is not actually loaded must SAY so —
+                // never fall silently into the correction/command path
+                // while the picker shows it selected.
+                emit("chat_brain_unavailable", outcome: "info")
+                let locale = coordinator?.activeLocale
+                    ?? Locale(identifier: "ne-NP")
+                completion(InterpretedCommand(
+                    action: .chat,
+                    entryId: nil, contact: nil, time: nil,
+                    medication: nil, message: nil,
+                    callType: nil, requestedApp: nil,
+                    topic: nil, steps: nil,
+                    pluginAction: nil, pluginEntities: nil,
+                    confidence: 1.0,
+                    reply: L10n.str("chat.brainUnavailable", locale: locale)))
+                return
+            }
             chatBrain.respondToChat(transcript: transcript,
                                     context: context) { [weak self] command in
                 guard let self else { completion(nil); return }
