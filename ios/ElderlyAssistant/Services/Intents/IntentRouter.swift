@@ -228,7 +228,7 @@ final class IntentRouter: CommandInterpreter {
         // `.command` reading costs one pure call and changes nothing: every
         // command, ladder, cascade and emergency utterance takes the
         // byte-identical code path it takes today (FR-CNR-014).
-        if ChatIntentClassifier.classify(transcript) == .chat {
+        if shouldTakeChatLane(transcript) {
             interpretChatLane(transcript: transcript, context: context,
                               completion: completion)
             return
@@ -266,6 +266,21 @@ final class IntentRouter: CommandInterpreter {
         interpretLocalLadder(transcript: transcript, context: context,
                              canEscalate: cloudEnabled && escalationBrain?.isAvailable == true,
                              completion: completion)
+    }
+
+
+    /// [MODEL-CLASSIFIES-CHAT] (2026-10-19, owner directive) With a
+    /// chat-capable brain picked, the MODEL classifies its own turns —
+    /// the keyword formulas exist only for the intent-only default brain.
+    /// A turn without explicit command cues goes to the chat lane so the
+    /// conversational model answers it instead of the intent machinery
+    /// (device evidence: "मलाई आज एक्लो महसुस भयो" → intent-mode reply +
+    /// degenerate "मलाई or मलाई" correction prompts).
+    private func shouldTakeChatLane(_ transcript: String) -> Bool {
+        if ChatIntentClassifier.classify(transcript) == .chat { return true }
+        guard localBrain is ChatResponding else { return false }
+        return !ChatIntentClassifier.containsCommandCue(
+            in: ChatIntentClassifier.normalized(transcript))
     }
 
     // MARK: - Chat lane ([CLOUD-CHAT-LANE], design §8.2/§8.7/§8.8)
@@ -477,7 +492,7 @@ final class IntentRouter: CommandInterpreter {
                                       canEscalate: Bool,
                                       chatEgressDisabled: Bool = false,
                                       completion: @escaping (InterpretedCommand?) -> Void) {
-        if ChatIntentClassifier.classify(transcript) == .chat,
+        if shouldTakeChatLane(transcript),
            let chatBrain = localBrain as? ChatResponding {
             chatBrain.respondToChat(transcript: transcript,
                                     context: context) { [weak self] command in
