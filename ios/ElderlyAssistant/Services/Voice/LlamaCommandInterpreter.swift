@@ -507,9 +507,9 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         static let `default` = Config(confidenceThreshold: 0.7,
                                       maxTokens: 128,
                                       timeoutSeconds: 10,
-                                      chatTimeoutSeconds: 30,
                                       chatConfidenceFloor: 0.6,
-                                      judgeTimeoutSeconds: 8.0)
+                                      judgeTimeoutSeconds: 8.0,
+                                      chatTimeoutSeconds: 30)
     }
 
     private let modelStore: ModelStore
