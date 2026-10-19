@@ -58,6 +58,20 @@ set -euo pipefail
 # crash reports symbolicate. Without one, uploadSymbols=false and the export
 # works but dSYMs must be uploaded later (Xcode Organizer → Distribute App).
 #
+# API-key setup (one time — no Apple ID or session token involved, so nothing
+# expires between runs):
+#   1. App Store Connect → Users and Access → Integrations → App Store
+#      Connect API → generate a key with the App Manager role.
+#   2. Download the .p8 (Apple allows the download only once) and keep it
+#      outside the repo at a fixed path:
+#        mkdir -p ~/.appstoreconnect
+#        mv ~/Downloads/AuthKey_<KEYID>.p8 ~/.appstoreconnect/
+#   3. Run with the two env vars (ASC_KEY_ID is optional — derived from the
+#      file name) and inspect the plan before executing anything:
+#        ASC_KEY_PATH=~/.appstoreconnect/AuthKey_<KEYID>.p8 \
+#        ASC_ISSUER_ID=<issuer-id> ./beta.sh dry-run
+#      The Issuer ID is shown above the key list in App Store Connect.
+#
 # Release gates: the constitution's Release-build log-safety gate
 # (tools/check-release-log-safety.sh) runs before every package — a
 # re-introduced transcript/error print blocks the build, not just the
@@ -235,20 +249,61 @@ bump_build_number() {
     echo "  (Info.plist is tracked — commit this bump with the release)"
 }
 
-# resolve_auth — echoes the altool/xcodebuild credential flags for the
-# configured App Store Connect identity. Exits with instructions if neither
-# an API key nor an Apple ID is configured.
+# asc_key_id — the API key id: ASC_KEY_ID when set, else derived from the
+# .p8 file name ("AuthKey_XXXXXXXXXX.p8" → "XXXXXXXXXX") so the file name is
+# the single source of truth.
+asc_key_id() {
+    if [ -n "${ASC_KEY_ID:-}" ]; then
+        echo "${ASC_KEY_ID}"
+        return
+    fi
+    local key_id
+    key_id="$(basename "${ASC_KEY_PATH}" .p8)"
+    key_id="${key_id#AuthKey_}"
+    if [ -z "${key_id}" ]; then
+        echo "ERROR: cannot derive the key id from '${ASC_KEY_PATH}' — set ASC_KEY_ID" >&2
+        exit 1
+    fi
+    echo "${key_id}"
+}
+
+# require_asc_key — fail fast, before any build work, on an incomplete
+# API-key configuration.
+require_asc_key() {
+    if [ ! -f "${ASC_KEY_PATH}" ]; then
+        echo "ERROR: ASC_KEY_PATH does not exist: ${ASC_KEY_PATH}" >&2
+        exit 1
+    fi
+    if [ -z "${ASC_ISSUER_ID:-}" ]; then
+        echo "ERROR: ASC_ISSUER_ID is required with ASC_KEY_PATH (App Store Connect → Users and Access → Integrations → App Store Connect API)" >&2
+        exit 1
+    fi
+}
+
+# asc_key_dir — absolute directory containing the .p8. altool locates API
+# keys by file name (AuthKey_<key-id>.p8) in a fixed set of directories, so
+# validate/upload point API_PRIVATE_KEYS_DIR at the configured file's
+# directory instead of asking the owner to move the key.
+asc_key_dir() {
+    (cd "$(dirname "${ASC_KEY_PATH}")" && pwd)
+}
+
+# resolve_auth — echoes the altool credential flags for the configured App
+# Store Connect identity. The API key wins when ASC_KEY_PATH is set; without
+# it the Apple ID/keychain path is used exactly as before. Exits with
+# instructions if neither is configured.
 resolve_auth() {
     if [ -n "${ASC_KEY_PATH:-}" ]; then
-        if [ ! -f "${ASC_KEY_PATH}" ]; then
-            echo "ERROR: ASC_KEY_PATH does not exist: ${ASC_KEY_PATH}" >&2
+        require_asc_key
+        local key_id
+        key_id="$(asc_key_id)"
+        # altool looks the .p8 up as AuthKey_<key-id>.p8 — a renamed file
+        # would fail inside altool, so catch it here with a clear message.
+        if [ "$(basename "${ASC_KEY_PATH}")" != "AuthKey_${key_id}.p8" ]; then
+            echo "ERROR: altool finds keys by file name — name the key AuthKey_${key_id}.p8 (or set ASC_KEY_ID from the current file name)" >&2
             exit 1
         fi
-        if [ -z "${ASC_ISSUER_ID:-}" ]; then
-            echo "ERROR: ASC_ISSUER_ID is required with ASC_KEY_PATH (App Store Connect → Users and Access → Keys)" >&2
-            exit 1
-        fi
-        echo "--apiKey ${ASC_KEY_PATH} --apiIssuer ${ASC_ISSUER_ID}"
+        echo "--apiKey ${key_id} --apiIssuer ${ASC_ISSUER_ID}"
         return
     fi
     if [ -n "${ASC_USERNAME:-}" ]; then
@@ -285,13 +340,9 @@ EOF
 # export phase can authenticate for provisioning and dSYM upload.
 xcodebuild_auth_flags() {
     if [ -n "${ASC_KEY_PATH:-}" ]; then
-        local key_id="${ASC_KEY_ID:-}"
-        if [ -z "${key_id}" ]; then
-            # AuthKey_XXXXXXXXXX.p8 → XXXXXXXX. Deriving it like altool does
-            # keeps one source of truth in the file name.
-            key_id="$(basename "${ASC_KEY_PATH}" .p8)"
-            key_id="${key_id#AuthKey_}"
-        fi
+        require_asc_key
+        local key_id
+        key_id="$(asc_key_id)"
         echo "-authenticationKeyPath ${ASC_KEY_PATH} -authenticationKeyID ${key_id} -authenticationKeyIssuerID ${ASC_ISSUER_ID}"
     else
         echo ""
@@ -430,10 +481,21 @@ EOF
     fi
 }
 
+# use_altool_key_dir — with API-key auth, point altool's key search at the
+# configured .p8 directory. Must run in the current shell (not command
+# substitution) so the export reaches xcrun.
+use_altool_key_dir() {
+    if [ -n "${ASC_KEY_PATH:-}" ]; then
+        API_PRIVATE_KEYS_DIR="$(asc_key_dir)"
+        export API_PRIVATE_KEYS_DIR
+    fi
+}
+
 validate() {
     check_altool
     local ipa auth_flags
     ipa="$(resolve_ipa)"
+    use_altool_key_dir
     auth_flags="$(resolve_auth)"
     echo ""
     echo "Validating ${ipa} with App Store Connect..."
@@ -445,6 +507,7 @@ upload() {
     check_altool
     local ipa auth_flags
     ipa="$(resolve_ipa)"
+    use_altool_key_dir
     auth_flags="$(resolve_auth)"
     echo ""
     echo "Uploading ${ipa} to App Store Connect (TestFlight)..."
@@ -455,40 +518,87 @@ upload() {
     echo "The build appears under TestFlight after App Store Connect processing."
 }
 
-# dry_run — print the resolved configuration and commands without executing.
+# dry_run — print the resolved configuration and the exact commands a real
+# run would execute, without executing anything. Also fails early on a bad
+# API-key path/issuer, exactly like package/validate/upload would.
 dry_run() {
+    local version build bump_note out_dir ipa
+    local auth_mode="<unset — validate/upload/release will refuse>"
+    local xcode_auth_flags="" altool_auth_flags="" altool_key_dir=""
+    version="$(plist_value CFBundleShortVersionString)"
+    if [ "${BETA_NO_BUMP:-0}" = "1" ]; then
+        build="$(plist_value CFBundleVersion)"
+        bump_note="skipped (BETA_NO_BUMP=1)"
+    elif [ -n "${BETA_BUILD_NUMBER:-}" ]; then
+        build="${BETA_BUILD_NUMBER}"
+        bump_note="→ ${build} (pinned)"
+    else
+        build=$(( $(plist_value CFBundleVersion) + 1 ))
+        bump_note="→ ${build} (auto)"
+    fi
+    out_dir="${BETA_DIR}/${version}-${build}"
+    ipa="${out_dir}/${APP_NAME}.ipa"
+
+    if [ -n "${ASC_KEY_PATH:-}" ]; then
+        require_asc_key
+        local key_id
+        key_id="$(asc_key_id)"
+        xcode_auth_flags="$(xcodebuild_auth_flags)"
+        altool_auth_flags="$(resolve_auth)"
+        altool_key_dir="$(asc_key_dir)"
+        auth_mode="API key ${ASC_KEY_PATH} (key id ${key_id}, issuer ${ASC_ISSUER_ID})"
+    elif [ -n "${ASC_USERNAME:-}" ]; then
+        auth_mode="Apple ID ${ASC_USERNAME} (${ASC_KEYCHAIN_ITEM:-password from env})"
+        if [ -n "${ASC_KEYCHAIN_ITEM:-}" ]; then
+            altool_auth_flags="-u ${ASC_USERNAME} -p @keychain:${ASC_KEYCHAIN_ITEM}"
+        elif [ -n "${ASC_PASSWORD:-}" ]; then
+            # Never echo the password itself into a plan meant to be shared.
+            altool_auth_flags="-u ${ASC_USERNAME} -p <ASC_PASSWORD>"
+        fi
+    fi
+
+    local archive_cmd export_cmd
+    archive_cmd="xcodebuild archive -project ${PROJECT_DIR}/${APP_NAME}.xcodeproj -scheme ${SCHEME} -archivePath ${out_dir}/${APP_NAME}.xcarchive -destination 'generic/platform=iOS' -configuration Release -derivedDataPath ${DERIVED_DATA} -allowProvisioningUpdates -skipMacroValidation -skipPackagePluginValidation"
+    export_cmd="xcodebuild -exportArchive -archivePath ${out_dir}/${APP_NAME}.xcarchive -exportPath ${out_dir} -exportOptionsPlist ${out_dir}/ExportOptions.plist -allowProvisioningUpdates"
+    if [ -n "${xcode_auth_flags}" ]; then
+        archive_cmd="${archive_cmd} ${xcode_auth_flags}"
+        export_cmd="${export_cmd} ${xcode_auth_flags}"
+    fi
+
     echo ""
     echo "Resolved configuration:"
     echo "  project:            ${PROJECT_DIR}"
     echo "  scheme:             ${SCHEME}"
     echo "  team:               ${TEAM_ID}"
     echo "  derived data:       ${DERIVED_DATA}"
-    echo "  version (plist):    $(plist_value CFBundleShortVersionString)"
+    echo "  version (plist):    ${version}"
     echo "  build (plist):      $(plist_value CFBundleVersion)"
-    if [ "${BETA_NO_BUMP:-0}" = "1" ]; then
-        echo "  bump:               skipped (BETA_NO_BUMP=1)"
-    elif [ -n "${BETA_BUILD_NUMBER:-}" ]; then
-        echo "  bump:               → ${BETA_BUILD_NUMBER} (pinned)"
-    else
-        echo "  bump:               → $(( $(plist_value CFBundleVersion) + 1 )) (auto)"
+    echo "  bump:               ${bump_note}"
+    echo "  auth:               ${auth_mode}"
+    if [ -n "${altool_key_dir}" ]; then
+        echo "  altool key dir:     ${altool_key_dir} (API_PRIVATE_KEYS_DIR)"
     fi
-    if [ -n "${ASC_KEY_PATH:-}" ]; then
-        echo "  auth:               API key ${ASC_KEY_PATH} (issuer ${ASC_ISSUER_ID:-<unset>})"
-    elif [ -n "${ASC_USERNAME:-}" ]; then
-        echo "  auth:               Apple ID ${ASC_USERNAME} (${ASC_KEYCHAIN_ITEM:-password from env})"
-    else
-        echo "  auth:               <unset — validate/upload/release will refuse>"
-    fi
-    echo "  artifact dir:       ${BETA_DIR}/$(plist_value CFBundleShortVersionString)-<build>"
-    echo "  xcodebuild auth:    $(xcodebuild_auth_flags || true)"
+    echo "  artifact dir:       ${out_dir}"
+    echo "  xcodebuild auth:    ${xcode_auth_flags:-<none>}"
+    echo "  altool auth:        ${altool_auth_flags:-<none — validate/upload will refuse>}"
     echo ""
     echo "Command plan:"
     echo "  1. ${PROJECT_DIR}/build.sh generate"
-    echo "  2. tools/check-release-log-safety.sh (release gate)"
-    echo "  3. bump CFBundleVersion (unless BETA_NO_BUMP)"
-    echo "  4. xcodebuild archive    → build/beta/<version>-<build>/seniOS.xcarchive"
-    echo "  5. xcodebuild -exportArchive (method: app-store-connect)"
-    echo "  6. [release only] altool --validate-app → --upload-app"
+    echo "  2. ${PROJECT_DIR}/tools/check-release-log-safety.sh (release gate)"
+    echo "  3. bump CFBundleVersion: ${bump_note}"
+    echo "  4. ${archive_cmd}"
+    echo "  5. ${export_cmd}"
+    if [ -n "${altool_auth_flags}" ]; then
+        local key_env=""
+        if [ -n "${altool_key_dir}" ]; then
+            key_env="API_PRIVATE_KEYS_DIR=${altool_key_dir} "
+        fi
+        echo "  6. [validate/release] ${key_env}xcrun altool --validate-app -f ${ipa} -t ios ${altool_auth_flags}"
+        echo "  7. [upload/release]   ${key_env}xcrun altool --upload-app -f ${ipa} -t ios ${altool_auth_flags}"
+    else
+        echo "  6. [validate/release] xcrun altool --validate-app … (no credentials configured)"
+        echo "  7. [upload/release]   xcrun altool --upload-app … (no credentials configured)"
+    fi
     echo ""
     echo "Nothing executed."
 }
