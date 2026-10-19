@@ -109,6 +109,10 @@ enum CloudChatRouting {
 
             /// The cost governor refuses a call right now.
             case costBlocked
+            /// The app-level cloud switch (the voice-engine stack)
+            /// is off — the master override: no chat egress
+            /// regardless of the chat consent record.
+            case cloudDisabled
         }
     }
 
@@ -151,6 +155,11 @@ enum CloudChatRouting {
         /// existing `geminiCostAllows` input).
         var costAllows: (() throws -> Bool?)?
 
+        /// The app-level cloud switch (voice-engine stack == gemini).
+        /// Absent resolves via resolvedAllowance to not-allowed, so pre-feature
+        /// sites stay fail-closed local; the shipped site always supplies it.
+        var cloudEnabled: (() throws -> Bool?)?
+
         /// All four absent: `decide` selects local, and says why — no
         /// consent has been recorded, because no consent reader exists. A
         /// site that never opted in to chat egress has nothing to disable.
@@ -158,6 +167,7 @@ enum CloudChatRouting {
              online: (() throws -> Bool?)? = nil,
              keyConfigured: (() throws -> Bool?)? = nil,
              costAllows: (() throws -> Bool?)? = nil) {
+            self.cloudEnabled = nil
             self.consent = consent
             self.online = online
             self.keyConfigured = keyConfigured
@@ -175,6 +185,7 @@ enum CloudChatRouting {
     /// routing decision, never later and never earlier).
     static func decide(_ inputs: Inputs) -> ChatRoute {
         decide(consent: resolvedConsent(inputs.consent),
+               cloudEnabled: resolvedAllowance(inputs.cloudEnabled),
                online: resolvedAllowance(inputs.online),
                keyConfigured: resolvedAllowance(inputs.keyConfigured),
                costAllows: resolvedAllowance(inputs.costAllows))
@@ -189,7 +200,11 @@ enum CloudChatRouting {
     static func decide(consent: CloudChatConsentGate.Decision,
                        online: Bool,
                        keyConfigured: Bool,
-                       costAllows: Bool) -> ChatRoute {
+                       costAllows: Bool,
+                       cloudEnabled: Bool = true) -> ChatRoute {
+        // The master switch is the broadest override: off means NO chat
+        // egress, named honestly, before every other axis.
+        guard cloudEnabled else { return .local(reason: .cloudDisabled) }
         if let reason = nonGrantedReason(for: consent) {
             return .local(reason: reason)
         }
