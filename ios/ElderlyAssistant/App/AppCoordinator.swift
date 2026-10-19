@@ -4761,10 +4761,11 @@ final class AppCoordinator: ObservableObject {
             online: { [weak self] in self?.cloudChatReachability.isReachable },
             keyConfigured: { [weak self] in self?.geminiConfigStore.isConfigured ?? false },
             costAllows: { [weak self] in self?.geminiCostGovernor.allowsCall() ?? false },
-            // [MASTER-SWITCH-GATE] The app-level cloud switch (the
-            // voice-engine stack) is the master override: off = no chat
-            // egress regardless of the chat consent record.
-            cloudEnabled: { [weak self] in self?.voiceEngineStack == .gemini }
+            // [MASTER-SWITCH-GATE] The user's cloud-fallback switch is
+            // the master override: off = no chat egress regardless of
+            // the chat consent record (the toggle the Settings row
+            // binds to `cloudFallbackEnabled`).
+            cloudEnabled: { [weak self] in self?.cloudFallbackEnabled ?? false }
         )
         // [CNR T-177] The ONE wrapped cloud responder: the lane's cloud
         // leg and the guard's escalation share this instance, so every
@@ -7045,10 +7046,11 @@ self.noteTalkContractChanged()
             interpreter: gemini,
             isConfigured: { [weak self] in self?.geminiConfigStore.isConfigured ?? false },
             costAllows: { [weak self] in self?.geminiCostGovernor.allowsCall() ?? false },
-            // [MASTER-SWITCH-GATE] The app-level cloud switch (the
-            // voice-engine stack) is the master override: off = no chat
-            // egress regardless of the chat consent record.
-            cloudEnabled: { [weak self] in self?.voiceEngineStack == .gemini }
+            // [MASTER-SWITCH-GATE] The user's cloud-fallback switch is
+            // the master override: off = no chat egress regardless of
+            // the chat consent record (the toggle the Settings row
+            // binds to `cloudFallbackEnabled`).
+            cloudEnabled: { [weak self] in self?.cloudFallbackEnabled ?? false }
         ))
         // Resolved through the seam — the coordinator never names a cloud
         // interpreter for a provider id; the registry does (adding a
