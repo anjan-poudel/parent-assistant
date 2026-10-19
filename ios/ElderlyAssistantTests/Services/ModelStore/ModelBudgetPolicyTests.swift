@@ -581,11 +581,13 @@ final class ModelBudgetPolicyTests: XCTestCase {
         // sentence a household reads is about the device the ledger budgets.
         // Same entry, two probes, two answers: the seam is what moves.
         let standard = ModelLifecycleManager(probe: FixedProbe(
-            physicalMemoryBytes: standardPhone))
+            physicalMemoryBytes: standardPhone),
+            ignoresFitPolicy: { false })
         XCTAssertEqual(standard.availability(of: entry(brain3B)),
                        .unavailable(reason: .requiresEvictingWarmSTT))
         let roomy = ModelLifecycleManager(probe: FixedProbe(
-            physicalMemoryBytes: roomyPhone))
+            physicalMemoryBytes: roomyPhone),
+            ignoresFitPolicy: { false })
         XCTAssertEqual(roomy.availability(of: entry(brain3B)), .available)
         // And a light resident is nobody's policy problem, on either.
         for manager in [standard, roomy] {
@@ -601,7 +603,8 @@ final class ModelBudgetPolicyTests: XCTestCase {
         // the registered `.speechToText` model. A caller passing a preference
         // in would be a second source for a fact the ledger holds.
         let manager = ModelLifecycleManager(probe: FixedProbe(
-            physicalMemoryBytes: standardPhone))
+            physicalMemoryBytes: standardPhone),
+            ignoresFitPolicy: { false })
         manager.register(slot: .speechToText,
                          modelID: ModelCatalog.whisperMediumFinetunedNepali,
                          owner: nil) {}
@@ -614,6 +617,81 @@ final class ModelBudgetPolicyTests: XCTestCase {
                     forSTTModelID: ModelCatalog.whisperMediumFinetunedNepali)))
     }
 
+    /// [CNR-4B 2026-10-20] The persisted developer switch now covers the
+    /// RUNTIME verdict as well as the download, which is what lets the
+    /// owner's only test phone (the 6 GB class) pick and run the 4B chat
+    /// brain. The class checks move; the device floor does not.
+    func testTheDeveloperBypassSkipsTheClassVerdictsButNotTheDeviceFloor() {
+        let standard = ModelBudgetPolicy.standard
+        // `.overClassBudget` — the 4B chat brain's shipped verdict here.
+        XCTAssertEqual(
+            standard.availability(of: entry(brain4B),
+                                  physicalMemoryBytes: standardPhone,
+                                  ignoringClassBudget: true),
+            .available,
+            "the switch exists to make the 4B runnable on the 6 GB class")
+        // `.requiresEvictingWarmSTT` — the same class's refusal of the 3B
+        // beside the warm STT is just as much a class verdict.
+        XCTAssertEqual(
+            standard.availability(of: entry(brain3B),
+                                  physicalMemoryBytes: standardPhone,
+                                  ignoringClassBudget: true),
+            .available)
+        // `.overBrainCeiling` — the ladder is the third class check, not a
+        // fact about the phone.
+        XCTAssertEqual(
+            standard.availability(of: entry(translationBrain),
+                                  physicalMemoryBytes: standardPhone,
+                                  warmSTTLiveBytes: 0,
+                                  ignoringClassBudget: true),
+            .available)
+
+        // The device floor is a claim about the PHONE, not the class, and
+        // stays refused with the switch on (the same floor
+        // `MultipartDownloadTests` pins for the download guard).
+        let belowTheFourBFloor: UInt64 = 3_500_000_000
+        XCTAssertEqual(
+            standard.availability(of: entry(brain4B),
+                                  physicalMemoryBytes: belowTheFourBFloor,
+                                  ignoringClassBudget: true),
+            .unavailable(reason: .deviceTooSmall),
+            "the bypass is the class policy, never the phone's RAM floor")
+
+        // The default is the honest refusal — the switch is opt-in at
+        // every call site that does not pass it.
+        XCTAssertEqual(
+            standard.availability(of: entry(brain4B),
+                                  physicalMemoryBytes: standardPhone),
+            .unavailable(reason: .overClassBudget))
+    }
+
+    /// The wiring, not just the policy: `ModelLifecycleManager.availability`
+    /// — the gate the Settings picker's `.disabled` and the row's Download
+    /// visibility ask — must read the switch. This is the runtime half the
+    /// owner asked for: with it on the pick can be made, with it off the
+    /// refusal stands.
+    func testTheManagerHonoursTheDeveloperSwitchForRuntimeAvailability() {
+        let bypassOn = ModelLifecycleManager(
+            probe: FixedProbe(physicalMemoryBytes: standardPhone),
+            ignoresFitPolicy: { true })
+        XCTAssertEqual(bypassOn.availability(of: entry(brain4B)), .available,
+                       "the Settings picker must offer the picked 4B")
+
+        let bypassOff = ModelLifecycleManager(
+            probe: FixedProbe(physicalMemoryBytes: standardPhone),
+            ignoresFitPolicy: { false })
+        XCTAssertEqual(bypassOff.availability(of: entry(brain4B)),
+                       .unavailable(reason: .overClassBudget),
+                       "with the switch off the honest refusal stands")
+
+        let tooSmall = ModelLifecycleManager(
+            probe: FixedProbe(physicalMemoryBytes: 3_500_000_000),
+            ignoresFitPolicy: { true })
+        XCTAssertEqual(tooSmall.availability(of: entry(brain4B)),
+                       .unavailable(reason: .deviceTooSmall),
+                       "the RAM floor outranks the developer switch")
+    }
+
     func testTheAvailabilityInputsAreTheOnesTheRowsAnswerWith() {
         // [MODEL-WARDEN] `availabilityInputs` is the triple the AUTOMATIC
         // pick walks its ladder with (one reading, many questions);
@@ -621,7 +699,8 @@ final class ModelBudgetPolicyTests: XCTestCase {
         // is what a Settings row asks. They must be the same answer, or a row
         // could refuse a model the picker then loads.
         let manager = ModelLifecycleManager(probe: FixedProbe(
-            physicalMemoryBytes: standardPhone))
+            physicalMemoryBytes: standardPhone),
+            ignoresFitPolicy: { false })
         var inputs = manager.availabilityInputs
         XCTAssertEqual(inputs.physicalMemoryBytes, standardPhone)
         XCTAssertEqual(inputs.policy.deviceClass, .standard)
@@ -782,7 +861,8 @@ final class ModelBudgetPolicyTests: XCTestCase {
     /// this pins that they agree on the two classes where it matters.
     func testTheAutomaticPickAgreesWithTheLedgerTheRowsRead() throws {
         let standard = ModelLifecycleManager(probe: FixedProbe(
-            physicalMemoryBytes: standardPhone))
+            physicalMemoryBytes: standardPhone),
+            ignoresFitPolicy: { false })
         let pick = try XCTUnwrap(LanguageModelResolver.resolvedAutomaticPick(
             kind: .llamaBase,
             language: "ne",
@@ -801,7 +881,8 @@ final class ModelBudgetPolicyTests: XCTestCase {
         // refusal IS the honest degradation — no crash, no loop, and no
         // silent admit of what the policy refused.
         let compact = ModelLifecycleManager(probe: FixedProbe(
-            physicalMemoryBytes: compactPhone))
+            physicalMemoryBytes: compactPhone),
+            ignoresFitPolicy: { false })
         let degraded = try XCTUnwrap(LanguageModelResolver.resolvedAutomaticPick(
             kind: .llamaBase,
             language: "ne",

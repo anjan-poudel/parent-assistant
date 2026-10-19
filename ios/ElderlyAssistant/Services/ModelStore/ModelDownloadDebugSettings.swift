@@ -17,11 +17,23 @@ import Foundation
 /// policy. It is surfaced as a switch row in the hidden technical sheet
 /// (see `TranslateTestView`).
 ///
+/// [CNR-4B 2026-10-20] The switch covers the RUNTIME verdict as well as the
+/// download: the owner's only test phone is the 6 GB class (Anzaan, iPhone
+/// 14 Pro Max), whose policy refuses the 4B chat brain. A download that the
+/// picker then disables would leave the artifact on disk and unusable, so
+/// `ModelLifecycleManager.availability(of:)` passes this switch to
+/// `ModelBudgetPolicy.availability(…, ignoringClassBudget:)` too. Only the
+/// three CLASS verdicts move (`.overClassBudget`,
+/// `.requiresEvictingWarmSTT`, `.overBrainCeiling`); `.deviceTooSmall` is
+/// the phone's RAM floor, not the class's, and still refuses.
+///
 /// It bypasses POLICY only. The size cap, the disk guard, the RAM floor and
 /// the iOS tier are facts about the phone and the artifact, not about the
 /// device class's budget, and every one of them still refuses a download
 /// with this switch on (pinned by
 /// `MultipartDownloadTests.testTheDeveloperBypassSkipsTheClassVerdictAndNothingElse`).
+/// The load-time real-memory pressure gate
+/// (`PressureBrainPickResolver.pressureRefusesLoad`) is likewise untouched.
 enum ModelDownloadDebugSettings {
 
     /// The [DEVSCREEN-DOWNLOAD] switch's key. Declared once so no call site
@@ -29,8 +41,12 @@ enum ModelDownloadDebugSettings {
     /// caption cannot drift onto different keys.
     static let ignoreFitPolicyKey = "modelDownload.ignoreModelFitPolicyForDownloads"
 
-    /// Whether the warden's availability verdict may be skipped for a
-    /// DOWNLOAD.
+    /// Whether the warden's availability verdict may be skipped.
+    ///
+    /// Two readers share it: `ModelDownloadService` skips the download
+    /// refusal, and `ModelLifecycleManager.availability(of:)` skips the
+    /// CLASS verdict on the Settings picker and rows. The device floor is
+    /// still applied by both.
     ///
     /// `bool(forKey:)` answers `false` for an unset key, which is exactly
     /// the default this wants: nobody bypasses the fit policy until a

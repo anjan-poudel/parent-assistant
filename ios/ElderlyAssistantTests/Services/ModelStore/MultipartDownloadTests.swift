@@ -427,6 +427,12 @@ final class MultipartDownloadTests: XCTestCase {
     /// the dev screen is a way around the policy that stops a household
     /// spending data on a model its device class refuses, not a way around
     /// the resource facts of the phone in the hand.
+    ///
+    /// [CNR-4B 2026-10-20] The same switch also opens the RUNTIME verdict
+    /// (`ModelLifecycleManager.availability`), so the model can be chosen
+    /// to run rather than merely landed on disk. That half is pinned in
+    /// `ModelBudgetPolicyTests.testTheManagerHonoursTheDeveloperSwitchForRuntimeAvailability`;
+    /// the guards this test pins are the download-side precedences.
     func testTheDeveloperBypassSkipsTheClassVerdictAndNothingElse() throws {
         let refusedByPolicy: (ModelCatalogEntry) -> ModelAvailability = { _ in
             .unavailable(reason: .overClassBudget)

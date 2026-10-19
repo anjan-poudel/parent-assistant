@@ -367,10 +367,23 @@ struct ModelBudgetPolicy: Sendable, Equatable {
     ///    construction: for them this function returns right after the
     ///    device check above, so their floor is the only bound there is and
     ///    the class line has nothing to do with it.
+    ///
+    /// `ignoringClassBudget` is the persisted developer switch
+    /// (`ModelDownloadDebugSettings.ignoreFitPolicyKey`) applied to the
+    /// RUNTIME verdict. With it on, the three CLASS checks below — the
+    /// budget alone, the budget beside the warm STT, and the brain-file
+    /// ladder — are skipped, while the `minDeviceRAMBytes` floor above is
+    /// not: it is a claim about the phone, not about the class. The switch
+    /// exists so a tester can pick and run a model this class refuses
+    /// (Anzaan, iPhone 14 Pro Max, needs the 4B chat brain); enforcement
+    /// still belongs to the ledger's own gate, which admits a replacing
+    /// `.brain` load over its class budget as `soloOverBudget`, and to the
+    /// real-memory pressure gate at the load site.
     func availability(of entry: ModelCatalogEntry,
                       physicalMemoryBytes: UInt64,
                       warmSTTLiveBytes: UInt64? = nil,
-                      budgetBytes: UInt64? = nil) -> ModelAvailability {
+                      budgetBytes: UInt64? = nil,
+                      ignoringClassBudget: Bool = false) -> ModelAvailability {
         guard entry.kind == .llamaBase || entry.kind == .llamaLoRA else {
             // Not a brain: the class policy has nothing to say about it.
             return entry.minDeviceRAMBytes > physicalMemoryBytes
@@ -380,6 +393,7 @@ struct ModelBudgetPolicy: Sendable, Equatable {
         guard entry.minDeviceRAMBytes <= physicalMemoryBytes else {
             return .unavailable(reason: .deviceTooSmall)
         }
+        if ignoringClassBudget { return .available }
 
         let footprint = ModelLifecycleInventory.footprint(for: .brain,
                                                           modelID: entry.id)
@@ -457,14 +471,16 @@ extension ModelBudgetPolicy {
     func availability(in entries: [ModelCatalogEntry],
                       physicalMemoryBytes: UInt64,
                       warmSTTModelID: ModelID? = nil,
-                      budgetBytes: UInt64? = nil) -> [ModelID: ModelAvailability] {
+                      budgetBytes: UInt64? = nil,
+                      ignoringClassBudget: Bool = false) -> [ModelID: ModelAvailability] {
         let warm = Self.warmSTTLiveBytes(forSTTModelID: warmSTTModelID)
         var result: [ModelID: ModelAvailability] = [:]
         for entry in entries {
             result[entry.id] = availability(of: entry,
                                             physicalMemoryBytes: physicalMemoryBytes,
                                             warmSTTLiveBytes: warm,
-                                            budgetBytes: budgetBytes)
+                                            budgetBytes: budgetBytes,
+                                            ignoringClassBudget: ignoringClassBudget)
         }
         return result
     }

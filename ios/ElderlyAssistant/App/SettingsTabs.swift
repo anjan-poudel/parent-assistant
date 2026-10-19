@@ -526,11 +526,13 @@ struct HiddenSettingsSheet: View {
     @EnvironmentObject private var coordinator: AppCoordinator
     /// [DEVSCREEN-DOWNLOAD] The persisted bypass switch
     /// (`ModelDownloadDebugSettings`). `@AppStorage` writes the same
-    /// `UserDefaults` key `ModelDownloadService` reads per download, so the
-    /// toggle IS the behaviour — there is no second copy to fall out of
-    /// step. Default OFF: an untouched install never bypasses the policy.
+    /// `UserDefaults` key `ModelDownloadService` reads per download AND
+    /// `ModelLifecycleManager.availability(of:)` reads for the picker/row
+    /// verdict, so the toggle IS the behaviour — there is no second copy to
+    /// fall out of step. Default OFF: an untouched install never bypasses
+    /// the policy.
     @AppStorage(ModelDownloadDebugSettings.ignoreFitPolicyKey)
-    private var ignoreFitPolicyForDownloads = false
+    private var ignoresFitPolicy = false
     /// [OWNER-OVERRIDE 2026-10-11] The RAM-tier bypass switch — same
     /// single-source-of-truth pattern as the row above.
     @AppStorage(ModelDownloadDebugSettings.ignoreRamTierKey)
@@ -598,14 +600,22 @@ struct HiddenSettingsSheet: View {
                     // be stepped around makes it useless for exactly the
                     // models it exists to measure.
                     //
+                    // [CNR-4B 2026-10-20] It also opens the RUNTIME verdict
+                    // (`ModelLifecycleManager.availability(of:)`), so a
+                    // tester on the 6 GB class can pick the refused 4B chat
+                    // brain from Settings and actually run it — a download
+                    // the picker then disables would leave the artifact on
+                    // disk and unusable.
+                    //
                     // It sits here, in the sheet a household never opens, and
                     // it is OFF until someone persists it — the bypass is a
                     // developer's deliberate choice for as long as an A/B
                     // runs, never a shipped behaviour. It bypasses POLICY
                     // only: the size cap, disk, RAM and iOS gates still
-                    // refuse a download with it on.
+                    // refuse a download with it on, and the load-time
+                    // real-memory pressure gate still refuses a load.
                     VStack(alignment: .leading, spacing: 8) {
-                        Toggle(isOn: $ignoreFitPolicyForDownloads) {
+                        Toggle(isOn: $ignoresFitPolicy) {
                             Text("settings.hidden.ignoreFitPolicy.label")
                                 .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                                 .foregroundStyle(appearance.colors.textPrimary)
