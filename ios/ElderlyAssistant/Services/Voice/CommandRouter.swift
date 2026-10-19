@@ -2536,7 +2536,14 @@ final class CommandRouter {
     static let medicationDenialPhrases = [
         "i didn't", "i did not", "not yet", "haven't", "havent",
         "औषधि खाएको छैन", "औषधी खाएको छैन", "खाएको छैन",
-        "नखाए", "नखाएको", "लिएको छैन", "भएन", "छैन"
+        "नखाए", "नखाएको", "लिएको छैन"
+        // [DENIAL-OVERMATCH-FIX] (2026-10-19) The bare tokens "भएन" and
+        // "छैन" were REMOVED: substring-matching them stole any utterance
+        // containing "isn't"/"didn't happen" into the med-denial path and
+        // answered it with fixed router.ackDenied copy BEFORE the LLM ran
+        // (device evidence: "aja swasthya thik chhaina" -> "ठीक छ, म पछि
+        // फेरि सम्झाउँछु।" on every brain). The med-specific phrases
+        // above carry the actual denial forms ("खाएको छैन" etc.).
     ]
 
     /// The POSITIVE half of the medication-ack vocabulary: "I took my
