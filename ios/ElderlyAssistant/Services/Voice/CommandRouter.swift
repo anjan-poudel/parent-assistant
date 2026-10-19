@@ -2820,16 +2820,33 @@ final class CommandRouter {
         var readings = clarification.readings
         if let first = readings.first {
             var options = first.options
+            // [NEAR-DUP-SUPPRESSION] (2026-10-19, owner) The propose judge
+            // offers tense variants / near-identical readings of the SAME
+            // word ("dukheko" vs "dukhekai") — a conjugation, not a
+            // correction. Drop options within scalar edit distance 1 of
+            // the heard surface; the domain keys above carry the real
+            // alternatives. Nothing meaningful left -> plain re-prompt,
+            // never a fake X-or-Y question.
+            let surfaceScalars = Array(first.surface.unicodeScalars)
+            options = options.filter {
+                STTCorrector.editDistance(Array($0.unicodeScalars),
+                                          surfaceScalars) >= 2
+            }
             let heardKey = STTCorrector.lexiconKey(of: first.surface)
             for key in domainKeys where
                 STTCorrector.lexiconKey(of: key) != heardKey
                     && !options.contains(key) {
                 options.insert(key, at: 0)
             }
+            options = Array(options.prefix(2))
+            guard !options.isEmpty else {
+                speak(key: "router.reprompt")
+                return
+            }
             readings = [CorrectionClarification.Reading(
                 tokenRange: first.tokenRange,
                 surface: first.surface,
-                options: Array(options.prefix(2)))]
+                options: options)]
         }
         let frame = DialogueFrame.correctionChoice(
             readings: readings,
