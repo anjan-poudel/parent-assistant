@@ -550,12 +550,44 @@ extension PipelineTrace {
     /// content in a Release build.
     func logToConsole(totalMs: Int) {
         // The one line that is always printed: counts and a duration.
-        print("\(Self.consolePrefix) turn \(ranCount)/\(rows.count) stages ran, "
-              + "\(max(0, totalMs)) ms total")
+        let summaryLine = "\(Self.consolePrefix) turn \(ranCount)/\(rows.count) stages ran, "
+            + "\(max(0, totalMs)) ms total"
+        print(summaryLine)
+        Self.appendDebugLog(summaryLine)
         #if DEBUG
-        consoleLines(includeSummaries: true).forEach { print($0) }
+        consoleLines(includeSummaries: true).forEach {
+            print($0)
+            Self.appendDebugLog($0)
+        }
         #else
-        consoleLines(includeSummaries: false).forEach { print($0) }
+        consoleLines(includeSummaries: false).forEach {
+            print($0)
+            Self.appendDebugLog($0)
+        }
+        #endif
+    }
+
+    /// [DEVICE-DEBUG-LOG] (2026-10-20) The turn trail also lands in a
+    /// file inside the app container, so a flaky console stream never
+    /// costs a turn's evidence again. Capped so it cannot grow forever.
+    static func appendDebugLog(_ line: String) {
+        #if DEBUG
+        let fm = FileManager.default
+        guard let dir = fm.urls(for: .applicationSupportDirectory,
+                                in: .userDomainMask).first else { return }
+        let url = dir.appendingPathComponent("anzaan-debug.log")
+        let withNewline = line + "\n"
+        if let attrs = try? fm.attributesOfItem(atPath: url.path),
+           let size = attrs[.size] as? Int, size > 200_000 {
+            try? fm.removeItem(at: url)
+        }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(Data(withNewline.utf8))
+            try? handle.close()
+        } else {
+            try? Data(withNewline.utf8).write(to: url)
+        }
         #endif
     }
 }
