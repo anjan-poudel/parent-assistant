@@ -2085,7 +2085,7 @@ final class AppCoordinator: ObservableObject {
                                                // stating as fact.
                                                chatConfidenceFloor: 0.6,
                                                judgeTimeoutSeconds: 8.0,
-                                               chatTimeoutSeconds: 30),
+                                               chatTimeoutSeconds: 60),
         pluginRegistry: pluginRegistry,
         // [TURN-TIMING-BREAKDOWN] Nil on every build but an
         // `INTENT_ENCODER` one — the picker brain's prompt-build and

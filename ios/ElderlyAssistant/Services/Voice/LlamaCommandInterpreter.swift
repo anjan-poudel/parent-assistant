@@ -509,7 +509,7 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                                       timeoutSeconds: 10,
                                       chatConfidenceFloor: 0.6,
                                       judgeTimeoutSeconds: 8.0,
-                                      chatTimeoutSeconds: 30)
+                                      chatTimeoutSeconds: 60)
     }
 
     private let modelStore: ModelStore
