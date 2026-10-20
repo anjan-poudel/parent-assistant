@@ -228,4 +228,35 @@ final class ModelPreferenceMemoryTests: XCTestCase {
                        "the automatic switch must leave no user-pick memory")
         XCTAssertEqual(ModelPreferenceMemory.rememberedBrain(defaults: suite), [:])
     }
+
+    // MARK: - [BUDGET-OVERRIDE] The single explicit brain pick
+
+    /// The ledger's budget exemption reads the coordinator's stored pick,
+    /// not the per-language memory above: `AppCoordinator.brainModelPreference`
+    /// persists under this key, so the two sites must resolve to the same
+    /// string. "Automatic" is the absence of a value — a nil here is what
+    /// keeps every automatic load on the old arithmetic — and a value that
+    /// is not a model id is corruption, not a pick.
+    func testExplicitBrainPickIsTheStoredCoordinatorPreference() {
+        XCTAssertEqual(ModelPreferenceMemory.brainPreferenceKey,
+                       "brainModelPreference",
+                       "AppCoordinator persists the household's pick under this key")
+        XCTAssertNil(ModelPreferenceMemory.explicitBrainPick(defaults: suite),
+                     "unset means Automatic")
+
+        suite.set(ModelCatalog.intentQwen4BSlotCanon.rawValue,
+                  forKey: ModelPreferenceMemory.brainPreferenceKey)
+        XCTAssertEqual(ModelPreferenceMemory.explicitBrainPick(defaults: suite),
+                       ModelCatalog.intentQwen4BSlotCanon)
+
+        // `ModelID` is a non-failable string wrapper, so a stale/corrupt
+        // stored value round-trips as an id. What keeps it from ever
+        // exempting a real artifact is the ledger's exact-match narrowing
+        // (`budgetExemptSlotLocked`): only the id the resolver actually
+        // registers can match. Pin the verbatim read, not an invented
+        // validation that does not exist.
+        suite.set("not-a-model", forKey: ModelPreferenceMemory.brainPreferenceKey)
+        XCTAssertEqual(ModelPreferenceMemory.explicitBrainPick(defaults: suite),
+                       ModelID("not-a-model"))
+    }
 }

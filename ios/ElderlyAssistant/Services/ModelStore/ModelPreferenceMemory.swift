@@ -33,6 +33,32 @@ enum ModelPreferenceMemory {
     private static let sttKey = "sttModelPreferenceByLanguage"
     private static let brainKey = "brainModelPreferenceByLanguage"
 
+    /// [BUDGET-OVERRIDE 2026-10-20] The single stored brain pick — the
+    /// household's EXPLICIT Settings choice, or `nil` for "Automatic".
+    ///
+    /// This is the same `brainModelPreference` `AppCoordinator` persists and
+    /// `resolveBrainModelID` rule 1 reads. It is exposed here, next to the
+    /// per-language memory, because the ledger's budget exemption
+    /// (`ModelLifecycleManager.budgetExemptSlotLocked(for:)`) must tell an
+    /// explicit pick from the automatic resolution, and this stored value is
+    /// the narrowest source for that fact: the automatic ladder never writes
+    /// it, so a `nil` answer leaves every automatic load byte-identical.
+    ///
+    /// Declared once so the coordinator's persistence site and the ledger's
+    /// reader cannot drift onto different keys.
+    static let brainPreferenceKey = "brainModelPreference"
+
+    /// The explicitly stored brain pick, or `nil` ("Automatic").
+    ///
+    /// `SettingsPersistence.shared` is the default because that is where
+    /// `AppCoordinator.brainModelPreference` writes (keychain first, with a
+    /// UserDefaults mirror), so a reinstall-restored pick is visible here
+    /// exactly as it is to the picker.
+    static func explicitBrainPick(defaults: UserDefaults = SettingsPersistence.shared) -> ModelID? {
+        guard let raw = defaults.string(forKey: brainPreferenceKey) else { return nil }
+        return ModelID(rawValue: raw)
+    }
+
     // MARK: - Read
 
     /// The STT engines the household has EXPLICITLY picked, keyed by the

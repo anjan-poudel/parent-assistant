@@ -61,12 +61,21 @@ final class ModelLifecycleManagerTests: XCTestCase {
     /// A manager on the scripted probe and the fake clock, with the budget
     /// pinned. `budgetOverrideBytes` also pins the device class, which is
     /// what keeps these tests independent of the host's RAM.
-    private func makeManager(budget: UInt64) -> ModelLifecycleManager {
+    ///
+    /// The two owner-override closures are injected explicitly so no test
+    /// depends on the host's persisted `UserDefaults` / keychain: the
+    /// defaults here are the shipped OFF state, which keeps every existing
+    /// budget pin honest. [BUDGET-OVERRIDE] tests opt in.
+    private func makeManager(budget: UInt64,
+                             ignoresFitPolicy: Bool = false,
+                             explicitBrainPick: ModelID? = nil) -> ModelLifecycleManager {
         ModelLifecycleManager(
             probe: probe,
             clock: { [unowned self] in self.now },
             idleEvictionSeconds: ModelLifecycleManager.defaultIdleEvictionSeconds,
-            budgetOverrideBytes: budget)
+            budgetOverrideBytes: budget,
+            ignoresFitPolicy: { ignoresFitPolicy },
+            explicitBrainPick: { explicitBrainPick })
     }
 
     override func tearDown() {
@@ -522,6 +531,145 @@ final class ModelLifecycleManagerTests: XCTestCase {
         XCTAssertTrue(events.contains(.soloOverBudget(
             slot: .brain, liveBytes: expected, budgetBytes: budget)),
             "an over-budget admission must never be silent")
+    }
+
+    // MARK: - 7b. [BUDGET-OVERRIDE] The developer switch's budget exemption
+
+    /// The owner directive of 2026-10-20, and the device trace that forced
+    /// it: on the 6 GB class the 4B chat brain is
+    ///
+    ///     2,497,278,784 (artifact) + 900,000,000 (4B class overhead)
+    ///     = 3,397,278,784 live  vs.  the 3,200,000,000 class budget
+    ///
+    /// i.e. ~197 MB over the ceiling on its own. With the persisted switch
+    /// ON and that brain explicitly picked, its bytes are outside the
+    /// budget: the load is admitted over the ceiling without evicting the
+    /// warm STT. With the switch OFF every line of arithmetic below is the
+    /// old one.
+    func testBudgetOverrideAdmitsTheExplicitBrainOverTheCeilingWithoutEvictingTheSTT() {
+        manager = makeManager(budget: budget,
+                              ignoresFitPolicy: true,
+                              explicitBrainPick: brain4B)
+        let sttOwner = FakeOwner()
+        XCTAssertTrue(load(.speechToText, modelID: sttQ8, owner: sttOwner).isAllowed)
+
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+
+        let brainOwner = FakeOwner()
+        let admission = load(.brain, modelID: brain4B, owner: brainOwner)
+
+        let brainLive = ModelLifecycleInventory.footprint(for: .brain,
+                                                          modelID: brain4B).liveBytes
+        let sttLive = ModelLifecycleInventory.footprint(for: .speechToText,
+                                                        modelID: sttQ8).liveBytes
+        XCTAssertEqual(admission, .allowed(evicted: []),
+                       "the exempt pick is admitted, and the warm STT is not spent to do it")
+        XCTAssertEqual(sttOwner.unloadCount, 0)
+        XCTAssertTrue(manager.isResident(.speechToText))
+        XCTAssertTrue(manager.isResident(.brain))
+        XCTAssertEqual(manager.snapshot().residentLiveBytes, sttLive + brainLive,
+                       "the ledger reports the over-ceiling working set honestly")
+        XCTAssertGreaterThan(brainLive, budget,
+                             "the case only exists because the 4B is over the class budget")
+        XCTAssertTrue(events.contains(.soloOverBudget(
+            slot: .brain, liveBytes: brainLive, budgetBytes: budget)),
+            "an over-ceiling admission stays loud even when the owner asked for it")
+    }
+
+    /// The other half of the trace: once the pick is resident it must not be
+    /// the victim of the next STT load. This used to be
+    /// `.allowed(evicted: [.brain])` — the exact ping-pong that left the
+    /// turn with no handle (`inference_empty_output`).
+    func testBudgetOverrideKeepsTheExplicitBrainFromBeingEvictedForBudget() {
+        manager = makeManager(budget: budget,
+                              ignoresFitPolicy: true,
+                              explicitBrainPick: brain4B)
+        let brainOwner = FakeOwner()
+        XCTAssertTrue(load(.brain, modelID: brain4B, owner: brainOwner).isAllowed)
+
+        let sttOwner = FakeOwner()
+        register(.speechToText, modelID: sttQ8, owner: sttOwner)
+        let admission = manager.prepareLoad(of: .speechToText, modelID: sttQ8)
+
+        XCTAssertEqual(admission, .allowed(evicted: []),
+                       "the picked brain is outside the budget the STT load is judged by")
+        XCTAssertEqual(brainOwner.unloadCount, 0)
+        XCTAssertEqual(sttOwner.unloadCount, 0)
+        XCTAssertTrue(manager.isResident(.brain),
+                      "the brain must still hold its handle when the turn infers")
+    }
+
+    /// The default state, byte-identical to today: with the switch OFF the
+    /// explicit pick is evicted for budget exactly as
+    /// `testEvictedBrainCanReload` pins.
+    func testWithoutTheSwitchTheExplicitBrainIsStillEvictedForBudget() {
+        manager = makeManager(budget: budget,
+                              ignoresFitPolicy: false,
+                              explicitBrainPick: brain4B)
+        let brainOwner = FakeOwner()
+        XCTAssertTrue(load(.brain, modelID: brain4B, owner: brainOwner).isAllowed)
+
+        let sttOwner = FakeOwner()
+        register(.speechToText, modelID: sttQ8, owner: sttOwner)
+        let admission = manager.prepareLoad(of: .speechToText, modelID: sttQ8)
+
+        XCTAssertEqual(admission, .allowed(evicted: [.brain]))
+        XCTAssertEqual(brainOwner.unloadCount, 1)
+        XCTAssertFalse(manager.isResident(.brain))
+    }
+
+    /// "Automatic" is not an explicit pick: `brainModelPreference` is nil,
+    /// so the switch ON must not widen the automatic ladder's hand. The
+    /// ledger cannot tell which artifact Automatic resolved to without the
+    /// stored pick, and this pins that it does not try.
+    func testTheBudgetOverrideDoesNotExemptTheAutomaticPick() {
+        manager = makeManager(budget: budget,
+                              ignoresFitPolicy: true,
+                              explicitBrainPick: nil)
+        let brainOwner = FakeOwner()
+        XCTAssertTrue(load(.brain, modelID: brain4B, owner: brainOwner).isAllowed)
+
+        let sttOwner = FakeOwner()
+        register(.speechToText, modelID: sttQ8, owner: sttOwner)
+
+        XCTAssertEqual(manager.prepareLoad(of: .speechToText, modelID: sttQ8),
+                       .allowed(evicted: [.brain]))
+        XCTAssertEqual(brainOwner.unloadCount, 1)
+    }
+
+    /// Nor is a different explicit pick: the exemption names one artifact,
+    /// and a stale/other registration does not inherit it.
+    func testTheBudgetOverrideDoesNotExemptADifferentExplicitPick() {
+        manager = makeManager(budget: budget,
+                              ignoresFitPolicy: true,
+                              explicitBrainPick: brain17B)
+        let brainOwner = FakeOwner()
+        XCTAssertTrue(load(.brain, modelID: brain4B, owner: brainOwner).isAllowed)
+
+        let sttOwner = FakeOwner()
+        register(.speechToText, modelID: sttQ8, owner: sttOwner)
+
+        XCTAssertEqual(manager.prepareLoad(of: .speechToText, modelID: sttQ8),
+                       .allowed(evicted: [.brain]))
+        XCTAssertEqual(brainOwner.unloadCount, 1)
+    }
+
+    /// Scope pin: the switch lifts the CLASS BUDGET, never the phone's real
+    /// memory floor. Phase 3's hard-bytes re-probe still refuses a load the
+    /// app does not have the non-pageable headroom for.
+    func testBudgetOverrideStillHonoursTheRealHeadroomFloor() {
+        manager = makeManager(budget: budget,
+                              ignoresFitPolicy: true,
+                              explicitBrainPick: brain4B)
+        probe.availableProcessMemoryBytes = 200_000_000
+        let brainOwner = FakeOwner()
+        register(.brain, modelID: brain4B, owner: brainOwner)
+
+        XCTAssertEqual(manager.prepareLoad(of: .brain, modelID: brain4B),
+                       .denied(.insufficientHeadroom))
+        XCTAssertEqual(brainOwner.unloadCount, 0)
+        XCTAssertFalse(manager.isResident(.brain))
     }
 
     // MARK: - 8. Denials
@@ -1768,7 +1916,12 @@ final class ModelLifecycleManagerTests: XCTestCase {
         ModelLifecycleManager(
             probe: probe,
             clock: { [unowned self] in self.now },
-            idleEvictionSeconds: ModelLifecycleManager.defaultIdleEvictionSeconds)
+            idleEvictionSeconds: ModelLifecycleManager.defaultIdleEvictionSeconds,
+            // The owner switches are OFF here for the same reason
+            // `makeManager` injects them: an eviction pin must not depend on
+            // the host's persisted defaults or keychain.
+            ignoresFitPolicy: { false },
+            explicitBrainPick: { nil })
     }
 
     /// Registers and drives a slot resident on a manager other than the one

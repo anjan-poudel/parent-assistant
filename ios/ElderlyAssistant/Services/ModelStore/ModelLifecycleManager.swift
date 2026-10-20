@@ -430,6 +430,18 @@ final class ModelLifecycleManager {
     /// move: the device floor and the ledger's own load gate are untouched.
     private let ignoresFitPolicy: () -> Bool
 
+    /// [BUDGET-OVERRIDE] The brain the household **explicitly** picked in
+    /// Settings (`ModelPreferenceMemory.explicitBrainPick()` — the stored
+    /// `brainModelPreference`), or `nil` for "Automatic".
+    ///
+    /// Read only behind `ignoresFitPolicy()` and only to decide the budget
+    /// exemption (`budgetExemptSlotLocked(for:)`). It is a closure for the
+    /// same reason `ignoresFitPolicy` is: the process default reads the
+    /// persisted pick, and a test injects its own answer. The automatic
+    /// resolution never writes the stored preference, so a `nil` here is
+    /// what keeps every automatic load byte-identical.
+    private let explicitBrainPick: () -> ModelID?
+
     /// [MODEL-WARDEN] Step 1 — the load bounds. All configurable; see
     /// `ModelWardenConfig` for why each number is the number.
     var wardenConfig: ModelWardenConfig
@@ -555,6 +567,9 @@ final class ModelLifecycleManager {
          wardenConfig: ModelWardenConfig = .default,
          ignoresFitPolicy: @escaping () -> Bool = {
              ModelDownloadDebugSettings.ignoresFitPolicy()
+         },
+         explicitBrainPick: @escaping () -> ModelID? = {
+             ModelPreferenceMemory.explicitBrainPick()
          }) {
         self.probe = probe
         self.clock = clock
@@ -562,6 +577,7 @@ final class ModelLifecycleManager {
         self.budgetOverrideBytes = budgetOverrideBytes
         self.wardenConfig = wardenConfig
         self.ignoresFitPolicy = ignoresFitPolicy
+        self.explicitBrainPick = explicitBrainPick
     }
 
     // MARK: Registration
@@ -781,6 +797,7 @@ final class ModelLifecycleManager {
         var residentAfterFirstPlan: UInt64 = 0
         var transientLive: UInt64 = 0
         var excluding: ModelSlot?
+        var budgetExemptSlot: ModelSlot?
 
         lock.lock()
         pruneDeadOwnersLocked()
@@ -819,6 +836,7 @@ final class ModelLifecycleManager {
             residentAfterFirstPlan = plan.residentLive
             transientLive = plan.transientLive
             excluding = plan.excluding
+            budgetExemptSlot = plan.budgetExemptSlot
             budgetUsed = plan.budget
             denial = plan.denial
             soloOverBudget = plan.soloOverBudget
@@ -842,6 +860,7 @@ final class ModelLifecycleManager {
                                               initialDenial: denial,
                                               request: request,
                                               excluding: excluding,
+                                              budgetExemptSlot: budgetExemptSlot,
                                               transientLive: transientLive,
                                               budget: budgetUsed,
                                               incomingLiveBytes: incoming.liveBytes,
@@ -1046,6 +1065,7 @@ final class ModelLifecycleManager {
                                               initialDenial: plan.denial,
                                               request: request,
                                               excluding: plan.excluding,
+                                              budgetExemptSlot: plan.budgetExemptSlot,
                                               transientLive: plan.transientLive,
                                               budget: plan.budget,
                                               incomingLiveBytes: incoming.liveBytes,
@@ -1072,6 +1092,11 @@ final class ModelLifecycleManager {
         /// The slot whose own residency is excluded from the arithmetic,
         /// for a replacing load.
         var excluding: ModelSlot?
+        /// [BUDGET-OVERRIDE] The slot the persisted developer switch exempts
+        /// from the class budget on this admission (the explicitly picked
+        /// brain), or nil. Threaded through the rebuild so the first walk and
+        /// the phase-2c walk judge the same arithmetic.
+        var budgetExemptSlot: ModelSlot?
         /// The budget this request was judged against (class or session —
         /// see the comment in `planLoadLocked`).
         var budget: UInt64 = 0
@@ -1100,11 +1125,23 @@ final class ModelLifecycleManager {
         // See `ModelLoadRequest.replacesSlotContents`: a replacing load
         // excludes the slot's own residency (one position being
         // refilled); a peer load does not (the bytes are additive).
-        let residentLive = request.replacesSlotContents
+        plan.excluding = request.replacesSlotContents ? request.slot : nil
+        // [BUDGET-OVERRIDE] The owner's explicit brain pick, when the
+        // persisted developer switch is ON. Its bytes are outside the class
+        // budget entirely: neither resident nor in-flight bytes count toward
+        // the budget other loads are judged by, and the slot is withheld
+        // from the victim order. See `budgetExemptSlotLocked(for:)`.
+        let budgetExemptSlot = budgetExemptSlotLocked(for: request)
+        plan.budgetExemptSlot = budgetExemptSlot
+        var residentLive = request.replacesSlotContents
             ? residentLiveBytesLocked(excluding: request.slot)
             : residentLiveBytesLocked()
-        plan.transientLive = transientLiveBytesLocked()
-        plan.excluding = request.replacesSlotContents ? request.slot : nil
+        if let budgetExemptSlot, budgetExemptSlot != plan.excluding,
+           entries[budgetExemptSlot]?.isResident == true {
+            let exemptBytes = entries[budgetExemptSlot]?.footprint.liveBytes ?? 0
+            residentLive = residentLive >= exemptBytes ? residentLive - exemptBytes : 0
+        }
+        plan.transientLive = transientLiveBytesLocked(excluding: budgetExemptSlot)
         // Two budgets, and the difference between them is the owner's
         // directive of 2026-09-19: "ModelWarden should UNLOAD other
         // models and load the translation model."
@@ -1158,15 +1195,29 @@ final class ModelLifecycleManager {
             : sessionBudget
         plan.budget = budget
 
+        // [BUDGET-OVERRIDE] The exempt pick's own incoming bytes are outside
+        // the walk as well. Without this the 4B's over-ceiling footprint
+        // would still evict the warm STT on every swap — the ping-pong the
+        // exemption exists to stop — and the pick would be announced as
+        // `soloOverBudget` only after that eviction, which is the trace the
+        // owner reported (brain evicted `reason=budget`, then STT reserved).
+        let judgedIncomingBytes = budgetExemptSlot == request.slot ? 0 : incoming.liveBytes
+        if budgetExemptSlot == request.slot && incoming.liveBytes > budget {
+            // The switch is ON but the admission still crosses the ceiling.
+            // Keep the over-budget admission loud: the event is the field
+            // capture's evidence that this was the owner's override.
+            plan.soloOverBudget = true
+        }
+
         let walk = planVictimsLocked(excluding: plan.excluding,
                                      residentLive: residentLive,
                                      transientLive: plan.transientLive,
-                                     incomingLiveBytes: incoming.liveBytes,
+                                     incomingLiveBytes: judgedIncomingBytes,
                                      budget: budget,
                                      priority: request.priority,
                                      now: now,
                                      config: config,
-                                     withheld: [])
+                                     withheld: budgetExemptSlot.map { [$0] } ?? [])
         plan.victims = walk.victims
         for victim in walk.victims {
             // Marking non-resident here (rather than after the unload)
@@ -1229,6 +1280,50 @@ final class ModelLifecycleManager {
         return plan
     }
 
+    /// [BUDGET-OVERRIDE] (owner directive, 2026-10-20) The slot the persisted
+    /// developer switch exempts from the class budget on this admission, or
+    /// nil. **Caller holds the lock.**
+    ///
+    /// The switch (`ModelDownloadDebugSettings.ignoreFitPolicyKey`) already
+    /// skips the class verdict at download and in `availability(of:)`. This
+    /// is its third consequence, and the one the field trace demanded: on
+    /// the owner's 6 GB test phone the explicitly picked 4B chat brain is
+    /// ~3.40 GB live against a 3.2 GB budget, so the ledger admitted it as
+    /// `soloOverBudget` and then evicted it (or the warm STT) on the next
+    /// load. The console showed the brain slot evicted `reason=budget`
+    /// immediately before an STT reservation, and the turn then inferred on
+    /// no handle (`picker_inference ... failed(inference_empty_output)`).
+    /// With the switch ON that pick's bytes are outside the budget:
+    /// admitted over the ceiling, never a budget victim, and never a reason
+    /// to evict the STT. The device may page or thrash; the owner accepted
+    /// that risk for testing.
+    ///
+    /// Three narrowings keep every other path unchanged:
+    ///
+    ///  · `.brain` only — the picker's chat position. `.intentBrain`,
+    ///    `.translateBrain` and the light residents keep their own rules.
+    ///  · An EXPLICIT stored pick only. `brainModelPreference` is `nil` under
+    ///    "Automatic" (`ModelPreferenceMemory.explicitBrainPick()`), so the
+    ///    automatic ladder can never match and stays byte-identical.
+    ///  · The slot must be registered as that exact pick (or the incoming
+    ///    load must be it), so a stale registration cannot exempt a
+    ///    different artifact.
+    ///
+    /// The real-device gates are deliberately untouched: the catalog's
+    /// `minDeviceRAMBytes` floor (`.deviceTooSmall`), phase 3's `hardBytes`
+    /// headroom re-probe, and `PressureBrainPickResolver.pressureRefusesLoad`
+    /// still refuse a load the phone genuinely cannot hold. This lifts the
+    /// class BUDGET, not the phone's memory floor.
+    private func budgetExemptSlotLocked(for request: ModelLoadRequest?) -> ModelSlot? {
+        guard ignoresFitPolicy() else { return nil }
+        guard let picked = explicitBrainPick() else { return nil }
+        if entries[.brain]?.modelID == picked { return .brain }
+        if let request, request.slot == .brain, request.modelID == picked {
+            return .brain
+        }
+        return nil
+    }
+
     /// Phases 2b–2d of the admission walk — the preemption ask, the rebuild
     /// around what was refused, and the unloads. **Caller holds no lock.**
     ///
@@ -1241,6 +1336,7 @@ final class ModelLifecycleManager {
                                        initialDenial: ReservationDenial?,
                                        request: ModelLoadRequest,
                                        excluding: ModelSlot?,
+                                       budgetExemptSlot: ModelSlot?,
                                        transientLive: UInt64,
                                        budget: UInt64,
                                        incomingLiveBytes: UInt64,
@@ -1313,6 +1409,12 @@ final class ModelLifecycleManager {
                 markResidentLocked(slot)
                 withheldLive += entries[slot]?.footprint.liveBytes ?? 0
             }
+            // [BUDGET-OVERRIDE] The exempt pick is withheld from the rebuilt
+            // walk for the same reason it was withheld from the first one:
+            // the refusal set is the owners' answer, the exemption is the
+            // owner's switch, and both mean "these bytes are not yours".
+            var rebuildWithheld = withheld
+            if let budgetExemptSlot { rebuildWithheld.insert(budgetExemptSlot) }
             let rebuilt = planVictimsLocked(excluding: excluding,
                                             residentLive: residentAfterFirstPlan + withheldLive,
                                             transientLive: transientLive,
@@ -1321,7 +1423,7 @@ final class ModelLifecycleManager {
                                             priority: request.priority,
                                             now: now,
                                             config: config,
-                                            withheld: withheld)
+                                            withheld: rebuildWithheld)
             victims += rebuilt.victims
             for victim in rebuilt.victims {
                 markNonResidentLocked(victim)
@@ -1689,8 +1791,14 @@ final class ModelLifecycleManager {
     }
 
     /// The transient term `T(t)`: bytes reserved and not yet in memory.
-    private func transientLiveBytesLocked() -> UInt64 {
-        reservations.values.reduce(UInt64(0)) { $0 + $1.liveBytes }
+    /// In-flight bytes (`T(t)`). `excluding` is the [BUDGET-OVERRIDE]
+    /// exemption: the explicitly picked brain's own reservation is outside
+    /// the class budget, so it must not block the STT (or anyone else) while
+    /// the brain is still paging in.
+    private func transientLiveBytesLocked(excluding excluded: ModelSlot? = nil) -> UInt64 {
+        reservations.values.reduce(UInt64(0)) {
+            $0 + ($1.slot == excluded ? 0 : $1.liveBytes)
+        }
     }
 
     /// Which resident is actually blocking the load — the largest one that
@@ -2691,6 +2799,9 @@ final class ModelLifecycleManager {
     /// still refuses, and the real-memory pressure gate at the load site is
     /// untouched. The automatic ladder does not read this method — it asks
     /// the policy directly — so the switch widens only the explicit pick.
+    /// The same switch also drives the ledger's budget exemption for that
+    /// pick (`budgetExemptSlotLocked(for:)`), so the model this verdict
+    /// offers as selectable is not evicted `reason=budget` on the next load.
     ///
     /// `physicalMemoryBytes` is the probe's. `budgetOverrideBytes` is a test
     /// hook that pins the *class* only, so a test host whose RAM disagrees

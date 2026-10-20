@@ -27,13 +27,25 @@ import Foundation
 /// `.requiresEvictingWarmSTT`, `.overBrainCeiling`); `.deviceTooSmall` is
 /// the phone's RAM floor, not the class's, and still refuses.
 ///
+/// [BUDGET-OVERRIDE 2026-10-20] Third consequence, and the one the device
+/// trace demanded: the LEDGER's budget too. With the switch on, the
+/// explicitly stored brain pick is exempt from the class budget in
+/// `ModelLifecycleManager` — admitted over the ceiling, never chosen as a
+/// budget victim, and never a reason to evict the warm STT. The 4B on the
+/// 6 GB class (3.40 GB live against a 3.2 GB budget) therefore stays
+/// loaded instead of being evicted `reason=budget` before the turn's
+/// inference. The exemption is narrowed to `.brain` + an explicit stored
+/// pick (`ModelPreferenceMemory.explicitBrainPick()`); "Automatic" never
+/// matches, so the automatic ladder is byte-identical.
+///
 /// It bypasses POLICY only. The size cap, the disk guard, the RAM floor and
 /// the iOS tier are facts about the phone and the artifact, not about the
 /// device class's budget, and every one of them still refuses a download
 /// with this switch on (pinned by
 /// `MultipartDownloadTests.testTheDeveloperBypassSkipsTheClassVerdictAndNothingElse`).
-/// The load-time real-memory pressure gate
-/// (`PressureBrainPickResolver.pressureRefusesLoad`) is likewise untouched.
+/// The ledger's real-memory gates — phase 3's `hardBytes` headroom re-probe
+/// and `PressureBrainPickResolver.pressureRefusesLoad` — are likewise
+/// untouched.
 enum ModelDownloadDebugSettings {
 
     /// The [DEVSCREEN-DOWNLOAD] switch's key. Declared once so no call site

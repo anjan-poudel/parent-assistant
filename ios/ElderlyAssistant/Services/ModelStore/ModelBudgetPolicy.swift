@@ -375,10 +375,12 @@ struct ModelBudgetPolicy: Sendable, Equatable {
     /// ladder — are skipped, while the `minDeviceRAMBytes` floor above is
     /// not: it is a claim about the phone, not about the class. The switch
     /// exists so a tester can pick and run a model this class refuses
-    /// (Anzaan, iPhone 14 Pro Max, needs the 4B chat brain); enforcement
-    /// still belongs to the ledger's own gate, which admits a replacing
-    /// `.brain` load over its class budget as `soloOverBudget`, and to the
-    /// real-memory pressure gate at the load site.
+    /// (Anzaan, iPhone 14 Pro Max, needs the 4B chat brain). The ledger
+    /// carries the same switch — `ModelLifecycleManager` exempts the
+    /// explicitly picked `.brain` from its budget arithmetic, so the pick is
+    /// admitted over the ceiling and is never a budget victim or a reason to
+    /// evict the STT. The real-memory gates at the load site (phase 3's
+    /// `hardBytes` re-probe and `PressureBrainPickResolver`) still refuse.
     func availability(of entry: ModelCatalogEntry,
                       physicalMemoryBytes: UInt64,
                       warmSTTLiveBytes: UInt64? = nil,

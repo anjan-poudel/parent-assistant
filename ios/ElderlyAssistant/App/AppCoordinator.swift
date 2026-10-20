@@ -700,7 +700,7 @@ final class AppCoordinator: ObservableObject {
             applyBrainModel()
         }
     }
-    private static let brainPreferenceKey = "brainModelPreference"
+    private static let brainPreferenceKey = ModelPreferenceMemory.brainPreferenceKey
 
     /// Which voice engine stack is active: on-device Whisper+LLaMA, or the
     /// cloud Gemini pivot (default). A UI preference, not a secret —
