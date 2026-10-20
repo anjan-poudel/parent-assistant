@@ -4859,9 +4859,17 @@ final class CommandRouter {
         case .setReminder:
             handleSetReminder(command, raw: raw)
         case .healthQuery:
-            // First-class stub intent — honest "not yet" (spec §5.1).
-            emit(eventType: "command_health_query_stub", outcome: "info")
-            speakWithVisibleOutcome(key: "router.healthNotAvailable")
+            // [HEALTH-REPLY-DELIVERY] (2026-10-20) The conversational
+            // brain answers health complaints with a real spoken reply —
+            // deliver it. The stub stays only for the no-reply case
+            // (field evidence: 'मेरो ढाड दुख्यो' → health_query with a
+            // reply, which the stub was discarding).
+            if let reply = sanitisedModelReply(command.reply) {
+                speak(text: reply)
+            } else {
+                emit(eventType: "command_health_query_stub", outcome: "info")
+                speakWithVisibleOutcome(key: "router.healthNotAvailable")
+            }
         case .music:
             // [SPOTIFY] (2026-10-07) T-116: the model-resolved music
             // intent routes to the same music path the ladder stage
