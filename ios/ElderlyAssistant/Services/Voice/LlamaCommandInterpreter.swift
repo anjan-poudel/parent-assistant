@@ -1236,8 +1236,17 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         // published and replace this row with its own measurement; the
         // offered-brain test requires SOME row, and the LLaMA 3.2 fallback
         // would mis-frame it.
-        ModelCatalog.intentQwenS43ChatV17: .qwen3,  // inherited (see above)
-        ModelCatalog.intentQwen4BS43ChatV17: .qwen3,  // [CNR-4B] same lineage/family as the 1.7B sibling
+        // [CHAT-RAW-FRAMING] (2026-10-20) The v17 chat variants were
+        // trained on the RAW seeds/chat_prompt_template.txt with NO
+        // chat-template wrapper (train_chat_lora tokenizes the raw
+        // text) — framing them .qwen3 at inference is a
+        // training/inference mismatch: the model never saw the
+        // <|im_start|> markers and the 4B answered the mismatched
+        // template with leading whitespace the strict chat grammar
+        // rejects -> EMPTY decode on device. Raw framing matches
+        // training byte-for-byte.
+        ModelCatalog.intentQwenS43ChatV17: .raw,
+        ModelCatalog.intentQwen4BS43ChatV17: .raw,  // [CNR-4B] same lineage/family as the 1.7B sibling
         ModelCatalog.intentQwenS43:   .qwen3,
         ModelCatalog.qwen4BNepali:    .raw,
         ModelCatalog.qwen3_4BInstruct: .qwen3,
