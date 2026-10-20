@@ -893,9 +893,22 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                         // the resident handle, awaited, immediately before
                         // the judge's own decode (see the note above).
                         await ChatSampling.apply(parameters, to: llm.core)
-                        let output = try await llm.core.generateWithConstraints(
+                        var output = try await llm.core.generateWithConstraints(
                             from: formattedPrompt,
                             jsonSchema: parameters.schema)
+                        // [CHAT-EMPTY-RETRY] (2026-10-20) Field evidence
+                        // (Anzaan, 4B chat): the constrained decode can
+                        // return EMPTY on the first draw while the same
+                        // prompt+schema decodes fine elsewhere — one
+                        // second draw, same params, same seed, before
+                        // reporting the failure. Deterministic either
+                        // way: both draws use the fixed seed.
+                        if output.isEmpty {
+                            await ChatSampling.apply(parameters, to: llm.core)
+                            output = try await llm.core.generateWithConstraints(
+                                from: formattedPrompt,
+                                jsonSchema: parameters.schema)
+                        }
                         return output.isEmpty ? .failed : .success(output)
                     } catch {
                         return .failed
@@ -1703,9 +1716,22 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                         // decodes byte-identically on turn N and turn 1
                         // (NFR-CNR-001).
                         await ChatSampling.apply(parameters, to: llm.core)
-                        let output = try await llm.core.generateWithConstraints(
+                        var output = try await llm.core.generateWithConstraints(
                             from: formattedPrompt,
                             jsonSchema: parameters.schema)
+                        // [CHAT-EMPTY-RETRY] (2026-10-20) Field evidence
+                        // (Anzaan, 4B chat): the constrained decode can
+                        // return EMPTY on the first draw while the same
+                        // prompt+schema decodes fine elsewhere — one
+                        // second draw, same params, same seed, before
+                        // reporting the failure. Deterministic either
+                        // way: both draws use the fixed seed.
+                        if output.isEmpty {
+                            await ChatSampling.apply(parameters, to: llm.core)
+                            output = try await llm.core.generateWithConstraints(
+                                from: formattedPrompt,
+                                jsonSchema: parameters.schema)
+                        }
                         return output.isEmpty ? .failed : .success(output)
                     } catch {
                         return .failed
