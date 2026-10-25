@@ -30,8 +30,9 @@ content that must never reach a Release log sink:
 
 and, over each feature's own roots (`FEATURE_ROOTS` — the live-camera-
 translation feature's, AM-5, and later additions for the point-ask,
-profile-interview, Spotify, dialogue, contacts, call-dialer and, at T-185,
-conversational-Nepali-replies features):
+profile-interview, Spotify, dialogue, contacts, call-dialer,
+conversational-Nepali-replies and, at T-026, reminders-instructions
+features):
 
   3. a Release-compiled console write at all — the feature's events go
      through the sanitising observability bus or not at all;
@@ -317,6 +318,22 @@ FEATURE_ROOTS = [
     "App/MedicationManageListView.swift",
     "App/MedicationVisualAidViews.swift",
     "App/SettingsTabs.swift",
+    # [REMINDERS-INSTRUCTIONS T-026 / design-l2 §6.5, FR-RIE-011,
+    # NFR-RIE-003/004/005] The instruction feature's own sources: the words
+    # the family types, the captions and the media filenames are household
+    # content. No console write anywhere in these files, in any
+    # configuration, and no unlisted metadata key (rules 3-6 whole). The
+    # directory root carries the whole `Services/Instructions` group; the
+    # two view/capture files are listed individually because they live in
+    # the shared `App/` directory, where the rest is not this feature's code.
+    # `RoutineNotificationContent.swift` is deliberately NOT a root: it lives
+    # in a shared directory, writes no log, and carries two producer keys and
+    # a Bool (design §6.5). The registry entries below keep the seven
+    # `instruction_*` payloads graded if an emitter ever moves to a shared
+    # file; while they live here the root already grades them.
+    "Services/Instructions",
+    "App/InstructionViews.swift",
+    "App/InstructionCapture.swift",
 ]
 
 # [CONVERSATIONAL-NEPALI-REPLIES T-185 / design-l1 §16, FR-CNR-012] The
@@ -372,6 +389,21 @@ FEATURE_EVENT_TYPES = {
     "medication_evidence_captured": "the evidence capture's outcome row (AppCoordinator)",
     "calendar_share_significant_event_enqueued": "a significant medication event queued for the shared calendar (CalendarShareService)",
     "calendar_share_write_failed": "a significant-event calendar write that failed (CalendarShareService)",
+    # [REMINDERS-INSTRUCTIONS T-026 / design-l2 §6.4, §6.5] The seven
+    # instruction_* event types. The emitter currently lives in the feature's
+    # own root (`Services/Instructions/InstructionObservability.swift`), so
+    # rules 5-6 already grade every statement there; these registry entries
+    # are the durable anchor if an emitter ever moves to a shared file, and
+    # the coverage self-test keeps a stale name visible. The event payloads
+    # carry closed tokens, integers and the existing hashed id only — never
+    # instruction text, a caption, a filename or a path.
+    "instruction_media_import": "the video import outcome (InstructionObservability)",
+    "instruction_media_delete": "a video delete outcome (InstructionObservability)",
+    "instruction_media_availability": "a card availability answer other than available (InstructionObservability)",
+    "instruction_playback": "a playback terminal outcome (InstructionObservability)",
+    "instruction_image_load": "an image load outcome (InstructionObservability)",
+    "instruction_capture_permission": "a permission check that stopped a recording attempt (InstructionObservability)",
+    "instruction_orphan_purge": "one launch sweep's purge outcome (InstructionObservability)",
 }
 
 # The shipped allow-list the feature's metadata keys must be declared in.
@@ -1007,7 +1039,7 @@ def scan(path: str, role: str, allowed_keys, source_root: str):
 # imported, never stubbed. Deleting a leg to get a green build is the one
 # repair that is never available.
 #
-# Three claims are proved, and only these:
+# Four claims are proved, and only these:
 #   1. every `FEATURE_ROOTS` entry resolves to at least one Swift file in the
 #      shipped tree, and every `FEATURE_EVENT_TYPES` entry is still emitted
 #      somewhere there — an empty root or a stale event type grades nothing;
@@ -1018,7 +1050,13 @@ def scan(path: str, role: str, allowed_keys, source_root: str):
 #      control that makes the RED above attributable to the root, not to the
 #      seed. That leg fails loudly if a later root swallows the control path,
 #      which is the moment to re-run the "is any content path unscanned?"
-#      audit that every root addition owes.
+#      audit that every root addition owes;
+#   4. [T-026] a planted violation in a TEMPORARY COPY of a real instruction
+#      feature file is caught by name, while the shipping bytes are compared
+#      before and after and must be identical. The copy is built in a
+#      temporary directory and the seed is appended in memory: this proves the
+#      gate grades the feature's actual source shape without the self-test
+#      ever writing to the shipping tree.
 # ---------------------------------------------------------------------------
 
 SELF_TEST_SOURCE_DIR = "ElderlyAssistant"
@@ -1155,13 +1193,75 @@ struct SelfTestSeededEventField {
 }
 ''' % _SEED_CONTENT_FIELD
 
+# [REMINDERS-INSTRUCTIONS T-026 / design-l2 §6.5] The instruction feature's
+# copy legs. Unlike the mirrors above, these are built from a REAL feature
+# file read out of the shipped tree: the coverage claim is demonstrated on the
+# tree's own shape, so it cannot drift from a synthetic stand-in. The file is
+# opened read-only; the seeded statement is appended in memory and written to
+# the temporary tree only. `run_self_test` compares the shipping bytes before
+# and after the subprocess, so "the shipping tree is not modified" is checked,
+# not assumed.
+_SELF_TEST_INSTRUCTION_COPY = "Services/Instructions/InstructionObservability.swift"
+_SEED_INSTRUCTION_TEXT = r'print("seeded instruction text: \(instructionText)")'
 
-def self_test_legs():
-    """The coverage self-test's tree legs: (label, files, expected_exit, tokens).
+_SEEDED_INSTRUCTION_LOG_FILE = '''
+
+// SEEDED VIOLATION (T-026 self-test): the instruction feature's own root
+// grades a Release console write and content-bearing text, in any
+// configuration — both rules must name the copied file and this statement.
+struct SelfTestSeededInstructionLog {
+    func seeded(_ instructionText: String) {
+        %s
+    }
+}
+''' % _SEED_INSTRUCTION_TEXT
+
+_SEEDED_UNKNOWN_EVENT_FILE = '''
+
+// SEEDED VIOLATION (T-026 self-test): an event name the registry does not
+// know, in a feature-root file, does not escape grading — the file's own
+// root applies rules 5-6, so the unlisted metadata key is caught.
+struct SelfTestSeededUnknownEvent {
+    let bus: ObservabilityBus
+
+    func seeded(_ token: String) {
+        bus.emit(ObservabilityEvent(component: "instruction_media", eventType: "instruction_future_unknown", durationMs: nil, outcome: "info", errorCode: nil, metadata: ["transcript": token]))
+    }
+}
+'''
+
+
+def _shipped_feature_source(relative: str) -> str:
+    """Read one shipped feature file read-only, for the self-test's copy legs."""
+    with open(os.path.join(DEFAULT_SOURCE_ROOT, relative), encoding="utf-8") as handle:
+        return handle.read()
+
+
+def _read_bytes(path: str):
+    """A file's bytes, or None. Used only to prove the shipping tree is unchanged."""
+    try:
+        with open(path, "rb") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def self_test_legs(instruction_copy=None):
+    """The coverage self-test's tree legs: (label, files, expected_exit, tokens[, guarded]).
 
     The pristine leg is the clean half of the differential: the same feature
     and shared-file paths the seeded legs use, with the shipped shapes — it
-    must pass, or the seeds prove nothing.
+    must pass, or the seeds prove nothing. A fifth element lists
+    `FEATURE_ROOTS`-relative shipping paths whose bytes must be identical
+    before and after the leg: the T-026 copy legs use it to prove the
+    temporary-copy exercise never modified the shipping tree. The clean copy
+    of the real instruction file is the differential control for its seeded
+    siblings (the RED is attributable to the seed, not to the copy).
+
+    `instruction_copy` is the real feature file's text. `run_self_test` reads
+    it itself so a missing copy source is reported as a failed case rather
+    than a traceback; when it is None (the read failed) the copy legs are
+    omitted because the caller has already recorded why.
     """
     pristine = {
         "Services/Intents/CloudChat/CloudChatRouting.swift": _CLEAN_ROUTING_FILE,
@@ -1169,7 +1269,7 @@ def self_test_legs():
         "Services/Intents/IntentRouter.swift": _CLEAN_INTENT_ROUTER_FILE,
         "Services/Voice/NepaliGrammarGuard.swift": _CLEAN_GUARD_FILE,
     }
-    return [
+    legs = [
         ("pristine-feature-paths", pristine, 0, []),
         (
             "seeded-raw-print-in-feature-path",
@@ -1206,6 +1306,41 @@ def self_test_legs():
             [],
         ),
     ]
+    if instruction_copy is not None:
+        # [REMINDERS-INSTRUCTIONS T-026] Temporary-copy legs over the real
+        # instruction feature file. The clean copy must pass; the two seeded
+        # copies must fail by file, rule and statement; every leg's guarded
+        # entry proves the shipping bytes were not touched.
+        legs.extend([
+            (
+                "clean-copy-of-instruction-feature-file",
+                {_SELF_TEST_INSTRUCTION_COPY: instruction_copy},
+                0,
+                [],
+                [_SELF_TEST_INSTRUCTION_COPY],
+            ),
+            (
+                "seeded-instruction-text-in-feature-copy",
+                {_SELF_TEST_INSTRUCTION_COPY:
+                    instruction_copy + _SEEDED_INSTRUCTION_LOG_FILE},
+                1,
+                [_SELF_TEST_INSTRUCTION_COPY,
+                 "feature-console-write", "feature-content-print",
+                 _SEED_INSTRUCTION_TEXT],
+                [_SELF_TEST_INSTRUCTION_COPY],
+            ),
+            (
+                "seeded-unknown-event-in-feature-copy",
+                {_SELF_TEST_INSTRUCTION_COPY:
+                    instruction_copy + _SEEDED_UNKNOWN_EVENT_FILE},
+                1,
+                [_SELF_TEST_INSTRUCTION_COPY,
+                 "feature-unlisted-metadata-key", "'transcript'",
+                 "instruction_future_unknown"],
+                [_SELF_TEST_INSTRUCTION_COPY],
+            ),
+        ])
+    return legs
 
 
 def shipped_coverage_failures(source_root: str):
@@ -1261,7 +1396,32 @@ def run_self_test(quiet=False) -> int:
         else "; ".join(coverage),
     ))
 
-    for label, files, expected_exit, tokens in self_test_legs():
+    # [T-026] Read the real instruction file once. A missing copy source is a
+    # failed case, not a traceback: the temporary-copy legs are what
+    # demonstrate the feature's coverage, so their input disappearing must be
+    # reported in the self-test's own vocabulary.
+    try:
+        instruction_copy = _shipped_feature_source(_SELF_TEST_INSTRUCTION_COPY)
+    except OSError as error:
+        instruction_copy = None
+        cases.append((
+            "instruction-copy-source",
+            False,
+            f"the instruction feature copy source "
+            f"{_SELF_TEST_INSTRUCTION_COPY} is unreadable: {error} "
+            "(the temporary-copy coverage legs cannot run)",
+        ))
+
+    for leg in self_test_legs(instruction_copy):
+        label, files, expected_exit, tokens = leg[:4]
+        # [T-026] A temporary-copy leg names the shipping file(s) it copied.
+        # Their bytes are read before and after the subprocess: the seed is
+        # written only under `tmp`, and this comparison proves it.
+        guarded = tuple(leg[4]) if len(leg) > 4 else ()
+        shipped_before = {
+            relative: _read_bytes(os.path.join(DEFAULT_SOURCE_ROOT, relative))
+            for relative in guarded
+        }
         with tempfile.TemporaryDirectory(prefix="log-safety-coverage-") as tmp:
             source_root = os.path.join(tmp, SELF_TEST_SOURCE_DIR)
             for relative, content in files.items():
@@ -1274,8 +1434,18 @@ def run_self_test(quiet=False) -> int:
                  "--source-root", source_root,
                  "--allow-list", DEFAULT_ALLOW_LIST, "--quiet"],
                 capture_output=True, text=True)
+        shipped_after = {
+            relative: _read_bytes(os.path.join(DEFAULT_SOURCE_ROOT, relative))
+            for relative in guarded
+        }
+        changed = [relative for relative in guarded
+                   if shipped_before[relative] != shipped_after[relative]]
         output = process.stdout + process.stderr
-        if expected_exit == 0:
+        if changed:
+            passed = False
+            detail = ("the shipping tree changed during a temporary-copy leg: "
+                      + ", ".join(changed))
+        elif expected_exit == 0:
             passed = process.returncode == 0
             detail = ("exit 0 — nothing seeded was rejected" if passed
                       else f"expected exit 0, got {process.returncode}: {output.strip()}")
@@ -1317,7 +1487,8 @@ def run_self_test(quiet=False) -> int:
         print("    graded. Fix the coverage or the seed — never delete the leg.")
         return 1
     print("  ✓ every root and feature event type resolves, every seeded violation "
-          "is caught by name, and the off-root control stays quiet")
+          "is caught by name, the off-root control stays quiet, and the "
+          "temporary-copy legs left the shipping tree byte-identical")
     return 0
 
 
@@ -1332,8 +1503,10 @@ def main(argv=None) -> int:
         help="run the gate's own coverage self-test — every FEATURE_ROOTS "
              "entry and FEATURE_EVENT_TYPES entry must resolve in the shipped "
              "tree, a seeded violation in a new feature path must be caught by "
-             "name, and the same seed outside every root must stay quiet "
-             "(T-185)")
+             "name, the same seed outside every root must stay quiet, and a "
+             "seeded violation in a temporary copy of an instruction feature "
+             "file must be caught without modifying the shipping tree "
+             "(T-185, T-026)")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument(
         "--disable-rule", action="append", default=[], metavar="RULE-ID",

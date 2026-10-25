@@ -107,6 +107,19 @@ targets:
       # app bundle and every Text("key") renders as the raw key.
       - path: ElderlyAssistant/Resources/Localizable.xcstrings
         buildPhase: resources
+      # [RIE-T020] Camera and microphone usage descriptions in both shipped
+      # languages (design-l2 §10.6, FR-RIE-025). `Resources` is excluded
+      # from the source glob above, so each localised `InfoPlist.strings`
+      # must be declared explicitly — the same single-file pattern as
+      # Localizable.xcstrings. Xcode copies a file declared under
+      # `<lang>.lproj/` into that localisation directory in the app bundle,
+      # which is where iOS reads it for the system permission dialogs.
+      # Without these entries neither file ships and every system language
+      # falls back to the plist English. They are resources, not sources.
+      - path: ElderlyAssistant/Resources/en.lproj/InfoPlist.strings
+        buildPhase: resources
+      - path: ElderlyAssistant/Resources/ne.lproj/InfoPlist.strings
+        buildPhase: resources
       # Bundled dialect-ID centroid table (voice-personalisation P0 slice D).
       # SEED-CENTROIDS placeholder — regenerate from field corpora with
       # tools/generate-seed-dialect-centroids.py (schema + loader:

@@ -199,7 +199,13 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// manage-list landing (2026-10-15): that unit adds one further key
     /// (`settings.meds.saveFailed`, the honest failed-save line) —
     /// total 1,482 — so this baseline is 1,463.
-    private static let dialogueBaselineKeyCount = 1_465
+    /// T-019 (instruction copy landing, 2026-10-25): the instruction family
+    /// adds 36 keys and the actual tree carries 1,534. This pin was already
+    /// 14 below the actual tree before T-019 (the historical comments above
+    /// stop at 1,463 while the catalogue had 1,498), so it is re-measured
+    /// against the actual tree rather than incremented: 1,534 − 19 dialogue
+    /// keys = 1,515.
+    private static let dialogueBaselineKeyCount = 1_515
 
     /// The design-l2 §16 draft copy, verbatim, both languages. The owner
     /// copy review is a later step recorded in the plan; this pin makes
@@ -495,7 +501,11 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// manage-list landing (2026-10-15): that unit adds one further key
     /// (`settings.meds.saveFailed`, the honest failed-save line) —
     /// total 1,482 — so this baseline is 1,477.
-    private static let callingBaselineKeyCount = 1_479
+    /// T-019 (instruction copy landing, 2026-10-25): the catalogue carries
+    /// 1,534 keys. This pin was already 14 below the actual tree before
+    /// T-019, so it is re-measured rather than incremented: 1,534 − 5 calling
+    /// keys = 1,529.
+    private static let callingBaselineKeyCount = 1_529
 
     /// The authored copy, both languages. The design freezes the keys and
     /// the parameter contracts, not the wording (catalog-time copy), so
@@ -1054,7 +1064,11 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// landing (2026-10-15): that unit adds one further key
     /// (`settings.meds.saveFailed`, the honest failed-save line) —
     /// total 1,482 — so this baseline is 1,459.
-    private static let familyContactsBaselineKeyCount = 1_461
+    /// T-019 (instruction copy landing, 2026-10-25): the catalogue carries
+    /// 1,534 keys. This pin was already 16 below the actual tree before
+    /// T-019, so it is re-measured rather than incremented: 1,534 − 23
+    /// family-contacts keys = 1,511.
+    private static let familyContactsBaselineKeyCount = 1_511
 
     /// Scenario: All 21 keys exist in both languages — the behavioural
     /// half. Every key resolves through the shipped lproj bundles in both
@@ -1682,7 +1696,11 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// (2026-10-15): that unit adds one further key
     /// (`settings.meds.saveFailed`, the honest failed-save line) —
     /// total 1,482 — so the baseline is 1,464.
-    private static let cloudChatBaselineKeyCount = 1_466
+    /// T-019 (instruction copy landing, 2026-10-25): the catalogue carries
+    /// 1,534 keys. This pin was already 16 below the actual tree before
+    /// T-019, so it is re-measured rather than incremented: 1,534 − 18
+    /// cloud-chat keys = 1,516.
+    private static let cloudChatBaselineKeyCount = 1_516
 
     /// The design-l1 §17 copy as authored by this unit, verbatim, both
     /// languages. T-176 owns the final disclosure-copy review; this pin
@@ -2822,4 +2840,875 @@ final class L10nCatalogCoverageTests: XCTestCase {
         }
     }
 
+    // MARK: T-019 — the instruction copy family (design-l2 §10.5, 36 keys)
+
+    /// The pinned inventory: design-l2 §10.5's 36 instruction keys, in
+    /// catalogue order — one contiguous alphabetical block between
+    /// `homeTimer.stop` and `intentLog.clear`. `instruction.atTimeFormat` is
+    /// the family's only formatting key (§10.5: "At %@" through `L10n.fmt`,
+    /// never string concatenation, because Nepali puts the time before
+    /// "बजे").
+    private static let instructionKeys: [String] = [
+        "instruction.add",
+        "instruction.atTimeFormat",
+        "instruction.camera.denied",
+        "instruction.camera.unavailable",
+        "instruction.change",
+        "instruction.done",
+        "instruction.foregroundNote",
+        "instruction.image.accessibility",
+        "instruction.image.change",
+        "instruction.image.unavailable",
+        "instruction.kind.image",
+        "instruction.kind.text",
+        "instruction.kind.video",
+        "instruction.microphone.denied",
+        "instruction.reminderUnavailable",
+        "instruction.remove",
+        "instruction.removed",
+        "instruction.saveFailed",
+        "instruction.savePartial",
+        "instruction.textPlaceholder",
+        "instruction.title",
+        "instruction.unsupported",
+        "instruction.useVideo",
+        "instruction.video.accessibility",
+        "instruction.video.add",
+        "instruction.video.change",
+        "instruction.video.play",
+        "instruction.video.preparing",
+        "instruction.video.record",
+        "instruction.video.recordingLimit",
+        "instruction.video.saveFailed",
+        "instruction.video.tooLarge",
+        "instruction.video.tooLong",
+        "instruction.video.unavailable",
+        "instruction.video.unreadable",
+        "instruction.video.validating",
+    ]
+
+    /// The catalog total minus the instruction family's 36 keys, measured
+    /// at this unit's landing (2026-10-25): the tree carried 1,498 keys,
+    /// zero `instruction.*` — the family adds exactly its 36 and removes
+    /// none, so the total is pinned at 1,534 = 1,498 + 36.
+    private static let instructionBaselineKeyCount = 1_498
+
+    /// The design-l2 §10.5 copy, verbatim, both languages (NFR-RIE-002:
+    /// real Devanagari Nepali, no English fallback). This pin makes every
+    /// wording change — including an "improvement" — a deliberate one
+    /// rather than a drift. The two behaviour-bearing keys are the table's
+    /// appended rows 35–36 (review-l1 B-1/B-2).
+    private static let instructionCopy: [(key: String, en: String, ne: String)] = [
+        ("instruction.add", "Add instruction", "निर्देशन थप्नुहोस्"),
+        ("instruction.atTimeFormat", "At %@", "%@ बजे"),
+        ("instruction.camera.denied",
+         "To record a video, allow the camera in Settings.",
+         "भिडियो रेकर्ड गर्न सेटिङमा क्यामेरा अनुमति दिनुहोस्।"),
+        ("instruction.camera.unavailable",
+         "The camera isn't available right now. You can choose a video instead.",
+         "क्यामेरा अहिले उपलब्ध छैन। तपाईं भिडियो छान्न सक्नुहुन्छ।"),
+        ("instruction.change", "Change instruction", "निर्देशन बदल्नुहोस्"),
+        ("instruction.done", "Done", "भयो"),
+        ("instruction.foregroundNote",
+         "This video plays only when the app is open.",
+         "यो भिडियो एप खोलेर मात्र हेर्न सकिन्छ।"),
+        ("instruction.image.accessibility", "Instruction photo", "निर्देशनको फोटो"),
+        ("instruction.image.change", "Change photo", "फोटो बदल्नुहोस्"),
+        ("instruction.image.unavailable",
+         "This photo can't be shown.",
+         "यो फोटो देखाउन सकिएन।"),
+        ("instruction.kind.image", "Photo", "फोटो"),
+        ("instruction.kind.text", "Text", "पाठ"),
+        ("instruction.kind.video", "Video", "भिडियो"),
+        ("instruction.microphone.denied",
+         "To record a video, allow the microphone in Settings.",
+         "भिडियो रेकर्ड गर्न सेटिङमा माइक्रोफोन अनुमति दिनुहोस्।"),
+        ("instruction.reminderUnavailable",
+         "This reminder is no longer available.",
+         "यो सम्झना अब उपलब्ध छैन।"),
+        ("instruction.remove", "Remove instruction", "निर्देशन हटाउनुहोस्"),
+        ("instruction.removed",
+         "This instruction is no longer available.",
+         "यो निर्देशन अब उपलब्ध छैन।"),
+        ("instruction.saveFailed",
+         "Your changes weren't saved. Try again.",
+         "तपाईंका परिवर्तन बचत हुन सकेनन्। फेरि प्रयास गर्नुहोस्।"),
+        ("instruction.savePartial",
+         "The video couldn't be saved. Add it again from the event.",
+         "भिडियो बचत हुन सकेन। कार्यक्रमबाट फेरि थप्नुहोस्।"),
+        ("instruction.textPlaceholder", "Write the instruction", "निर्देशन लेख्नुहोस्"),
+        ("instruction.title", "Instruction", "निर्देशन"),
+        ("instruction.unsupported",
+         "This instruction may not show correctly.",
+         "यो निर्देशन राम्ररी देखिन नसक्ने हुन सक्छ।"),
+        ("instruction.useVideo", "Use this video", "यो भिडियो प्रयोग गर्नुहोस्"),
+        ("instruction.video.accessibility",
+         "Instruction video. Play", "निर्देशनको भिडियो। चलाउनुहोस्"),
+        ("instruction.video.add", "Choose a video", "भिडियो छान्नुहोस्"),
+        ("instruction.video.change", "Change video", "भिडियो बदल्नुहोस्"),
+        ("instruction.video.play", "Play", "चलाउनुहोस्"),
+        ("instruction.video.preparing",
+         "Getting the video ready…", "भिडियो तयार हुँदैछ…"),
+        ("instruction.video.record", "Record a video", "भिडियो रेकर्ड गर्नुहोस्"),
+        ("instruction.video.recordingLimit",
+         "Recording stops by itself after 3 minutes.",
+         "रेकर्डिङ ३ मिनेटपछि आफै रोकिन्छ।"),
+        ("instruction.video.saveFailed",
+         "The video couldn't be saved. Try again.",
+         "भिडियो बचत हुन सकेन। फेरि प्रयास गर्नुहोस्।"),
+        ("instruction.video.tooLarge",
+         "That video is too big for this phone. Choose a smaller one.",
+         "यो भिडियो यो फोनका लागि धेरै ठूलो छ। सानो भिडियो छान्नुहोस्।"),
+        ("instruction.video.tooLong",
+         "That video is too long. Choose one 3 minutes or shorter.",
+         "यो भिडियो धेरै लामो छ। ३ मिनेटसम्मको भिडियो छान्नुहोस्।"),
+        ("instruction.video.unavailable",
+         "This video can't be played right now.",
+         "यो भिडियो अहिले चलाउन सकिएन।"),
+        ("instruction.video.unreadable",
+         "That video can't be played on this phone. Choose a different one.",
+         "यो भिडियो यो फोनमा चल्दैन। अर्को भिडियो छान्नुहोस्।"),
+        ("instruction.video.validating",
+         "Checking the video…", "भिडियो जाँच हुँदैछ…"),
+    ]
+
+    /// The technical-token ban for the instruction copy (NFR-RIE-002: the
+    /// copy is elder-facing plain language — no error codes, no file
+    /// names, no technical tokens). Matching is lowercased, so "Error"
+    /// trips the "error" row.
+    private static let instructionForbiddenTokens: [String] = [
+        "error", "warning", "http", "www",
+        ".swift", ".json", ".xcstrings", ".mov", ".mp4", ".m4a",
+        ".png", ".jpg", ".jpeg", ".log", ".plist", ".mp3", ".txt",
+    ]
+
+    /// Scenario: Every instruction key resolves in both languages — the
+    /// behavioural half. Every key resolves through the shipped lproj
+    /// bundles in both languages, the Nepali resolution is Devanagari copy
+    /// and the two resolutions differ, so a forgotten or pasted
+    /// translation fails here rather than shipping English to a Nepali
+    /// household.
+    func testEveryInstructionKeyResolvesInBothLanguages() {
+        XCTAssertEqual(Self.instructionKeys.count, 36,
+                       "the instruction family is exactly the 36 design-l2 "
+                       + "§10.5 keys")
+        for key in Self.instructionKeys {
+            let en = L10n.str(key, locale: english)
+            let ne = L10n.str(key, locale: nepali)
+            XCTAssertNotEqual(en, key,
+                              "\(key) does not resolve in en — the catalog "
+                              + "entry is missing")
+            XCTAssertNotEqual(ne, key,
+                              "\(key) does not resolve in ne — the catalog "
+                              + "entry is missing")
+            XCTAssertFalse(en.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "\(key) resolves to empty en copy")
+            XCTAssertFalse(ne.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "\(key) resolves to empty ne copy")
+            XCTAssertNotEqual(en, ne,
+                              "\(key) resolves to the SAME string in en and ne "
+                              + "— the Nepali copy is missing (or the key was "
+                              + "forgotten in one language)")
+            XCTAssertTrue(Self.isDevanagariOrPlaceholderOnly(ne),
+                          "\(key) resolves to non-Devanagari Nepali copy: \(ne)")
+        }
+    }
+
+    /// Scenario: The family is exactly the 36 pinned keys — present,
+    /// `manual`, both units `translated`, Nepali Devanagari, placeholders
+    /// matching — and the catalog total is pinned at 1,534 = the 1,498-key
+    /// baseline plus the 36 (NFR-RIE-002).
+    func testInstructionFamilyPassesCoverageCheck() {
+        let catalog = sourceCatalog()
+
+        XCTAssertEqual(Self.instructionBaselineKeyCount + Self.instructionKeys.count,
+                       1_534,
+                       "the pinned baseline and inventory must sum to the "
+                       + "1,534 total")
+        XCTAssertEqual(catalog.count, 1_534,
+                       "the catalog total must be exactly 1,534 = the "
+                       + "\(Self.instructionBaselineKeyCount)-key baseline "
+                       + "plus the 36 instruction keys")
+
+        let failures = Self.instructionCoverageFailures(in: catalog)
+        XCTAssertTrue(failures.isEmpty,
+                      "the instruction coverage check failed:\n"
+                      + failures.joined(separator: "\n"))
+
+        // The immediate alphabetical neighbours of the insertion point: if
+        // a textual insertion had clobbered an entry, one of these moves.
+        assertCatalogValue("homeTimer.stop",
+                           en: "Stop timer", ne: "टाइमर बन्द गर्नुहोस्")
+        assertCatalogValue("intentLog.clear", en: "Clear", ne: "हटाउनुहोस्")
+    }
+
+    /// DoD evidence: every value is the design-l2 §10.5 copy, verbatim, in
+    /// both languages — a dropped translation or an English copy pasted
+    /// into the `ne` slot fails here.
+    func testInstructionCopyIsPinnedVerbatim() {
+        XCTAssertEqual(Self.instructionCopy.map { $0.key }, Self.instructionKeys,
+                       "the copy table and the pinned inventory must agree")
+        for (key, expectedEN, expectedNE) in Self.instructionCopy {
+            assertCatalogValue(key, en: expectedEN, ne: expectedNE)
+        }
+    }
+
+    /// NFR-RIE-002 / design-l2 §10.5: `instruction.atTimeFormat` is the
+    /// ONLY key that carries a placeholder (one `%@` in each language —
+    /// Nepali puts the time before "बजे", English after "At"). A dropped,
+    /// duplicated or stray placeholder would mis-place the argument or
+    /// crash `L10n.fmt`.
+    func testInstructionPlaceholdersMatchBetweenLanguages() {
+        for key in Self.instructionKeys {
+            guard let en = catalogValue(key, language: "en"),
+                  let ne = catalogValue(key, language: "ne") else {
+                XCTFail("\(key) is missing an en or ne value")
+                continue
+            }
+            let expected = key == "instruction.atTimeFormat" ? 1 : 0
+            XCTAssertEqual(Self.placeholderCount(in: en),
+                           Self.placeholderCount(in: ne),
+                           "\(key): the en and ne copies disagree on how many "
+                           + "arguments the format string takes")
+            XCTAssertEqual(Self.placeholderCount(in: en), expected,
+                           "\(key): only instruction.atTimeFormat may carry "
+                           + "one placeholder (design-l2 §10.5)")
+        }
+    }
+
+    /// Implementation note: the 36 entries are written as one contiguous,
+    /// alphabetically ordered block between `homeTimer.stop` and
+    /// `intentLog.clear`. JSONSerialization loses key order, so this pin
+    /// reads the raw file's key lines (the dialogue pin's convention).
+    func testInstructionKeysAreAlphabeticallyContiguous() {
+        let keyLines = rawCatalogKeyLines()
+        XCTAssertGreaterThan(keyLines.count, 1_000,
+                             "the key-line scan found too few entries — the "
+                             + "catalog layout changed and this pin is blind")
+
+        // Family membership, not a prefix sweep: the family is the pinned
+        // inventory, so a bare prefix filter would let an unpinned
+        // `instruction.*` key pass silently.
+        let family = Set(Self.instructionKeys)
+        let indices = keyLines.enumerated()
+            .filter { family.contains($0.element) }
+            .map(\.offset)
+        XCTAssertEqual(indices.count, Self.instructionKeys.count,
+                       "exactly \(Self.instructionKeys.count) instruction "
+                       + "keys must sit in the file")
+        guard let first = indices.first, let last = indices.last else { return }
+
+        XCTAssertEqual(Array(indices), Array(first...last),
+                       "the instruction family must be one contiguous block")
+        XCTAssertEqual(Array(keyLines[first...last]), Self.instructionKeys,
+                       "the family must be in alphabetical order")
+        if first > 0 {
+            XCTAssertEqual(keyLines[first - 1], "homeTimer.stop",
+                           "the alphabetical predecessor moved")
+        }
+        if last + 1 < keyLines.count {
+            XCTAssertEqual(keyLines[last + 1], "intentLog.clear",
+                           "the alphabetical successor moved")
+        }
+    }
+
+    /// Scenario: The copy speaks to a person. No instruction copy names an
+    /// error code, a file name or an ASCII technical token in either
+    /// language (NFR-RIE-002; the elder-facing copy rule). The banned
+    /// token list is pinned so it cannot be quietly emptied, and two shape
+    /// probes catch code-shaped (ERR404) and extension-shaped (.mov)
+    /// tokens a fixed list could not enumerate.
+    func testInstructionFamilyHasNoCodesOrFilenames() {
+        XCTAssertEqual(Self.instructionForbiddenTokens,
+                       ["error", "warning", "http", "www",
+                        ".swift", ".json", ".xcstrings", ".mov", ".mp4",
+                        ".m4a", ".png", ".jpg", ".jpeg", ".log", ".plist",
+                        ".mp3", ".txt"],
+                       "the forbidden-token list must stay pinned")
+
+        let codeShape = try? NSRegularExpression(
+            pattern: "\\b[A-Z]{2,}\\d{2,}\\b")
+        let extensionShape = try? NSRegularExpression(
+            pattern: "[a-zA-Z]+\\.[a-zA-Z]{1,4}\\b")
+        XCTAssertNotNil(codeShape, "the code-shape probe must compile")
+        XCTAssertNotNil(extensionShape, "the extension-shape probe must compile")
+
+        var findings: [String] = []
+        for key in Self.instructionKeys {
+            for language in ["en", "ne"] {
+                guard let value = catalogValue(key, language: language) else {
+                    findings.append("\(key).\(language) is missing from the "
+                                    + "catalog")
+                    continue
+                }
+                let lowered = value.lowercased()
+                for token in Self.instructionForbiddenTokens
+                    where lowered.contains(token) {
+                    findings.append("\(key): \(language) copy names a "
+                                    + "technical token or file name "
+                                    + "(\(token)): \(value)")
+                }
+                if let codeShape,
+                   let match = codeShape.firstMatch(
+                       in: value,
+                       range: NSRange(value.startIndex..<value.endIndex,
+                                      in: value)) {
+                    let offending = (value as NSString)
+                        .substring(with: match.range)
+                    findings.append("\(key): \(language) copy carries a "
+                                    + "code-shaped token (\(offending)): "
+                                    + "\(value)")
+                }
+                if let extensionShape,
+                   let match = extensionShape.firstMatch(
+                       in: value,
+                       range: NSRange(value.startIndex..<value.endIndex,
+                                      in: value)) {
+                    let offending = (value as NSString)
+                        .substring(with: match.range)
+                    findings.append("\(key): \(language) copy carries an "
+                                    + "extension-shaped token "
+                                    + "(\(offending)): \(value)")
+                }
+            }
+        }
+        XCTAssertTrue(findings.isEmpty,
+                      "the instruction copy must carry no error codes, file "
+                      + "names or technical tokens:\n"
+                      + findings.joined(separator: "\n"))
+    }
+
+    /// Scenario: The behaviour-bearing copy is present and exact. The two
+    /// restored keys (review-l1 B-1/B-2) resolve in both languages with
+    /// the design's verbatim copy — a missing key is a visible defect on
+    /// the owner-deleted and foreground-only surfaces, not a cosmetic gap.
+    func testReminderUnavailableAndForegroundNoteArePresentInBothLanguages() {
+        let keys = ["instruction.reminderUnavailable",
+                    "instruction.foregroundNote"]
+        for key in keys {
+            XCTAssertTrue(Self.instructionKeys.contains(key),
+                          "\(key) must sit in the pinned inventory")
+            let en = L10n.str(key, locale: english)
+            let ne = L10n.str(key, locale: nepali)
+            XCTAssertNotEqual(en, key,
+                              "\(key) does not resolve in en — the catalog "
+                              + "entry is missing")
+            XCTAssertNotEqual(ne, key,
+                              "\(key) does not resolve in ne — the catalog "
+                              + "entry is missing")
+            XCTAssertFalse(en.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "\(key) resolves to empty en copy")
+            XCTAssertFalse(ne.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "\(key) resolves to empty ne copy")
+            XCTAssertTrue(Self.isDevanagariOrPlaceholderOnly(ne),
+                          "\(key) resolves to non-Devanagari Nepali copy: \(ne)")
+        }
+        assertCatalogValue("instruction.reminderUnavailable",
+                           en: "This reminder is no longer available.",
+                           ne: "यो सम्झना अब उपलब्ध छैन।")
+        assertCatalogValue("instruction.foregroundNote",
+                           en: "This video plays only when the app is open.",
+                           ne: "यो भिडियो एप खोलेर मात्र हेर्न सकिन्छ।")
+    }
+
+    /// The family's one formatting key, pinned alone: English puts "At"
+    /// first, Nepali puts the time first, and both carry exactly one `%@`
+    /// (design-l2 §10.5 — resolved through `L10n.fmt`, never string
+    /// concatenation).
+    func testAtTimeFormatPlaceholderCounts() {
+        guard let en = catalogValue("instruction.atTimeFormat", language: "en"),
+              let ne = catalogValue("instruction.atTimeFormat", language: "ne") else {
+            XCTFail("instruction.atTimeFormat is missing an en or ne value")
+            return
+        }
+        XCTAssertEqual(en, "At %@",
+                       "instruction.atTimeFormat English copy drifted")
+        XCTAssertEqual(ne, "%@ बजे",
+                       "instruction.atTimeFormat Nepali copy drifted")
+        XCTAssertEqual(Self.placeholderCount(in: en), 1,
+                       "the English value must carry exactly one placeholder")
+        XCTAssertEqual(Self.placeholderCount(in: ne), 1,
+                       "the Nepali value must carry exactly one placeholder")
+        XCTAssertTrue(en.contains("%@") && ne.contains("%@"),
+                      "the single placeholder must be `%@` in both languages")
+        XCTAssertTrue(en.hasPrefix("At ") && ne.hasSuffix("बजे"),
+                      "English puts \"At\" first and Nepali puts the time "
+                      + "first — the positional contract §10.5 pins")
+    }
+
+    // MARK: T-019 helpers
+
+    /// The instruction coverage check as a pure function over a parsed
+    /// catalog, so the gate's rules can be exercised against fixtures.
+    /// Every failure names the offending key and the rule it broke. The
+    /// family is the pinned 36 — a key shaped like an instruction key but
+    /// outside the inventory is a thirty-seventh user-visible string.
+    static func instructionCoverageFailures(in catalog: [String: Any]) -> [String] {
+        var failures: [String] = []
+        let inventory = Set(instructionKeys)
+        let family = catalog.keys.filter { $0.hasPrefix("instruction.") }
+
+        for key in family.sorted() where !inventory.contains(key) {
+            failures.append("\(key): in the instruction family but not in the "
+                            + "pinned inventory (exactly \(instructionKeys.count) "
+                            + "keys)")
+        }
+        for key in instructionKeys where !family.contains(key) {
+            failures.append("\(key): missing from the catalog")
+        }
+        for key in instructionKeys {
+            guard let entry = catalog[key] as? [String: Any] else { continue }
+            if entry["extractionState"] as? String != "manual" {
+                failures.append("\(key): extractionState is not `manual`")
+            }
+            guard let localizations = entry["localizations"] as? [String: Any] else {
+                failures.append("\(key): no localizations")
+                continue
+            }
+            var values: [String: String] = [:]
+            for language in ["en", "ne"] {
+                guard let unit = (localizations[language] as? [String: Any])?["stringUnit"]
+                        as? [String: Any],
+                      let value = unit["value"] as? String,
+                      !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    failures.append("\(key): missing or empty \(language) value")
+                    continue
+                }
+                values[language] = value
+                if unit["state"] as? String != "translated" {
+                    failures.append("\(key): \(language) is not marked `translated`")
+                }
+                if language == "ne" {
+                    if containsASCIILetters(value) {
+                        failures.append("\(key): Nepali value carries ASCII "
+                                        + "letters — \(value)")
+                    }
+                    if !isDevanagariOrPlaceholderOnly(value) {
+                        failures.append("\(key): Nepali value is not Devanagari "
+                                        + "— \(value)")
+                    }
+                }
+            }
+            // The placeholder rule (design-l2 §10.5): exactly
+            // `instruction.atTimeFormat` carries one `%@`; no other key
+            // carries any `%`.
+            let mustCarryPlaceholder = key == "instruction.atTimeFormat"
+            for (language, value) in values {
+                let count = placeholderCount(in: value)
+                if mustCarryPlaceholder {
+                    if count != 1 || !value.contains("%@") {
+                        failures.append("\(key): \(language) must carry exactly "
+                                        + "one %@ placeholder (found \(count) %)")
+                    }
+                } else if count != 0 {
+                    failures.append("\(key): \(language) carries a % but only "
+                                    + "instruction.atTimeFormat may")
+                }
+            }
+            if let en = values["en"], let ne = values["ne"], en == ne {
+                failures.append("\(key): en and ne resolve to the same value — "
+                                + "the Nepali copy is missing")
+            }
+        }
+        return failures
+    }
+
+    // MARK: T-020 — camera/microphone usage disclosure and built-bundle registration (design-l2 §10.6)
+
+    /// The two keys this unit owns. Both already existed in the shipped
+    /// plist; T-020 amends their English values (retaining every existing
+    /// disclosure and adding the video/on-device clauses) and ships the two
+    /// `InfoPlist.strings` files. No other usage key is added.
+    private static let usageDisclosureKeys: [String] = [
+        "NSCameraUsageDescription",
+        "NSMicrophoneUsageDescription",
+    ]
+
+    /// design-l2 §10.6, verbatim: the amended English plist values. The
+    /// source Info.plist must equal them, and the `en.lproj` file must match
+    /// them byte-for-byte (D10's English fallback plus the localised copy).
+    private static let cameraUsageEnglish = "The camera is used to verify medication intake, to photograph appliances, remotes, or screens when you ask for help using them, and to take an ordinary photo when you ask for one — that photo is then saved to your photo library. The camera is also used to read printed text aloud in your language with live translation. Appliance photos are sent to the assistant's cloud service so it can guide you. For live translation, only the text seen by the camera is sent — and only when the phone's own dictionary cannot translate it. Photos of that text are never sent. When you tap \"what is this?\", the small picture of the tapped thing — only that picture, and nothing else from your camera — is sent to the assistant's cloud service to work out what it is. The camera can also record a short instruction video for a reminder; that video stays on this phone and is never uploaded or shared."
+    private static let microphoneUsageEnglish = "The assistant needs microphone access to hear your voice commands. By default your speech goes to Gemini, a cloud service, to be turned into text — you can switch to a fully on-device engine in Settings → Voice Engine. The microphone is also used to record the sound in a short instruction video for a reminder; that recording stays on this phone and is never uploaded or shared."
+
+    /// design-l2 §10.6, verbatim: the Nepali table. Full translations for
+    /// both keys — a half-translated permission dialog is worse than an
+    /// English one.
+    private static let cameraUsageNepali = "क्यामेरा औषधि सेवन पुष्टि गर्न, तपाईंले सहयोग माग्नुहुँदा उपकरण, रिमोट वा स्क्रिनको फोटो खिच्न, र तपाईंले भन्नुहुँदा साधारण फोटो खिच्न प्रयोग गरिन्छ — त्यो फोटो त्यसपछि तपाईंको फोटो लाइब्रेरीमा सुरक्षित गरिन्छ। क्यामेरा तपाईंको भाषामा छापिएको अक्षर लाइभ अनुवादसँगै ठूलो स्वरमा पढ्न पनि प्रयोग गरिन्छ। उपकरणका फोटो असिस्टेन्टको क्लाउड सेवामा पठाइन्छ ताकि यसले तपाईंलाई मार्गदर्शन गर्न सकोस्। लाइभ अनुवादका लागि क्यामेराले देखेको अक्षर मात्र पठाइन्छ — र त्यो पनि फोनको आफ्नै शब्दकोशले अनुवाद गर्न नसकेको अवस्थामा मात्र। ती अक्षरका तस्बिर कहिल्यै पठाइँदैनन्। तपाईंले \"यो के हो?\" ट्याप गर्नुहुँदा ट्याप गरिएको वस्तुको सानो तस्बिर — त्यो तस्बिर मात्र, क्यामेराको अरू केही होइन — असिस्टेन्टको क्लाउड सेवामा पठाइन्छ ताकि यो के हो भनेर पत्ता लगाउन सकियोस्। क्यामेरा सम्झनाका लागि छोटो निर्देशन भिडियो रेकर्ड गर्न पनि प्रयोग गरिन्छ; त्यो भिडियो यही फोनमा रहन्छ र कहिल्यै अपलोड वा साझा गरिँदैन।"
+    private static let microphoneUsageNepali = "असिस्टेन्टलाई तपाईंका आवाज आदेश सुन्न माइक्रोफोनको अनुमति चाहिन्छ। पूर्वनिर्धारित रूपमा तपाईंको बोली जेमिनी, एउटा क्लाउड सेवामा पठाइन्छ, अक्षरमा बदल्न — तपाईं सेटिङ → भ्वाइस इन्जिनमा गएर पूर्ण रूपमा फोनभित्रै चल्ने इन्जिन रोज्न सक्नुहुन्छ। माइक्रोफोन सम्झनाका लागि छोटो निर्देशन भिडियोको आवाज रेकर्ड गर्न पनि प्रयोग गरिन्छ; त्यो रेकर्डिङ यही फोनमा रहन्छ र कहिल्यै अपलोड वा साझा गरिँदैन।"
+
+    private static let usageDisclosureNepali: [String: String] = [
+        "NSCameraUsageDescription": L10nCatalogCoverageTests.cameraUsageNepali,
+        "NSMicrophoneUsageDescription": L10nCatalogCoverageTests.microphoneUsageNepali,
+    ]
+
+    /// The untouched photo-library disclosure (design-l2 §10.6: the picker
+    /// is out of process and writes nothing to Photos, so this key keeps its
+    /// shipped text and no photo-read key is added).
+    private static let photoLibraryAddDisclosure = "Photos you take with the assistant are saved to your photo library so you can keep them. The assistant can only ADD photos — it never looks at or changes the photos you already have. The app works fully even if you say no."
+
+    /// Scenario: The Info.plist declares exactly the two new usages in
+    /// English. Both keys exist as non-empty English strings; neither
+    /// carries Devanagari (the plist fallback is English by D10).
+    func testPlistHasCameraAndMicrophoneUsageDescriptions() {
+        let plist = sourceInfoPlist()
+        for key in Self.usageDisclosureKeys {
+            guard let value = plist[key] as? String else {
+                XCTFail("\(key) is missing from the source Info.plist")
+                continue
+            }
+            XCTAssertFalse(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "\(key) is empty in the source Info.plist")
+            XCTAssertFalse(Self.containsDevanagari(value),
+                           "\(key) carries Devanagari — the plist fallback is "
+                           + "the English disclosure")
+        }
+    }
+
+    /// Scenario: The plist English values match the design text exactly.
+    /// The amended strings keep every disclosure the shipped copy carried
+    /// and add the two video clauses (design-l2 §10.6, §11.3 N(i)).
+    func testPlistUsageTextMatchesDesignVerbatim() {
+        let plist = sourceInfoPlist()
+        let camera = plist["NSCameraUsageDescription"] as? String ?? ""
+        let microphone = plist["NSMicrophoneUsageDescription"] as? String ?? ""
+
+        XCTAssertEqual(camera, Self.cameraUsageEnglish,
+                       "NSCameraUsageDescription must be the design-l2 §10.6 "
+                       + "text, verbatim")
+        XCTAssertEqual(microphone, Self.microphoneUsageEnglish,
+                       "NSMicrophoneUsageDescription must be the design-l2 "
+                       + "§10.6 text, verbatim")
+
+        // The retained camera disclosures, spelled out so a deletion is
+        // reported as a lost disclosure, not only as a drifted blob.
+        for clause in ["verify medication intake",
+                       "photograph appliances, remotes, or screens",
+                       "saved to your photo library",
+                       "read printed text aloud",
+                       "only the text seen by the camera is sent",
+                       "\"what is this?\"",
+                       "record a short instruction video",
+                       "stays on this phone and is never uploaded or shared"] {
+            XCTAssertTrue(camera.contains(clause),
+                          "the camera disclosure lost \"\(clause)\"")
+        }
+        for clause in ["hear your voice commands",
+                       "Gemini",
+                       "Settings → Voice Engine",
+                       "record the sound in a short instruction video",
+                       "stays on this phone and is never uploaded or shared"] {
+            XCTAssertTrue(microphone.contains(clause),
+                          "the microphone disclosure lost \"\(clause)\"")
+        }
+    }
+
+    /// Scenario: No photo-library, location or other new usage key was
+    /// added. The usage key set is the 12 shipped keys; the photo-add
+    /// disclosure and `CFBundleLocalizations` keep their exact values
+    /// (design-l2 §10.6, §11.3 N(ii)/(iii)).
+    func testPlistAddsNoOtherUsageKeys() {
+        let plist = sourceInfoPlist()
+        let usage = plist.keys.filter { $0.hasSuffix("UsageDescription") }.sorted()
+        XCTAssertEqual(usage, Self.pinnedUsageDescriptionKeys,
+                       "T-020 amends exactly NSCameraUsageDescription and "
+                       + "NSMicrophoneUsageDescription — it adds no usage key")
+        XCTAssertFalse(usage.contains("NSPhotoLibraryUsageDescription"),
+                       "no photo-read key may appear — the picker is out of "
+                       + "process and reads nothing")
+        XCTAssertEqual(plist["NSPhotoLibraryAddUsageDescription"] as? String,
+                       Self.photoLibraryAddDisclosure,
+                       "the photo-library add-only disclosure must stay as shipped")
+        XCTAssertEqual(plist["CFBundleLocalizations"] as? [String],
+                       ["en", "ne"],
+                       "both localisations must stay declared so the OS can "
+                       + "resolve the strings files")
+    }
+
+    /// Scenario: The existing contact-related usage key is unchanged.
+    /// T-020 does not touch the T-147 frozen contacts disclosure.
+    func testContactsUsageDescriptionUnchanged() {
+        let plist = sourceInfoPlist()
+        XCTAssertEqual(plist["NSContactsUsageDescription"] as? String,
+                       Self.frozenContactsDisclosure,
+                       "the contacts disclosure belongs to T-147 and must not "
+                       + "change in T-020")
+        XCTAssertFalse(Self.containsDevanagari(
+            plist["NSContactsUsageDescription"] as? String ?? ""),
+            "usage-description strings are English-only by the accepted "
+            + "security residual")
+    }
+
+    /// Scenario: Both localisations exist as parseable strings files in the
+    /// built bundle — the `en` half. The unit tests are app-hosted
+    /// (`TEST_HOST`, ios/project.yml), so `Bundle.main.bundleURL` is the
+    /// Debug app bundle this build produced; the file is opened directly,
+    /// never read through the merged Info dictionary (M-3).
+    func testEnInfoPlistStringsExistsAndParsesInBuiltBundle() {
+        let bundleURL = Bundle.main.bundleURL
+        XCTAssertEqual(bundleURL.pathExtension, "app",
+                       "the app-hosted test must resolve the app bundle, not "
+                       + "a test-bundle path: \(bundleURL.path)")
+        let url = bundleURL.appendingPathComponent("en.lproj/InfoPlist.strings")
+        guard let strings = Self.builtBundleStringsDictionary(at: url) else { return }
+        for key in Self.usageDisclosureKeys {
+            guard let value = strings[key] as? String else {
+                XCTFail("en.lproj/InfoPlist.strings is missing \(key)")
+                continue
+            }
+            XCTAssertFalse(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "en.lproj/InfoPlist.strings carries an empty \(key)")
+        }
+    }
+
+    /// Scenario: Both localisations exist as parseable strings files in the
+    /// built bundle — the `ne` half. A missing `project.yml` registration
+    /// fails here because the file is absent from the built bundle (M-3).
+    func testNeInfoPlistStringsExistsAndParsesInBuiltBundle() {
+        let bundleURL = Bundle.main.bundleURL
+        XCTAssertEqual(bundleURL.pathExtension, "app",
+                       "the app-hosted test must resolve the app bundle, not "
+                       + "a test-bundle path: \(bundleURL.path)")
+        let url = bundleURL.appendingPathComponent("ne.lproj/InfoPlist.strings")
+        guard let strings = Self.builtBundleStringsDictionary(at: url) else { return }
+        for key in Self.usageDisclosureKeys {
+            guard let value = strings[key] as? String else {
+                XCTFail("ne.lproj/InfoPlist.strings is missing \(key)")
+                continue
+            }
+            XCTAssertFalse(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "ne.lproj/InfoPlist.strings carries an empty \(key)")
+            XCTAssertTrue(Self.containsDevanagari(value),
+                          "ne.lproj/InfoPlist.strings \(key) is not Nepali: \(value)")
+        }
+    }
+
+    /// Scenario: The English file matches the Info.plist English values.
+    /// Both the source `en.lproj` pin and the built-bundle pin run: the
+    /// source pin catches a drifted file, the built-bundle pin catches a
+    /// file that never shipped (M-3).
+    func testEnStringsMatchPlistValues() {
+        let plist = sourceInfoPlist()
+        var expected: [String: String] = [:]
+        for key in Self.usageDisclosureKeys {
+            guard let value = plist[key] as? String else {
+                XCTFail("\(key) is missing from the source Info.plist")
+                continue
+            }
+            expected[key] = value
+        }
+
+        let sourceURL = Self.sourceInfoPlistStringsURL(language: "en")
+        guard let sourceStrings = Self.propertyListDictionary(at: sourceURL) else {
+            return
+        }
+        for key in Self.usageDisclosureKeys {
+            XCTAssertEqual(sourceStrings[key] as? String, expected[key],
+                           "en.lproj/InfoPlist.strings \(key) must be "
+                           + "byte-identical to the source Info.plist value")
+        }
+
+        let failures = Self.infoPlistStringsGateFailures(
+            inBundleAt: Bundle.main.bundleURL,
+            expectedEnglish: expected,
+            expectedNepali: Self.usageDisclosureNepali)
+            .filter { $0.contains("en.lproj/InfoPlist.strings") }
+        XCTAssertTrue(failures.isEmpty,
+                      "the built bundle's en.lproj/InfoPlist.strings does not "
+                      + "match the source plist:\n"
+                      + failures.joined(separator: "\n"))
+    }
+
+    /// Scenario: The Nepali file carries the exact Devanagari copy. Both
+    /// the source file and the built-bundle file are pinned to design-l2
+    /// §10.6, and each value must actually be Devanagari.
+    func testNeStringsCarryExactDevanagariCopy() {
+        let sourceURL = Self.sourceInfoPlistStringsURL(language: "ne")
+        guard let sourceStrings = Self.propertyListDictionary(at: sourceURL) else {
+            return
+        }
+        for key in Self.usageDisclosureKeys {
+            let expected = Self.usageDisclosureNepali[key]
+            XCTAssertEqual(sourceStrings[key] as? String, expected,
+                           "ne.lproj/InfoPlist.strings \(key) must be the "
+                           + "design-l2 §10.6 Nepali copy, verbatim")
+            XCTAssertTrue(Self.containsDevanagari(sourceStrings[key] as? String ?? ""),
+                          "ne.lproj/InfoPlist.strings \(key) is not Devanagari")
+        }
+
+        let failures = Self.infoPlistStringsGateFailures(
+            inBundleAt: Bundle.main.bundleURL,
+            expectedEnglish: [:],
+            expectedNepali: Self.usageDisclosureNepali)
+            .filter { $0.contains("ne.lproj/InfoPlist.strings") }
+        XCTAssertTrue(failures.isEmpty,
+                      "the built bundle's ne.lproj/InfoPlist.strings does not "
+                      + "carry the design copy:\n"
+                      + failures.joined(separator: "\n"))
+    }
+
+    /// Scenario: The test never trusts the merged Info dictionary. The
+    /// built-bundle evidence opens the `.strings` files directly (the
+    /// suite's own source proves it) and never reads these keys through the
+    /// merged Info dictionary's object lookup.
+    func testGateOpensBuiltBundleFilesNotMergedInfoDictionary() {
+        let url = URL(fileURLWithPath: "\(#filePath)")
+        let code = FeatureSourceScan.codeText(of: url)
+        XCTAssertFalse(code.isEmpty,
+                       "the suite's own source must be readable")
+        XCTAssertTrue(code.contains("InfoPlist.strings"),
+                      "the gate must open the .strings files by name")
+        XCTAssertTrue(code.contains("PropertyListSerialization.propertyList"),
+                      "the gate must parse the files as property lists")
+        XCTAssertTrue(code.contains("Bundle.main.bundleURL"),
+                      "the gate must resolve the built app bundle")
+        XCTAssertTrue(code.contains("appendingPathComponent"),
+                      "the gate must build the file URL inside the bundle")
+
+        // Build the merged-dictionary call from parts so this scan's own
+        // needle is not a literal match for itself.
+        let mergedRead = "object(forInfo" + "DictionaryKey:"
+        let offending = code.split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+            .filter { line in
+                line.contains(mergedRead)
+                    && Self.usageDisclosureKeys.contains { line.contains($0) }
+            }
+        XCTAssertTrue(offending.isEmpty,
+                      "the usage-key evidence must not read the merged Info "
+                      + "dictionary: \(offending)")
+    }
+
+    /// Scenario: Removing one localisation fails the gate. The same gate
+    /// runs against a temporary bundle carrying only `en.lproj`; it must
+    /// name `ne.lproj/InfoPlist.strings` and must not fall back to English.
+    func testGateFailsWhenOneLocalisationIsMissing() throws {
+        let plist = sourceInfoPlist()
+        var expectedEnglish: [String: String] = [:]
+        for key in Self.usageDisclosureKeys {
+            if let value = plist[key] as? String {
+                expectedEnglish[key] = value
+            }
+        }
+
+        let manager = FileManager.default
+        let fixtureBundle = manager.temporaryDirectory
+            .appendingPathComponent("T020-\(UUID().uuidString).bundle")
+        defer { try? manager.removeItem(at: fixtureBundle) }
+        let enDirectory = fixtureBundle.appendingPathComponent("en.lproj")
+        try manager.createDirectory(at: enDirectory,
+                                    withIntermediateDirectories: true)
+        let enData = try PropertyListSerialization.data(
+            fromPropertyList: expectedEnglish, format: .xml, options: 0)
+        try enData.write(to: enDirectory.appendingPathComponent("InfoPlist.strings"))
+
+        let failures = Self.infoPlistStringsGateFailures(
+            inBundleAt: fixtureBundle,
+            expectedEnglish: expectedEnglish,
+            expectedNepali: Self.usageDisclosureNepali)
+
+        XCTAssertTrue(failures.contains { $0.contains("ne.lproj/InfoPlist.strings") },
+                      "the gate must fail naming the missing Nepali file; it "
+                      + "produced: \(failures)")
+        XCTAssertFalse(failures.contains { $0.contains("en.lproj/InfoPlist.strings") },
+                       "the present English file must pass; it produced: \(failures)")
+        XCTAssertEqual(failures.count, 1,
+                       "only the missing localisation may fail — the gate must "
+                       + "not fall back to English silently: \(failures)")
+    }
+
+    // MARK: T-020 helpers
+
+    /// The built-bundle registration gate (M-3) as a pure function over a
+    /// bundle URL. It opens `<lang>.lproj/InfoPlist.strings` directly,
+    /// parses each as a property list and compares both keys' values — the
+    /// merged Info dictionary is never consulted, because it cannot
+    /// distinguish a missing localisation from a merged one. Every failure
+    /// names its file.
+    static func infoPlistStringsGateFailures(inBundleAt bundleURL: URL,
+                                             expectedEnglish: [String: String],
+                                             expectedNepali: [String: String]) -> [String] {
+        var failures: [String] = []
+        let localisations: [(language: String, expected: [String: String])] = [
+            ("en", expectedEnglish),
+            ("ne", expectedNepali),
+        ]
+        for (language, expected) in localisations {
+            let relativePath = "\(language).lproj/InfoPlist.strings"
+            let url = bundleURL.appendingPathComponent(relativePath)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                failures.append("\(relativePath): missing from the built app "
+                                + "bundle at \(bundleURL.path) — the project.yml "
+                                + "resource entry did not ship it")
+                continue
+            }
+            guard let data = try? Data(contentsOf: url),
+                  let propertyList = try? PropertyListSerialization.propertyList(
+                    from: data, options: [], format: nil),
+                  let strings = propertyList as? [String: Any] else {
+                failures.append("\(relativePath): could not be parsed as a "
+                                + "property-list dictionary")
+                continue
+            }
+            for key in Self.usageDisclosureKeys {
+                guard let value = strings[key] as? String,
+                      !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    failures.append("\(relativePath): \(key) is missing or empty")
+                    continue
+                }
+                guard let expectedValue = expected[key], !expectedValue.isEmpty else {
+                    failures.append("\(relativePath): \(key) has no expected "
+                                    + "value to compare against")
+                    continue
+                }
+                if value != expectedValue {
+                    failures.append("\(relativePath): \(key) does not match "
+                                    + "the expected value")
+                }
+            }
+        }
+        return failures
+    }
+
+    /// A `.strings` file opened and parsed directly as a property-list
+    /// dictionary — the M-3 evidence path. A missing or malformed file is
+    /// an explicit failure.
+    static func propertyListDictionary(at url: URL,
+                                       file: StaticString = #filePath,
+                                       line: UInt = #line) -> [String: Any]? {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            XCTFail("missing file at \(url.path) — the source resource is "
+                    + "absent", file: file, line: line)
+            return nil
+        }
+        guard let data = try? Data(contentsOf: url),
+              let propertyList = try? PropertyListSerialization.propertyList(
+                from: data, options: [], format: nil),
+              let strings = propertyList as? [String: Any] else {
+            XCTFail("\(url.path) does not parse as a property-list dictionary",
+                    file: file, line: line)
+            return nil
+        }
+        return strings
+    }
+
+    /// The built bundle's `.strings` file parsed directly; a missing file
+    /// fails naming the expected registration defect.
+    static func builtBundleStringsDictionary(at url: URL,
+                                             file: StaticString = #filePath,
+                                             line: UInt = #line) -> [String: Any]? {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            XCTFail("\(url.lastPathComponent) is missing from the built app "
+                    + "bundle at \(url.path) — check the project.yml resource "
+                    + "entry", file: file, line: line)
+            return nil
+        }
+        return propertyListDictionary(at: url, file: file, line: line)
+    }
+
+    /// The source `Resources/<language>.lproj/InfoPlist.strings` URL.
+    static func sourceInfoPlistStringsURL(language: String) -> URL {
+        FeatureSourceScan.iosDirectory()
+            .appendingPathComponent("ElderlyAssistant/Resources/"
+                                    + "\(language).lproj/InfoPlist.strings")
+    }
 }

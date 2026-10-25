@@ -6,15 +6,16 @@ import UserNotifications
 ///
 /// Two jobs, both about the same banner:
 ///
-///  - **The fire-time card.** An event with a photo presents the app's own
-///    event detail screen when its reminder fires, instead of a text-only
-///    banner — the photo large, the time, the notes, and (when the event
-///    has an address) the Go button. This is the design's "the fire-time
-///    card when a photo is present shows a Navigate button": there is no
-///    separate event card, deliberately, because an event with two faces
-///    is an event the elder has to learn twice.
-///    No photo → nothing is presented, and the banner delivers exactly as
-///    it always has.
+///  - **The fire-time card.** An event with a photo OR an instruction
+///    presents the app's own event detail screen when its reminder fires,
+///    instead of a text-only banner — the photo large, the time, the
+///    notes, the instruction card, and (when the event has an address) the
+///    Go button. This is the design's "the fire-time card when a photo is
+///    present shows a Navigate button": there is no separate event card,
+///    deliberately, because an event with two faces is an event the elder
+///    has to learn twice.
+///    Neither a photo nor an instruction → nothing is presented, and the
+///    banner delivers exactly as it always has.
 ///
 ///  - **The Open action.** The category's Open button (and a plain tap on
 ///    the banner) deep-links to the same detail screen, by event id.
@@ -61,12 +62,16 @@ final class FreeFormEventFireHandler: NotificationEventHandling {
             // silently; they are other handlers' business.
             return false
         }
-        // The event, and specifically whether it has a photo: the detail
-        // screen is worth covering the app for exactly when there is
-        // something to SEE. An event that was deleted between arming and
-        // firing presents nothing (it also has no photo any more — the
-        // side index drops the row and the bytes together).
-        guard let event = eventLookup(eventId), event.photoFilename != nil else {
+        // The event, and specifically whether there is something to SEE or
+        // something to FOLLOW: the detail screen is worth covering the app
+        // for exactly when the event has a photo or a present instruction
+        // (design L2 §2.14.4). An event that was deleted between arming
+        // and firing presents nothing (it also has no photo or
+        // instruction any more — the side index drops the row and the
+        // bytes together).
+        guard let event = eventLookup(eventId),
+              event.photoFilename != nil || event.instruction?.isPresent == true
+        else {
             return false
         }
         // Delegate callbacks are not documented as main-thread; the

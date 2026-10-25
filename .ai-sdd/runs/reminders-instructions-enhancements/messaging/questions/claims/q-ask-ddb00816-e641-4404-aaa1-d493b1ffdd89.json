@@ -1,0 +1,15 @@
+{
+  "schema_version": "1",
+  "question_id": "q-ask-ddb00816-e641-4404-aaa1-d493b1ffdd89",
+  "claimant": "store-40529-1",
+  "message_id": "C0C6CEVV8R4:1792906524.589809",
+  "event_id": null,
+  "from_user": "U0C6DTHDMV0",
+  "consumed_at": "2026-10-25T05:35:26.380Z",
+  "answer": {
+    "choice_id": null,
+    "text": "instructions can be in any type of video, whatever fits the need",
+    "from_user": "U0C6DTHDMV0"
+  },
+  "claimed_at": "2026-10-25T05:35:26.381Z"
+}

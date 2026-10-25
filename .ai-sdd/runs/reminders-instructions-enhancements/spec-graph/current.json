@@ -1,0 +1,522 @@
+{
+  "version": "1",
+  "workflow_name": "full-feature",
+  "built_at": "2026-10-25T06:09:04.764Z",
+  "nodes": [
+    {
+      "id": "define-requirements",
+      "type": "task",
+      "label": "Elicit and document project requirements. Produce a structured folder of\nrequirements: one file per FR, one file per NFR, with Gherkin acceptance\ncriteria embedded in each file, and index files at each folder level.\nAfter stakeholder HIL sign-off, produce a requirements lock file that\ncaptures a stable snapshot for downstream drift detection.\n",
+      "hash": "sha256:f629d47aebb26467ca6ac2354521007578e6de26d722875083d5db06f32862b2",
+      "metadata": {
+        "agent": "ba",
+        "phase": "requirements",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "design-l1",
+      "type": "task",
+      "label": "Produce the L1 system architecture document. Define system components,\ntechnology stack, integration points, and key architectural decisions.\nConsult the requirements lock file (specs/<requirements-task-id>.lock.yaml)\nto ensure the architecture covers all locked FRs and NFRs.\n",
+      "hash": "sha256:a089f4eac72293f1562ea6d09994887d74c1b5489a802598b12710ddb3535eaf",
+      "metadata": {
+        "agent": "architect",
+        "phase": "design",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "review-l1",
+      "type": "task",
+      "label": "Review the L1 architecture document. Verify it addresses all requirements,\ncheck for architectural risks, and provide GO/NO_GO decision.\n",
+      "hash": "sha256:988a88b96a370e1cfbf96c6f62e00a638036429d558ad22d57fa1a865eac84ab",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "design-l2",
+      "type": "task",
+      "label": "Produce L2 component design documents. Define component interfaces,\ndata models, error handling strategy, and observability approach.\nConsult the requirements lock file (specs/<requirements-task-id>.lock.yaml)\nand the L1 architecture document to ensure component designs stay within scope.\n",
+      "hash": "sha256:bf5d4420c185b048f81719a4d7f389103ddd708ffa9c80c473bf7aa31d6432fa",
+      "metadata": {
+        "agent": "pe",
+        "phase": "design",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "review-l2",
+      "type": "task",
+      "label": "Review the L2 component design. Verify component interfaces are correct,\ndata models are complete, and the design aligns with L1 architecture.\nIssue GO/NO_GO decision.\n",
+      "hash": "sha256:7621f054b471e34bda2d07f8d5b7229aeb5b291fe4937339f9e01c2510702565",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "plan-tasks",
+      "type": "task",
+      "label": "Break down the component designs into concrete implementation tasks.\nDefine acceptance criteria (including Gherkin tests) per task, identify\ndependencies, and estimate effort. Output is a folder of one file per task\nplus an index.\n",
+      "hash": "sha256:a8c50f6435f7bffef83aa4ab4794eee69e9055c3bc1ddb403622e67b0a739eff",
+      "metadata": {
+        "agent": "le",
+        "phase": "planning",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "implement",
+      "type": "task",
+      "label": "Implement the feature per the task specification. Write unit tests,\nensure all acceptance criteria pass, fix lint and type errors.\n",
+      "hash": "sha256:9e845529f804e7936633b031c16b824dfa9f18d607b1af899f998c45039650be",
+      "metadata": {
+        "agent": "dev",
+        "phase": "implement",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "review-implementation",
+      "type": "task",
+      "label": "Review the implementation. Check code quality, test coverage, security,\nand conformance to the design. Issue GO/NO_GO decision.\n",
+      "hash": "sha256:e604de503319b459e3ff2ce2f685a18d651f0752641e02149509e9892aac4c3b",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "define-requirements:output:specs/define-requirements.md",
+      "type": "output",
+      "label": "specs/define-requirements.md",
+      "hash": "sha256:75f555959adb405761e57ddefad9e79535a2e357758094a5f2c37a60ae934b55",
+      "metadata": {
+        "task_id": "define-requirements",
+        "contract": "requirements_doc"
+      }
+    },
+    {
+      "id": "define-requirements:output:specs/define-requirements.lock.yaml",
+      "type": "output",
+      "label": "specs/define-requirements.lock.yaml",
+      "hash": "sha256:ff55fba50f383d0f4040aa231552345cff57dc6ed227ff06c795a8374692ccf3",
+      "metadata": {
+        "task_id": "define-requirements",
+        "contract": "requirements_lock"
+      }
+    },
+    {
+      "id": "design-l1:output:specs/design-l1.md",
+      "type": "output",
+      "label": "specs/design-l1.md",
+      "hash": "sha256:cf8cb3c7df0a669a41ca006dc7c247669998f9e6e9bb5cbd6a56540928b44e28",
+      "metadata": {
+        "task_id": "design-l1",
+        "contract": "architecture_l1"
+      }
+    },
+    {
+      "id": "review-l1:output:specs/review-l1.md",
+      "type": "output",
+      "label": "specs/review-l1.md",
+      "hash": "sha256:83392347fa77540946fc35e1f839a6b303ab5a64a476b73bb39479128661dbd8",
+      "metadata": {
+        "task_id": "review-l1",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "design-l2:output:specs/design-l2.md",
+      "type": "output",
+      "label": "specs/design-l2.md",
+      "hash": "sha256:8cc30ccf2496102d889a5598e5d58b0dac9fdf9c1517e8b474f69634b19a91d8",
+      "metadata": {
+        "task_id": "design-l2",
+        "contract": "component_design_l2"
+      }
+    },
+    {
+      "id": "review-l2:output:specs/review-l2.md",
+      "type": "output",
+      "label": "specs/review-l2.md",
+      "hash": "sha256:13a5057e96f8878d8c74c89e933f88b0135c821973dea85f7e3f3f203d2d6f7c",
+      "metadata": {
+        "task_id": "review-l2",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "plan-tasks:output:specs/plan-tasks/plan.md",
+      "type": "output",
+      "label": "specs/plan-tasks/plan.md",
+      "hash": "sha256:ed7639b75f7530a91c81ae5509015c6a8b6b259185a0c6cffb89656d2837578d",
+      "metadata": {
+        "task_id": "plan-tasks",
+        "contract": "task_breakdown_l3"
+      }
+    },
+    {
+      "id": "plan-tasks:output:specs/plan-tasks/tasks/",
+      "type": "output",
+      "label": "specs/plan-tasks/tasks/",
+      "hash": "sha256:d9706c3405fa6930ed6e105a4fdddff050eefc61a8437ebb6aedf7eb1e1e76a2",
+      "metadata": {
+        "task_id": "plan-tasks"
+      }
+    },
+    {
+      "id": "implement:output:specs/implement-notes.md",
+      "type": "output",
+      "label": "specs/implement-notes.md",
+      "hash": "sha256:23f3b8cc53fe17d9bbd1673a382681ed1c7e6e12616a0984515b3f42e40b0114",
+      "metadata": {
+        "task_id": "implement",
+        "contract": "implementation"
+      }
+    },
+    {
+      "id": "review-implementation:output:specs/review-implementation.md",
+      "type": "output",
+      "label": "specs/review-implementation.md",
+      "hash": "sha256:2d03760237e8bf38e363556077047b79c5085e4d0c77c004db4d98024a9ce943",
+      "metadata": {
+        "task_id": "review-implementation",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "FR-MSR-001",
+      "type": "requirement",
+      "label": "Slot-based entry model — quantity + time-of-day slot + before/after meal",
+      "hash": "sha256:5ee78081d10441d0ff29a49b2e7f943da28d3c15ead6c394fe049a80377087ad",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-002",
+      "type": "requirement",
+      "label": "Deterministic slot-to-clock mapping — 08:00 / 13:00 / 19:00 defaults, family-configurable",
+      "hash": "sha256:93bc0f488707256835a9f8c394886ef559617d1f030a89b8b5da058ce9ee8e49",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-003",
+      "type": "requirement",
+      "label": "Structured quantity — amount + unit composed into the rendered dose line",
+      "hash": "sha256:a9129afb30ac0b5ce8fe0a5c47572c4a4920dc0ca2a6c4b657d900779abdbcf8",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-004",
+      "type": "requirement",
+      "label": "Purpose at entry — a brief purpose description on every medication",
+      "hash": "sha256:d1869db1a3fcff2786b6b823b7ab642a7a2b9ed1b424e71576ff2948aa543e91",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-005",
+      "type": "requirement",
+      "label": "Scan-to-fill — additive beside manual entry, bounded extraction",
+      "hash": "sha256:4027626743b6e838cda0a8e7c2c6a6482ce2d437d726bec1e05fed7dd1f735dd",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-006",
+      "type": "requirement",
+      "label": "OCR values require human confirmation before binding — never silent auto-apply",
+      "hash": "sha256:8656d761b74954340478031b20d30ddf32bfc89110d6ff0b0cbbf22151b5542e",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-007",
+      "type": "requirement",
+      "label": "Voice acknowledgement names the medication and slot — resolution by what was said",
+      "hash": "sha256:075a54f8366b1d5ee34ec45fa9a1e880fa362957d4593886bb2b885b2fa98dcd",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-008",
+      "type": "requirement",
+      "label": "Conservative disambiguation — \"did you mean X / X or Y\" copy rule, never the wrong medication",
+      "hash": "sha256:6bdd150d4b7b8acbd9dddeae051eccd5566c13d089dde6e7b345da175a3090fb",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-009",
+      "type": "requirement",
+      "label": "Acknowledgement safety sequence preserved — challenge, then double-dose check, then record",
+      "hash": "sha256:7a73c5ceb76174772f3c3e890732aa7300d83d107fcc33bacb87c100cedd3f40",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-010",
+      "type": "requirement",
+      "label": "Intake recorded against the day's schedule — scheduled time and acknowledged time",
+      "hash": "sha256:373ca42910b2831b145404347c2afdad5e42503a181deaf9ae68b5aef0b741a5",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-011",
+      "type": "requirement",
+      "label": "Refusal-first denial guard preserved — a denial never falls through to an acknowledgement",
+      "hash": "sha256:0e3110778ad338084ea9e63055ad3fd7bb7087de60dffd1b8a4c87ae0fbcda9a",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-012",
+      "type": "requirement",
+      "label": "Mic continuity around acknowledgements — no gap between acknowledgement and listening",
+      "hash": "sha256:67bb8e62d87daac622174b5541c8590577c97a68f38e594f924d0c35c7f1d5d5",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-013",
+      "type": "requirement",
+      "label": "Photo of the medication as intake evidence — augments, never replaces, never creates a record",
+      "hash": "sha256:090ef934a395b4ab259646a5aeeeade88f26d6bf4bfddf6de4fc622830057370",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-014",
+      "type": "requirement",
+      "label": "Photo evidence resolves the shared slot deterministically — never the wrong medication",
+      "hash": "sha256:a47327db3fdf4140a76e9912309f960db9d6bc530ec137ae84ac718ffa64d6b6",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-015",
+      "type": "requirement",
+      "label": "Significant-event notification set — missed dose, double-dose, intake recorded, escalation started",
+      "hash": "sha256:c665688e5bd5525982217a41d30e8b05aba13d4fbe1fb726c130c19481cba462",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-016",
+      "type": "requirement",
+      "label": "Caregiver notification channels and honest per-contact delivery",
+      "hash": "sha256:4312a391ccac41eada19edac8ac6fb7be6890208ac4a826156938548b399f59c",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-017",
+      "type": "requirement",
+      "label": "PII-free wire — significant events extend the existing taxonomy with no new PII",
+      "hash": "sha256:7e66f5e841fea03ca19cf31a0ce4a2da69f76d82f5ffd490dd4201c235dbb2ff",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-018",
+      "type": "requirement",
+      "label": "Honest degradation — deferred capabilities surfaced as themselves, never a false success",
+      "hash": "sha256:4c00fb53378ac16546cea00547c26d1bbaaa1ba821906b100031a58081129536",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-019",
+      "type": "requirement",
+      "label": "Existing reminder and escalation semantics preserved — no weakening of medication safety invariants",
+      "hash": "sha256:732d4be1d0c19f6a4894d7383f895e6a615820a511a375246722772b27a2df0d",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-020",
+      "type": "requirement",
+      "label": "Dementia machinery preserved and integrated — never rebuilt, never removed",
+      "hash": "sha256:5d3ee7ee20b520ba8604a1982378c5dbb1b0831f773e12ad7742f253e2de94e3",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-021",
+      "type": "requirement",
+      "label": "Elderly-fit UX of the new flows — voice-first completion, plain language, vocabulary limit",
+      "hash": "sha256:8765d794d09b065c52c58de35387b25dbba1cd04d88c1347ed723fb31b536df8",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MSR-022",
+      "type": "requirement",
+      "label": "Persistence before alarm and process-kill re-arm — the FR-029 invariant holds on the revamped paths",
+      "hash": "sha256:68e2cbf3b441e2ffb802c7accd44771d393f5e968f58657f08cc864b1cac58d8",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MSR-001",
+      "type": "requirement",
+      "label": "LLM independence — the medication scheduler unit stays free of LLM dependencies",
+      "hash": "sha256:604fc7e078ea026a947b91f8b6787e053e58de30df9713df557d947bfc8af9ff",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MSR-002",
+      "type": "requirement",
+      "label": "PII-free observability — hash-only medication identifiers, sanitised logs, gate-covered paths",
+      "hash": "sha256:f798f9288c56c8a67f1496f37d89142890ee04fb66bfb21a768170c435cb0829",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MSR-003",
+      "type": "requirement",
+      "label": "On-device label and photo processing — no new cloud egress for medication content",
+      "hash": "sha256:7ebb22b087a9ba810a02dec4b49977ed7191e94f936bd92ba82d58bac4d80228",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MSR-004",
+      "type": "requirement",
+      "label": "Localisation and spoken times — every new string in Nepali and English, all spoken times through the formatter",
+      "hash": "sha256:a623ff81cd0f75e46360a3dde4a830daec91953d5ff1deb380c04468b87de36c",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MSR-005",
+      "type": "requirement",
+      "label": "Accessibility — 44pt targets, 18pt body text, contrast, voice-first acknowledgement",
+      "hash": "sha256:ff99a80206b580b30118fe13af9f8d079f357a311234cb6a100fa4c6c6cac144",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MSR-006",
+      "type": "requirement",
+      "label": "Migration compatibility — legacy payloads keep loading, schedules are never lost to a missing key",
+      "hash": "sha256:c4a013a549e11ed0d2c4a48627fe5806d714b4f9525af28665a1d39076fd7f57",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MSR-007",
+      "type": "requirement",
+      "label": "Devanagari grapheme-cluster behaviour regression-pinned — do not \"fix\" it",
+      "hash": "sha256:af3d827d002567855f4716da54e571e2f53aee9713ad4e6a1dbe33c4c6c32eea",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MSR-008",
+      "type": "requirement",
+      "label": "Safety-path test rigor — 100 per cent unit coverage, required integration tests, elevated confidence",
+      "hash": "sha256:652afd319edcb175bcdf4ae2581b3faedeca317bf9b02a29dc5c04a8f69151c2",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MSR-009",
+      "type": "requirement",
+      "label": "Compliance and release gates — log-safety gate green, health-policy posture unchanged, honest baseline",
+      "hash": "sha256:0b1fb7aaf42d71db80c6fae716dab78336db34c0bc2eb1e53cbd6037d0773f23",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MSR-010",
+      "type": "requirement",
+      "label": "Reminder firing latency — the mapped clock time is the schedule of record",
+      "hash": "sha256:f59adc0dbcfe6aa1baa5dcdd7caff18f04273d9dbda1a7f493415c70d7075fba",
+      "metadata": {}
+    }
+  ],
+  "edges": [
+    {
+      "source": "design-l1",
+      "target": "define-requirements",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-l1",
+      "target": "design-l1",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "design-l2",
+      "target": "review-l1",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-l2",
+      "target": "design-l2",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "review-l2",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "implement",
+      "target": "plan-tasks",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-implementation",
+      "target": "implement",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "define-requirements",
+      "target": "define-requirements:output:specs/define-requirements.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "define-requirements",
+      "target": "define-requirements:output:specs/define-requirements.lock.yaml",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "design-l1",
+      "target": "design-l1:output:specs/design-l1.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-l1",
+      "target": "review-l1:output:specs/review-l1.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "design-l2",
+      "target": "design-l2:output:specs/design-l2.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-l2",
+      "target": "review-l2:output:specs/review-l2.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "plan-tasks:output:specs/plan-tasks/plan.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "plan-tasks:output:specs/plan-tasks/tasks/",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "implement",
+      "target": "implement:output:specs/implement-notes.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-implementation",
+      "target": "review-implementation:output:specs/review-implementation.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    }
+  ]
+}

@@ -1,5 +1,51 @@
 import Foundation
 
+/// The routine/event write seam's failures (design L2 §3.3, §5.6, §6.2).
+///
+/// Every case means "nothing changed": the previous instruction and every
+/// file the index still names are intact. The seam returns
+/// `Result<Void, InstructionWriteError>` and never a `Bool` (OI-1, P-11), so
+/// a caller cannot mistake a refusal for a save.
+///
+/// Declared here, beside its routine owner (implementation pin P-4), because
+/// the routine write transaction is the only producer; the event service
+/// (C13) consumes the same type.
+enum InstructionWriteError: Error, Equatable {
+    /// No routine (or extras) entry has this id. Checked before anything is
+    /// written, deleted or re-armed.
+    case ownerNotFound
+    /// A media payload that names neither pending bytes nor a stored
+    /// filename: there is nothing the instruction could point at.
+    case unresolvedPayload
+    /// The store refused the new bytes. The previous instruction and its
+    /// media are untouched.
+    case mediaWriteFailed(InstructionStorageError)
+    /// The entry/index refused the new payload. Any bytes committed for this
+    /// attempt are rolled back; the previous instruction remains readable.
+    case persistenceFailed
+}
+
+/// The slice of `InstructionVideoStore` the routine write transaction needs
+/// (design L2 §5.6, §7.2).
+///
+/// `InstructionVideoStore` is a concrete `final class` by design (§3.5), so
+/// this protocol exists only to make the ordered transaction testable with a
+/// spy. There is no second implementation and no second store: the class
+/// conforms below, unchanged.
+protocol RoutineInstructionVideoStoring: AnyObject {
+    func commit(_ staged: StagedInstructionVideo,
+                for owner: InstructionOwner) -> Result<String, InstructionStorageError>
+    func discard(_ staged: StagedInstructionVideo) -> Result<Void, InstructionStorageError>
+    func delete(_ filename: String,
+                for owner: InstructionOwner) -> Result<Void, InstructionStorageError>
+    func deleteAll(for owner: InstructionOwner) -> Result<Void, InstructionStorageError>
+    func availability(filename: String,
+                      owner: InstructionOwner) -> InstructionPlaybackAvailability
+}
+
+/// The production store is the only conformer (design C02).
+extension InstructionVideoStore: RoutineInstructionVideoStoring {}
+
 /// Schedules and fires routine (non-medication) reminders — v2 pivot
 /// Phase 1 (docs/superpowers/specs/2026-09-03-v2-gemini-pivot-design.md
 /// §4.1/§9). Mirrors `MedicationScheduler`'s proven shape — entries in
@@ -35,6 +81,12 @@ final class RoutineScheduler {
     /// makes fired notifications carry the picture and deleted entries
     /// drop their photos.
     private let visualAidStore: VisualAidStore?
+    /// Instruction video bytes for this owner (C11 write seam, T-013).
+    /// Optional with a nil default so every existing harness constructs the
+    /// scheduler unchanged; `AppCoordinator` passes the app's one shared
+    /// video store. Nil means "no video bytes can be written or deleted" —
+    /// text and image instructions still save.
+    private let instructionVideoStore: RoutineInstructionVideoStoring?
     /// Injectable clock — tests pin "now" so window/weekday behavior is
     /// deterministic. Production passes `Date.init`.
     private let now: () -> Date
@@ -57,6 +109,7 @@ final class RoutineScheduler {
         familyNotifier: FamilyNotifierProtocol,
         caregiverNotifySettings: CaregiverNotifySettings,
         visualAidStore: VisualAidStore? = nil,
+        instructionVideoStore: RoutineInstructionVideoStoring? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.store = store
@@ -65,6 +118,7 @@ final class RoutineScheduler {
         self.familyNotifier = familyNotifier
         self.caregiverNotifySettings = caregiverNotifySettings
         self.visualAidStore = visualAidStore
+        self.instructionVideoStore = instructionVideoStore
         self.now = now
     }
 
@@ -72,6 +126,17 @@ final class RoutineScheduler {
 
     func entries() -> [RoutineEntry] {
         store.loadEntries()
+    }
+
+    /// IF-23 / M-4. The strict read the orphan sweep builds its live set
+    /// from: it delegates to `RoutineStore.loadEntriesIfReadable()` (IF-33),
+    /// so `nil` means "the store could not be read" and is preserved as
+    /// such. It is never `loadEntries()` plus a flag, and a read failure is
+    /// never collapsed to an empty list — that would make every instruction
+    /// file on disk look unreferenced. The legacy `entries()` above keeps
+    /// its `[]`-on-failure contract for its existing callers.
+    func entriesIfReadable() -> [RoutineEntry]? {
+        store.loadEntriesIfReadable()
     }
 
     func entry(for id: UUID) -> RoutineEntry? {
@@ -109,12 +174,26 @@ final class RoutineScheduler {
     }
 
     func removeEntry(id: UUID) {
-        guard store.remove(id: id) else { return }
+        entry(deleting: id)
+    }
+
+    /// Removes an entry through the shipping deletion path and tears down
+    /// its instruction media (design C11, §2.11 rule 4, §5.6 D).
+    ///
+    /// The photos and a routine instruction IMAGE share the visual-aid
+    /// directory, so the existing `deleteAll` covers both; a routine
+    /// instruction VIDEO lives in its own owner directory and is purged
+    /// separately. A media delete failure is reported as a typed event and
+    /// then left to the orphan sweep — it can never fail the entry deletion
+    /// or resurrect the entry.
+    func entry(deleting entryId: UUID) {
+        guard store.remove(id: entryId) else { return }
         // The photos go WITH the reminder (photo-visual-aids task): a
         // picture of a medicine box must not outlive the reminder it was
         // attached to, and nothing else can find these files afterwards.
-        visualAidStore?.deleteAll(for: id)
-        emit("entry_removed", metadata: ["entry_id_hash": idHash(id)])
+        visualAidStore?.deleteAll(for: entryId)
+        tearDownInstructionVideoMedia(entryId: entryId)
+        emit("entry_removed", metadata: ["entry_id_hash": idHash(entryId)])
         scheduleAll()
         onScheduleChanged?()
     }
@@ -134,6 +213,288 @@ final class RoutineScheduler {
         return persistAndReschedule(entry, eventType: "entry_visual_aids_updated",
                                     metadata: ["entry_id_hash": idHash(entryId),
                                                "count": String(aids.count)])
+    }
+
+    // MARK: - Instruction write seam (IF-22, design §5.6)
+
+    /// IF-22 / OI-1. The routine owner's ordered write transaction.
+    ///
+    /// Ordering rule (§5.6): bytes become durable before the index names
+    /// them, and the index moves before old bytes are deleted. A missing
+    /// owner is `.ownerNotFound` before anything is touched. A failure after
+    /// the media write but before persistence deletes the newly committed
+    /// file (or keeps it when the unchanged index already names it); a
+    /// failure after persistence leaves the new file live and the previous
+    /// file a best-effort delete.
+    ///
+    /// On a successful, real change the entry is persisted once, the window
+    /// is regenerated once (`regenerateWindow` refreshes `hadInstruction`
+    /// from the new index) and `entry_instruction_updated` is emitted once.
+    /// A write producing exactly the stored instruction is a successful
+    /// no-op: no persist, no re-arm, no event.
+    @discardableResult
+    func setInstruction(_ commit: InstructionCommit,
+                        entryId: UUID) -> Result<Void, InstructionWriteError> {
+        guard var entry = entry(for: entryId) else { return .failure(.ownerNotFound) }
+        let previous = entry.instruction
+
+        switch commit.write {
+        case .remove:
+            // Removing nothing is not a change: no persist, no event, no
+            // media delete. The reminder keeps its current instruction.
+            guard previous != nil else { return .success(()) }
+            entry.instruction = nil
+            guard persistInstructionEntry(entry) else {
+                return .failure(.persistenceFailed)
+            }
+            if let previous {
+                deleteInstructionMedia(previous, entryId: entryId)
+            }
+            notifyInstructionChanged(entryId: entryId,
+                                     kind: previous?.kind ?? "")
+            return .success(())
+
+        case .set(let payload):
+            let prepared: Instruction
+            var committedVideoFilename: String?
+            var committedImage: VisualAid?
+            switch payload.kind {
+            case .text:
+                prepared = payload.instruction
+            case .image, .video:
+                switch resolveMedia(payload: payload,
+                                    pendingMedia: commit.pendingMedia,
+                                    entryId: entryId) {
+                case .failure(let error):
+                    return .failure(error)
+                case .success(let media):
+                    prepared = media.instruction
+                    committedVideoFilename = media.videoFilename
+                    committedImage = media.imageAid
+                }
+            }
+
+            guard prepared != previous else { return .success(()) }
+
+            entry.instruction = prepared
+            guard persistInstructionEntry(entry) else {
+                rollBackCommittedMedia(videoFilename: committedVideoFilename,
+                                       image: committedImage,
+                                       previous: previous,
+                                       entryId: entryId)
+                return .failure(.persistenceFailed)
+            }
+
+            if let previous {
+                deleteInstructionMedia(previous, entryId: entryId,
+                                       replacingWith: prepared)
+            }
+            notifyInstructionChanged(entryId: entryId, kind: prepared.kind)
+            return .success(())
+        }
+    }
+
+    /// What `resolveMedia` hands back: the instruction the index should
+    /// store, plus the bytes just committed (nil when nothing new was
+    /// written) so a failed persist can roll them back.
+    private struct ResolvedInstructionMedia {
+        let instruction: Instruction
+        let videoFilename: String?
+        let imageAid: VisualAid?
+    }
+
+    /// The media half of a `.set` (§5.6 A1/A3, §5.8).
+    ///
+    /// Pending bytes are committed before the index can name them; a
+    /// committed filename is returned for rollback and for the
+    /// "index already names it" adoption check. With no pending bytes the
+    /// payload must already carry a filename, or the write is
+    /// `.unresolvedPayload`.
+    private func resolveMedia(payload: InstructionPayload,
+                              pendingMedia: InstructionPendingMedia?,
+                              entryId: UUID) -> Result<ResolvedInstructionMedia,
+                                                       InstructionWriteError> {
+        if let pendingMedia, media(pendingMedia, matches: payload.kind) {
+            switch pendingMedia {
+            case .image(let image):
+                guard let visualAidStore else {
+                    return .failure(.mediaWriteFailed(.stagingFailed))
+                }
+                guard let aid = visualAidStore.save(image, for: entryId,
+                                                    caption: payload.caption) else {
+                    // §5.8: a nil image save is the store's staging refusal.
+                    return .failure(.mediaWriteFailed(.stagingFailed))
+                }
+                let instruction = InstructionPayload(kind: .image,
+                                                     caption: payload.caption,
+                                                     filename: aid.filename).instruction
+                return .success(ResolvedInstructionMedia(instruction: instruction,
+                                                         videoFilename: nil,
+                                                         imageAid: aid))
+            case .video(let video):
+                guard let instructionVideoStore else {
+                    return .failure(.mediaWriteFailed(.stagingFailed))
+                }
+                switch instructionVideoStore.commit(video.staged,
+                                                   for: .routine(entryId)) {
+                case .success(let filename):
+                    let instruction = InstructionPayload(kind: .video,
+                                                         caption: payload.caption,
+                                                         filename: filename).instruction
+                    return .success(ResolvedInstructionMedia(instruction: instruction,
+                                                             videoFilename: filename,
+                                                             imageAid: nil))
+                case .failure(let error):
+                    // The draft bytes are useless now; the orphan sweep
+                    // collects them if this best-effort discard also fails
+                    // (§5.6 A1).
+                    _ = instructionVideoStore.discard(video.staged)
+                    return .failure(.mediaWriteFailed(error))
+                }
+            }
+        }
+
+        if let filename = payload.filename, !filename.isEmpty {
+            // The index already names the bytes (the unchanged-media path):
+            // nothing new to commit.
+            return .success(ResolvedInstructionMedia(instruction: payload.instruction,
+                                                     videoFilename: nil,
+                                                     imageAid: nil))
+        }
+        return .failure(.unresolvedPayload)
+    }
+
+    private func media(_ media: InstructionPendingMedia,
+                       matches kind: InstructionKind) -> Bool {
+        switch media {
+        case .image:
+            return kind == .image
+        case .video:
+            return kind == .video
+        }
+    }
+
+    /// Never leaves bytes the index does not name after a failed persist
+    /// (§5.6 A2). If the unchanged index already names the committed file (a
+    /// retried commit reused the name), the file is adopted and kept.
+    private func rollBackCommittedMedia(videoFilename: String?,
+                                        image: VisualAid?,
+                                        previous: Instruction?,
+                                        entryId: UUID) {
+        if let videoFilename, previous?.filename != videoFilename {
+            deleteVideoMedia(filename: videoFilename, entryId: entryId,
+                             reportSuccess: false)
+        }
+        if let image, previous?.filename != image.filename {
+            // Image deletes have no error channel in the shipping store
+            // (N-1): the sweep is the backstop.
+            visualAidStore?.delete(image, for: entryId)
+        }
+    }
+
+    /// Deletes a previous instruction's now-unreferenced media (§5.6 step
+    /// 3). Only video deletes have an error channel and therefore an event
+    /// (N-1); an image delete keeps the shipping best-effort `Void` shape.
+    /// `replacingWith` is the new instruction: when both name the same file
+    /// the file is still referenced and must not be deleted.
+    private func deleteInstructionMedia(_ instruction: Instruction,
+                                        entryId: UUID,
+                                        replacingWith replacement: Instruction? = nil) {
+        guard let filename = instruction.filename, !filename.isEmpty else { return }
+        if let replacementFilename = replacement?.filename,
+           replacementFilename == filename {
+            return
+        }
+        switch instruction.knownKind {
+        case .some(.video):
+            deleteVideoMedia(filename: filename, entryId: entryId,
+                             reportSuccess: true)
+        case .some(.image):
+            visualAidStore?.delete(VisualAid(filename: filename), for: entryId)
+        case .some(.text):
+            break
+        case .none:
+            // Unknown raw kind: the holding store is not knowable from the
+            // model, so attempt both. Neither attempt claims a success
+            // event for a kind the instruction does not have.
+            visualAidStore?.delete(VisualAid(filename: filename), for: entryId)
+            deleteVideoMedia(filename: filename, entryId: entryId,
+                             reportSuccess: false)
+        }
+    }
+
+    /// One video-file delete with its `instruction_media_delete` event
+    /// (§6.4). `reportSuccess` is false for internal rollbacks, which must
+    /// clean up without claiming the person's media was deleted.
+    private func deleteVideoMedia(filename: String,
+                                  entryId: UUID,
+                                  reportSuccess: Bool) {
+        guard let instructionVideoStore else { return }
+        let owner = InstructionOwner.routine(entryId)
+        let existed: Bool
+        switch instructionVideoStore.availability(filename: filename,
+                                                  owner: owner) {
+        case .available, .rejectedFilename, .unreadableFile:
+            existed = true
+        case .missingFile:
+            existed = false
+        }
+        switch instructionVideoStore.delete(filename, for: owner) {
+        case .success:
+            guard reportSuccess else { return }
+            instructionEvents.mediaDelete(outcome: existed ? .deleted : .absent,
+                                          count: existed ? 1 : 0,
+                                          error: nil)
+        case .failure(let error):
+            instructionEvents.mediaDelete(outcome: .failed, count: 0,
+                                          error: error)
+        }
+    }
+
+    /// Entry teardown's video half (§2.11 rule 4). Always attempted for the
+    /// owner directory; a failure is reported and left to the sweep.
+    private func tearDownInstructionVideoMedia(entryId: UUID) {
+        guard let instructionVideoStore else { return }
+        if case .failure(let error) =
+            instructionVideoStore.deleteAll(for: .routine(entryId)) {
+            instructionEvents.mediaDelete(outcome: .failed, count: 0,
+                                          error: error)
+        }
+    }
+
+    /// The single index write of the transaction. Emits the routine's
+    /// existing persistence-failure event on refusal; `setInstruction`
+    /// turns `false` into `.persistenceFailed`.
+    private func persistInstructionEntry(_ entry: RoutineEntry) -> Bool {
+        guard store.update(entry) else {
+            emit("entry_persistence_failed", metadata: [:])
+            return false
+        }
+        return true
+    }
+
+    /// `entry_instruction_updated`, exactly once per real change (design
+    /// §6.4): outcome `saved`, metadata `entry_id_hash`, `kind` and
+    /// `count = 1`. Never text, caption, filename, path or title.
+    ///
+    /// Emitted through the scheduler's shared post-persist path
+    /// (`completeMutation`, the same tail `persistAndReschedule` runs) but
+    /// after the old-media delete §5.6 step 3 requires between the index
+    /// write and step 4. Written as a direct `emit` call so the release
+    /// log-safety gate grades this registered event's payload by name.
+    private func notifyInstructionChanged(entryId: UUID, kind: String) {
+        emit("entry_instruction_updated",
+             metadata: ["entry_id_hash": idHash(entryId),
+                        "kind": InstructionKind.reportable(kind),
+                        "count": "1"],
+             outcome: "saved")
+        completeMutation()
+    }
+
+    /// The typed media-event emitter this seam shares with the rest of the
+    /// feature (§6.4). A value type over the injected bus; no state.
+    private var instructionEvents: InstructionObservability {
+        InstructionObservability(bus: observabilityBus)
     }
 
     // MARK: - Native-edit application (calendar-driven task, 2026-09-07)
@@ -206,10 +567,25 @@ final class RoutineScheduler {
             emit("entry_persistence_failed", metadata: [:])
             return false
         }
-        emit(eventType, metadata: metadata)
+        completePersistedMutation(eventType: eventType, metadata: metadata)
+        return true
+    }
+
+    /// The post-persist half of every mutation: one observation, then the
+    /// shared completion. Called only after the index write succeeded, so a
+    /// failed mutation never announces itself as done.
+    private func completePersistedMutation(eventType: String,
+                                           metadata: [String: String],
+                                           outcome: String = "success") {
+        emit(eventType, metadata: metadata, outcome: outcome)
+        completeMutation()
+    }
+
+    /// One re-arm and one side-channel notification — the tail every
+    /// successful mutation (and `setInstruction`) shares.
+    private func completeMutation() {
         scheduleAll()
         onScheduleChanged?()
-        return true
     }
 
     // MARK: - Schedule All (launch + BGTask wake, mirrors MedicationScheduler)
@@ -368,6 +744,7 @@ final class RoutineScheduler {
                     entryId: entry.id,
                     title: entry.displayTitle(locale: locale),
                     visualAidURL: visualAidURL(for: entry),
+                    hadInstruction: entry.instruction?.isPresent == true,
                     at: occurrence.scheduledAt
                 )
             } else {
@@ -432,12 +809,13 @@ final class RoutineScheduler {
         IdHashing.shortHash(of: id)
     }
 
-    private func emit(_ eventType: String, metadata: [String: String]) {
+    private func emit(_ eventType: String, metadata: [String: String],
+                      outcome: String = "success") {
         observabilityBus.emit(ObservabilityEvent(
             component: "routine_scheduler",
             eventType: eventType,
             durationMs: nil,
-            outcome: "success",
+            outcome: outcome,
             errorCode: nil,
             metadata: metadata
         ))

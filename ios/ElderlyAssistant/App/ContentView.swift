@@ -61,13 +61,29 @@ struct ContentView: View {
         // alarm is: it is the app's only in-app firing surface for
         // reminders, and it must cover whatever screen the elder is on.
         // Transparent no-op while nothing has fired (the overwhelming
-        // case — only reminders with photos ever present it).
+        // case — only reminders with photos or an instruction ever
+        // present it).
+        //
+        // [REMINDERS-INSTRUCTIONS T-021] The overlay is a view and reaches
+        // no store: both video seams below are the coordinator's, and
+        // availability is resolved off the draw path inside the overlay's
+        // `.task(id:)`. The mount shape is unchanged.
         .overlay(
             RoutineVisualAidOverlay(
                 presentation: coordinator.firedRoutineVisualAids,
                 store: coordinator.visualAidStore,
                 locale: coordinator.activeLocale,
-                onClose: coordinator.dismissFiredRoutineVisualAids
+                onClose: coordinator.dismissFiredRoutineVisualAids,
+                playbackURL: { entryId, filename in
+                    if case .available(let url) = coordinator.instructionPlaybackAvailability(
+                        filename: filename, owner: .routine(entryId)) {
+                        return url
+                    }
+                    return nil
+                },
+                makePlayback: { url, title in
+                    coordinator.makeInstructionPlayback(url: url, title: title)
+                }
             )
         )
         // [MED-PHOTO-AIDS] (2026-09-16) The medication half of the same

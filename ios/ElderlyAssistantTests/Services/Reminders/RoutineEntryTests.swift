@@ -143,6 +143,132 @@ final class RoutineEntryTests: XCTestCase {
         XCTAssertEqual(decoded.id, aid.id, "the id must round-trip — it keys the file on disk")
     }
 
+    // MARK: - Instruction delta (T-011, design L2 §4.4/§4.6)
+
+    /// F-1 / NFR-RIE-006: a payload written before the `instruction` field
+    /// existed still decodes, with `instruction == nil` and every other
+    /// field intact. A nil instruction also adds no key on re-encode, so a
+    /// legacy payload is never rewritten into a new shape.
+    func testLegacyEntryDecodesNilInstruction() throws {
+        let entry = RoutineEntry(
+            category: .meal,
+            titleOverride: "खाना",
+            scheduleTimes: [DateComponents(hour: 13)],
+            frequency: .weekly,
+            weekdays: [1, 3],
+            isEnabled: false
+        )
+        let data = try JSONEncoder().encode(entry)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertNil(object["instruction"],
+                     "a nil instruction must add no stored key")
+        XCTAssertNotNil(object["visualAids"],
+                        "fixture sanity: the rest of the payload is present")
+
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(RoutineEntry.self, from: legacy)
+
+        XCTAssertNil(decoded.instruction)
+        XCTAssertEqual(decoded.id, entry.id)
+        XCTAssertEqual(decoded.category, .meal)
+        XCTAssertEqual(decoded.titleOverride, "खाना")
+        XCTAssertEqual(decoded.scheduleTimes, entry.scheduleTimes)
+        XCTAssertEqual(decoded.frequency, .weekly)
+        XCTAssertEqual(decoded.weekdays, [1, 3])
+        XCTAssertEqual(decoded.isEnabled, false)
+        XCTAssertEqual(decoded.visualAids, [],
+                       "the pre-instruction payload still carries its (empty) aids")
+    }
+
+    /// B-2 (must-carry): a stored text instruction keeps the raw kind
+    /// `"text"` — never a numeric case and never a renamed value.
+    func testTextKindStaysRawText() throws {
+        let entry = RoutineEntry(
+            category: .medication,
+            scheduleTimes: [DateComponents(hour: 8)],
+            isEnabled: true,
+            instruction: Instruction(kind: "text", text: "Take the blue pill")
+        )
+        let data = try JSONEncoder().encode(entry)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let stored = try XCTUnwrap(object["instruction"] as? [String: Any])
+        XCTAssertEqual(stored["kind"] as? String, "text",
+                       "the persisted vocabulary is the raw string \"text\"")
+
+        let decoded = try JSONDecoder().decode(RoutineEntry.self, from: data)
+        XCTAssertEqual(decoded.instruction?.kind, "text")
+        XCTAssertEqual(decoded.instruction?.knownKind, InstructionKind.text)
+        XCTAssertEqual(decoded.instruction?.text, "Take the blue pill")
+    }
+
+    /// F-4: every instruction field survives a routine-entry round trip,
+    /// and the instruction rides alongside the existing fields rather than
+    /// replacing them.
+    func testInstructionRoundTrip() throws {
+        let instruction = Instruction(kind: "image",
+                                      caption: "the blue box",
+                                      filename: "abc.jpg")
+        let entry = RoutineEntry(
+            category: .medication,
+            titleOverride: "Metformin",
+            scheduleTimes: [DateComponents(hour: 8)],
+            isEnabled: true,
+            visualAids: [VisualAid(filename: "box.jpg", caption: "the box")],
+            instruction: instruction
+        )
+        let data = try JSONEncoder().encode(entry)
+        let decoded = try JSONDecoder().decode(RoutineEntry.self, from: data)
+
+        XCTAssertEqual(decoded, entry)
+        XCTAssertEqual(decoded.instruction, instruction)
+        XCTAssertEqual(decoded.instruction?.kind, "image")
+        XCTAssertEqual(decoded.instruction?.caption, "the blue box")
+        XCTAssertEqual(decoded.instruction?.filename, "abc.jpg")
+        XCTAssertNil(decoded.instruction?.text)
+        XCTAssertEqual(decoded.instruction?.isPresent, true)
+        XCTAssertEqual(decoded.visualAids.count, 1,
+                       "the instruction must not clobber the existing fields")
+    }
+
+    /// F-8: unknown fields inside the nested instruction are ignored on
+    /// decode and dropped on re-encode — forward tolerance never fails the
+    /// owner and never smuggles an unknown field back to disk.
+    func testUnknownInstructionFieldsAreIgnored() throws {
+        let entry = RoutineEntry(
+            category: .walk,
+            scheduleTimes: [DateComponents(hour: 17)],
+            isEnabled: true,
+            instruction: Instruction(kind: "text", text: "Walk to the park")
+        )
+        let data = try JSONEncoder().encode(entry)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        var instruction = try XCTUnwrap(object["instruction"] as? [String: Any])
+        instruction["future_field"] = 42
+        object["instruction"] = instruction
+        let mutated = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(RoutineEntry.self, from: mutated)
+        XCTAssertEqual(decoded.instruction?.kind, "text")
+        XCTAssertEqual(decoded.instruction?.text, "Walk to the park")
+
+        let reencoded = try JSONEncoder().encode(decoded)
+        let reencodedObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: reencoded) as? [String: Any]
+        )
+        let reencodedInstruction = try XCTUnwrap(
+            reencodedObject["instruction"] as? [String: Any]
+        )
+        XCTAssertNil(reencodedInstruction["future_field"],
+                     "an unknown nested field is ignored, not carried")
+        XCTAssertEqual(reencodedInstruction["kind"] as? String, "text")
+    }
+
     // MARK: - Display title
 
     func testDisplayTitlePrefersVerbatimOverride() {

@@ -1,60 +1,59 @@
-# Functional Requirements — Medication Schedules and Reminders
+# Functional Requirements — Reminders Instructions Enhancements
 
-22 functional requirements. IDs are namespaced `FR-MSR-NNN` to avoid colliding with the
+25 functional requirements. IDs are namespaced `FR-RIE-NNN` to avoid colliding with the
 project-level `FR-NNN` set in the root stakeholder brief (`requirements.md`) — the same convention
-live-camera-translation used (`FR-LCT-NNN`), profile-interview used (`FR-PI-NNN`),
-spotify-music-integration used (`FR-SP-NNN`), multi-turn-conversation used (`FR-MTC-NNN`),
-family-contacts-unify used (`FR-FCU-NNN`), call-dialer-primary-secondary used (`FR-CDP-NNN`) and
-conversational-nepali-replies used (`FR-CNR-NNN`). This page covers the
-`medication-schedules-reminders` set (`FR-MSR-*`) only; the earlier feature files remain in this
-folder and are not part of this feature's requirements or lock.
+the earlier features used (`FR-MSR-NNN`, `FR-CNR-NNN`, `FR-CDP-NNN`, `FR-FCU-NNN`, `FR-LCT-NNN`,
+`FR-MTC-NNN`, `FR-PI-NNN`, `FR-SP-NNN`). This page covers the
+`reminders-instructions-enhancements` set (`FR-RIE-*`) only; the earlier feature files remain in
+this folder and are not part of this feature's requirements or lock.
 
-The root brief's `FR-026` … `FR-030` and the dementia supplement's `FR-D01` … `FR-D04e` are
-referenced for traceability, never renumbered. All 22 requirements are MUST — this is a
-safety-critical revamp of the medication path; there is no polish tier.
+The feature constitution (`specs/reminders-instructions-enhancements/constitution.md`) is the
+normative source; OD-1 … OD-8 were RESOLVED by the owner on 2026-10-25. All 25 requirements are
+MUST — the scope is a fixed v1 contract, not a polish tier.
 
 | ID | Title | Area | Priority |
 |----|-------|------|----------|
-| [FR-MSR-001](FR-MSR-001-slot-based-entry-model.md) | Slot-based entry model — quantity + time-of-day slot + before/after meal | Entry Model | MUST |
-| [FR-MSR-002](FR-MSR-002-deterministic-slot-to-clock-mapping.md) | Deterministic slot-to-clock mapping — 08:00 / 13:00 / 19:00 defaults, family-configurable | Slot-to-Clock Mapping | MUST |
-| [FR-MSR-003](FR-MSR-003-structured-quantity-dose-line.md) | Structured quantity — amount + unit composed into the rendered dose line | Quantity & Dose Line | MUST |
-| [FR-MSR-004](FR-MSR-004-purpose-at-entry.md) | Purpose at entry — a brief purpose description on every medication | Purpose | MUST |
-| [FR-MSR-005](FR-MSR-005-scan-to-fill-additive.md) | Scan-to-fill — additive beside manual entry, bounded extraction | Scan-to-Fill | MUST |
-| [FR-MSR-006](FR-MSR-006-ocr-human-confirmation-before-binding.md) | OCR values require human confirmation before binding — never silent auto-apply | Scan-to-Fill / Safety | MUST |
-| [FR-MSR-007](FR-MSR-007-voice-ack-names-medication-and-slot.md) | Voice acknowledgement names the medication and slot — resolution by what was said | Voice Acknowledgement | MUST |
-| [FR-MSR-008](FR-MSR-008-conservative-disambiguation-copy-rule.md) | Conservative disambiguation — "did you mean X / X or Y" copy rule, never the wrong medication | Voice Acknowledgement / Safety | MUST |
-| [FR-MSR-009](FR-MSR-009-acknowledgement-safety-sequence.md) | Acknowledgement safety sequence preserved — challenge, then double-dose check, then record | Medication Safety Sequence | MUST |
-| [FR-MSR-010](FR-MSR-010-intake-recorded-against-schedule.md) | Intake recorded against the day's schedule — scheduled time and acknowledged time | Recording & Adherence | MUST |
-| [FR-MSR-011](FR-MSR-011-refusal-first-denial-guard.md) | Refusal-first denial guard preserved — a denial never falls through to an acknowledgement | Ack Vocabulary Guard | MUST |
-| [FR-MSR-012](FR-MSR-012-mic-continuity-around-acks.md) | Mic continuity around acknowledgements — no gap between acknowledgement and listening | Voice Pipeline / Ack Fast Lane | MUST |
-| [FR-MSR-013](FR-MSR-013-photo-evidence-augments-never-replaces.md) | Photo of the medication as intake evidence — augments, never replaces, never creates a record | Photo Evidence / Safety | MUST |
-| [FR-MSR-014](FR-MSR-014-photo-evidence-shared-slot-resolution.md) | Photo evidence resolves the shared slot deterministically — never the wrong medication | Photo Evidence | MUST |
-| [FR-MSR-015](FR-MSR-015-significant-event-notification-set.md) | Significant-event notification set — missed dose, double-dose, intake recorded, escalation started | Caregiver Notification | MUST |
-| [FR-MSR-016](FR-MSR-016-caregiver-channels-honest-delivery.md) | Caregiver notification channels and honest per-contact delivery | Caregiver Notification / Delivery Honesty | MUST |
-| [FR-MSR-017](FR-MSR-017-pii-free-wire.md) | PII-free wire — significant events extend the existing taxonomy with no new PII | Wire Discipline / Safety | MUST |
-| [FR-MSR-018](FR-MSR-018-honest-degradation-deferred-capabilities.md) | Honest degradation — deferred capabilities surfaced as themselves, never a false success | Honesty / Delivery Integrity | MUST |
-| [FR-MSR-019](FR-MSR-019-existing-reminder-escalation-preserved.md) | Existing reminder and escalation semantics preserved — no weakening of medication safety invariants | Preserved Machinery | MUST |
-| [FR-MSR-020](FR-MSR-020-dementia-machinery-preserved.md) | Dementia machinery preserved and integrated — never rebuilt, never removed | Preserved Machinery | MUST |
-| [FR-MSR-021](FR-MSR-021-elderly-fit-ux-new-flows.md) | Elderly-fit UX of the new flows — voice-first completion, plain language, vocabulary limit | Elderly-Fit UX | MUST |
-| [FR-MSR-022](FR-MSR-022-persistence-before-alarm-and-rearm.md) | Persistence before alarm and process-kill re-arm — the FR-029 invariant holds on the revamped paths | Persistence & Recovery | MUST |
+| [FR-RIE-001](FR-RIE-001-instruction-model-three-kinds.md) | Instruction model — one instruction of a single kind on routines and free-form events | Instruction Model | MUST |
+| [FR-RIE-002](FR-RIE-002-text-instruction.md) | Text instruction — written steps stored as text and readable at fire time | Text Instruction | MUST |
+| [FR-RIE-003](FR-RIE-003-image-instruction.md) | Image instruction — photo or diagram shown through the existing photo-aid path | Image Instruction | MUST |
+| [FR-RIE-004](FR-RIE-004-library-video-pick.md) | Pick an existing video from the library — first-class, permission-free source | Video Capture | MUST |
+| [FR-RIE-005](FR-RIE-005-in-app-video-recording.md) | Record a video in the app — system camera UI, ships in v1 | Video Capture | MUST |
+| [FR-RIE-006](FR-RIE-006-video-acceptance-limits.md) | Video acceptance limits — 3 minutes, ~200 MB, as provided, unsupported codecs rejected at pick time | Video Constraints | MUST |
+| [FR-RIE-007](FR-RIE-007-optional-caption.md) | Optional caption for image and video — shown with the instruction, blank reserves no space | Captions | MUST |
+| [FR-RIE-008](FR-RIE-008-instruction-lifetime-and-edits.md) | One instruction belongs to the entry — every firing, edits apply without re-creation | Instruction Lifetime | MUST |
+| [FR-RIE-009](FR-RIE-009-existing-caregiver-edit-surfaces.md) | Instruction management stays in the existing caregiver surfaces — no standalone media screen | Caregiver Editing | MUST |
+| [FR-RIE-010](FR-RIE-010-plain-feedback-and-safe-failure.md) | Plain visible feedback — choose, record, save, replace, remove; cancellation and failure never silent | Caregiver Editing | MUST |
+| [FR-RIE-011](FR-RIE-011-video-storage-layout-and-protection.md) | Video store — dedicated Application Support roots, bare filenames, complete file protection | Storage | MUST |
+| [FR-RIE-012](FR-RIE-012-filename-hygiene-traversal-guard.md) | Filename hygiene — plain names only; a hand-edited payload cannot escape the store root | Storage Hardening | MUST |
+| [FR-RIE-013](FR-RIE-013-transactional-replace.md) | Transactional replace — write the new video before the index points at it | Storage Lifecycle | MUST |
+| [FR-RIE-014](FR-RIE-014-delete-with-owner.md) | Delete with the owner — routine deletion, event deletion and reconcile leave no orphan video | Storage Lifecycle | MUST |
+| [FR-RIE-015](FR-RIE-015-reminder-always-fires.md) | The reminder always fires — instruction media never blocks, delays or mutes it | Fire-Time Reliability | MUST |
+| [FR-RIE-016](FR-RIE-016-presentation-handlers-always-false.md) | Presentation handlers always return false — notification outcomes unchanged | Notification Discipline | MUST |
+| [FR-RIE-017](FR-RIE-017-fire-time-composition.md) | Fired screen composition — reminder content plus instruction content per kind | Fire-Time Presentation | MUST |
+| [FR-RIE-018](FR-RIE-018-playback-ux-no-autoplay.md) | Playback UX — explicit large Play opens full-screen AVKit; no sound before a user action | Playback UX | MUST |
+| [FR-RIE-019](FR-RIE-019-tap-open-path-foreground-honest.md) | Tap/Open path in v1 — reach the instruction after unlock; no background video claim | Fire-Time Access | MUST |
+| [FR-RIE-020](FR-RIE-020-playback-failure-plain-fallback.md) | Playback failure — plain localized message, reminder stays, always dismissible, PII-free log | Failure Handling | MUST |
+| [FR-RIE-021](FR-RIE-021-notification-taxonomy-preserved.md) | Notification taxonomy preserved — full-REPLACE builder, scoped cancels only | Notification Discipline | MUST |
+| [FR-RIE-022](FR-RIE-022-video-not-in-notification-attachments.md) | Instruction video never enters the notification attachment store | Notification Discipline | MUST |
+| [FR-RIE-023](FR-RIE-023-no-new-ack-escalation-machinery.md) | No new acknowledgement, escalation, re-fire or missed-event machinery | Preserved Behaviour | MUST |
+| [FR-RIE-024](FR-RIE-024-honest-capability-surface.md) | Honest capability surface — YouTube link not shipped, no fake control, room left for a later link kind | Honesty / Capability Surface | MUST |
+| [FR-RIE-025](FR-RIE-025-camera-microphone-permissions.md) | Camera and microphone at point of use — plain disclosure, denial non-blocking | Capture Permissions | MUST |
 
 ## Traceability to the source mandate
 
 | Source | Requirements |
 |--------|--------------|
-| Owner scope point 1 (slot-based entry model) | FR-MSR-001, FR-MSR-002, FR-MSR-003 |
-| Owner scope point 2 (purpose) | FR-MSR-004 |
-| Owner scope point 3 (scan-to-fill; manual as before) | FR-MSR-005, FR-MSR-006 |
-| Owner scope point 4 (voice ack with slot, recorded against the day's schedule) | FR-MSR-007 … FR-MSR-012 |
-| Owner scope point 5 (photo as evidence, shared slot) | FR-MSR-013, FR-MSR-014 |
-| Owner scope point 6 (caregivers always notified) | FR-MSR-015, FR-MSR-016, FR-MSR-017 |
-| Owner scope point 7 (fit for forgetful elderly users) | FR-MSR-021 (+ NFR-MSR-005) |
-| Safety delta (a) OCR never auto-binds | FR-MSR-006 |
-| Safety delta (b) deterministic slot-to-clock mapping | FR-MSR-002 |
-| Safety delta (c) photo evidence never creates a record | FR-MSR-013 |
-| Safety delta (d) PII-free wire | FR-MSR-017 |
-| Root FR-026 – FR-028 (delivery, escalation, missed dose) | FR-MSR-019, FR-MSR-015 |
-| Root FR-029 / NFR-027 (persistence, re-fire) | FR-MSR-022 |
-| Root FR-030 / supplement FR-D04 (adherence view) | FR-MSR-010 |
-| Supplement FR-D01 – FR-D03 (challenge, denial, double dose) | FR-MSR-009, FR-MSR-020, FR-MSR-011 |
-| Supplement FR-D04a – FR-D04e (photo verification machinery) | FR-MSR-013, FR-MSR-020 |
+| Feature purpose and in-scope items 1–5 (instructions on routines and free-form events; local video primary; three kinds; playback at fire time) | FR-RIE-001 … FR-RIE-025 |
+| OD-1 media amendment (text, image, video; one instruction; 3 min / ~200 MB; no transcode; codec rejection) | FR-RIE-001, FR-RIE-002, FR-RIE-003, FR-RIE-006 |
+| OD-2 in-app recording ships, system camera UI, non-blocking denial | FR-RIE-005, FR-RIE-025 |
+| OD-3 YouTube links not shipped; room for a later link kind; no fake control | FR-RIE-024 (+ FR-RIE-001 model) |
+| OD-4 fire-time composition, no autoplay, photos plus video | FR-RIE-017, FR-RIE-018, FR-RIE-007 |
+| OD-5 storage roots, bare filenames, complete file protection, receive-as-is | FR-RIE-011, FR-RIE-006 |
+| OD-6 foreground-only honest; routine tap/Open in v1; no extra "Watch video" action | FR-RIE-018, FR-RIE-019, FR-RIE-024 |
+| OD-7 injectable playback seam; simulator failure paths; one device smoke | FR-RIE-020, NFR-RIE-009 |
+| OD-8 success criterion (caregiver attaches; elder follows unaided) | FR-RIE-009, FR-RIE-010, FR-RIE-017 … FR-RIE-020 |
+| Instruction Model & Storage Contract properties 1–7 | FR-RIE-001, FR-RIE-008, FR-RIE-011 … FR-RIE-014, FR-RIE-022, NFR-RIE-005 … NFR-RIE-007 |
+| Capture & Permissions Contract properties 1–6 | FR-RIE-004, FR-RIE-005, FR-RIE-007, FR-RIE-009, FR-RIE-010, FR-RIE-025, NFR-RIE-002 |
+| Fire-Time Playback, Accessibility & Failure Contract properties 1–7 | FR-RIE-015 … FR-RIE-023, NFR-RIE-001, NFR-RIE-008 |
+| Safety & Compliance Delta (fail-safe degradation; on-device only; privacy of home video; permissions; no silent stubs) | FR-RIE-015, FR-RIE-020, FR-RIE-024, NFR-RIE-003, NFR-RIE-004 |
+| Root brief FR-024 / FR-025 (general reminders; schedules persist) and supplement FR-D26–D29 (routine guidance context) | FR-RIE-001, FR-RIE-008, FR-RIE-023 (context, never renumbered) |

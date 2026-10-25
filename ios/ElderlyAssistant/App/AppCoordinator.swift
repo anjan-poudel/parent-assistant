@@ -319,6 +319,57 @@ struct TakenDoseRow: Identifiable, Equatable {
     let hasEvidence: Bool
 }
 
+// MARK: - [REMINDERS-INSTRUCTIONS] T-025 — sweep input and seam
+
+/// The orphan sweep's input (design-l2 §4.9): what may be treated as live,
+/// per root. `nil` means the source could not be read — deliberately NOT
+/// the same as an empty set. An unreadable index must skip its root; a
+/// sweep built on an empty stand-in would delete every video the household
+/// owns (P-6, §5.9, §11.3 K).
+///
+/// `compose` is pure. The coordinator supplies the two strict reads
+/// (`RoutineScheduler.entriesIfReadable()` and `EventExtrasStore.snapshot()`)
+/// on the main actor, which is what keeps "unknown" expressible at all.
+struct LiveInstructionOwners: Equatable {
+    /// `nil` = the routine store could not be read.
+    let routines: Set<InstructionOwner>?
+    /// `nil` = the extras index could not be read.
+    let events: Set<InstructionOwner>?
+
+    /// Every owner whose current instruction kind is video is live,
+    /// regardless of whether its file resolves. Erring toward "live" means
+    /// the sweep can never delete bytes the index might still point at; a
+    /// missing file simply has nothing to delete. Performs no IO.
+    static func compose(routineEntries: [RoutineEntry]?,
+                        extras: [String: EventExtras]?) -> LiveInstructionOwners {
+        LiveInstructionOwners(
+            routines: routineEntries.map { entries in
+                Set(entries
+                    .filter { $0.instruction?.knownKind == .video }
+                    .map { InstructionOwner.routine($0.id) })
+            },
+            events: extras.map { rows in
+                Set(rows
+                    .filter { $0.value.instruction?.knownKind == .video }
+                    .map { InstructionOwner.event($0.key) })
+            }
+        )
+    }
+}
+
+/// The two purge operations the launch sweep drives (IF-11, IF-12). A
+/// file-scope protocol held by the coordinator as a test seam; the
+/// production video store conforms below without the coordinator naming
+/// its concrete type.
+protocol InstructionOrphanSweeping {
+    func purgePendingDrafts() -> Result<Int, InstructionStorageError>
+    func purgeOrphanedOwners(in root: InstructionRoot,
+                             live: Set<InstructionOwner>?,
+                             graceSeconds: TimeInterval) -> Result<Int, InstructionStorageError>
+}
+
+extension InstructionVideoStore: InstructionOrphanSweeping {}
+
 /// Central coordinator that wires all services together.
 /// Starts safety-critical services first (medication scheduler, health monitor),
 /// then voice pipeline, then LLM.
@@ -3323,6 +3374,12 @@ final class AppCoordinator: ObservableObject {
         let storage = MigratingEncryptedStorage()
         self.storage = storage
         self.observabilityBus = bus
+        // [REMINDERS-INSTRUCTIONS] (T-025) The free-form event side index:
+        // ONE instance shared by the lazy event service's writes and the
+        // launch sweep's strict `snapshot()` read (design-l2 §5.5), so the
+        // sweep sees exactly the rows the service writes. Construction
+        // stores the seam only — no read, no write, no file IO.
+        self.eventExtrasStore = EventExtrasStore(storage: storage)
         // [PROFILE-INTERVIEW T-092] Store → guard → seam, composed here
         // next to the storage they write through (design-l2 §5.6): the
         // wizard runs BEFORE start(), so the seam must exist the moment
@@ -3580,7 +3637,12 @@ final class AppCoordinator: ObservableObject {
             // [PHOTO-AIDS] Two jobs: arming a notification with the
             // entry's first photo as a banner attachment, and clearing
             // the entry's photo folder when the entry is deleted.
-            visualAidStore: visualAidStore
+            visualAidStore: visualAidStore,
+            // [REMINDERS-INSTRUCTIONS] (T-022) The ONE video store
+            // (design-l2 §2.18): the scheduler commits and deletes the
+            // routine owner's bytes through the same instance the
+            // coordinator's importer and capture coordinators use.
+            instructionVideoStore: instructionVideoStore
         )
         self.routineScheduler = routineScheduler
         self.routinePlugin = RoutinePlugin(scheduler: routineScheduler)
@@ -4354,6 +4416,16 @@ final class AppCoordinator: ObservableObject {
             self.routineStore.seedDefaultsIfNeeded()
             DispatchQueue.main.async { self.routineScheduler.scheduleAll() }
         }
+        // [REMINDERS-INSTRUCTIONS] (T-025) ONE instruction orphan sweep per
+        // launch (design-l2 §5.5, §7.4): the live set is composed here, on
+        // the main actor, and the file work runs on the model-housekeeping
+        // queue — never on main, never from `init`, never from a timer or a
+        // foreground event. `assumeIsolated` states the main confinement
+        // this method already has (it is reached from `start()`'s main hop
+        // and from ContentView.onAppear).
+        MainActor.assumeIsolated {
+            self.enqueueInstructionOrphanSweep()
+        }
         // Same re-queue for alarms + timers ([ALARMS-TIMERS] 2026-09-07 —
         // idempotent: pending requests replace in place by id, and
         // expired timer rows are pruned first).
@@ -4592,8 +4664,17 @@ final class AppCoordinator: ObservableObject {
             entryLookup: { [weak routineScheduler] entryId in
                 routineScheduler?.entry(for: entryId)
             },
-            onFire: { [weak self] entry in
-                self?.presentRoutineVisualAids(for: entry)
+            // [REMINDERS-INSTRUCTIONS] (T-025) The designated initializer:
+            // foreground delivery carries the typed `had_instruction` and
+            // delivery-date context, and a tap reaches the instruction
+            // screen through its own sink (FR-RIE-019). Both run on main.
+            onFire: { [weak self] entry, context in
+                self?.presentRoutineVisualAids(for: entry, context: context)
+            },
+            onInstructionTap: { [weak self] entryId, entry, firedAt in
+                self?.presentRoutineInstructionTap(entryId: entryId,
+                                                   entry: entry,
+                                                   firedAt: firedAt)
             }
         )
         // [MED-PHOTO-AIDS] The dose's photos at the moment it fires
@@ -12860,7 +12941,18 @@ self.noteTalkContractChanged()
     /// screens ask through the same EventKit prompt every other calendar
     /// surface uses, and a denial reads as an empty list, never a crash.
     private(set) lazy var freeFormEventService = FreeFormEventService(
-        extras: EventExtrasStore(storage: storage),
+        // [REMINDERS-INSTRUCTIONS] (T-025) The SAME index instance the
+        // launch sweep reads with `snapshot()` — the sweep and the write
+        // path must never disagree about which rows exist.
+        extras: eventExtrasStore,
+        // [REMINDERS-INSTRUCTIONS] (T-022) The ONE video store
+        // (design-l2 §2.18): the event owner's bytes are committed and
+        // deleted through the same instance the coordinator's importer and
+        // capture coordinators use. The service's own default would resolve
+        // the same root but be a second instance; inject the shared one.
+        // The photo store stays the service's (`EventPhotos`), which is what
+        // `eventInstructionImageLoader` reads.
+        instructionVideoStore: instructionVideoStore,
         observability: observabilityBus
     )
 
@@ -12883,8 +12975,9 @@ self.noteTalkContractChanged()
         freeFormEventService.photo(forEventId: eventId)
     }
 
-    /// Saves the Events form — creating when `eventId` is nil — and tells
-    /// the Google bridge, answering the native identifier. nil means
+    /// Saves the Events form — creating when `eventId` is nil — tells the
+    /// Google bridge, and answers the service's typed outcome (IF-25): the
+    /// event id plus whether the instruction half saved. nil still means
     /// nothing was written, which is the form's cue to stay open with its
     /// draft rather than claim a save that did not happen.
     ///
@@ -12894,23 +12987,34 @@ self.noteTalkContractChanged()
     /// fingerprint diff decides whether anything changed — so an edit
     /// that alters nothing sends no request, and one that moves the time
     /// queues exactly one PUT.
+    ///
+    /// `FreeFormEventSaveOutcome.instructionSaved == false` is the honest
+    /// partial result: the event and its photo are saved and the
+    /// instruction's failure is the caller's to report. A Boolean here
+    /// would lose that distinction (design §3.1 rule 3, IF-25).
     @discardableResult
     func saveFreeFormEvent(_ form: FreeFormEventForm,
-                           editing eventId: String? = nil) -> String? {
-        guard let savedId = freeFormEventService.save(form, editing: eventId) else {
+                           editing eventId: String? = nil) -> FreeFormEventSaveOutcome? {
+        // [T-022] The single delegation point: production is the lazy
+        // `freeFormEventService`; the coordinator's suite replaces the seam
+        // with a recording double so no unit test opens EventKit.
+        let saver = freeFormEventSaver
+        guard let outcome = saver.save(form, editing: eventId) else {
             return nil
         }
-        // Read back through the service rather than the form: what was
+        // Read back through the same target rather than the form: what was
         // actually written is the honest thing to share (the gateway
-        // normalizes blank notes and address to nil on the way in).
-        if let saved = freeFormEventService.event(withId: savedId) {
-            calendarShareService.eventCreated(localEventId: savedId,
+        // normalizes blank notes and address to nil on the way in). The
+        // Google-bridge reconcile is the shipping side effect, kept
+        // unchanged for both create and edit.
+        if let saved = saver.event(withId: outcome.eventId) {
+            calendarShareService.eventCreated(localEventId: outcome.eventId,
                                               title: saved.title,
                                               startDate: saved.startDate,
                                               durationMinutes: saved.durationMinutes,
                                               location: saved.address)
         }
-        return savedId
+        return outcome
     }
 
     /// Deletes the event natively, then tells the Google bridge — so the
@@ -13385,13 +13489,14 @@ self.noteTalkContractChanged()
 
     // MARK: - Routine reminder surface (v2 pivot Phase 1)
 
-    /// A routine reminder that just fired WITH photos, presented full
-    /// screen for the person the reminder is for (photo-visual-aids task,
-    /// 2026-09-16). Set by `RoutineVisualAidFireHandler` — the app's only
-    /// in-app firing surface for reminders, since routine reminders
-    /// otherwise deliver as text-only notification banners. Nil (the
-    /// normal state) means nothing to present; entries without photos
-    /// never set it, so their behaviour is byte-for-byte unchanged.
+    /// A routine reminder that just fired, presented full screen for the
+    /// person the reminder is for (photo-visual-aids task, 2026-09-16;
+    /// widened to instructions by T-025). Set by
+    /// `RoutineVisualAidFireHandler` — the app's only in-app firing surface
+    /// for reminders, since routine reminders otherwise deliver as
+    /// text-only notification banners. Nil (the normal state) means nothing
+    /// to present; an entry with neither photos nor an expected instruction
+    /// never sets it, so its behaviour is byte-for-byte unchanged.
     @Published private(set) var firedRoutineVisualAids: FiredRoutineVisualAids?
 
     /// All configured routine entries (seeded categories + voice-created)
@@ -13434,15 +13539,55 @@ self.noteTalkContractChanged()
         firedRoutineVisualAids = nil
     }
 
-    /// `RoutineVisualAidFireHandler`'s presentation sink, on the main
-    /// queue. Reads the title through `activeLocale` at fire time — the
-    /// language the app is in NOW, not the one it was in when the
-    /// notification was armed.
-    private func presentRoutineVisualAids(for entry: RoutineEntry) {
+    /// `RoutineVisualAidFireHandler`'s foreground sink, on the main queue
+    /// (design-l2 §2.15.3, §4.11; IF-32). Reads the title through
+    /// `activeLocale` at fire time — the language the app is in NOW, not the
+    /// one it was in when the notification was armed. `expectsInstruction`
+    /// mirrors the payload's `had_instruction`, so a photo-only or
+    /// pre-upgrade firing keeps exactly today's screen (D6, NFR-RIE-010).
+    func presentRoutineVisualAids(for entry: RoutineEntry,
+                                  context: RoutineInstructionFireContext) {
         firedRoutineVisualAids = FiredRoutineVisualAids(
             entryId: entry.id,
-            title: entry.displayTitle(locale: activeLocale),
-            aids: entry.visualAids
+            content: .reminder(
+                title: entry.displayTitle(locale: activeLocale),
+                aids: entry.visualAids,
+                instruction: entry.instruction,
+                expectsInstruction: context.hadInstruction,
+                firedAt: context.firedAt)
+        )
+    }
+
+    /// `RoutineVisualAidFireHandler`'s tap sink (design-l2 §2.14.3,
+    /// §2.15.3; FR-RIE-019). Three outcomes, no dead tap:
+    ///
+    ///  1. a deleted owner (`entry == nil`) publishes `.unavailable`, which
+    ///     claims no title and no time because none can be resolved;
+    ///  2. a live owner publishes `.reminder` with `expectsInstruction:
+    ///     true` — this path only runs when `had_instruction` was true, so
+    ///     an instruction removed after arming renders the honest
+    ///     `instruction.removed` fallback instead of a blank card;
+    ///  3. a presentation already showing the SAME entry is not replaced
+    ///     (L1's dedupe rule, R-13); a different entry replaces it, so the
+    ///     single `fullScreenCover(item:)` never stacks.
+    func presentRoutineInstructionTap(entryId: UUID,
+                                      entry: RoutineEntry?,
+                                      firedAt: Date) {
+        if firedRoutineVisualAids?.entryId == entryId { return }
+        guard let entry else {
+            firedRoutineVisualAids = FiredRoutineVisualAids(
+                entryId: entryId,
+                content: .unavailable)
+            return
+        }
+        firedRoutineVisualAids = FiredRoutineVisualAids(
+            entryId: entryId,
+            content: .reminder(
+                title: entry.displayTitle(locale: activeLocale),
+                aids: entry.visualAids,
+                instruction: entry.instruction,
+                expectsInstruction: true,
+                firedAt: firedAt)
         )
     }
 
@@ -14792,6 +14937,294 @@ self.noteTalkContractChanged()
             realEngineAtLaunch: wakeWordEngineRealAtLaunch
         )
     }
+
+    // MARK: - [REMINDERS-INSTRUCTIONS] T-022 composition seams (design-l2 §2.15, IF-32)
+    //
+    // The feature's ONLY composition root (C15, service half). Views never
+    // reach a store: the editors receive the lazy factories below through
+    // their dependency values, and every save goes through the two seams at
+    // the bottom of this section — one entry point per owner kind, no
+    // duplicate transaction logic.
+    //
+    // Nothing here performs file IO at construction: the video store's
+    // `init` only resolves paths (§5.1, pinned by `NoIOInInitTests`), the
+    // configuration values are plain structs, and the importer, capture
+    // coordinator and playback controller are built lazily on first use.
+    // No picker, recorder, player, timer, notification registration or
+    // permission request exists until a person asks for one (§2.15.6,
+    // FR-RIE-018). The fired-screen presentation methods and the tap sink
+    // live in the routine-reminder surface section above; T-025's launch
+    // sweep closes this section.
+
+    /// The app's ONE instruction video store (design-l2 §2.15, §7.1). Its
+    /// `init` resolves the two roots and performs no disk IO; the
+    /// directories appear on the first write, so this declaration keeps the
+    /// constant-time boot contract. Injected into the importer, the capture
+    /// coordinators and both owner write seams — there is never a second
+    /// instance, which is what makes `availability` see the bytes `commit`
+    /// wrote.
+    let instructionVideoStore = InstructionVideoStore()
+
+    /// The synchronous pre-staging probe (IF-13) and the asynchronous
+    /// inspection (IF-14). Stateless values; constructing them performs no
+    /// AVFoundation work and reads no file.
+    let instructionVideoProber = AVInstructionVideoProber()
+    let instructionVideoInspector = AVInstructionVideoInspector()
+
+    /// The validate-only importer (IF-15), built on first use from the
+    /// shared store and the shared inspector; the capture coordinator owns
+    /// the only other reference. It holds no mutable state and opens no
+    /// file until `validate` runs.
+    lazy var instructionVideoImporter = InstructionVideoImporter(
+        store: instructionVideoStore,
+        inspector: instructionVideoInspector,
+        configuration: instructionCaptureConfiguration.video)
+
+    /// The camera/microphone seam (IF-18). A stateless value over the OS:
+    /// construction asks for nothing and reads nothing until the recorder
+    /// path calls it (§2.5).
+    let instructionVideoPermissions = AVFoundationInstructionPermissions()
+
+    /// The 3-minute / 200 MiB limits, recording quality and staging chunk
+    /// size (design §9.1), and the playback timing bounds. Constructed from
+    /// their ONE named homes; nothing user-configurable, no clock read.
+    let instructionCaptureConfiguration = InstructionCaptureConfiguration.standard
+    let instructionPlaybackConfiguration = InstructionPlaybackConfiguration.standard
+
+    /// The feature's only event writer (IF-29) over the app's existing
+    /// sanitising bus. Lazy because the bus is an init-injected property.
+    lazy var instructionEvents = InstructionObservability(bus: observabilityBus)
+
+    /// [T-022 test seam] The routine write target `saveRoutineInstruction`
+    /// delegates to. Production is the coordinator's `routineScheduler`
+    /// (IF-22); the suite replaces this with a recording double so the
+    /// exact `(commit, entryId)` pair and the scheduler's own `Result` are
+    /// observable without opening the encrypted routine store. `lazy` so
+    /// neither the scheduler nor a double exists before the first save.
+    lazy var routineInstructionWriter: RoutineInstructionWriting = self.routineScheduler
+
+    /// [T-022 test seam] The event-save target `saveFreeFormEvent`
+    /// delegates to. Production is the lazy `freeFormEventService` (IF-25);
+    /// the suite replaces this with a recording double so the form, editing
+    /// id and returned outcome are observable without opening EventKit. The
+    /// Google-bridge reconcile still reads back through the same target.
+    lazy var freeFormEventSaver: FreeFormEventSaving = self.freeFormEventService
+
+    /// Presents an instruction capture surface from the top-most view
+    /// controller. Shared by both factories; the presenter is resolved at
+    /// presentation time (a controller captured earlier could be detached),
+    /// exactly like the Google sign-in sheet above.
+    @MainActor
+    private func presentInstructionCaptureSurface(_ controller: UIViewController) {
+        topPresentingViewController()?.present(controller, animated: true)
+    }
+
+    /// The library picker factory (IF-16; T-010's production adapter). A
+    /// new adapter per presentation: the picker holds one session's
+    /// callbacks, and the capture coordinator creates it only when the
+    /// person taps the library button (`makePicker` closure), never at
+    /// coordinator construction. No photo-library adapter is constructed
+    /// anywhere.
+    @MainActor
+    func makeInstructionVideoPicker() -> InstructionVideoPicking {
+        PHPickerInstructionVideoPicker(present: { [weak self] controller in
+            guard let self else { return }
+            self.presentInstructionCaptureSurface(controller)
+        })
+    }
+
+    /// The camera recorder factory (IF-17; T-010's production adapter).
+    /// Same per-presentation rule; it owns no permission logic (the capture
+    /// coordinator resolves camera and then microphone first, §2.5.3).
+    @MainActor
+    func makeInstructionVideoRecorder() -> InstructionVideoRecording {
+        UIImagePickerInstructionVideoRecorder(present: { [weak self] controller in
+            guard let self else { return }
+            self.presentInstructionCaptureSurface(controller)
+        })
+    }
+
+    /// The playback factory (IF-20; T-004's AVKit adapter + T-017's
+    /// controller). It constructs values only: the controller stores them
+    /// and `start()` — the person's tap — is the sole path that presents a
+    /// player, so no factory here can autoplay (FR-RIE-018). The URL is the
+    /// store's stable Application Support path (§7.4).
+    @MainActor
+    func makeInstructionPlayback(url: URL, title: String?) -> InstructionPlaybackController {
+        InstructionPlaybackController(
+            url: url,
+            title: title,
+            player: AVKitInstructionVideoPlayer(),
+            configuration: instructionPlaybackConfiguration,
+            events: instructionEvents)
+    }
+
+    /// Per-editor-session capture coordinator factory (IF-28; design
+    /// §2.18). `draftSession` is the owner root the session stages into —
+    /// `.routines` for a routine editor, `.events` for an event editor — so
+    /// each editor gets its own state machine while both are bound to the
+    /// ONE shared video store. The picker and recorder closures are passed,
+    /// not invoked: no system surface exists until `pick()`/`record()`.
+    @MainActor
+    func instructionCaptureCoordinator(draftSession: InstructionRoot) -> InstructionVideoCaptureCoordinator {
+        InstructionVideoCaptureCoordinator(
+            root: draftSession,
+            store: instructionVideoStore,
+            importer: instructionVideoImporter,
+            permissions: instructionVideoPermissions,
+            makePicker: { self.makeInstructionVideoPicker() },
+            makeRecorder: { self.makeInstructionVideoRecorder() },
+            configuration: instructionCaptureConfiguration,
+            events: instructionEvents,
+            probe: { url in self.instructionVideoProber.probe(url: url) })
+    }
+
+    /// The routine editor's image-preview loader (IF-21), over the app's
+    /// existing routine visual-aid store. Built per entry because the loader
+    /// is bound to the entry whose instruction it previews; no second store
+    /// instance is created (design §2.15.1's `routineInstructionImageLoader`,
+    /// adapted to its per-entry shape).
+    @MainActor
+    func routineInstructionImageLoader(entryId: UUID) -> VisualAidInstructionImageLoader {
+        VisualAidInstructionImageLoader(store: visualAidStore, entryId: entryId)
+    }
+
+    /// The event editor's image-preview loader (IF-21), over the event photo
+    /// store the lazy event service already owns — the same `EventPhotos`
+    /// directory the event's own photo uses, never a second instance. Lazy
+    /// for the same reason `freeFormEventService` is: the service opens
+    /// EventKit, and no event surface exists at launch.
+    @MainActor
+    var eventInstructionImageLoader: EventPhotoInstructionImageLoader {
+        EventPhotoInstructionImageLoader(store: freeFormEventService.photos)
+    }
+
+    /// IF-10 through the composition seam: the playability answer for one
+    /// owner, from the ONE shared store. Views pass the owner id they
+    /// already hold and never reach the store themselves (design §2.15.2);
+    /// every non-playable answer simply yields no play control. The call is
+    /// value-only and reads no bytes until the person taps Play.
+    func instructionPlaybackAvailability(filename: String,
+                                         owner: InstructionOwner) -> InstructionPlaybackAvailability {
+        instructionVideoStore.availability(filename: filename, owner: owner)
+    }
+
+    /// IF-32. Saves a routine instruction through the scheduler's ordered
+    /// transaction (IF-22). One entry point; the typed `Result` is returned
+    /// unchanged, so `.ownerNotFound`, a media-write failure or a
+    /// persistence failure can never be mistaken for a save and the editor
+    /// keeps its previous instruction and its draft (§5.6, §11.3).
+    @MainActor
+    @discardableResult
+    func saveRoutineInstruction(_ commit: InstructionCommit,
+                                entryId: UUID) -> Result<Void, InstructionWriteError> {
+        routineInstructionWriter.setInstruction(commit, entryId: entryId)
+    }
+
+    // MARK: - [REMINDERS-INSTRUCTIONS] T-025 — the launch orphan sweep
+    //
+    // One sweep per launch, never from `init` (§5.5, §7.4): the live set is
+    // composed with the two STRICT reads on the main actor (`nil` =
+    // unreadable, never an empty stand-in), then the file work runs on
+    // `modelHousekeepingQueue`. Pending drafts are purged once and each root
+    // is swept once with its own live set; every call emits one
+    // `instruction_orphan_purge` event. No timer, no foreground sweep, and no
+    // purge can block launch.
+
+    /// The free-form event side index the sweep's strict read goes through.
+    /// Assigned in `init` beside `storage` so the lazy event service and the
+    /// sweep share ONE instance (design-l2 §5.5). Construction performs no
+    /// read; `snapshot()` reads only when the sweep asks.
+    let eventExtrasStore: EventExtrasStore
+
+    /// [T-025 test seam] The purge target the launch sweep drives (IF-11,
+    /// IF-12). Production is the ONE video store; a test swaps in a
+    /// recording double before first access, so no unit test touches a
+    /// real instruction root.
+    lazy var instructionSweeper: InstructionOrphanSweeping = self.instructionVideoStore
+
+    /// One-shot guard (design-l2 §7.4): both launch entry points reach
+    /// `start()`, but the sweep must run exactly once per process. Read by
+    /// the suite to prove init left it unset. Main-confined.
+    private(set) var instructionSweepEnqueued = false
+
+    /// [T-025] Composes the sweep's live set on the main actor from the two
+    /// strict reads — `RoutineScheduler.entriesIfReadable()` (IF-23,
+    /// delegating to IF-33) and `EventExtrasStore.snapshot()` (IF-27).
+    /// `nil` per root is preserved, never substituted with `[]`, because the
+    /// sweep treats "unknown" as "do not touch this root" (P-6, §5.9).
+    @MainActor
+    func composeLiveInstructionOwners() -> LiveInstructionOwners {
+        LiveInstructionOwners.compose(
+            routineEntries: routineScheduler.entriesIfReadable(),
+            extras: eventExtrasStore.snapshot())
+    }
+
+    /// [T-025] Enqueues the ONE launch sweep (design-l2 §5.5). Called from
+    /// `composePostFirstFrame()` — never from `init`. The live set, the
+    /// grace value and both lazy values are resolved HERE, on the main
+    /// actor, before the hop: the strict reads are main-actor reads, and
+    /// touching the lazy seams off-main would race their initializers
+    /// (§3.1 rule 4).
+    @MainActor
+    func enqueueInstructionOrphanSweep() {
+        guard !instructionSweepEnqueued else { return }
+        instructionSweepEnqueued = true
+
+        let owners = composeLiveInstructionOwners()
+        let graceSeconds = InstructionVideoConfiguration.standard.orphanGraceSeconds
+        let sweeper = instructionSweeper
+        let events = instructionEvents
+
+        modelHousekeepingQueue.async {
+            AppCoordinator.performInstructionOrphanSweep(owners: owners,
+                                                         graceSeconds: graceSeconds,
+                                                         sweeper: sweeper,
+                                                         events: events)
+        }
+    }
+
+    /// [T-025] The synchronous sweep body. Static and value-driven so the
+    /// suite can call it directly with composed owners and a spy:
+    /// `purgePendingDrafts()` once, then `purgeOrphanedOwners` once per root
+    /// with that root's live set, one event per call. A failure is an event
+    /// and a skipped root — never a thrown error and never a launch failure.
+    static func performInstructionOrphanSweep(owners: LiveInstructionOwners,
+                                              graceSeconds: TimeInterval,
+                                              sweeper: InstructionOrphanSweeping,
+                                              events: InstructionObservability) {
+        switch sweeper.purgePendingDrafts() {
+        case .success(let count):
+            events.orphanPurge(outcome: .completed, count: count, error: nil)
+        case .failure(let error):
+            events.orphanPurge(outcome: .failed, count: 0, error: error)
+        }
+        sweepInstructionOrphans(root: .routines,
+                                live: owners.routines,
+                                graceSeconds: graceSeconds,
+                                sweeper: sweeper,
+                                events: events)
+        sweepInstructionOrphans(root: .events,
+                                live: owners.events,
+                                graceSeconds: graceSeconds,
+                                sweeper: sweeper,
+                                events: events)
+    }
+
+    private static func sweepInstructionOrphans(root: InstructionRoot,
+                                                live: Set<InstructionOwner>?,
+                                                graceSeconds: TimeInterval,
+                                                sweeper: InstructionOrphanSweeping,
+                                                events: InstructionObservability) {
+        switch sweeper.purgeOrphanedOwners(in: root,
+                                           live: live,
+                                           graceSeconds: graceSeconds) {
+        case .success(let count):
+            events.orphanPurge(outcome: .completed, count: count, error: nil)
+        case .failure(let error):
+            events.orphanPurge(outcome: .failed, count: 0, error: error)
+        }
+    }
 }
 
 // MARK: - [ALARMS-TIMERS] Alarms + timers (voice stage + Settings leaf)
@@ -15692,3 +16125,38 @@ extension AppCoordinator {
             mandatoryFieldsRecorded: mandatoryRecorded)
     }
 }
+
+// MARK: - [REMINDERS-INSTRUCTIONS] T-022 write-seam protocols
+
+/// The routine-write face `AppCoordinator.saveRoutineInstruction` delegates
+/// to (IF-22/IF-32; design-l2 §2.15).
+///
+/// `RoutineScheduler` is the only production conformer, and the conformance
+/// is declared here so the scheduler's own file stays untouched. The
+/// coordinator's suite replaces the delegation target with a recording
+/// double, which is how the exact `(commit, entryId)` pair and the
+/// scheduler's own `Result` are observed without opening the encrypted
+/// routine store. No second write path exists.
+protocol RoutineInstructionWriting: AnyObject {
+    func setInstruction(_ commit: InstructionCommit,
+                        entryId: UUID) -> Result<Void, InstructionWriteError>
+}
+
+extension RoutineScheduler: RoutineInstructionWriting {}
+
+/// The event-save face `AppCoordinator.saveFreeFormEvent` delegates to
+/// (IF-25/IF-32).
+///
+/// It is exactly the service's two calls — the save and the read-back the
+/// Google bridge reconciles from — so the coordinator's suite can prove the
+/// form, the editing id and the returned partial outcome without opening
+/// EventKit. `FreeFormEventService` is the only production conformer; the
+/// type is `AnyObject` because the service is a reference type and the
+/// coordinator's seam property must be replaceable.
+protocol FreeFormEventSaving: AnyObject {
+    func save(_ form: FreeFormEventForm,
+              editing eventId: String?) -> FreeFormEventSaveOutcome?
+    func event(withId eventId: String) -> FreeFormEvent?
+}
+
+extension FreeFormEventService: FreeFormEventSaving {}

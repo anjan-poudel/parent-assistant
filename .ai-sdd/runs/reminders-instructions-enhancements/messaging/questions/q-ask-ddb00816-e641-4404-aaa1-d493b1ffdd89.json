@@ -1,0 +1,26 @@
+{
+  "schema_version": "1",
+  "question_id": "q-ask-ddb00816-e641-4404-aaa1-d493b1ffdd89",
+  "kind": "open",
+  "channel_id": "C0C6CEVV8R4",
+  "message_ts": "C0C6CEVV8R4:1792902265.592829",
+  "thread_ts": "1792902265.592829",
+  "hil_id": null,
+  "status": "answered",
+  "asked_at": "2026-10-25T04:24:25.584Z",
+  "expires_at": "2026-11-19T00:55:49.231Z",
+  "consumed": [
+    {
+      "message_id": "C0C6CEVV8R4:1792906524.589809",
+      "event_id": null,
+      "from_user": "U0C6DTHDMV0",
+      "consumed_at": "2026-10-25T05:35:26.380Z",
+      "delivered_at": "2026-10-25T05:35:26.384Z"
+    }
+  ],
+  "answer": {
+    "choice_id": null,
+    "text": "instructions can be in any type of video, whatever fits the need",
+    "from_user": "U0C6DTHDMV0"
+  }
+}

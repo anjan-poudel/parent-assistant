@@ -2,17 +2,87 @@ import XCTest
 import UIKit
 @testable import ElderlyAssistant
 
+// MARK: - Video spy (T-015)
+
+/// Records the event write seam's video calls in one ordered log so the
+/// transaction's ORDER is assertable without touching real bytes (T-015).
+/// `onCommit` is the hook that lets a test interleave a gateway or storage
+/// write with the commit — the same witness shape `RoutineSchedulerTests`
+/// uses for C11.
+private final class EventInstructionVideoStoreSpy: RoutineInstructionVideoStoring {
+    var callLog: [String] = []
+    var commitOwners: [InstructionOwner] = []
+    var deleteAllOwners: [InstructionOwner] = []
+    /// Bare filenames that "exist" for the owner, per the store's contract.
+    var files: Set<String> = []
+    var commitResult: Result<String, InstructionStorageError> =
+        .success("instruction-new.mov")
+    var deleteResult: Result<Void, InstructionStorageError> = .success(())
+    var deleteAllResult: Result<Void, InstructionStorageError> = .success(())
+    var discarded: [StagedInstructionVideo] = []
+    /// Overrides the availability answer when set — models a name the
+    /// store refuses or cannot read.
+    var availabilityOverride: InstructionPlaybackAvailability?
+    var onCommit: (() -> Void)?
+
+    func commit(_ staged: StagedInstructionVideo,
+                for owner: InstructionOwner) -> Result<String, InstructionStorageError> {
+        callLog.append("commit")
+        commitOwners.append(owner)
+        onCommit?()
+        if case .success(let filename) = commitResult {
+            files.insert(filename)
+        }
+        return commitResult
+    }
+
+    func discard(_ staged: StagedInstructionVideo) -> Result<Void, InstructionStorageError> {
+        callLog.append("discard")
+        discarded.append(staged)
+        return .success(())
+    }
+
+    func delete(_ filename: String,
+                for owner: InstructionOwner) -> Result<Void, InstructionStorageError> {
+        callLog.append("delete:\(filename)")
+        if case .success = deleteResult {
+            files.remove(filename)
+        }
+        return deleteResult
+    }
+
+    func deleteAll(for owner: InstructionOwner) -> Result<Void, InstructionStorageError> {
+        callLog.append("deleteAll")
+        deleteAllOwners.append(owner)
+        if case .success = deleteAllResult {
+            files.removeAll()
+        }
+        return deleteAllResult
+    }
+
+    func availability(filename: String,
+                      owner: InstructionOwner) -> InstructionPlaybackAvailability {
+        if let availabilityOverride { return availabilityOverride }
+        if files.contains(filename) {
+            return .available(URL(fileURLWithPath: "/tmp/\(filename)"))
+        }
+        return .missingFile
+    }
+}
+
 /// `FreeFormEventService` — the read/write face over the native events
-/// the app created (rich-events task, 2026-09-17; design §2).
+/// the app created (rich-events task, 2026-09-17; design §2), extended by
+/// T-015 with the event owner's instruction transaction (design L2 §2.13,
+/// §4.8, §5.6).
 ///
 /// Free-form events ARE native `EKEvent`s in the default calendar, so
 /// the interesting behaviour is at the SEAMS: which events the list
 /// shows (the side index's membership, not the calendar), how the app
 /// heals an index row whose event is gone, and the write-then-index
 /// ordering that decides whether a failed photo write can destroy the
-/// photo it was replacing. The gateway is an in-memory fake and the
-/// photo store a throwaway directory, so nothing touches EventKit,
-/// the Keychain or Application Support.
+/// photo it was replacing. The gateway is an in-memory fake, the photo
+/// store a throwaway directory and the video store an ordered spy, so
+/// nothing touches EventKit, the Keychain or Application Support.
 final class FreeFormEventServiceTests: XCTestCase {
 
     // MARK: - Fakes
@@ -28,6 +98,10 @@ final class FreeFormEventServiceTests: XCTestCase {
         private(set) var updated: [(identifier: String, draft: CalendarEventDraft)] = []
         private(set) var removedIdentifiers: [String] = []
         var records: [CalendarEventRecord] = []
+        /// Ordered write log shared with the video spy's hook where a test
+        /// pins "the event exists before any instruction bytes move"
+        /// (T-015, design §5.6).
+        var callLog: [String] = []
 
         var eventsAccess: CalendarAccess { access }
 
@@ -42,6 +116,7 @@ final class FreeFormEventServiceTests: XCTestCase {
         func createEvent(_ draft: CalendarEventDraft,
                          in calendarIdentifier: String?) -> String? {
             guard !refuseWrites else { return nil }
+            callLog.append("create")
             created.append((draft, calendarIdentifier))
             let identifier = "evt-\(created.count)"
             records.append(CalendarEventRecord(
@@ -57,6 +132,7 @@ final class FreeFormEventServiceTests: XCTestCase {
             guard !refuseWrites,
                   let index = records.firstIndex(where: { $0.eventIdentifier == identifier })
             else { return false }
+            callLog.append("update")
             let existing = records[index]
             records[index] = CalendarEventRecord(
                 eventIdentifier: identifier,
@@ -71,6 +147,7 @@ final class FreeFormEventServiceTests: XCTestCase {
         func removeEvent(identifier: String) -> Bool {
             guard let index = records.firstIndex(where: { $0.eventIdentifier == identifier })
             else { return false }
+            callLog.append("remove")
             records.remove(at: index)
             removedIdentifiers.append(identifier)
             return true
@@ -81,8 +158,10 @@ final class FreeFormEventServiceTests: XCTestCase {
     // MARK: - Harness
 
     private var gateway: FakeGateway!
+    private var storage: MockEncryptedLocalStorage!
     private var extras: EventExtrasStore!
     private var photoRoot: URL!
+    private var videoStore: EventInstructionVideoStoreSpy!
     private var bus: MockObservabilityBus!
     private var service: FreeFormEventService!
 
@@ -97,7 +176,9 @@ final class FreeFormEventServiceTests: XCTestCase {
     override func setUpWithError() throws {
         try super.setUpWithError()
         gateway = FakeGateway()
-        extras = EventExtrasStore(storage: MockEncryptedLocalStorage())
+        storage = MockEncryptedLocalStorage()
+        extras = EventExtrasStore(storage: storage)
+        videoStore = EventInstructionVideoStoreSpy()
         bus = MockObservabilityBus()
         photoRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("event-photo-tests-\(UUID().uuidString)")
@@ -105,6 +186,7 @@ final class FreeFormEventServiceTests: XCTestCase {
             gateway: gateway,
             extras: extras,
             photoStore: ContactPhotoStore(rootDirectory: photoRoot),
+            instructionVideoStore: videoStore,
             observability: bus)
     }
 
@@ -149,6 +231,71 @@ final class FreeFormEventServiceTests: XCTestCase {
     private func fileExists(_ filename: String) -> Bool {
         FileManager.default.fileExists(
             atPath: photoRoot.appendingPathComponent(filename).path)
+    }
+
+    // MARK: - Instruction harness (T-015)
+
+    /// A staged video for the EVENT root — the owner the transaction must
+    /// commit under (design §5.6, §4.3).
+    private func makeStagedVideo(draftId: UUID = UUID()) -> StagedInstructionVideo {
+        StagedInstructionVideo(
+            draftId: draftId,
+            root: .events,
+            stagedURL: URL(fileURLWithPath: "/tmp/staged-\(draftId.uuidString).mov"),
+            byteCount: 1024,
+            metadata: InstructionVideoMetadata(durationSeconds: 12,
+                                               hasVideoTrack: true,
+                                               isPlayable: true),
+            sourceExtension: "mov",
+            stagedAt: now)
+    }
+
+    private func makeVideoCommit(caption: String? = nil) -> InstructionCommit {
+        let staged = makeStagedVideo()
+        return InstructionCommit(
+            write: .set(InstructionPayload(kind: .video, caption: caption)),
+            pendingMedia: .video(AcceptedInstructionVideo(staged: staged,
+                                                          validatedAt: now)))
+    }
+
+    private func makeTextCommit(_ text: String) -> InstructionCommit {
+        InstructionCommit(write: .set(InstructionPayload(kind: .text, text: text)),
+                          pendingMedia: nil)
+    }
+
+    private var removeCommit: InstructionCommit {
+        InstructionCommit(write: .remove, pendingMedia: nil)
+    }
+
+    /// Tracks `eventId` and stores `instruction` directly, through the
+    /// store seam — the "event already had one" precondition.
+    private func seedInstruction(_ instruction: Instruction, forEventId eventId: String) {
+        extras.track(eventId: eventId)
+        XCTAssertTrue(extras.setInstruction(instruction, forEventId: eventId))
+    }
+
+    private func assertSuccess(_ result: Result<Void, InstructionWriteError>,
+                               file: StaticString = #filePath,
+                               line: UInt = #line) {
+        if case .failure(let error) = result {
+            XCTFail("expected success, got \(error)", file: file, line: line)
+        }
+    }
+
+    private func assertFailure(_ result: Result<Void, InstructionWriteError>,
+                               equals expected: InstructionWriteError,
+                               file: StaticString = #filePath,
+                               line: UInt = #line) {
+        switch result {
+        case .success:
+            XCTFail("expected \(expected), got success", file: file, line: line)
+        case .failure(let error):
+            XCTAssertEqual(error, expected, file: file, line: line)
+        }
+    }
+
+    private func instructionUpdatedEvents() -> [ObservabilityEvent] {
+        bus.emittedEvents.filter { $0.eventType == "event_instruction_updated" }
     }
 
     // MARK: - The list
@@ -230,9 +377,10 @@ final class FreeFormEventServiceTests: XCTestCase {
         form.address = "Patan"
         form.durationMinutes = 60
 
-        let id = service.save(form)
+        let outcome = service.save(form)
 
-        XCTAssertEqual(id, "evt-1")
+        XCTAssertEqual(outcome, FreeFormEventSaveOutcome(eventId: "evt-1",
+                                                         instructionSaved: true))
         XCTAssertEqual(gateway.created.count, 1)
         XCTAssertNil(gateway.created.first?.calendarIdentifier,
                      "the default calendar is where an elder's own appointments belong")
@@ -269,9 +417,10 @@ final class FreeFormEventServiceTests: XCTestCase {
         var form = FreeFormEventForm(startDate: date(hour: 16))
         form.title = "New title"
 
-        let id = service.save(form, editing: "evt-9")
+        let outcome = service.save(form, editing: "evt-9")
 
-        XCTAssertEqual(id, "evt-9")
+        XCTAssertEqual(outcome?.eventId, "evt-9")
+        XCTAssertEqual(outcome?.instructionSaved, true)
         XCTAssertTrue(gateway.created.isEmpty, "an edit is not a second event")
         XCTAssertEqual(gateway.updated.map(\.identifier), ["evt-9"])
         XCTAssertEqual(extras.eventIds, ["evt-9"], "still exactly one row")
@@ -287,6 +436,222 @@ final class FreeFormEventServiceTests: XCTestCase {
         XCTAssertNil(service.save(form, editing: "evt-9"))
     }
 
+    // MARK: - Instructions (T-015, design L2 §2.13, §4.8, §5.6)
+
+    /// No draft means no instruction work at all: the event save is
+    /// exactly today's, the membership row is still written (that is what
+    /// makes the event "one of ours"), and no bytes move.
+    func testSaveWithoutInstructionIsUnchanged() {
+        var form = FreeFormEventForm(startDate: date(hour: 14))
+        form.title = "Dentist"
+
+        let outcome = service.save(form)
+
+        XCTAssertEqual(outcome,
+                       FreeFormEventSaveOutcome(eventId: "evt-1",
+                                                instructionSaved: true))
+        XCTAssertEqual(gateway.created.count, 1)
+        XCTAssertEqual(extras.eventIds, ["evt-1"])
+        XCTAssertNil(extras.extras(forEventId: "evt-1")?.instruction)
+        XCTAssertTrue(videoStore.callLog.isEmpty,
+                      "no instruction draft -> no media, no delete, no commit")
+        XCTAssertTrue(instructionUpdatedEvents().isEmpty)
+    }
+
+    /// The event exists before any instruction byte is committed, and the
+    /// commit runs under the EVENT owner (design §5.6: "step 1 runs only
+    /// after the event's resolvedId exists").
+    func testSaveWithInstructionWritesEventFirst() throws {
+        var form = FreeFormEventForm(startDate: date(hour: 14))
+        form.title = "Dentist"
+        var draft = InstructionDraft.loaded(instruction: nil)
+        draft.setPendingVideo(AcceptedInstructionVideo(staged: makeStagedVideo(),
+                                                       validatedAt: now),
+                              caption: nil)
+        form.instructionDraft = draft
+
+        let fakeGateway = gateway!
+        videoStore.onCommit = { fakeGateway.callLog.append("commit") }
+
+        let outcome = try XCTUnwrap(service.save(form))
+
+        XCTAssertEqual(outcome.eventId, "evt-1")
+        XCTAssertTrue(outcome.instructionSaved)
+        XCTAssertEqual(fakeGateway.callLog, ["create", "commit"],
+                       "the event is created before the instruction is committed")
+        XCTAssertEqual(videoStore.commitOwners, [.event("evt-1")],
+                       "the event owner root, never the routine root")
+        XCTAssertEqual(extras.extras(forEventId: "evt-1")?.instruction?.kind, "video")
+        XCTAssertEqual(extras.extras(forEventId: "evt-1")?.instruction?.filename,
+                       "instruction-new.mov")
+    }
+
+    /// A failed instruction write after a successful event save is a
+    /// PARTIAL outcome, never nil: the event (and its photo) are exactly
+    /// as today, the instruction did not change, and no bytes are orphaned.
+    func testInstructionFailureReportsInstructionSaved() throws {
+        var form = FreeFormEventForm(startDate: date(hour: 14))
+        form.title = "Dentist"
+        var draft = InstructionDraft.loaded(instruction: nil)
+        draft.setPendingVideo(AcceptedInstructionVideo(staged: makeStagedVideo(),
+                                                       validatedAt: now),
+                              caption: nil)
+        form.instructionDraft = draft
+        videoStore.commitResult = .failure(.commitFailed)
+
+        let outcome = try XCTUnwrap(service.save(form),
+                                    "a saved event is never nil")
+
+        XCTAssertEqual(outcome.eventId, "evt-1")
+        XCTAssertFalse(outcome.instructionSaved,
+                       "the surface can report the partial line honestly")
+        XCTAssertNotNil(service.event(withId: "evt-1"),
+                        "the event remains visible and editable")
+        XCTAssertNil(extras.extras(forEventId: "evt-1")?.instruction,
+                     "no instruction change is claimed")
+        XCTAssertEqual(videoStore.discarded.count, 1,
+                       "a failed commit discards the staged draft")
+        XCTAssertTrue(videoStore.files.isEmpty, "no media is orphaned")
+        XCTAssertTrue(instructionUpdatedEvents().isEmpty,
+                      "a failed write emits no update event")
+    }
+
+    /// §5.6 A1/A2: the new bytes are durable before the extras row names
+    /// them. The storage hook and the spy hook share one ordered log, so
+    /// this is one array comparison.
+    func testSetInstructionCommitsBeforePersist() {
+        seedEvent(id: "evt-1")
+        var log: [String] = []
+        videoStore.onCommit = { log.append("commit") }
+        storage.onWriteCompleted = { log.append("persist") }
+
+        assertSuccess(service.setInstruction(makeVideoCommit(), forEventId: "evt-1"))
+
+        XCTAssertEqual(Array(log.prefix(2)), ["commit", "persist"],
+                       "bytes become durable before the index names them")
+        XCTAssertEqual(videoStore.commitOwners, [.event("evt-1")])
+        XCTAssertEqual(extras.extras(forEventId: "evt-1")?.instruction?.filename,
+                       "instruction-new.mov")
+    }
+
+    /// A missing extras row is `.ownerNotFound` BEFORE anything is
+    /// touched: no byte written, no byte deleted, no index write.
+    func testMissingEventReturnsOwnerNotFound() {
+        assertFailure(service.setInstruction(makeTextCommit("Take the blue pill"),
+                                             forEventId: "never"),
+                      equals: .ownerNotFound)
+
+        XCTAssertTrue(videoStore.callLog.isEmpty,
+                      "no bytes are written or deleted for an owner we do not have")
+        XCTAssertEqual(storage.writeCallCount, 0, "the index is untouched")
+        XCTAssertTrue(instructionUpdatedEvents().isEmpty)
+    }
+
+    /// §5.6 A1: a failed media commit leaves the previous instruction and
+    /// its file exactly where they were.
+    func testMediaCommitFailureKeepsPrevious() {
+        seedEvent(id: "evt-1")
+        let previous = Instruction(kind: "video", caption: "Old",
+                                   filename: "instruction-old.mov")
+        seedInstruction(previous, forEventId: "evt-1")
+        videoStore.files = ["instruction-old.mov"]
+        videoStore.commitResult = .failure(.commitFailed)
+
+        assertFailure(service.setInstruction(makeVideoCommit(), forEventId: "evt-1"),
+                      equals: .mediaWriteFailed(.commitFailed))
+
+        XCTAssertEqual(extras.extras(forEventId: "evt-1")?.instruction, previous,
+                       "the extras row still names the previous file")
+        XCTAssertTrue(videoStore.files.contains("instruction-old.mov"),
+                      "the previous file still exists")
+        XCTAssertEqual(videoStore.discarded.count, 1,
+                       "the staged draft is discarded")
+        XCTAssertTrue(instructionUpdatedEvents().isEmpty)
+    }
+
+    /// §5.6 A2: a failed persist deletes the bytes committed for THIS
+    /// attempt, so the row and disk cannot disagree.
+    func testPersistFailureDoesNotOrphanNewBytes() {
+        seedEvent(id: "evt-1")
+        let previous = Instruction(kind: "video", caption: "Old",
+                                   filename: "instruction-old.mov")
+        seedInstruction(previous, forEventId: "evt-1")
+        videoStore.files = ["instruction-old.mov"]
+        videoStore.commitResult = .success("instruction-new.mov")
+        storage.shouldFailWrite = true
+
+        assertFailure(service.setInstruction(makeVideoCommit(), forEventId: "evt-1"),
+                      equals: .persistenceFailed)
+
+        XCTAssertEqual(extras.extras(forEventId: "evt-1")?.instruction, previous,
+                       "the previous instruction survives the failed write")
+        XCTAssertFalse(videoStore.files.contains("instruction-new.mov"),
+                       "bytes committed for an index write that failed are deleted")
+        XCTAssertTrue(videoStore.files.contains("instruction-old.mov"),
+                      "the previous file is not touched by a rollback")
+        XCTAssertTrue(instructionUpdatedEvents().isEmpty)
+    }
+
+    /// §2.13.4: delete removes the row, the photo and the event owner's
+    /// whole video directory.
+    func testDeleteEventDeletesAllMedia() throws {
+        seedEvent(id: "evt-1")
+        XCTAssertTrue(service.setPhoto(makeImage(), forEventId: "evt-1"))
+        let photo = try XCTUnwrap(extras.extras(forEventId: "evt-1")?.photoFilename)
+        seedInstruction(Instruction(kind: "video", filename: "instruction-old.mov"),
+                        forEventId: "evt-1")
+        videoStore.files = ["instruction-old.mov"]
+
+        XCTAssertTrue(service.delete(eventId: "evt-1"))
+
+        XCTAssertTrue(videoStore.callLog.contains("deleteAll"))
+        XCTAssertEqual(videoStore.deleteAllOwners, [.event("evt-1")],
+                       "teardown is for the event owner, never the routine root")
+        XCTAssertFalse(fileExists(photo))
+        XCTAssertNil(extras.extras(forEventId: "evt-1"))
+    }
+
+    /// A media-delete failure is observed and left to the sweep: it never
+    /// changes the answer and never blocks the row removal.
+    func testDeleteEventSurvivesMediaFailure() {
+        seedEvent(id: "evt-1")
+        videoStore.deleteAllResult = .failure(.deleteFailed)
+
+        XCTAssertTrue(service.delete(eventId: "evt-1"),
+                      "the returned Bool still reports the native removal")
+        XCTAssertNil(extras.extras(forEventId: "evt-1"),
+                     "the row is removed even when the media delete fails")
+        XCTAssertEqual(videoStore.deleteAllOwners, [.event("evt-1")])
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "instruction_media_delete" && $0.outcome == "failed"
+        })
+    }
+
+    /// §6.4: one `event_instruction_updated` on a real change — component
+    /// `free_form_events`, outcome `saved`, `kind` + `count = 1`, and no
+    /// identifier, title, text, caption, filename or URL.
+    func testRealChangeEmitsEventInstructionUpdated() throws {
+        seedEvent(id: "evt-1")
+
+        assertSuccess(service.setInstruction(makeTextCommit("Take the blue pill"),
+                                             forEventId: "evt-1"))
+
+        let events = instructionUpdatedEvents()
+        XCTAssertEqual(events.count, 1)
+        let event = try XCTUnwrap(events.first)
+        XCTAssertEqual(event.component, "free_form_events")
+        XCTAssertEqual(event.outcome, "saved")
+        XCTAssertEqual(event.metadata, ["kind": "text", "count": "1"])
+        XCTAssertNil(event.errorCode)
+        XCTAssertNil(event.durationMs)
+
+        // The identical write is a successful no-op: no persist, no event.
+        assertSuccess(service.setInstruction(makeTextCommit("Take the blue pill"),
+                                             forEventId: "evt-1"))
+        XCTAssertEqual(instructionUpdatedEvents().count, 1,
+                       "an unchanged instruction must not emit a second event")
+    }
+
     // MARK: - Photos
 
     func testSaveWritesAPickedPhotoAndIndexesItOnlyAfterTheBytesLand() {
@@ -294,9 +659,11 @@ final class FreeFormEventServiceTests: XCTestCase {
         form.title = "Birthday"
         form.pickedPhoto = makeImage()
 
-        let id = try! XCTUnwrap(service.save(form))
+        let outcome = try! XCTUnwrap(service.save(form))
+        let id = outcome.eventId
         let filename = try! XCTUnwrap(extras.extras(forEventId: id)?.photoFilename)
 
+        XCTAssertTrue(outcome.instructionSaved)
         XCTAssertTrue(fileExists(filename), "the index points at a file that exists")
         XCTAssertNotNil(service.photo(forEventId: id))
         XCTAssertNotNil(service.photo(for: try! XCTUnwrap(service.event(withId: id))))

@@ -1,0 +1,10 @@
+{
+  "schema_version": "1",
+  "workspace_id": "T0C78DE0QF2",
+  "transport": "socket",
+  "interactive": true,
+  "native_polls": false,
+  "poll_app": "simple_poll",
+  "detected_at": "2026-10-25T06:20:34.092Z",
+  "ttl_ms": 86400000
+}

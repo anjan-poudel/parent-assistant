@@ -1,0 +1,15 @@
+{
+  "schema_version": "1",
+  "question_id": "q-ask-450c1298-5133-40ae-8077-b5b299950db8",
+  "claimant": "store-24300-1",
+  "message_id": "C0C6CEVV8R4:1792882422.477939",
+  "event_id": null,
+  "from_user": "U0C6DTHDMV0",
+  "consumed_at": "2026-10-24T23:00:31.025Z",
+  "answer": {
+    "choice_id": null,
+    "text": "feature name: reminders-instructions-enhancements ?\nallow attaching instructions to an event/activity reminder. for example if its a reminder for physio exercise, then it may have video instructions to do the physio at home.",
+    "from_user": "U0C6DTHDMV0"
+  },
+  "claimed_at": "2026-10-24T23:00:31.026Z"
+}

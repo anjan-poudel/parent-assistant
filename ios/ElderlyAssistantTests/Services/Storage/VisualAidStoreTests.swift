@@ -373,4 +373,47 @@ final class VisualAidStoreTests: XCTestCase {
             .hasPrefix(VisualAidStore.medicationDirectoryPrefix))
         XCTAssertNil(medications.existingFileURL(VisualAid(filename: "../escape.jpg"), for: id))
     }
+
+    // MARK: - Instruction-image boundary (reminders-instructions-enhancements, T-005)
+
+    /// An instruction's photo is saved through the same `save(_:for:)` seam
+    /// into the entry's directory, beside the entry's visual aids — but it
+    /// is its OWN file, referenced from `Instruction.filename` rather than
+    /// the `visualAids` array. Removing one must never remove the other
+    /// (design L2 §5.8; the fourth T-005 scenario).
+    func testInstructionAndVisualAidImagesCoexist() throws {
+        let store = makeStore()
+
+        // One routine entry carrying both: a visual aid and a separate
+        // instruction image, each its own save.
+        let aid = try XCTUnwrap(store.save(makeImage(width: 30, height: 30), for: entryId))
+        let instructionImage = try XCTUnwrap(store.save(makeImage(width: 40, height: 40),
+                                                       for: entryId))
+        XCTAssertNotEqual(aid.filename, instructionImage.filename,
+                          "each save writes its own file — the instruction image never overwrites the aid")
+
+        let directory = tmpRoot.appendingPathComponent(entryId.uuidString, isDirectory: true)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 2,
+                       "the visual aid and the instruction image coexist in the entry's directory")
+        XCTAssertNotNil(store.load(aid, for: entryId))
+        XCTAssertNotNil(store.load(instructionImage, for: entryId))
+
+        // Removing the instruction deletes only the instruction's file.
+        store.delete(instructionImage, for: entryId)
+        XCTAssertNil(store.load(instructionImage, for: entryId), "the instruction image is gone")
+        XCTAssertNotNil(store.load(aid, for: entryId),
+                        "the visual aid must survive the instruction's removal")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 1)
+
+        // And the reverse, on a second entry: removing the visual aid
+        // leaves the instruction image untouched.
+        let otherAid = try XCTUnwrap(store.save(makeImage(width: 30, height: 30),
+                                                for: otherEntryId))
+        let otherInstruction = try XCTUnwrap(store.save(makeImage(width: 40, height: 40),
+                                                        for: otherEntryId))
+        store.delete(otherAid, for: otherEntryId)
+        XCTAssertNil(store.load(otherAid, for: otherEntryId), "the visual aid is gone")
+        XCTAssertNotNil(store.load(otherInstruction, for: otherEntryId),
+                        "the instruction image must survive the visual aid's removal")
+    }
 }
