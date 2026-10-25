@@ -1,0 +1,15 @@
+{
+  "schema_version": "1",
+  "question_id": "q-ask-a4622d33-4cae-43aa-89e3-057835765bd9",
+  "claimant": "store-42528-1",
+  "message_id": "C0C6CEVV8R4:1792907348.605929",
+  "event_id": null,
+  "from_user": "U0C6DTHDMV0",
+  "consumed_at": "2026-10-25T05:56:16.562Z",
+  "answer": {
+    "choice_id": null,
+    "text": "both (pick from library or record in app); videos can also be youtube links - not recommended due to ads and fiddly skipping",
+    "from_user": "U0C6DTHDMV0"
+  },
+  "claimed_at": "2026-10-25T05:56:16.562Z"
+}

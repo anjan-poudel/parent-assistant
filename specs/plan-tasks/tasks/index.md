@@ -1,40 +1,56 @@
-# Implementation Tasks
+# Implementation Tasks — Reminders Instructions Enhancements
 
-Feature: **conversational-nepali-replies** (Conversational Nepali Replies — CNR)
-Decomposition source: `specs/design-l1.md` (combined L1+L2 design of record, 2026-10-14). Total: 6 groups, 27 tasks, 0 subtasks, about 50.5 developer-days nominal.
+Flat unit layout. Every file in this directory except this index is one implementation unit discovered by the ai-sdd unit engine. There are no group subdirectories and no subtask files.
 
-| Group | Title | Tasks | Total Effort | Status |
-|-------|-------|-------|-------------|--------|
-| [TG-34](TG-34-style-spec-chat-decode-and-persona-seams/index.md) | Style Spec, Chat Decode and Persona Seams | 3 tasks | ~5.5 days | PENDING |
-| [TG-35](TG-35-grammar-guard-prompt-mirrors-and-copy/index.md) | Grammar Guard, Prompt Mirrors and Localised Copy | 3 tasks | ~4.5 days | PENDING |
-| [TG-36](TG-36-cloud-chat-consent-routing-and-elder-surfaces/index.md) | Cloud Chat Consent, Routing and Elder Surfaces | 6 tasks | ~10 days | PENDING |
-| [TG-37](TG-37-v17-chat-aware-training-suite/index.md) | v17 Chat-Aware Training Suite | 7 tasks | ~16 days | PENDING |
-| [TG-38](TG-38-release-gate-acceptance-and-device-validation/index.md) | Release Gate, Acceptance and Device Validation | 3 tasks | ~4.5 days | PENDING |
-| [TG-39](TG-39-p2-polish-and-feasibility-honesty/index.md) | P2 Polish and Feasibility Honesty | 5 tasks | ~10 days | PENDING |
+The previous feature plan that occupied this directory is preserved byte-for-byte under `specs/plan-tasks/archive/pre-reminders-instructions-enhancements-2026-10-25/` so unit discovery yields only this feature's units.
 
-Execution mode: `unit_based` with the default wave parallelism. The plan is leaf-task-only (no subtasks): the ai-sdd unit planner dispatches every non-`index.md` file under `specs/plan-tasks/tasks/**` as a unit keyed by its leading `T-<digits>` token, so subtask files would collide with their parent's id. The wave order, the critical path and the risk list live in [plan.md](../plan.md).
+## Units
 
-## ID numbering
+| ID | Title | Group | Wave | Effort | Depends on | Risk |
+|----|-------|-------|------|--------|------------|------|
+| [T-001](T-001.md) | Instruction model, configuration, filename guard and inspection seam | TG-01 | 0 | M (2) | — | HIGH |
+| [T-002](T-002.md) | Instruction video store — create-before-bytes, protection and sweeps | TG-02 | 1 | L (3) | T-001 | CRITICAL |
+| [T-003](T-003.md) | Instruction draft algebra and collapsed display state | TG-01 | 2 | M (1.5) | T-002 | HIGH |
+| [T-004](T-004.md) | Playback seam and AVKit adapter | TG-03 | 1 | M (1.5) | T-001 | HIGH |
+| [T-005](T-005.md) | Instruction image loaders and filename guard reuse | TG-01 | 1 | S (1) | T-001 | HIGH |
+| [T-006](T-006.md) | Camera and microphone permission seam | TG-01 | 1 | S (1) | T-001 | HIGH |
+| [T-007](T-007.md) | Typed observability and the plain-copy map | TG-01 | 3 | M (1.5) | T-002, T-003, T-004, T-005, T-006 | HIGH |
+| [T-008](T-008.md) | Video importer — validate, bound and discard | TG-02 | 2 | M (1.5) | T-002 | HIGH |
+| [T-009](T-009.md) | Capture coordinator — single flight, camera first, honest states | TG-02 | 4 | L (2) | T-002, T-006, T-007, T-008 | CRITICAL |
+| [T-010](T-010.md) | Platform capture adapters — permission-free picker and capped recorder | TG-02 | 5 | M (1.5) | T-009 | HIGH |
+| [T-011](T-011.md) | Routine entry instruction delta and the strict store read | TG-04 | 1 | M (1.5) | T-001 | CRITICAL |
+| [T-012](T-012.md) | Routine notification content builder and had_instruction payload | TG-04 | 0 | S (1) | — | HIGH |
+| [T-013](T-013.md) | Routine scheduler write seam, ordered transaction and entry teardown | TG-04 | 4 | L (2.5) | T-002, T-007, T-011, T-012 | CRITICAL |
+| [T-014](T-014.md) | Event extras instruction field, snapshot and mutation repair | TG-04 | 1 | M (1.5) | T-001 | HIGH |
+| [T-015](T-015.md) | Free-form event service and form instruction seam | TG-04 | 5 | L (2) | T-002, T-007, T-013, T-014 | CRITICAL |
+| [T-016](T-016.md) | Fire handlers — instruction-aware presentation and three tap cases | TG-05 | 6 | M (1.5) | T-011, T-012, T-015 | HIGH |
+| [T-017](T-017.md) | Playback controller — preflight bound, ready watchdog and late-event safety | TG-03 | 4 | M (1.5) | T-004, T-007 | HIGH |
+| [T-018](T-018.md) | Instruction card, cover and editor views | TG-06 | 6 | L (2.5) | T-003, T-005, T-007, T-009, T-010, T-017 | HIGH |
+| [T-019](T-019.md) | Instruction copy catalogue — 36 keys in English and Nepali | TG-01 | 0 | S (1) | — | MEDIUM |
+| [T-020](T-020.md) | Camera and microphone usage disclosure and built-bundle registration | TG-01 | 1 | S (1) | T-019 | HIGH |
+| [T-021](T-021.md) | Fired-screen overlay — D6 time gate and deleted-owner notice | TG-05 | 7 | M (1.5) | T-018 | CRITICAL |
+| [T-022](T-022.md) | Coordinator service seams and production factories | TG-06 | 6 | M (1.5) | T-002, T-008, T-010, T-013, T-015, T-017 | HIGH |
+| [T-023](T-023.md) | Routine settings instruction editor integration | TG-06 | 7 | S (1) | T-018, T-022 | HIGH |
+| [T-024](T-024.md) | Events view instruction editing and detail surface | TG-06 | 7 | S (1) | T-015, T-018, T-022 | MEDIUM |
+| [T-025](T-025.md) | Coordinator fired-screen composition, tap routing and launch sweep | TG-06 | 8 | M (1.5) | T-011, T-014, T-016, T-021, T-022 | HIGH |
+| [T-026](T-026.md) | Release-log gate registration and source-hygiene suite | TG-07 | 8 | S (1) | T-010, T-018, T-021 | HIGH |
+| [T-027](T-027.md) | Feature integration, release gates and the single full-suite run | TG-07 | 9 | M (2) | T-001 through T-026 | CRITICAL |
 
-The task tree accumulates across features: the maximum before this plan was TG-33 / T-165, so this plan continues at **TG-34 / T-166** and runs to **T-192** with no gaps. Dependencies always point to strictly lower task IDs, so ascending IDs form a valid topological order and the wave planner can build its parallel groups from the declared lines alone.
+## Totals
 
-## Dependency line format
+- Units: 27 (26 implementation units plus one closing integration unit, `final: true`)
+- Waves: 0–9 (ten waves)
+- Nominal effort: 42 developer-days
+- Critical path: T-001 → T-002 → T-003 → T-007 → T-009 → T-010 → T-018 → T-021 → T-025 → T-027 (about 19 sequential-equivalent days)
 
-Each unit file declares its dependency as a bare id first (machine-readable for the unit planner's dependency parser), followed by a relative link (human-readable) — for example `- **Depends on**: T-166 ([T-166](TG-34-style-spec-chat-decode-and-persona-seams/T-166-nepali-chat-style-spec-and-loader.md))` (inside a unit file the same link is written relative to its group folder). `- **Depends on**: —` means the unit has no dependencies and starts in the first wave.
+## Group labels
 
-## Inputs, outputs and acceptance
+Group labels are navigation aids only. Waves are computed from `depends_on` and `files`, not from group membership.
 
-Every unit file carries: the metadata block (group, component, agent, effort, risk, dependency line, requirement links), an acceptance criteria section in Gherkin (Given / When / Then, with a separate failure-path block for the HIGH and CRITICAL units), an explicit **Input** and **Output** statement naming what the unit consumes and produces, and a declared file list in backticks. The declared files are the unit's ownership: units that share a file are serialized into different waves by the planner, and units in the same wave own disjoint files. Each unit's deliverable is listed in its file (changed sources, new artifacts, or a notes/evidence document), together with its definition of done.
-
-## Preconditions
-
-- All work runs in the feature worktree `/Users/anjan/workspace/projects/elderly-ai-assistant-conversational-nepali-replies` (branch `feat/conversational-nepali-replies`), never in the main checkout.
-- The P0 runtime slice (TG-34, TG-35, TG-36, plus the T-185 gate and the T-186 acceptance sweep over runtime-only behaviour) is independently landable: no P0 unit depends on any P1 or P2 artifact, and the chat/P0 behaviour is specified against the currently shipped on-device model. Ordering between the P0 slice and the P1 swap is the project's open question (the design's OD-3, recorded not decided); this plan does not presume the answer, and both orderings keep the declared dependency graph valid.
-- The lean workflow of 2026-10-14 is in force: no review or security-gate units exist in this plan (design-l1 is combined; review gates are dropped; one advisory non-blocking security pass rides the final sign-off). The hard safety gates (emergency recall 1.00, abstention at or above 0.90, closed-intent at or above 0.95, calibration within plus or minus 0.10) are enforced by T-181 and T-182 as code, not by review tasks.
-- The device-validation completion gate (T-187) depends on an Anzaan session; without one it records every DV item as BLOCKED with the reason, and the feature stays outstanding until a session runs.
-- Training legs (TG-37, TG-39) execute on the training box and produce build artifacts, not app changes; the only catalog-visible output is the gated, reversible entry of T-184.
-
-## Top-level plan
-
-- [plan.md](../plan.md) — summary, wave order, critical path, key risks, security-advisory mapping and requirement coverage
-- [amendments/](amendments/) — plan amendments recorded against this feature run
+- TG-01 — Model, copy and foundations: T-001, T-003, T-005, T-006, T-007, T-019, T-020
+- TG-02 — Video bytes, import and capture: T-002, T-008, T-009, T-010
+- TG-03 — Playback: T-004, T-017
+- TG-04 — Routine and event owner seams: T-011, T-012, T-013, T-014, T-015
+- TG-05 — Notification handling and fired screen: T-016, T-021
+- TG-06 — Surfaces and composition: T-018, T-022, T-023, T-024, T-025
+- TG-07 — Gates and release: T-026, T-027

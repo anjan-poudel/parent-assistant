@@ -1,134 +1,700 @@
-# implement — running unit log (conversational-nepali-replies)
+# Implementation notes — reminders-instructions-enhancements
 
-Short per-unit summaries for the engine record (full notes per unit live in
-`specs/T-NNN-notes.md`).
+Cumulative unit record for the `implement` phase. Worktree:
+`/Users/anjan/workspace/projects/elderly-ai-assistant-reminders-instructions-enhancements`
+(branch `worktree-reminders-instructions-enhancements`, based on master `821f19c5`).
 
-- **Description:** Implementation log for the unit-based `implement` task of the conversational-nepali-replies feature (worktree elderly-ai-assistant-conversational-nepali-replies, branch feat/conversational-nepali-replies). One section per unit, appended as waves complete.
+## Starting-tree baseline and repairs
 
-## T-166 — Nepali chat style spec and its loader — DONE
+The starting commit's test target did not compile, and the canonical
+`./build.sh test` gate is blocked before xcodebuild by a pre-existing
+prompt-mirror drift (Swift template 3,136 bytes vs seed 2,717 bytes,
+divergence line 5). That failure is identical in the main checkout on
+master HEAD and is unrelated to this feature. The prompt mirror was not
+modified.
 
-Wave 0. The single source of truth for Nepali conversation style plus its
-stdlib-only loader and executable drift check. Artifact
-`tools/train-intent/seeds/nepali-chat-style-spec`: sectioned text with prose
-rule text (byte-mirrorable) and JSON machine blocks; 10 required sections
-(register, particles, sentence_shape, small_talk, code_switch, ai_isms,
-persona_clause, rubric, guard_checks, coverage); style_spec_version 1;
-content sha256 recorded in the unit notes. Loader
-`tools/train-intent/src/style_spec.py`: typed accessors, no-default failures
-naming the missing section, version+sha256 evidence, executable consumer
-drift check with a documented marker contract, CLI exit 0/1/2, stdlib-only
-(proven under an isolated interpreter). Tests
-`tools/train-intent/tests/test_style_spec.py`: 42 tests, all OK (python3 -m
-unittest tests.test_style_spec). Recorded deviation: JSON machine blocks
-instead of a whole-file YAML document (the stdlib-only contract rules out
-PyYAML; JSON is a subset of YAML so the design intent holds). rubric and
-coverage are required sections beyond design section 6.1 because the
-acceptance criteria and T-178/T-181 cite them. Training-box (anjan-ubuntu)
-execution not performed here; owned by T-179/T-183. Full notes: the unit
-notes file in specs.
+To obtain a measurable starting tree, the coordinator applied the
+following non-feature repairs in the worktree, each documented in place:
 
-## T-172 — CloudChatConsentGate: fail-closed consent record — DONE
+1. Applied upstream hotfix `cc7bbcb2` (already on `origin/master` as PR
+   #254, missing from the base commit): `ChatResponding` lacks
+   `isAvailable`; the cast now targets the composed protocol and the
+   locale comes from the turn context. App-target build fixed.
+2. `IntentRouterLocalFailureFallbackTests`: the local-intent
+   `generateOverride` seam is a one-argument closure; the stale `{ _, _ in`
+   became `{ _ in`. Test semantics unchanged.
+3. `ChatResponseShapeTests`: the required `chatTimeoutSeconds` argument
+   (value 30, the Config default) was added to the one test-side
+   `LlamaCommandInterpreter.Config` construction. Test semantics unchanged.
+4. `LlamaCommandInterpreterTests`: removed the eight stale
+   `[CASCADE-RUNTIME]` generation-budget tests that referenced
+   `OnDeviceGenerationBudget`, a type a later runtime change deleted from
+   the app. They could not compile or run; the removal is marked with a
+   `BASELINE-REPAIR 2026-10-25` comment.
+5. `ASWebSpotifyAuthSessionTests.testAStartRefusalWithNoReportedReasonCode...`
+   now `throw XCTSkip`: production gained the iOS 27.0.1 external-browser
+   fallback for the unreported-code-0 refusal, so the stale test opens a
+   real browser and hangs. Marked `BASELINE-REPAIR 2026-10-25`.
 
-Wave 0. The cloud chat consent record and its one-writer gate in the shipped
-OD-12 shape (LiveTranslate/PointAsk precedent reused, not forked). Decision
-with four states (granted, notRecorded, denied, unreadable); allowsEgress
-true only for granted; ConsentRecord {granted, recordedAt,
-disclosureVersion} over the same encrypted-at-rest consent storage with the
-same key-store composition; stale disclosure version re-asks (notRecorded),
-never granted; unreadable distinct from notRecorded and denied, fail-closed,
-never crashes; one writer under NSLock with read-back verification, revoke
-clears memory before the stored record is rewritten, a write that does not
-persist is surfaced (never a false success); per-turn read with no caching.
-Disclosure stamp placeholder cloudchat.disclosure.draft.14oct2026.r1 (final
-copy owned by T-176). Classification-only events (component cloud_chat, five
-types, metadata only disclosureVersion). Tests: 37 executed, 0 failures
-(./build.sh test:unit CloudChatConsentGateTests; the release-log and
-prompt-mirror pre-test guards passed; full test log in the suite).
+Full-suite direct `xcodebuild test` attempt on the repaired starting tree
+(no feature test binary, feature source not in the generated project yet):
+1,892 test cases executed, 33 pre-existing failures, 2 skipped, then the
+run stalled inside `DialectIdentifierTests` on its long frozen-classes
+shipped-rule case (a pre-existing dialect test, unrelated to this feature). The
+full-suite baseline is therefore recorded as inconclusive, not green. The
+33 failures are all pre-existing suites outside this feature (CommandRouter,
+CloudChat, BrainModelSelection, CallChannel, AckFastLane and peers). Scoped
+`-only-testing` runs are the authoritative gate for this feature, per the
+project's established unit-gate practice.
 
-## T-167 — Local chat decode shape and upgraded local persona — DONE
+## Wave plan deviations
 
-Wave 1. New `ChatSampling.swift`: chat temperature 0.3 + fixed seed as named constants (command constant untouched), `DecodeParameters` record, per-turn awaited `ParameterHandle` override that always writes (never skips on equal values — the set-once defect the determinism tests catch). `LlamaCommandInterpreter.swift` extended: `lastDecodeParameters` written at the start of every decode path (command, chat, judge, test seam); additive parameter-carrying seam (pre-feature two-arg seam keeps working); `ResponseShape` derives its whole decode contract from one source; awaited override immediately before `generateWithConstraints` on the one resident handle (wrapper `LLM.temp` fire-and-forget rejected); judge re-asserts deterministic parameters after chat turns so 0.3 cannot leak into a judge run; new `chatPersonaSystemPrompt` = spec `persona_clause` under a transport wrapper, byte-identical to the artifact. Tests: ChatSamplingTests 20/20; scoped regression (ChatSampling + ChatResponseShape + ChatConfidenceFloor + IntentRouterChatRouting + LlamaCommandInterpreter + LlamaSemanticJudge + IntentPrompt) 123/123. Gates: style_spec --check-consumers clean; check-release-log-safety + check-prompt-mirror exit 0. Command system slot byte-identical to HEAD (633 chars, sha256 8ba8f380…). Deviations (reported, access-level/necessity only): vendored `LLM.swift` `setParameters` internal→public (required for the awaited per-turn override); judge determinism re-assert added; no `chat_sampling_override_failed` event (vendored setter is non-throwing — would be dead code); `chatSystemPrompt` private→internal (bytes pinned unchanged). Device items remain: DV-5 (command-after-chat determinism) + T-187 reproducibility.
+- Revised wave 0 is T-001 + T-019. T-012 moves from wave 0 to wave 4,
+  immediately before T-013: its no-default `hadInstruction` requirement
+  breaks the `MockRoutineAlarmScheduler` conformance owned by T-013's
+  `RoutineSchedulerTests.swift`, so the two must land in that order.
+- T-007's spec cites `instruction.import.*` / `instruction.permission.*`
+  copy keys that do not exist; it must map to the actual 36-key §10.5
+  family instead of inventing keys.
+- T-009's matrix names `testPickerTwiceIsSingleFlight` while its spec says
+  `testPickTwiceIsSingleFlight`; implement the spec name and keep the
+  matrix name as an alias so both pins hold.
+- T-019's spec cites design §10.3 for copy; the actual table is §10.5.
 
-## T-168 — Cloud chat responder and explicit temperature — DONE
+## Units completed and verified
 
-Wave 1. `GeminiClient.swift` extended: `GenerationConfig.temperature` (optional, declared after responseMimeType), threaded through `generateJSON`; every existing call site untouched and still passes no temperature. `GeminiCommandInterpreter.swift`: file-scope `GeminiChatConfig` (reviewed chat temperature 0.3, OD-5, chat-only), `ChatResponding` conformance, `respondToChat` pipeline (sanitise .quarantine → `IntentPrompt.buildChat` → `replyPersona` system instruction → generateJSON, useSearchGrounding false, temperature 0.3), `replyPersona` re-authored as ONE constant whose last line is the spec `persona_clause` byte-identical (519 bytes, drift markers in place; style_spec --check-consumers clean, exit 0). Egress scope pinned (FR-CNR-010): root keys exactly {contents, generationConfig, systemInstruction}; one content; plugins never consulted; pendingMedications constructed away; addressAs + userLanguageHint kept (the shared chat template renders them by design). Hygiene: key header-only; chat region zero console writes (whole-file DEBUG-gating scan). Failure paths: no key → nil + .notConfigured with zero network calls; empty-after-sanitise → nil; malformed or non-.chat answer → nil + .invalidResponse, never fabricated; governor shared with no bypass, cap → plain classified nil (T-175 owns the chat fallback); no confidence gate on the chat path — the .chat shape gate only. Tests: CloudChatResponderTests 27/27 (./build.sh test:unit CloudChatResponderTests; run 3 — runs 1/2 exposed cap-clamp and JSON member-order premises). Deviations (recorded with evidence): untouched-call-site pins compare canonical .sortedKeys bytes + exact key sets + raw temperature-absence because JSONEncoder emits unspecified member order on this Foundation (equal-length, order-only diffs observed at 1377/3348 bytes); governor soft cap clamps to a minimum of 10 so cap tests use 10 with persisted-payload assertions. Build contention hit once — waited 120 s, retried, DerivedData untouched.
+### T-001 — Instruction model, configuration, filename guard and inspection seam
 
-## T-173 — CloudChatRouting: the single fail-closed routing decision — DONE
+Files (5, as declared):
+- `ios/ElderlyAssistant/Services/Instructions/Instruction.swift`
+- `ios/ElderlyAssistant/Services/Instructions/InstructionConfiguration.swift`
+- `ios/ElderlyAssistant/Services/Instructions/InstructionFilename.swift`
+- `ios/ElderlyAssistant/Services/Instructions/InstructionVideoInspecting.swift`
+- `ios/ElderlyAssistantTests/Services/Instructions/InstructionModelTests.swift`
 
-Wave 1. New `CloudChatRouting.swift`: `ChatRoute { cloud, local(reason: LocalReason) }` with the design's closed reason vocabulary (raw values are the case names; the file contains no string literal). Injected `Inputs` seam: four optional throwing closures (consent, online, keyConfigured, costAllows) all defaulting to nil, so every pre-feature construction site compiles and selects local honestly; the router's existing readiness closures slot in unchanged (compile-level test). `decide(_:)` reads every closure per turn, caches nothing; the pure core `decide(consent:online:keyConfigured:costAllows:)` is the single body holding the precedence (first blocking input in order consent → online → key → cost; the gate-state switch has no default:, so a fifth state cannot silently map). Fail-closed matrix: absent closure, nil return and throw ALL resolve local (consent reads NotRecorded/NotRecorded/Unreadable; online, key and cost read their own reasons for all three modes). `consentRevoked` reconciliation (recorded): the gate's `.denied` means "declined, or revoked" — no readable state distinguishes them and a second source would be the forbidden parallel consent store — so `.denied → consentDenied` and `decide` never fabricates `consentRevoked`; that token stays in the vocabulary for the revocation surfaces (T-177) that performed the withdrawal and know it. Tests: CloudChatRoutingTests 15/15 (32-cell table over the four-state consent axis — the design's "sixteen" strictly contained — exactly one cloud; precedence pins; revocation between two reads through the real gate; tombstone/relaunch/corrupt-record variants; 12 exact unknown-input cells plus all 81 absent/nil/throwing combinations never cloud; determinism; source hygiene — no import at all, no logging, no transport, no UI). Scope fence held: no router/coordinator wiring, no guard resolution, gate file untouched. Transient build contention: one run failed on a concurrent agent's mid-edit test file, cleared on retry.
+Content: tolerant wire model with raw `String` kind (must-carry B-2), IF-1
+`isPresent` exactly per design §3.4.1, authoring payload normalisation,
+disjoint routine/event owner roots (event owner = `ev-` + first 32 lowercase
+SHA-256 hex), inclusive rounded 180-second arithmetic, configuration
+defaults per §9.1, the synchronous prober / asynchronous inspector with
+all-AV-failure mapping to typed errors, and the one bare-filename guard.
+T-001 carried a temporary `InstructionStorageError` placeholder in
+`InstructionVideoInspecting.swift` for standalone compilation. T-002 landed
+the final declaration in `InstructionVideoStore.swift` (identical case set)
+and the coordinator deleted the placeholder before the wave build.
 
-## T-169 — NepaliGrammarGuard core — DONE
+Tests: `InstructionModelTests`, 12/12 passed under
+`-only-testing:ElderlyAssistantTests/InstructionModelTests` (xcodebuild
+direct, derived data `build/DerivedDataTests`). Project regenerated with
+`./build.sh generate` after the new files landed.
 
-Wave 1. New `NepaliGrammarGuard.swift`: the pure, total, synchronous guard — `GrammarCheckClass {honorificAgreement, devanagariPurity, danglingParticle}` with raw values 1:1 with the spec's `guard_checks` ids (T-171's safe-template keys are 1:1 with the same names); `GrammarGuardVerdict {pass, flag(classes:), unavailable(reason:)}` is a classification only and carries no text. Compiled tables decoded from four spec machine blocks embedded byte-verbatim (`register`, `particles`, `code_switch`, `guard_checks`) behind `// @style-spec-block:` markers with `@style-spec-section:` rule citations; `style_spec --check-consumers` clean on the file. Checks: honorific = the curated banned-form sets exactly as the eval executes them (no pair-existence condition; the pair table is decoded, structure-validated and pinned as a data property); purity = mixed-script tokens plus Latin runs outside the spec's allowlist; particles = longest-match occurrences over the spec lexicon, spec budget, plus the positional dangling rule (a reply's first token, or one preceded only by a sentence terminator, is dangling; commas and spaces attach). Audit of the interrupted draft: fixed a compile break (`nouns.map(\.english)` over a `[String:String]`) and a real false-pass (the multi-word unit matched across a sentence terminator — `हुन्छ। नि, ठीक छ।` returned pass; reproduced with the draft algorithm first, then closed by requiring the unit contiguous inside one clause and judging the later clitic on its own position); added 7 DoD pins (positional rule, substring non-occurrence on नियम/अनिवार्य/निद्रा, grapheme tokenization, allowlist-as-data, no-rewrite declaration scan, byte-for-byte block/citation pins, reproducible-from-spec-bytes). Tests: NepaliGrammarGuardTests 37/37 (exit 0). `unavailable` carries a closed 4-member reason set (lexicon-load failure plus the input classes romanized / letterless / non-Nepali locale); never a pass; T-174 maps it to the degraded event. Coordinator re-verification at the wave gate (independent of the unit suite): the current guard recompiled and run over the final 500-turn golden fixture → 500 pass / 0 flag / 0 unavailable. No call site in this unit (T-174 wires it).
+### T-019 — Instruction copy catalogue, 36 keys in English and Nepali
 
-## T-171 — Localisation: consent, disclosure, indicator, revocation, safe-template copy — DONE
+Files (2, as declared):
+- `ios/ElderlyAssistant/Resources/Localizable.xcstrings`
+- `ios/ElderlyAssistantTests/App/L10nCatalogCoverageTests.swift`
 
-Wave 1. `Localizable.xcstrings`: the 18-key cloud-chat family in en+ne (every entry manual/translated, Nepali Devanagari-only, en≠ne), inserted at the house alphabetical positions as two contiguous blocks; catalogue 1,421 → 1,439 keys. Key-name contract frozen for T-174/T-176/T-177: consent title/body/allow/notNow; `cloud.chat.indicator` + `indicatorSpoken`; revoke title/body/done; `state.spoken.on/off`; `settings.cloudChat.title/toggleLabel/toggleNote`; and the four `chat.safeTemplate.*` keys (generic + one per guard class). `L10n.swift`: `L10n.SafeTemplate` enum raw values 1:1 with T-169's class names; deterministic `safeTemplate(forCheckClasses:)` (first known class wins; an unknown name drops to generic and is never echoed into a key) and a locale resolver (total miss → "", the shipped nothing-to-say contract). `L10nCatalogCoverageTests`: 13 T-171 tests (suite 39/39, exit 0): both-language resolution through `L10n.str`, verbatim copy pins, the zero-slot contract, bounded/enumerable template set, the register bar (sentence/character caps, ai-ism and apology bars, banned familiar forms and non-honorific verbs, `हजुर` in every template; four offence fixtures prove the check bites), the spec-mirror test reading T-166's seed blocks (mirror may be a superset, never a subset; the template cap IS the spec's `max_sentences`), no-internals term bans in both languages, failure fixtures naming the missing key and the language, the hardcoded-copy sweep (now covering T-174's `CommandRouter.swift`), alphabetical/contiguous span pins; rebased the two stale shared count pins (calling 1,416→1,434, family-contacts 1,398→1,416; the dialogue pin had already been rebased 1,402→1,420 — all four now sum to 1,439 with their family sizes). Draft audit: fixed a Nepali register slip in the consent disclosure (honorific agreement when the elder is the subject of refusing) and non-idiomatic English in the Settings note; converted the register-mirror provenance comment into a spec-reading test. Deviations recorded: `chat.cloudFallback.notice` (design §17, optional) deliberately omitted — §8.8 gives no user-visible error where a reply is expected; the templates' softener "न" is recorded for T-176's copy review (it is not one of the spec's six particle units, so the guard's lexicon never counts it); `SpotifyLocalizationTests` pins the global total at 1,381, already stale at HEAD before this unit (pre-existing red, recorded, untouched).
+Content: exactly the 36 `instruction.*` keys from design §10.5, one
+alphabetically sorted contiguous block between `homeTimer.stop` and
+`intentLog.clear`; every entry `manual`, both languages `translated`,
+English and Nepali byte-verbatim; only `instruction.atTimeFormat` carries a
+placeholder (`At %@` / `%@ बजे`, one each). Catalogue total 1,534 keys
+(1,498 + 36). Eight new named tests plus the pinned key/copy lists and
+coverage helper.
 
-## T-178 — Held-out chat evaluation set — DONE
+Shared-count repair: the four whole-catalogue baseline pins in this test
+file were already 14–16 keys below the actual 1,498-key tree before this
+unit. They were re-measured against the actual 1,534-key tree rather than
+blindly incremented: dialogue 1,515, calling 1,529, family contacts 1,511,
+cloud chat 1,516. This makes the whole L10n suite green and removes
+pre-existing test debt; no existing key, copy pin or family assertion was
+otherwise changed.
 
-Wave 1. `tools/train-intent/eval/chat_golden.jsonl`: 500 turns / 50 batches, fixture revision 83283663, sha256 `83283663…fcb1519` (full value in `specs/T-178-notes.md`; the version record T-179/T-181 gate results must cite); 500 unique dedupe keys; coverage classes 40/40/40/50/50/40/40/50/50/50/50; hard cases short_turn 90 + code_switched_input 50 + reminiscence_prompt 50; 24 context entries across 20 turns; synthetic content only; every batch teacher-authored (`gemini-2.5-flash-lite` via openrouter, recorded per batch). `author_chat_golden.py`: plan derived from the spec (never a local copy), teacher loop, the mechanical review now executing the POSITIONAL particle rule aligned with T-169's guard (token-gap tokenization, longest-match, multi-word units contiguous-in-clause, dangling = first token or after only a terminator; the violation class is named `dangling_particle`), `record_review`, `correct_output` / `--correct-turn --new-output --correction-reason` with loader-validated `provenance.revisions`, the offline CLI, `held_out_keys()` and `require_gate_fixture()`. Coordinator course-correction from the T-169 cross-probe: the 4 reference replies that opened with a dangling clitic (`cg-b026-06`, `cg-b034-02`, `cg-b034-09`, `cg-b035-10`) were reworded through the recorded correction path — old text preserved in `provenance.revisions`, all four still `human: pending`, a pre-review authoring correction and not a review override. Pins: the 16 guard particle vectors cross-checked between the eval check and `NepaliGrammarGuardTests`, a whole-fixture pin that every reference reply passes the positional rule, and a reconstruction test proving all 50 recorded `teacher_output_sha256` values recompute after undoing exactly the documented mutations (review dispositions + the 4 revisions) — i.e. the revisions are the only divergence from teacher output. Tests: test_chat_golden 70/70 + test_style_spec 42/42 (exit 0); `--check` exit 0, `reference_outputs_clean=yes`, only the 50 human-pending findings. Coordinator re-verification at the wave gate: the real Swift guard over the final fixture → 500/500 pass; fixture sha256 matches the report. Deviations: b001 and b004 were re-authored via `--force-batch` to clear assistant-side mechanical flags (a 3-sentence reply; an over_politeness_stacking hit; pre-repair backup kept outside the repo); pre-alignment batches record the old check name `particle_budget` vs new `dangling_particle` (same spec check; history not rewritten); residual mechanical findings in elder `user_turn` texts are the elder's idiolect and do not gate eligibility. OPEN OWNER GATE: all 50 batches' human review is `pending` — the set is deliberately NOT yet an eligible gate fixture (`require_gate_fixture()` refuses it); the owner review pass is required before the T-182 harness gate run and is carried in the final report.
+Tests: `L10nCatalogCoverageTests` 48/48 passed, 0 failures under the
+scoped filter (including all eight instruction tests). First run before the
+baseline re-measure showed only the four pre-existing baseline-pin
+failures; after the re-measure the suite is green.
 
-## T-170 — Prompt mirror discipline: chat template seed, persona clauses, guard lexicons — DONE
+### T-002 — Instruction video store (create-before-bytes, protection, sweeps)
 
-Wave 2. The T-094 intent-prompt checker grown into the seven-check mirror gate (`ios/tools/check-prompt-mirror.py`, +960/−93; the shell gate's two invocations and its `run_tests` wiring unchanged). Checks: the pinned intent prompt + seed byte-identical (T-094 semantics preserved verbatim) AND its recorded pin reproduced — the seed re-rendered through the training suite's own `intent_prompt.render_prompt` must reproduce `IntentPromptTests`' two digest constants (`18003ddd…24b8b78`, `bd47910d…16e00ff`); the new chat seed `tools/train-intent/seeds/chat_prompt_template.txt` (725 bytes, sha256 `abacefc6…34a8721`, generated by the one `--regen-chat-seed` path) ↔ `IntentPrompt.buildChat` (exactly three interpolations); both personas (`LlamaCommandInterpreter.chatPersonaSystemPrompt`, `GeminiCommandInterpreter.replyPersona`) embed the spec `persona_clause` byte-for-byte inside a transport wrapper; the guard's four `// @style-spec-block` regions byte-equal the spec's fence bodies, cross-checked through the spec's own loader; chat token-budget print (worst-case template ≈255 + persona ≈200 = ≈455 of the 512-token prompt side; margin ≈57 — T-186's reading point). Self-test grew 6→20 drift classes over temp-tree mutations; new `tools/train-intent/tests/test_prompt_mirror_chat.py` (64 tests, 10 classes). Deviations: the budget check is a documented conservative estimator (2 chars/Devanagari token, 3 chars/other; it over-counts the recorded 696/677-token reference measurement, so the margin is a lower bound — the exact-tokenizer legs are T-167's Character ceiling and T-186's sweep); the design's `chatSystemPrompt` label vs the shipped `chatPersonaSystemPrompt` name recorded; `--quiet` made consistent. Wave-close rework: first execution 63/64 — the duplicated-chat-interpolation test mutated `build()`'s twin line (@123) instead of `buildChat`'s (@207); probes proved the checker contract sound (no checker gap) and exposed a masked self-test gap (the chat-leg duplication rule had no class of its own); fixed region-scoped via a new `literal_line_range` helper + a new `chat-interpolation-duplicated` drift class; module 65/65. No assertion weakened; the intent prompt, its seed and its pin untouched.
+Files (3, as declared):
+- `ios/ElderlyAssistant/Services/Instructions/InstructionVideoStore.swift` (new)
+- `ios/ElderlyAssistantTests/Services/Instructions/InstructionVideoStoreTests.swift` (new)
+- `ios/ElderlyAssistantTests/Services/Readiness/NoIOInInitTests.swift` (one case added)
 
-## T-174 — Guard flag resolution at the dispatch seam — DONE
+Content: the final `InstructionStorageError` case set from design §3.3;
+`InstructionPlaybackAvailability` (available/missing/unreadable/rejected);
+staged and accepted value types; the `InstructionStagingFileOps` seam with
+its system implementation; and `InstructionVideoStore` (`@unchecked
+Sendable`, NSLock-protected in-flight commit names, no file IO in init).
+`stageSynchronously` follows the fixed §5.2 order: readable source, size
+stat, synchronous probe, pending directory, destination created empty with
+`.complete` protection, chunked fill under a cumulative cap, exact-byte
+re-verification, then protection re-verification. Every failure after the
+first directory creation removes the partial file and draft directory. B-3
+holds structurally: `copyItem` appears nowhere in the store (grep 0 and a
+source-scan test), and the first byte is written only after the protected
+empty file exists. `commit` creates the owner directory protected, is
+retry-safe on an existing same-size destination, renames then removes the
+draft directory, and re-applies the R-5 rule (fail only on a reported
+weaker class; a nil report is tolerated). Delete paths are idempotent and
+guard payload filenames before any URL build (N-4). Pending drafts and
+crash-orphan owner directories are swept with a 60-second grace; a nil
+live set returns zero before enumeration.
 
-Wave 2. `CommandRouter.swift` +376/−21 (8 hunks). Injected `ChatGuardSeam` (`servingPath` default `.onDevice`, `cloudAllowed` default false, `respondToChat` default nil — the definitional defaults keep every pre-existing construction site byte-identical); the guard runs over the polished candidate at THE single polish call site (`deliverModelReply` refactored to delegate to `polishedModelReply` so the chat path computes its candidate without a second polish site); the `.chat` case delivers through `deliverGuardedChatReply` (sanity gate → polish → guard verdict → speak). Paths: `.pass` speaks byte-identically (event `notApplicable`); `.flag` never speaks the flagged text — escalates ONCE iff the reply is local-shaped AND `cloudAllowed()` AND a lane is wired (same-turn transcript; reply-pending hold armed before the hop; the hop's completion re-verifies through the same guard: pass → speak the cloud reply `escalated`, re-flag → safe template keyed by the escalated reply's classes, `unavailable` → speak + `degraded`, nil / non-`.chat` / sanity-rejected → template with the original classes; a once-guard drops a second completion); a flagged cloud reply or no lane → safe template only (design §7.3 asymmetry); `.unavailable` → today's behaviour + `degraded` (never reported as verified); the turn is always answered (the hop's completion resolves the hold and ends the turn). Templates resolve only through T-171's `L10n.SafeTemplate` API (pinned by source scan — no copy in code). Frozen event `reply_grammar_flag` (component `command_router`; outcome notApplicable|escalated|safeTemplate|degraded; metadata `origin`/`reason`/`count` — the design's `path` key maps to `origin`, recorded deviation). Tests authored: `ReplyGrammarFlagResolutionTests` 21 (class green in the consolidated pass). Open: T-177 fills the seam (for a lane-served cloud reply `servingPath` must report `.cloud`, or the guard would treat a cloud reply as local); T-185 adds the file to the release-log gate roots.
+Tests: `InstructionVideoStoreTests` (18: the 16 named cases in this file
+plus the two design-assigned extras) and `NoIOInInitTests` (6 total, the
+new `testInitDoesNoFileIO` included) both passed with zero failures in the
+consolidated wave run. During coordinator verification, four `Result<Void,
+…>` equality assertions (`Void` is not `Equatable`) were rewritten through
+small assert helpers; test intent unchanged.
 
-## T-175 — Router chat lane: cloud-first decision, egress-disabled local floor, same-turn fallback — DONE
+Deviation recorded: design E.1 names `.completeFileProtection` (a
+`Data.WritingOptions` constant), but the seam creates the empty file with
+`FileProtectionType.complete` as §5.3 itself specifies, so the source pin
+asserts that actual token. `.purgeFailed` carries no partial count because
+the fixed case set has no payload; T-025's event wiring must not expect
+one.
 
-Wave 2. `IntentRouter.swift` +299/−2. `[CLOUD-CHAT-LANE]` branch after cache/preparse and before the cloud-first selector, with an unconditional `return` — a chat turn can never fall into the selector or the legacy ladder's `canEscalate` computation. ONE `CloudChatRouting.decide(cloudChatLane.routingInputs)` read per turn, nothing cached (a consent change between turns is visible to the next turn's decision). `.cloud` → `interpretCloudChat`: responder unwired → fallback `notConfigured`; one attempt; main-queue hop with the once-claim taken on that queue (a contract-violating second completion is dropped); the reply is accepted only as an `action == .chat` command (a slot-bearing answer off a chat prompt is a misbehaving responder and is never delivered); success → additive `cloud_chat_served` event. Failure → `cloud_chat_fallback` (component `intent_router`, metadata `["reason": <token>]` — the reason string IS the whole payload) + same-turn on-device answer. `.local(reason)` → fallback event + on-device answer; the responder is never called (no retry, no check). `answerChatOnDevice` runs `interpretLocalLadder(canEscalate: false, chatEgressDisabled: true)` — closing BOTH ladder cloud doors for chat: the cascade tier (@560) and the `[LAT-EVIDENCE]` failure re-check (@592, the door that does not ride `canEscalate`). `chatEgressDisabled` defaults `false`, so both pre-lane call sites are byte-identical (reference test). `CloudChatLaneSeam` @987–1015 carries the T-177 wiring recipe. Tests authored: `IntentRouterCloudChatLaneTests` 32 — including a 13-cell byte-identity reference vs the pre-lane routing structure, integration through the real `CommandRouter`, both-doors controls and closures, and structural source pins. Deviations: `cloud_chat_served` is additive (the design names the fallback; the positive counterpart enables aggregate counting — a one-line rename if the owner prefers); the lane deliberately ignores `cloudEnabled`/`cloudFirstEnabled` (the routing decision is the single chat-egress chokepoint); the fallback reason vocabulary is closed at 11 tokens (6 producible `LocalReason` + 5 `GeminiFailureClass` raw values). Wave-close rework: the vocabulary test asserted a self-contradictory pair (line 445 forbids `consentRevoked` in the sweep; line 447 expected it in `seen`) — T-173's pinned contract (`decide` never produces it; `.denied` covers decline and withdrawal) is correct, so the expected set was fixed to `declared.subtracting(["consentRevoked"]).union(["cloud"])`; no production change; class 32/32.
+### T-004 — Playback adapter (AVKit, typed events, no autoplay)
 
-## T-176 — Consent prompt and plain-language disclosure at first cloud chat need — DONE
+Files (3, as declared):
+- `ios/ElderlyAssistant/Services/Instructions/InstructionPlayback.swift` (new)
+- `ios/ElderlyAssistant/Services/Instructions/AVKitInstructionVideoPlayer.swift` (new)
+- `ios/ElderlyAssistantTests/Services/Instructions/InstructionPlaybackAdapterTests.swift` (new)
 
-Wave 2. `CloudChatConsentPrompt.swift` (302) + `Views/CloudChatConsentSheet.swift` (160). The ONE entry `consentNeedDetected(answerPendingTurnLocally:)` reads `gate.currentDecision()` fresh: `.granted` → `.cloudAllowed` (local seam NOT run — serving the turn twice would be the bug); `.notRecorded` → `.awaitingDecision` (local answer run once + the question shown + the spoken capture offered once); `.denied` → `.localOnly(.denied)` (closed, never re-shown this session); `.unreadable` → `.localOnly(.unreadable)` (never shown — fail closed; a broken record is not a question for the elder). `isPromptPresented` keeps repeated turns answering their own turns; `updateLocale` / `reofferSpokenAnswer` (a no-op when no question is live) / `refreshAfterDecisionChange`; the answers `grant()`/`decline()`/`submitSpokenAnswer` reach `gate.record(granted:)` exactly once and return `recorded | writeFailed | questionNotLive`; a spoken yes/no outside the live question writes nothing (a late voice "yes" cannot flip a recorded "no"). Sheet: exactly two actions (kind/title + derived accessibilityIdentifier), four catalogue keys resolved per locale, `.interactiveDismissDisabled(true)`. Tests authored: `CloudChatConsentPromptTests` 24 (class green in the consolidated pass). Deviations/proposals recorded: no observability events of its own (T-172's frozen catalogue is the schema; presentation is verified through `isPromptPresented` + seam spies, not invented telemetry); NO failure line in the sheet — a `cloud.chat.consent.failed` key + a `failureMessage` slot are PROPOSED for T-171's file if the owner wants the elder told on-screen (failure is otherwise honestly surfaced: `writeFailed` to the wiring, the gate's `consent_write_failed` event, and a failed grant leaving the question up); the disclosure-stamp `draft.` proposal (T-172's gate file, not applied) and the templates' "न" softener are recorded for the owner copy review. The T-172 gate suite's concurrency assertion flake (lines 373/377 vs 422/428) recorded for T-172's owner.
+Content: the typed playback seam (`InstructionVideoPlaying`,
+`InstructionPlaybackEvent`, failure cases, 0.6 s preflight and 10 s ready
+watchdog configuration) and the only AVKit construction site for
+instructions. `present` refuses non-file and unplayable URLs with one
+typed `.unsupported`, registers status/finish/fail/interruption
+observations, emits `.preflightPassed` last and never calls `play()`.
+`dismiss` pauses, clears the item, tears down observations and releases
+the player; a single emission gate drops late or post-dismiss events.
+No NSError, path or console write escapes.
 
-## T-179 — Four-layer chat corpus pipeline with spec-driven filters and teacher GEC — DONE
+Tests: `InstructionPlaybackAdapterTests` 11/11 passed (the 10 named cases
+plus the interruption-while-presenting mapping). Source pins prove no
+timers, no network, no transcode and no logging.
 
-Wave 2. `tools/train-intent/src/build_chat_corpus.py` (2,294) + `tests/test_build_chat_corpus.py` (2,005; 126 cases). `SOURCE_REGISTRY` 18 entries (L1 5, L2 7, L3 1 generated, L4 5) driving the four layer stages, every layer reporting candidates/admitted/selected/target/target_rationale; mixture 70/30 conversation–claw-back (`CONVERSATION_SHARE` 0.70) with BOTH target and achieved recorded (the target is never changed at run time; an under-delivering layer is a named shortfall). Filters ARE the spec's machine checks — `author_chat_golden.mechanical_review`, one rule / one source, the same function the held-out fixture is authored under — plus the pipeline length rule (floor 2 word tokens, ceiling ~512 tokens), every rejection counted by the spec's own rule name; a drift test asserts no spec lexicon entry appears literally in the builder's source. `GecStage` runs over ALL kept candidates before admission: content-hash cache, temperature 0.0, call budget with `budget_exhausted`, resumable from `gec-cache.jsonl` at 0 calls; a turn with no result is HELD (`gec_missing`), never admitted; an unavailable transport is recorded, never fabricated. `HeldOutGuard` loads the 500 held-out keys VERBATIM + the normalize-skeleton sets of the golden corpus & emergency near-miss + a token-Jaccard near-duplicate pool (0.80 @ ≥4 tokens), checking the user turn AND the reply; it STOPS the run (exit 3) if the chat set or the golden corpus cannot load — nothing is admitted unguarded. Admission deliberately does not gate on `require_gate_fixture()` (human review pending): the keys protect either way and `eligible_gate_fixture: false` + a NOTE ride every run. STT-noise stage over claw-back (rate 0.60; backends none|recorded|hf|cli|auto; the `recorded` backend applies only exact clean→noisy pairs, as NEW turns with a `:noise` suffix and the carried GEC record; no-op round trips are not added). Deterministic outputs + offline CLI. Deviation recorded: the builder refuses any claw-back from the eval/held-out fixtures (recorded in counters/deviations, not silently worked around). The 13 absent source files and the real teacher/translation/piper round-trip are T-183 training-box items. Consolidated pass: module green in the 358-test Python pass (126/126 at unit time).
+### T-005 — Instruction image loading seam
 
-## T-181 — Chat gate harness: honorific rate, AI-ism rate and the recorded judge — DONE
+Files (3, as declared):
+- `ios/ElderlyAssistant/Services/Instructions/InstructionImageLoading.swift` (new)
+- `ios/ElderlyAssistantTests/Services/Instructions/InstructionImageLoadingTests.swift` (new)
+- `ios/ElderlyAssistantTests/Services/Storage/VisualAidStoreTests.swift` (one test added)
 
-Wave 2. `tools/train-intent/src/eval_chat_gates.py` (1,318; sha256 `e7ac148f…f4ac905`) + `tests/test_eval_chat_gates.py` (1,112; 55 cases). `thresholds_from_spec()` reads the spec's `rubric` block — honorific ≥0.98, AI-isms ≥0.98, judge mean ≥4.0 (`>=` semantics); a missing/non-numeric threshold is a refusal, never a default. The deterministic gates delegate per reply to `author_chat_golden`'s review functions (the same execution site as the fixture's own mechanical review; data-not-code tests mutate a spec copy and the gates move with it); the particle criterion ships `measure: count, threshold: null` — reported, never gated. Judge: temperature 0.0; transports `gemini` (lazy client, `response_mime_type: application/json`) and `fixture` (offline replay whose scores-file sha256 is part of the judge identity); every result records model / transport / temperature / prompt-builder + template + sha256 / rubric + sha256 / judge fingerprint / call + reuse counts; the parser is strict (a malformed response is a failed call, never a coerced score); a failed call leaves the gate `not_measured` and no partial mean is ever the gate value; the error limit + `aborted_early` / `unattempted_turns` are recorded; a measured result carries the mean WITH its spread (per-criterion means, per-turn mean min/max/stdev, a 2-decimal histogram — a 4.0 hiding a 2.0 is visible, pinned). One JSON result block (+ JSONL row): fixture identity (revision `83283663…fcb1519`), denominators, eligible; candidate artifact path + sha256; style-spec evidence; thresholds; the judge block; each gate's value/threshold/denominator/offenders (cap 20) + a `provenance` sub-block — the identity T-182 consumes; `swap.eligible` always false, naming the standing hard gates. Consolidated pass: module green in the 358-test Python pass (55/55 at unit time). Until the 50 human reviews land, the shipped fixture is (correctly) ineligible and the harness refuses it; the first real (billed) judge run is a T-182/T-183 step, resumable via the journal.
+Content: `InstructionImageFailure` (rejectedFilename/missingFile/
+unreadableFile), the `@MainActor InstructionImageLoading` protocol, and
+two loaders. Both run `InstructionFilename.isPlain` before building any
+URL or touching a store; the routine loader then reads its existing file,
+the event loader reads stored bytes. Neither uses the photo library,
+prompts for permission or logs a filename.
 
-## T-180 — Provenance manifest and ship-mix enforcement — DONE
+Tests: `InstructionImageLoadingTests` 8/8 and `VisualAidStoreTests` 27/27
+passed. Two test-fixture writes originally skipped creating their parent
+directories; the coordinator added the directory creation, leaving the
+assertions unchanged.
 
-Wave 3. `tools/train-intent/src/build_chat_corpus.py` (3,192) + `tests/test_provenance_manifest.py` (1,214; 52 cases / 9 classes). Licence registry (18 sources + 5 tooling inputs) with a recorded `license_family`; the manifest is emitted BY THE BUILDER itself into the run directory (`build/<run-id>/provenance-manifest.json`; the dev mix writes `provenance-manifest.dev.json` so a dev build can never overwrite the ship compliance artifact; `--manifest-out` overrides) — after `assert_provenance`, before the counters, so the counters carry its `content_hash`: sha256 over canonical JSON minus the hash fields, byte-identical across re-emissions, the pairing value T-182 records beside the gate evidence. No user content by pinned construction: closed key sets (20 body / 18 source-entry / 14 tooling-entry), no fixture or corpus text, no Devanagari codepoint anywhere. Three checks, all CODE inside the build, all preflight-before-any-spend: (a) classification — an empty/unknown admissibility or a missing licence fails the build naming source and field, nothing defaulted (the recorded `unclassified` classification is distinct and clearly defined: refused from both mixes, counted); (b) consent (FR-CNR-029) — a real-transcript source without its consent record is REFUSED from both mixes with the reason (source-level refusal + preflight record `mix: none` + a bypass backstop that fails any build where such a source contributed turns; the P2 consent leg is T-191); (c) the ship-mix licence rule — only CC-BY/Apache-2.0/MIT/synthetic/own data, with the never-admissible pin (IndicDialogue, DailyDialog, PersonaChat, EmpatheticDialogues, research-gated call-center transcripts) verified against the CURRENT registry every run, so promoting or removing a named source is itself a violation. A violation returns `EXIT_PROVENANCE` = 5 (deliberately outside the guards 0–4 vocabulary), writes NO corpus and NO manifest, and leaves the counters recording `stopped` / `verdict: fail` / `ship_mix_eligible: false` + the named violations. Run-level `ship_mix_eligible` is the AND of every check (an unclassified failure can no longer record eligible: true); the direct-build preflight record itself carries `ship_mix_eligible: False` (same as the CLI path). Manifest completeness pinned: the held-out chat set and both eval fixtures recorded EXCLUDED (`mix: none`, no derived artifacts), the exact per-source counts {candidates, admitted, selected}, derived artifacts exact (a layer file iff admitted > 0, the corpus iff selected > 0, refused/excluded sources derive nothing), tooling inputs always classified (`not_exercised` + reason, never omitted). Wave-close rework (recorded narrow exception — single-module runs; the 6-module consolidated pass had found 5 reds, all in the new module): 2 test-side key-path defects (flat `admitted` read where the manifest nests `counts.admitted`; flat `reply` where corpus rows nest `assistant.reply`), 2 implementation defects (the preflight failure record did not carry `ship_mix_eligible` itself — only the CLI path stamped it; the `--plan` provenance line printed the literal `{EXIT_PROVENANCE}` — now an f-string printing `exit 5`), and 1 semantics correction (a pending L2 batch is layer-admitted but mixture-excluded per T-179's hold — `RealCountsTests` now asserts the split where it lives: layer file yes, `selected == 0`, no corpus row, `held.pending_spot_check ≥ 1`; production hold semantics untouched). Re-run after rework: the 6-module consolidated Python pass, 410 tests, OK. Deviations recorded in the unit notes: `EXIT_PROVENANCE = 5` (new vocabulary), refused/excluded entries record `mix: none` (agrees with `consent_refusals()`), dev manifest mix-qualified, the ship-rule witness over executed counts is the L1 CC BY-NC layer (L2 batches held pending spot-check), plan-text documents the rule from a real subprocess. Open (recorded): T-182 records `provenance.content_hash` beside its gate evidence; T-183 supplies the 13 absent source files and the real transports; T-191 supplies the consent record id; the manifest is a run artifact (`build/` is gitignored) — if release wants it archived, the publish step copies it beside the corpus it describes.
+Deviation recorded: the event loader uses `ContactPhotoStore.loadData`
+rather than `load` so absent and undecodable files stay distinguishable;
+it reports OS-unreadable event files as `.missingFile` (the store's read
+surface cannot tell that apart), while the routine loader reports
+unreadable files as `.unreadableFile`.
 
-## T-177 — Indicator, revocation surfaces and coordinator wiring — DONE
+### T-006 — Camera/microphone permission seam (M-1 order)
 
-Wave 3. `Services/Intents/CloudChat/CloudChatActivityIndicator.swift` (new, 245) + `AppCoordinator.swift` (+608/−3, 10 hunks) + `HomeSubviews.swift` (+8) + `SettingsView.swift` (+37) + `Services/Voice/KeywordIntentRule.swift` (+142) + tests `CloudChatIndicatorAndRevocationTests.swift` (new, 972; 25 cases) + `KeywordIntentRuleTests.swift` (+177; 9 new, file 63). The badge is structural, not a rendering guess: ONE open site (the wrapped responder's attempt-begin hook, so the window can only exist when a cloud call is actually issued — a local-only turn cannot light it) and three close funnels (speech end with the attempt settled; any decision change, revocation included; the next chat-turn decide); an unpaired end is ignored so a stray funnel cannot close a window it never opened; the surface renders only when window AND `cloudChatEnabled` (a revoked device shows nothing); zero-format-slot catalogue label, no content. One spoken notice per app session at the first cloud attempt, key `cloud.chat.indicatorSpoken` (T-171; the elder's language), committed before the network call is awaited (the `speakPreAck` discipline — it rides the wait, never delays the reply; a mid-notice answer takes the speaker by the shipped cancel discipline). Wiring (lane seam T-175 / guard seam T-174): every routing input READ PER TURN, never cached — `cloudChatConsentInput()` re-reads `currentDecision()`, `online`/`keyConfigured`/`costAllows` read live sources, and the guard's `cloudAllowed` re-runs the SAME lane decision (one chokepoint: consent cannot be bypassed at the escalation door); ONE wrapped responder shared by the lane's cloud leg and the guard's escalation, so every cloud attempt drives the same window and notice. The consent question fires only inside the consent closure when the decision is `.notRecorded` — never at launch, never in Settings, never speculatively; its spoken capture rides the shipped 45 s confirmation window; an answer outside a live question writes nothing and says nothing (T-176 `.questionNotLive`); an accepted answer speaks the state line read AFTER the write (truthful state, never the requested one); a lapsed capture re-offers, never expires; a failed grant keeps the question up and re-offers (branch pinned at T-176's prompt layer; honest note: this unit's coordinator-side re-offer branch is not directly exercised by its tests — the injected storage is healthy). Revocation, three surfaces, ONE writer: Settings toggle (ON = explicit grant / OFF = `revoke()`, silent like every Settings control, read-back is the gate's current decision on every render — no stale mirror), deterministic voice keywords (`cloudChatVoiceRequest` — revoke family before the state-query family, outside the `Domain` table so no existing exhaustive switch moves; an internet word alone never fires; pinned against claiming any utterance an existing rule claims), and the state query answered truthfully from `currentDecision().allowsEgress` (denied/withdrawn/unreadable all read fail-closed OFF). The voice revoke ends the turn deterministically before the interpreter (no model, no NLU) and emits classification only — `cloud_chat_voice_control`, `metadata: [:]` (no transcript, no content, no identity). Deviation (documented, additive only — needs wave-gate acknowledgement): `CommandRouter.swift` +100/−0, six hunks (2 protocol members + defaults `{ false }`/`{}` so every pre-existing conformer and construction site stays byte-identical; the consent question claims its own yes/no as the LAST flowed confirmation block and speaks its own state line; a typed `.unrecognised` return so the turn is consumed, never a medication ack; the keyword-stage block; the content-free emitter). Accessibility/NFR-009: no Info.plist, no permission, no entitlement change (pinned); indicator imports Foundation + SwiftUI only. Amendment-4 in-unit gate: compile only — run 1 EXIT 65 with ONE true error (private profile-payload double in the new test file; fixed with the house file-scope copy pattern), run 2 `** TEST BUILD SUCCEEDED **` EXIT 0, zero `error:` lines. Consolidated pass (coordinator, 2026-10-15, 13 classes / 325 tests): RED — 21 failures, ALL in this unit's two suites (the other 12 classes green; both house guards green inside the run). Two independent root causes, both fixed in the recorded wave-close rework (the unit notes' "Wave-close rework" section): (a) test-side — the suite's isolation assumed a fresh coordinator starts with a clean consent record, but the gate is built over the REAL `MigratingEncryptedStorage()` container (the injected `profileStorage:` double only backs the profile store), so a real record left by one test leaked into every later-constructed gate and 17 assertions across 4 tests were order-dependent; fixed with a `setUp`/`tearDown` purge of `plugin.cloud_chat.consent.v1` through the app's own storage channel, a clean-store guard in the question helper, and `makeFreshCoordinator()` for the multi-leg tests (no coordinator init-signature change). (b) impl-side — 4 of the 14 authored revoke utterances resolved nil: three honorific forms lost their stem to a Devanagari virama conjunct at Character-cluster level ("बन्द गर" ⊄ "बन्द गर्नुहोस्", "रोक" ⊄ "रोक्नुहोस्" — the family's own documented contract), plus the नपठाऊ (ऊ) spelling variant; fixed with a family-scoped scalar (`unicodeScalars`) phrase matcher + `.phrase("नपठाऊ")` — shared `Alternative`/`firstMatchingKey` semantics and the 2026-09-07 Search cluster pin untouched, no other rule changed. Rework verification: the two classes green twice cold+warm (88/88, exit 0) + compile gate re-run green (`** TEST BUILD SUCCEEDED **`). Coordinator re-run of the consolidated pass after the rework: 325/325, 0 failures, `** TEST SUCCEEDED **`, both house guards green.
+Files (2, as declared):
+- `ios/ElderlyAssistant/Services/Instructions/InstructionPermissions.swift` (new)
+- `ios/ElderlyAssistantTests/Services/Instructions/InstructionPermissionTests.swift` (new)
 
-## T-182 — Chat-variant config and the full ship gate over one candidate — DONE
+Content: `InstructionMediaPermission`, the five-value status enum
+(granted/denied/restricted/undetermined/unavailable), the three-value
+problem enum, a Sendable requesting protocol, the AVFoundation adapter,
+and `prepareForRecording`. The order is locked: read camera, request only
+when undetermined, short-circuit denied/restricted/unavailable, then read
+and request microphone; nil only when both are usable. Status reads never
+prompt; unknown platform values map to `.restricted`; no microphone
+request follows a refused camera (must-carry M-1).
 
-Wave 4. `tools/train-intent/config.yaml` (+66/−0) + `src/eval_golden.py` (+1,388/−157; 2,133) + `tests/test_eval_golden_chat_variant.py` (new, 1,491; 80 cases / 10 classes). The chat training variant lives in an ADDITIVE `chat:` section (15 leaf keys, `enabled: false` in the checked-in file): run id / mix / corpus root, mixture 0.70/0.30, per-layer corpus paths (L1 3, L2 7, L3 `[]`, L4 3), and the filter constants (the 5 spec-check rule names, min word tokens 2, turn ceiling 512, held-out dedupe, near-duplicate Jaccard 0.80); recipe r16 / α32 / lr 1.5e-4 / 3 epochs / 1024 ctx / Q4_K_M. Nothing pre-existing is altered — the flat 64-key non-chat config digest is pinned `0fcf33a1…` and a variant constant changed anywhere is detected as a check failure, never a knob. A CONFIGURATION selects the variant, not a flag: flag absent/false → the variant object is `None` and the legacy path runs byte-identically (stdout + results.csv + committed-ledger safety pinned by `LegacyByteIdentityTests`); flag true → the variant is resolved with every missing or unknown key a named refusal, never a default. Three fixed-constant checks (recipe vs the shipped quantization plan; mixture vs T-179's `CONVERSATION_SHARE`; filter names read FROM `author_chat_golden`'s emittable rule set, not restated) fail the run as checks, never as moved thresholds. ONE `--full-gates` invocation runs T-181's three chat gates (thresholds via `thresholds_from_spec`) plus the existing hard gates (called through their own functions — `tests/test_eval_golden_gates.py` untouched) over one candidate and emits ONE `full_gate_report/v1`: every gate's value/threshold/denominator/status/tier (emergency 1.00 / abstention ≥0.90 / closed-intent ≥0.95 carried verbatim), fixture versions, the T-181 provenance block, the candidate artifact path + sha256, and the T-180 manifest hash INDEPENDENTLY recomputed from the manifest file (a mismatch is a named failure, never a copied value); latency replays `measure_device.py`'s own loader/scorer (nearest-rank percentiles, inclusive at exactly 1,000.0 ms, the 100-prompt floor enforced — a 50-prompt set is a partial measurement); exit 0 all-green / 1 red-or-incomplete / 2 refusal-before-scoring (a refusal writes no report). A red gate names its shortfall and keeps measuring the rest; an incomplete run (gate not measured, judge aborted, tampered/hash-less/ineligible manifest, absent measurements) writes the report MARKED incomplete with the reason and `swap.eligible: false` — incomplete evidence cannot serve as swap evidence; an unscorable measurements file is an input error (exit 2), not absent evidence. The real (billed) judge run remains blocked behind the standing owner gate — the 50-batch chat golden-set human review (the fixture is ineligible until then by T-181's design; every test/ad-hoc run uses T-181's offline `fixture` replay with `billed: False`). Wave-close rework (recorded narrow exception — single-module runs ×2; the suite's FIRST real execution WAS the wave's consolidated pass): (a) test-side — `GateInputs` wrote into the run layout without creating parent directories (6 `setUpClass` `FileNotFoundError`s across the six planning classes) → `mkdir(parents=True, exist_ok=True)` before every write, layout paths unchanged; (b) IMPL-SIDE, a real legacy regression the pre-existing `test_eval_golden_gates` caught (green at base `29ebf1a6` — verified from a `git archive` scratch copy, 35/35 — deterministically red alone in-tree): the refactor's `hard_gate_metrics` returned the per-intent counters as plain dicts, losing base's `defaultdict(int)` zero-read, so the legacy print loop raised `KeyError: 'query'` on the all-wrong `query` intent of `preds_abstention_fail` BEFORE the ledger row was written — the `'none'` the test read was the copied BASELINE's `gates_failed` and the exit 1 was the interpreter crash, not a gate; fixed by priming every `per_intent_total` key with 0 (mechanism-level; manual confirmation on the fixture: `GATES FAILED: ['abstention_precision']`), and the legacy helper/ledger assembly proven byte-equivalent to base by diff; (c) two further first-execution test-side defects — `cls.run` shadowed `TestCase.run` (renamed `cls.gate_result`) and `gate(golden=None)` meant omit-flag → a stale repo placeholder fixture (fixed with a `"default"` sentinel). Re-run after rework: both modules green ×2 (35/35, 80/80) + py_compile. Consolidated pass: the 8-module Python pass green — 525 tests, OK, exit 0.
+Tests: `InstructionPermissionTests` 10/10 passed.
 
-## T-185 — Release log-surface gate coverage for the new chat paths — DONE
+Coordinator verification fixed two compile points without changing
+behaviour: the prompt bridges now start their main-actor task through a
+checked continuation (`MainActor.run` cannot take an async closure), and
+the unknown-status fixture force-unwraps the Sdk's optional
+`AVAuthorizationStatus(rawValue:)` result.
 
-Wave 4. `ios/tools/check-release-log-safety.py` (897→1,376; +509/−30) + `check-release-log-safety.sh` (45→61; +24/−8). The CNR feature's sources join the STRICTER role (no Release-compiled console write at all; content forbidden in every configuration) via 8 new `FEATURE_ROOTS` entries (25 → 33 total; every entry must resolve — the coverage self-test fails if a root grades nothing): the whole `Services/Intents/CloudChat` directory, `ChatSampling`, `NepaliGrammarGuard`, `KeywordIntentRule`, `LlamaCommandInterpreter`, `GeminiClient`, `SettingsView`, `HomeSubviews`. The four shared files that cannot take the feature role without grading unrelated code (`CommandRouter`, `IntentRouter`, `GeminiCommandInterpreter`, `AppCoordinator`) get the additive rules 5–6 through a new `FEATURE_EVENT_TYPES` registry (7 events: the design's specified set plus `chat_respond_{unusable,done,failed}` found by the audit) applied STATEMENT-wise at every emission site — the judge splits so payload rules travel by event type, never by rule 3–4 file association; every violation now names the file AND the statement. A new `--self-test` (7 legs; the engine run as a subprocess over temp trees; wired as wrapper step 3) proves the coverage is load-bearing: 4 seeded violations each go RED by file + statement (a raw print in `CloudChatRouting`, a Debug-guarded content print in `NepaliGrammarGuard`, a `"transcript"` key in a `cloud_chat_voice_control` emit, interpolated reply text in a `cloud_chat_fallback` emit), an off-root control stays green, and mirror-copy falsifications go RED as predicted (removing the CloudChat root / the NepaliGrammarGuard root / the whole registry). One stated limitation (recorded, not hidden): deleting a single registry entry outright is not caught (the stale-entry check fires when an entry exists but its event is no longer emitted; removing the WHOLE registry is caught); the source comment beside the registry states this `ENGINE_FILES`-style. Existing fixtures unchanged: 24 cases / 12 rules before and after, every fixture green; `--falsify` 36 cases green; the gate exits 0 over the shipped sources (≈4.2 s). All 7 CNR emission sites validated against `LogSanitiser.allowedKeys` (no text interpolated). Coverage audit: all 29 CNR-changed Swift files classified with a per-hunk grading of the CNR-added lines in the shared files (0 offences); pre-existing findings in the un-rooted files recorded report-only with recommendations (`topic`/`domain`/`matched_keys`/`floor` keys and a Debug-guarded content print at `:5472` in `CommandRouter`, an `interpreter` key in `IntentRouter`, 21 Release prints + `cold_features` in `AppCoordinator`, a DEBUG transcript print in `GeminiCommandInterpreter`) — carried to the final report as follow-ups, not silently fixed; the AM-5 static-analysis limits (indirection, wrapper sinks, metadata-as-variable) remain stated in the docstring — a green gate means "no defect of these shapes", not "content cannot reach a sink". Build wiring confirmed unchanged (`ios/build.sh:431`, inside `run_tests()`, ahead of every test scope). Unit gate with amendment-4 cadence: gate script exit 0 + py_compile. Consolidated pass: iOS 4 classes / 126 tests, 0 failures, `** TEST SUCCEEDED **`, the extended guard green inside the run over the 33 roots + its 7 self-test legs.
+### T-011 — Routine entry instruction delta and strict read
 
-## T-184 — v17 catalog entry and the gated, reversible swap — DONE (entry PRESENT; promotion honestly blocked, not promoted)
+Files (4, as declared):
+- `ios/ElderlyAssistant/Services/Reminders/RoutineEntry.swift`
+- `ios/ElderlyAssistant/Services/Reminders/RoutineStore.swift`
+- `ios/ElderlyAssistantTests/Services/Reminders/RoutineEntryTests.swift`
+- `ios/ElderlyAssistantTests/Services/Reminders/RoutineStoreTests.swift`
 
-Wave 5 (P1 leg). `ModelCatalog.swift` (+318/−7) + `LanguageModelResolver.swift` (+45/−13) + `AppCoordinator.swift` (+70/−2) + `ModelCatalogChatVariantTests.swift` (new, 535; 20 tests), rebased `BrainModelSelectionTests.swift` (+38/−5; the curated-list/framing pins an entry must move), `project.pbxproj` (+4, xcodegen registration), and one documented necessity deviation `LlamaCommandInterpreter.swift` (+11 — the inherited `.qwen3` measured-framing row: an offered brain without a row fails the offered-brain test and would fall to the LLaMA 3.2 `default:` branch; `framing_check.py` replaces it at publication), plus `specs/T-184-notes.md` (full record). The new entry `intentQwenS43ChatV17` (`intent-ne-qwen-s43-chat-v17-q4km`) ships BESIDE `intentQwenS43` — the previous entry stays offered and selectable with unchanged evidence, that is the rollback target — with the real artifact identity (sha `e05cc8a2…`, 1,107,408,736 B = the sibling's `c2135f78…`/1,107,408,576 B +160 B, same 1.7B memory-class rung, 3 GB floor, `["ne"]`) and an RFC 2606 `.invalid` placeholder URL (publication pending; the digest is the REAL local artifact's, so an untimely tap is an honest failed download, never a wrong file — only the URL changes at publication). Promotion is REFERENCE DATA, not a code path: `chatVariantPromotionRecord` ships a complete attempt honestly BLOCKED — real artifact identity + the run manifest hash `fb7f7779…` carried, `gateReportPath`/`gateReportSHA256`/`gates` empty ON PURPOSE (no full-gate report exists: the chat judge is blocked on the funded key, latency unmeasured until the Anzaan DV session) → `promotionVerdict` resolves `.blocked(.gateReportMissing)` (closed vocabulary; no report path or gate name reaches a log surface). Enforced where serving happens, three points: `defaultEntry` step −1 serves the variant only when `.promoted` (blocked ⇒ every step below byte-identical to pre-CNR behaviour); `explicitDefaultEntry` refuses a `languageDefaultPicks` map entry naming a record-blocked variant (pointing the map at v17 is not promotion — it falls through as if the map had not moved); an `isAutomaticPickEligible` filter inside the automatic ladder blocks the 160-byte arithmetic hazard (the +160 B file would otherwise win the "largest fitting" step on seed-43 classes once the warm-STT footprint tightens the budget — a silent promotion by arithmetic; pinned by `testTheVariantsExtraBytes…WhileBlocked`). Rule 1 (explicit household pick) deliberately NOT gated — "selectable" is the spec's word and the display name quotes the state ("Brain — Qwen 1.7B · Nepali chat-aware (v17 · gates pending)"); `defaultBrainModelID` untouched (`intentQwenS43`). New `chat_variant_promotion` event (`slot`+`reason` only; both shipped `LogSanitiser.allowedKeys`; silent once promoted) + the tier-named decision field FR-CNR-022 asks for via new `AutomaticPick.deviceClass` (in the hand-written `==`: a 6 GB-tier pick is not the "same" pick as an 8 GB one). Scoped evidence (no full suite, no clean, no DerivedData deletion): baseline 102 tests / 1 pre-existing red (`MultipartDownloadTests:232` — stale `intentQwen4BSlotCanon` pin); unit run xcresult **182 passed / 3 failed / 1 skipped** (186 executed) — all 3 red cases are that same pre-existing stale `defaultBrainModelID` pin (`InterpreterAvailabilityTests:255/:173/:191/:197` + `MultipartDownloadTests:232`; the constant is already `intentQwenS43` at HEAD `AppCoordinator.swift:2202` and both files are byte-identical to base — git proof, no re-run needed); the new suite 20/20 green including the single-residency pair (`switchBaseModel` both directions, exactly one `llmInstance` pinned structurally) and the rollback tests. The result is the unit's own spec'd honest partial: promotion is the blocked action, not the unit's existence; the log-safety gate passes inside the run with the new emission.
+Content: optional `Instruction` on a routine entry, added after
+`visualAids`, encoded only when present and decoded tolerantly; the raw
+kind stays `"text"` (must-carry B-2). `RoutineStore.loadEntriesIfReadable`
+is the strict read the reminder path needs: entries for a readable empty
+collection, nil for a read failure or missing key. Legacy `loadEntries`
+still returns an empty array on failure for the edit surfaces.
 
-## T-186 — End-to-end acceptance, scoped sweep and the release gate — DONE (P0 accepting; v17 entry present, not promoted)
+Tests: `RoutineEntryTests` 19/19 and `RoutineStoreTests` 16/16 passed
+(including the four new entry tests and seven new store tests).
 
-Wave 7. Full record `specs/CNR-acceptance-notes.md` (351 lines, committed `bc19411c`). Scoped sweep over the integrated tree: 30 classes / 5 `./build.sh test:unit` runs — 716 tests, 711 passed, 4 red cases (1 CNR-suite flake + the 3 recorded pre-existing baseline cases), 1 skipped; per-class denominators in the record (console vs xcresult reconciled). The one red NOT attributable to the baseline: `CloudChatConsentGateTests.testConcurrentGrantAndRevoke…NeverLeaveATornOrMixedRecord` — red once at `:510` (the predicate rejects the cleanly-absent `.notRecorded` state its own message blesses), green 3/3 re-runs (37/37) → timing-dependent flake, recorded as a genuine finding with the recommendation for T-172's owner (widen the predicate or make the coda deterministic), NOT fixed here (this unit owns no other artifact). Pre-existing baseline reds proven by empty `git diff` at both `9cafa3cc..HEAD` and `14a008bf..HEAD`: `MultipartDownloadTests:232` + `InterpreterAvailabilityTests:255/:173/:191/:197` (stale `intentQwen4BSlotCanon` pins vs the shipped `intentQwenS43`; already false at the CNR base). Full iOS bundle NOT run — the substitution is recorded explicitly per the owner policy (§5: scoped `-only-testing` runs are the honest gate; the full bundle carries a known baseline and no full-bundle number is claimed). Python: 9 CNR modules, 539 tests OK exit 0 each (the 8-module wave-close set grew via P1's +6 in `test_eval_golden_gates` and the ninth pre-existing intent-prompt-pin module; denominator note in the record). Release-log gate exit 0 verbatim (33 feature roots, 7 event types, 24 fixtures/12 rules, 7-leg self-test — also green inside all five sweep runs via `build.sh:431`). Journey acceptance: the four journeys (local chat; consented cloud + indicator + lossless toggle-back; offline honest degradation; guard-flagged with AND without a cloud lane) green through named shipped seams, with the device-only limits explicitly ceded to T-187 — no seam-level test presented as a device observation. Preservation audit walked at the named range boundaries (P0 `14a008bf..5169c040`, P1 `5169c040..HEAD`): single-decode schema unchanged (the one P1 parse change is training-tooling-only and additive — the canonical-intent bridge); router ladder additive-only (`[CLOUD-CHAT-LANE]` branch; zero emergency-path lines changed in either range — only added doc comments match an emergency grep); STT/Whisper path untouched (name-grep empty across both ranges); no Info.plist/entitlement change anywhere in CNR (the file's history carries no CNR commit); the 160-byte arithmetic hazard pinned green (Run D 153/153). Headline honesty, required by the spec: **the P0 runtime slice ACCEPTS; the v17 catalog entry is PRESENT but NOT PROMOTED** (`.gateReportMissing` — the full-gate report was in flight at authoring, the chat-judge leg is behind the owner money gate, the latency leg is unmeasured) — and **T-187 (DV-1..6) remains the completion gate**.
+### T-014 — Event extras instruction and typed write seam (OI-1)
 
-## T-187 — DV-1..6 device-validation protocol and the record — DONE (protocol written; every item BLOCKED — no Anzaan session; feature DEVICE-VALIDATION-OUTSTANDING)
+Files (2, as declared):
+- `ios/ElderlyAssistant/Services/Storage/EventExtrasStore.swift`
+- `ios/ElderlyAssistantTests/Services/Storage/EventExtrasStoreTests.swift`
 
-Wave 7 (second unit). Full record `specs/CNR-device-validation-protocol.md` (367 lines, committed `aaf0143c`). House 10-section device-validation format, mirrored from `specs/MTC-device-validation-protocol.md`: why/binding (FR-CNR-025 completion gate), environment and build identity with `[OWNER INPUT]` cells (device, iOS version, app build, branch/HEAD sha — a result without recorded build identity is not gate evidence), step-zero hard prerequisite, how to run (one session; nothing authored on the device; the house install recipe — the installer derives the bundle identifier from the built artifact, per the PR #157 fix), record fields, the six item sections, the record, the completion gate, capture discipline, recording rules. DV items carried VERBATIM from the unit spec: local chat quality (warm, grammatical, honorific agreement, particles within budget, no AI-isms, plus a seeded guard flag engaging the safe template); cloud chat consent plus visible indicator, toggling off returning to the on-device brain without losing chat; offline chat degrading honestly to the local brain (no crash, no false success); emergency phrasing triggering exactly with recall untouched; command determinism at temperature zero (reminders and alarms); the elderly listening panel's side-by-side verdict. Every item recorded **BLOCKED with its named reason** — per-item prerequisites enumerated in the record (§7.3): DV-1 needs a device session on a working-STT build with the shipped-tier brain present plus forced-local state and one genuinely flagged reply for the guard leg; DV-2 needs the session plus the cleanly-absent consent starting state, online, key, cost; DV-3 needs the session plus the airplane-mode control, including the failure-in-force mid-turn leg; DV-4 needs the session plus granted/online state and a configured emergency contact; DV-5 needs the session plus the previous build for the side-by-side; DV-6 needs the session plus the elderly listening panel present. No PASS is inferred anywhere from unit tests, the T-186 sweep, or training-box gates; completion status stated explicitly as **DEVICE-VALIDATION-OUTSTANDING** (never a fabricated pass). NFR-CNR-002/003 observation slots per chat item: felt latency on the reference tier and any eviction/reload observed — a second resident model or a per-turn reload is a finding, not a curiosity. Release-log gate re-observed by the unit itself at authoring HEAD (`8b64c01c`): the gate script (`tools/check-release-log-safety.sh`) invoked from `ios/` exits 0 (`RELEASE_GATE_EXIT=0`), verbatim coverage lines recorded (33 feature roots / 7 payload-graded event types; 24 fixtures over 12 rules; 7-leg self-test — seeded violations caught by name, off-root control quiet). Honest state recorded at authoring: v17 PRESENT but NOT PROMOTED (`.blocked(.gateReportMissing)`), the full-gate report in flight with the chat-judge leg behind the owner money gate and the latency leg unmeasured. The promoted-v17 serve/rollback smoke (T-184's open item) is carried as the record's appendix cell — explicitly not a DV-1..6 substitution. Capture discipline stated: telemetry is read for classification fields only; a content-bearing field in a log is itself a finding. Recording rules: any failed item keeps its reproduction steps; nothing tuned away.
+Content: optional `Instruction` alongside `photoFilename`, tolerant
+decode, and `snapshot()` that distinguishes a readable empty store
+(success with an empty dictionary) from a read failure (nil). The setters
+were repaired so each preserves the other field. `setInstruction` returns
+false and writes nothing when the event row does not exist.
 
-## T-188, T-189, T-190, T-191 — P2 legs: owner-descope records (2026-10-15) — DESCoped
+Tests: `EventExtrasStoreTests` 20/20 passed (nine new instruction/extras
+tests included).
 
-P2 (conversation polish) is separated from this run as its own initiative — `docs/features/2026-10-15-p2-conversation-polish-initiative.md` (main checkout). Per the owner decision of 2026-10-15 (relayed via the main session), the four P2 legs are descoped from `conversational-nepali-replies`; the plan rule applied is risk 10 ("descoping never silent"). Per-leg owner-descope records: T-188 → `specs/CNR-p2-dpo-notes.md` (DPO on judge preferences), T-189 → `specs/CNR-p2-romanized-notes.md` (romanized Nepali chat), T-190 → `specs/CNR-p2-4b-tier-notes.md` (4B tier candidate/admission), T-191 → `specs/CNR-p2-transcripts-notes.md` (consent-based real transcripts) — each cites the 2026-10-15 decision, states the declared code files were not produced, and claims no outcome. Umbrella record: `specs/plan-tasks/amendments/amendment-6-p2-descoped-2026-10-15.md` (+ the plan.md summary bullet and wave-table annotation). T-192 stays in this run and must account for all four legs in the feasibility honesty statement. The workflow's 5-task shape is unchanged (the legs were units inside implement); the run's scope now closes the critical path at T-187.
+Deviation recorded: IF-26's summary says "upserts", but T-014's acceptance
+text requires false/no-write for a missing row and the task contract is
+the unit's authority; the store does not create an extras row by itself.
 
-## T-192 — Feasibility honesty statement — DONE (statement written; every leg carries a verdict + pointer; gate verdicts awaited)
+### T-020 — Usage disclosure strings and built-bundle registration
 
-Statement `specs/CNR-feasibility-honesty-report.md` (174 lines, committed `582b6fd6`), mirroring design section 20 row for row (design verified at the section's table lines): 11 rows — the seven section-20 legs plus the DPO and transcripts P2 legs called out beyond the table, the device-validation state, and latency. Verdicts as written: (a)+(b) chat sampling at the fixed seed and recorded temperature + the command schema/determinism — DELIVERED at the implementation layer, on-device form BLOCKED (T-187); (c) guard coverage — DELIVERED AS THE STATED BOUND (lexicon-bounded honorific catch, script-classification scope), the seeded guard-flag device leg BLOCKED; (d) cloud routing (per-turn decision, fallback, no leak) — DELIVERED at the implementation layer, the recorded transcription exception on the Gemini stack stated plainly; DV-2/DV-3 BLOCKED; (e) 1.7B reference-tier chat quality — MEASURED AT THE RUN (the 0.8940 end-probe stated as 0.006 below the 0.90 default — evidence, not a gate; both floor aborts, 0.862 at 300 and 0.884 at 1000, preserved red), gate verdicts NOT YET LANDED (report #1 in flight at authoring — the file confirmed absent locally, its recorded identity stated, no verdict claimed), no swap ships; (f) the four P2 legs — OWNER-DESCOPED (2026-10-15), pointers to the four notes files + amendment 6; (g) device validation — BLOCKED all six, DEVICE-VALIDATION-OUTSTANDING, pointer to the T-187 record; the section-20 chat-classified-surface-scope row — DELIVERED AS THE STATED BOUND; latency (NFR-CNR-002) — NOT MEASURED. Failure-path self-check run against the spec's three defect scenarios: no leg without a verdict; no red restated green (the HTTP-402 judge-key block, the one flake — red 1/4, green 3/3 re-runs, the three pre-existing baseline reds all stated as recorded); every verdict pointer grep-verified to contain its claim — ten precision edits applied where the draft's pointer or wording overreached (e.g. the v17 smoke cell's section number corrected). Cross-references explicit: manifest `fb7f7779…`, the gate report identity, the DV record revision `aaf0143c`. Quote discipline held: values verbatim from the recorded evidence with file+section pointers; interpretation only where the design defines a threshold. No code, no other evidence — composes, checks, points.
+Files (5, as declared):
+- `ios/ElderlyAssistant/Info.plist`
+- `ios/ElderlyAssistant/Resources/en.lproj/InfoPlist.strings` (new)
+- `ios/ElderlyAssistant/Resources/ne.lproj/InfoPlist.strings` (new)
+- `ios/project.yml`
+- `ios/ElderlyAssistantTests/App/L10nCatalogCoverageTests.swift`
 
-## T-190 — P2 4B tier: RE-OPENED (owner 2026-10-17) — executing (amendment 7)
+The regenerated `ios/seniOS.xcodeproj` is the project.yml build artifact,
+not a separately owned file.
 
-Dated annotation to the P2 descope block above (which stands as the 2026-10-15..17 record). Owner decision 2026-10-17 (relayed via the main session, recorded with owner provenance): T-190 is carved back into this run — the owner wants the 4B chat variant for the iPhone 17 Pro Max; T-188/T-189/T-191 remain descoped. Umbrella record `specs/plan-tasks/amendments/amendment-7-t190-4b-reopened-2026-10-17.md`; execution record `specs/CNR-p2-4b-tier-notes.md` ("RE-OPENED" section — base choice with rationale, corpus/recipe identity, launch, discipline, outstanding). Launched 2026-10-17T04:37 box-local, in parallel with the in-flight v17 full-gate decode (GPU verified idle before launch; the decode is CPU-bound — zero GPU conflict): base `checkpoints/qwen4b-s43-merged` (the 4B seed-43 lineage merged checkpoint — the structural mirror of `qwen-s43-merged`, which the 1.7B v17 run trained on), unchanged v17 corpus (17,235/500 verified on disk) and pinned recipe (r=16/alpha=32/lr 1.5e-4/3 epochs/seq 1024 → trainer-printed ~3,234 steps), in-run floor guard disabled per the ratified restart-#2 discipline, run id `cnr-v17-4b-20261017-0437`, box-side detached chain `chain-train-4b.sh` (train → end-of-run probe → Q4_K_M export + sha; CPU-only export), ETA ~9-10 h. No measured outcome is claimed anywhere yet; T-192 §5 carries the dated amendment annotation.
+Content: the camera and microphone usage descriptions now match design-l2
+§10.6 verbatim in English, with localised copies in both languages. No
+other usage key changed, and contacts/photo-add text is untouched
+(must-carry M-3). Both strings files pass `plutil -lint` and are declared
+as explicit resources so they land in the built bundle. The added L10n
+tests open `<lang>.lproj/InfoPlist.strings` directly and parse them with
+`PropertyListSerialization`; they never read the merged Info dictionary,
+and a missing-localisation fixture fails the gate.
+
+Tests: `L10nCatalogCoverageTests` 58/58 passed (ten new tests included).
+
+## Consolidated wave-1 verification
+
+The project was regenerated with `./ios/build.sh generate` after all new
+files and `project.yml` landed. One direct scoped `xcodebuild test` run
+covered: InstructionVideoStoreTests, NoIOInInitTests,
+InstructionPlaybackAdapterTests, InstructionImageLoadingTests,
+VisualAidStoreTests, InstructionPermissionTests, RoutineEntryTests,
+RoutineStoreTests, EventExtrasStoreTests and L10nCatalogCoverageTests.
+
+Result: **193 tests executed, 0 failures**, `** TEST SUCCEEDED **`
+(simulator iPhone 17 Pro, derived data `ios/build/DerivedDataTests`). The
+only failures seen on earlier attempts of this run were the compile and
+fixture issues described above, all repaired before the green run.
+
+## Verification policy for the remaining units
+
+Each unit is implemented by an `sdd-dev` subagent inside its declared
+ownership set, with no builds, commits or `ai-sdd` calls. The coordinator
+integrates sequentially, regenerates the project when new files land, runs
+the unit's scoped `-only-testing` filter (plus any explicitly shared suite
+it touches), and records the unit here. No full-suite run is used as a
+per-unit gate; one consolidated final full-suite comparison is attempted
+at T-027 and reported honestly as inconclusive if it stalls again.
+
+## Wave 4 — capture seam, routine write seam and playback controller
+
+### T-009 — Video capture coordinator seam
+
+`InstructionVideoCaptureCoordinator` (main actor, observable) owns the five
+capture phases — `idle`, `picking`, `recording`, `validating`, and one
+terminal `ready(AcceptedInstructionVideo)` / `failed(Failure)` — behind the
+injected `InstructionVideoPicking` and `InstructionVideoRecording` seams.
+`pick()` and `record()` start one session at a time, `cancel()` invalidates
+the attempt before dismissing anything, and `consumeAccepted()` transfers an
+accepted video exactly once. Permission problems and import failures stay
+typed; no error text crosses the seam. A test repair recorded the honest
+behaviour that a cancel arriving while the importer is validating has no
+system surface left to dismiss (`dismissCount == 0`): the picker released
+itself when its callback completed, while the staged bytes remain the
+coordinator's to discard.
+
+Tests: `InstructionCaptureTests`.
+
+### T-013 — Routine instruction write seam and scheduler delta
+
+`RoutineScheduler` gained the one routine write seam,
+`setInstruction(_:entryId:) -> Result<Void, InstructionWriteError>`, with the
+closed error set `.ownerNotFound`, `.unresolvedPayload`,
+`.mediaWriteFailed(InstructionStorageError)` and `.persistenceFailed`.
+`InstructionWriteError` lives beside its routine owner. The scheduler also
+gained `entriesIfReadable()` (nil means unknown, never empty) and
+`entry(deleting:)` / `removeEntry`, which tear down owned video media.
+`regenerateWindow` now passes `hadInstruction: entry.instruction?.isPresent
+== true` so the notification payload stays honest. The scheduler emits
+`entry_instruction_updated` through the observability bus directly because
+`InstructionObservability` has no such method; T-026 registers the event.
+
+Tests: `RoutineSchedulerTests` (45), `InstructionDisplayStateTests` (8).
+
+### T-017 — Playback controller
+
+`InstructionPlaybackController` adds the seven-phase state machine
+(`idle`, `preflighting`, `preparing`, `ready`, `failed`, `finished`,
+`closed`) over T-004's `InstructionVideoPlaying` seam. `start()` is the only
+present path and a second call is a no-op; a 0.6 s preflight bound and a
+10 s ready watchdog run through an injected cancellable deadline factory;
+`close()` is idempotent, cancels both deadlines, dismisses the adapter and
+emits at most one `closed` outcome for a session that had a player. The
+controller never stores a URL after close and never retries or autoplays.
+
+Tests: `InstructionPlaybackControllerTests` (13),
+`InstructionPlaybackAdapterTests` (11, regression).
+
+### Wave 4 verification
+
+Project regenerated with `./ios/build.sh generate`; one scoped run covered
+`InstructionCaptureTests`, `InstructionDisplayStateTests`,
+`InstructionPlaybackAdapterTests`, `InstructionPlaybackControllerTests` and
+`RoutineSchedulerTests`.
+
+Result: **92 tests executed, 0 failures**, `** TEST SUCCEEDED **`
+(iPhone 17 Pro simulator, `ios/build/DerivedDataTests`).
+
+## Wave 5 — production capture adapters and event instruction seam
+
+### T-010 — PHPicker and camera capture adapters
+
+`PHPickerInstructionVideoPicker` presents the out-of-process, video-only,
+single-selection picker with `.current` representation and no photo-library
+authorization; `UIImagePickerInstructionVideoRecorder` presents the system
+camera in video mode with the 180 s cap. Both stage the chosen file
+synchronously inside the system callback and retain neither the callback URL
+nor the item provider. The recorder exposes a pure `Configuration` value and
+guards camera-only property assignment behind `isSourceTypeAvailable`, so a
+simulator can construct it; the delegate contract is exercised through an
+injected surface builder. Provider failures map into the closed import
+vocabulary, with cancellation recognised at either error level.
+
+Tests: `InstructionCaptureTests` (25).
+
+### T-015 — Event instruction, save outcome and teardown
+
+`FreeFormEvent` gained `instruction`; `FreeFormEventForm` gained
+`instructionDraft` (default `.loaded(instruction: nil)`); `save(_:editing:)`
+now answers `FreeFormEventSaveOutcome(eventId:instructionSaved:)`, where a
+partial outcome is never nil. `setInstruction(_:forEventId:)` writes through
+the event extras seam and `delete` tears down the event's video media
+best-effort. The service emits `event_instruction_updated` through the
+observability bus directly. The coordinator carries a temporary bridge at
+the old `saveFreeFormEvent -> String?` call site until T-022 owns the typed
+seam.
+
+Tests: `FreeFormEventFormTests` (22), `FreeFormEventServiceTests` (30).
+
+### Wave 5 verification
+
+Project regenerated; one scoped run covered `InstructionCaptureTests`,
+`FreeFormEventFormTests` and `FreeFormEventServiceTests`.
+
+Result: **77 tests executed, 0 failures**, `** TEST SUCCEEDED **`
+(iPhone 17 Pro simulator, `ios/build/DerivedDataTests`).
+
+## Wave 6 — fire handlers, instruction surfaces and coordinator seams
+
+### T-016 — Routine and event fire handlers
+
+`RoutineVisualAidFireHandler` now takes a `RoutineInstructionFireContext`
+(`hadInstruction`, `firedAt`) and a tap callback. Its fire path requires a
+visual aid, a present instruction, or `hadInstruction == true`; the tap path
+only handles the default action when `had_instruction == true`, resolves the
+entry (which may already be gone) and calls the tap callback once on the main
+queue with the notification's date. `FreeFormEventFireHandler` gains the same
+instruction gate on its existing tap path. Both handlers always return false
+so the system keeps its own presentation.
+
+Tests: `RoutineVisualAidFireHandlerTests` (18),
+`FreeFormEventFireHandlerTests` (11).
+
+### T-018 — Shared instruction surfaces
+
+New `InstructionViews.swift` holds the one key catalogue
+(`InstructionSurfaceKeys`, 26 keys), the shared `InstructionCardView`
+(image via a loader, 44 pt play target, `.none` renders `EmptyView` before any
+modifier), the `InstructionCoverView` playback cover (starts once when
+presented and only calls `play()` on `.ready`, Close always available), and
+the shared `InstructionEditorView` over the T-009 capture coordinator. The
+editor's pure seams (`canSave`, `kindKey`, `imageButtonKey`, `videoButtonKey`,
+`removeIsOffered`, `feedbackKey`, `applyingPickedImage`,
+`applyingAcceptedVideo`) keep the seven edit states testable without rendering.
+
+Tests: `InstructionSurfaceTests` (16).
+
+Deviation recorded: the editor previews only pending picked image bytes and
+does not preview an already-stored image, because the task forbids the view
+from reaching any service beyond the capture coordinator. The stored image
+remains visible on the card after save.
+
+### T-022 — Coordinator service seams and factories
+
+`AppCoordinator` owns one `InstructionVideoStore`, the prober/inspector and a
+lazy importer, the AVFoundation permission adapter, capture and playback
+configurations, and the event instruction seam. New factories:
+`makeInstructionVideoPicker()`, `makeInstructionVideoRecorder()`,
+`makeInstructionPlayback(url:title:)`, `instructionCaptureCoordinator(draftSession:)`,
+`routineInstructionImageLoader(entryId:)` and `eventInstructionImageLoader`.
+`saveRoutineInstruction(_:entryId:) -> Result<Void, InstructionWriteError>`
+delegates to the scheduler; `saveFreeFormEvent(_:editing:) ->
+FreeFormEventSaveOutcome?` delegates to the service and keeps the Google
+reconcile. The shared video store is injected into the existing scheduler and
+event-service constructions. Small file-scope protocols
+(`RoutineInstructionWriting`, `FreeFormEventSaving`) keep the seams recordable
+in tests.
+
+Tests: `AppCoordinatorInstructionTests` (11).
+
+### Wave 6 verification
+
+Project regenerated; one scoped run covered
+`InstructionSurfaceTests`, `RoutineVisualAidFireHandlerTests`,
+`FreeFormEventFireHandlerTests` and `AppCoordinatorInstructionTests`.
+
+Result: **56 tests executed, 0 failures**, `** TEST SUCCEEDED **`
+(iPhone 17 Pro simulator, `ios/build/DerivedDataTests`).
+
+## Wave 7 — fired-screen, routine and event instruction surfaces
+
+### T-021 — Fired routine instruction overlay
+
+`FiredRoutineVisualAids` gains `entryId` and a `Content` value
+(`.reminder(title:aids:instruction:expectsInstruction:firedAt:)` /
+`.unavailable`). `RoutineVisualAidOverlay` renders the reminder screen through
+the shared card, resolves playability through the injected closures off the
+draw path, and presents the shared playback cover only on a Play tap. The D6
+gate is a pure `timeText(for:locale:)`: a time is passed only when
+`instruction?.isPresent == true || expectsInstruction`; `.unavailable` carries
+no title or time and its Close clears the presentation. The temporary
+photo-only initializer remains only until T-025 composes the real content.
+
+Tests: `InstructionSurfaceTests` extended by 11 cases (27 total).
+
+### T-023 — Routine settings instruction editor
+
+`RoutineSettingsView` adds one instruction row beside the existing photo and
+toggle controls. The row opens a sheet holding one presentation value and one
+capture coordinator per session; the shared `InstructionEditorView` owns every
+control and copy line. Saving calls only
+`coordinator.saveRoutineInstruction(_:entryId:)`; a typed failure maps through
+`InstructionMessageKey.forWrite` to one plain line and keeps the draft. The
+photo picker's old cancel grace was removed because the shipping picker
+dismisses before asynchronous image loading completes and the grace could
+discard a slow pick.
+
+Tests: `RoutineSettingsInstructionTests` (11).
+
+### T-024 — Event instruction form and detail
+
+`EventFormView` carries one local `InstructionDraft` and opens the shared
+editor as a nested sheet; Save is the single `saveFreeFormEvent` call.
+`EventDetailView` renders the shared card under the photo and above the info
+card, resolves the video URL in `load()` and builds the playback controller
+only on the Play tap. A partial outcome is never a modal: the form closes on
+every non-nil outcome and reports the partial flag to its host, which shows
+`instruction.savePartial` once as a plain inline line (the list after
+add/edit-from-list, the detail after edit-from-detail). Tests pin the close
+rule, the card position and the no-dialog rule.
+
+Coordinator note (pre-T-025): views do not reach the store, so the two playback
+surfaces call the new `instructionPlaybackAvailability(filename:owner:)` seam;
+T-025 keeps and tests this seam.
+
+Tests: `FreeFormEventFormTests` extended by 9 cases (31 total).
+
+### Wave 7 verification
+
+Project regenerated; one scoped run covered `InstructionSurfaceTests`,
+`RoutineSettingsInstructionTests`, `FreeFormEventFormTests` and
+`AppCoordinatorInstructionTests`.
+
+Result: **80 tests executed, 0 failures**, `** TEST SUCCEEDED **`
+(iPhone 17 Pro simulator, `ios/build/DerivedDataTests`).
+
+## Wave 8 — coordinator composition and release-log gate
+
+### T-025 — coordinator presentation, tap routing and launch sweep
+
+`AppCoordinator` now owns `LiveInstructionOwners` (nil-preserving strict-read
+composition: a root is unreadable, never empty) and the
+`InstructionOrphanSweeping` seam. One `EventExtrasStore` is constructed in
+`init` and shared with the lazy event service, so the sweep reads the same
+index the service writes. The routine fire handler is registered with the
+designated initializer: foreground delivery publishes
+`FiredRoutineVisualAids(.reminder)` with the typed fire context, and a tap
+routes present / removed / deleted owners to `.reminder` or `.unavailable`.
+The one launch sweep is enqueued from `composePostFirstFrame()` (never from
+`init`), composes both live sets on the main actor, then purges pending
+drafts once and each root once on `modelHousekeepingQueue` with the 60 s
+grace, emitting exactly one `instruction_orphan_purge` event per call. A nil
+live set is passed through, which the store treats as a no-op. The temporary
+`FiredRoutineVisualAids.init(entryId:title:aids:)` was removed by the
+coordinator after the designated construction site landed.
+
+Tests: `AppCoordinatorInstructionTests` extended by 16 cases (26 total);
+`NoIOInInitTests` gained `testSweepNotRunFromInit`.
+
+### T-026 — release-log gate registration and source hygiene
+
+`ios/tools/check-release-log-safety.py` now scans `Services/Instructions`,
+`App/InstructionViews.swift` and `App/InstructionCapture.swift`, and
+recognises exactly the seven `instruction_*` event types. `--self-test`
+gained three temporary-copy legs over the shipped
+`InstructionObservability.swift`: a clean copy passes, an injected
+interpolated instruction-text console write fails with
+`feature-console-write` and `feature-content-print`, and an unknown event
+with an unlisted `transcript` key fails with
+`feature-unlisted-metadata-key`. Shipping bytes are compared before and
+after and must be identical. No root, rule or allow-list entry was removed.
+
+`InstructionSourceHygieneTests` adds 11 cases: gate registration, full file
+coverage, the seven event types, the unknown-event/free-text failure paths,
+and comment-stripped scans of the three roots for network/upload/share,
+Photos access (`PHPickerViewController` explicitly allowed), `copyItem`,
+transcode/trim and merged-Info.plist usage-string lookups. Every detector has
+a planted-token falsifiability control.
+
+### Wave 8 verification
+
+Project regenerated after the new test file landed. The wave-8 scoped run
+covered `AppCoordinatorInstructionTests`, `NoIOInInitTests` and
+`InstructionSourceHygieneTests`.
+
+Result: **44 tests executed, 0 failures**, `** TEST SUCCEEDED **`
+(iPhone 17 Pro simulator, `ios/build/DerivedDataTests`). The release-log
+gate wrapper also exited 0 independently (fixtures plus the 10-leg
+self-test, shipping tree byte-identical).
+
+## Wave 9 — T-027 integration suite, release gates and full-suite comparison
+
+T-027 created `ios/ElderlyAssistantTests/Services/Instructions/InstructionFeatureIntegrationTests.swift`
+with exactly the twelve named cases. It drives the real routine store,
+scheduler, notification content builder, fire handler and coordinator, with
+only the platform edges doubled (alarm scheduler, observability bus, family
+notifier, EventKit gateway, in-memory storage). Migration fixtures F-1…F-12
+go through raw JSON so wrong-typed fields, explicit nulls and unknown nested
+fields are real bytes; all other round trips use the shipping tolerant
+decoders. Every test roots its media under a unique temporary directory and
+deletes it in tearDown; nothing is written to Application Support, the
+Keychain, the photo library or the network, and no sleeps are used.
+
+Coordinator repair during verification: line 932 compared
+`cardState(coordinator)` (an `InstructionDisplayState?`) with bare `.none`,
+which Swift resolved to `Optional.none` (nil) rather than the display
+case. The assertion now names `InstructionDisplayState.none`. Test-only
+change; no product file was touched by this unit.
+
+### Verification results
+
+Scoped filter after `ios/build.sh generate`:
+
+```
+xcodebuild test -project seniOS.xcodeproj -scheme ElderlyAssistant \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -derivedDataPath build/DerivedDataTests \
+  -only-testing:ElderlyAssistantTests/InstructionFeatureIntegrationTests \
+  CODE_SIGNING_ALLOWED=NO
+```
+
+Result: **Executed 12 tests, with 0 failures**, `** TEST SUCCEEDED **`.
+
+Release-log gate: `bash ios/tools/check-release-log-safety.sh` exited 0 on
+the final tree — every root and feature event resolves, every
+seeded violation is caught by name, the off-root control is quiet, and the
+temporary-copy legs leave the shipping tree byte-identical.
+
+Canonical build: `cd ios && ./build.sh` — `✓ Build complete`, exit 0. (A
+first attempt was stopped by a 20-minute wall-clock guard while compiling a
+cold canonical cache; an immediate retry hit a transient build-database
+lock from the shutting-down first xcodebuild; the clean rerun on the warm
+cache completed.)
+
+### The single full-suite comparison — INCONCLUSIVE
+
+The pre-wave-0 baseline was already recorded as inconclusive: the starting
+commit does not compile without the five documented baseline repairs, and
+the baseline run was terminated inside
+`DialectIdentifierTests.testFrozenClassesSurviveEveryShippedRule`. That case
+is not a hang: in the deeper run below it passed in **309.5 seconds**.
+Baseline record: 1,890 cases executed, 33 failures, 2 skipped.
+
+Two post-change attempts were made. Attempt 1 carried a 9-minute wall-clock
+guard and was terminated while still running (2,864 completed cases):
+41 failures — all 33 baseline failures reproduced, plus 8. Two of the 8
+(`ContactResolverTests.testVoiceResolution…20ms`, `AppCoordinatorSpotifyWiringTests.testScenario4…`)
+passed when rerun scoped; the other 6 are CloudChat consent-store cases that
+also fail in isolation and are order/state-sensitive (see below).
+
+Attempt 2 carried a 30-minute guard and was terminated by a test-host crash:
+**5,261 completed cases** (5,180 passed, 79 failed, 2 skipped). The crash is
+pre-existing and outside this feature: `EXC_BAD_ACCESS / SIGSEGV` at
+capture 02:53:17 in `MedicationSchedulerTests.testIntakeRecordedAfterWrite`,
+faulting stack `MockEncryptedLocalStorage.read` → `Dictionary._Variant.lookup`
+inside `MockFamilyNotifier.notifyAll`, i.e. the non-thread-safe in-memory
+test double raced by the scheduler's async notification. That suite passes
+41/41 when run alone. No instruction source appears in the stack.
+
+Comparison over every executed case: all **33 documented baseline failures
+reproduced**, zero baseline failures disappeared, and **zero instruction
+suite failures** occurred. Every instruction suite reached before the crash
+passed: **207 cases, 0 failures**, including
+`InstructionFeatureIntegrationTests` 12/12,
+`AppCoordinatorInstructionTests` 26/26, `InstructionSurfaceTests` 27/27,
+`InstructionSourceHygieneTests` 11/11 and the other instruction suites. The
+`RoutineSettingsInstructionTests` and `RoutineNotificationSchedulerTests`
+classes sort after the crash point and were not reached by this run; both
+were green in their wave scoped runs.
+
+The 46 additional failures beyond the baseline's executed scope are all in
+pre-existing suites this feature does not touch and are not attributable to
+it: 20 `IntentRouterCloudChatLaneTests` and 5 `IntentPromptTests` fail on the
+already-documented prompt-mirror byte drift; 6 CloudChat consent-store cases
+fail on a contaminated consent record (the suite's `setUp` purge expects
+`notRecorded` and gets `unreadable`); 5 `InterpreterAvailabilityTests`; 4
+LiveTranslate; 2 `Dialogue*`; 2 `FamilyWizardPhotoSaveTests`; 1
+`AppCoordinatorSpotifyWiringTests`; 1 `CommandRouterCorrectionRerouteTests`.
+The feature's own files touch none of those suites. The only non-feature
+source change in the tree is the documented upstream hotfix `cc7bbcb2`
+(already on origin/master as PR #254) needed to make the starting commit
+compile at all. Because the baseline record itself is incomplete and attempt
+2 was terminated by a pre-existing test-host crash, the full-suite
+comparison is recorded as **inconclusive, not green**, per the task's own
+fallback.
+
+### Device smoke — OUTSTANDING (not simulated)
+
+Device: **Anzaan**, iPhone 14 Pro Max (`iPhone15,3`), iOS **27.0.1**;
+`xcrun devicectl list devices` reports `available (paired)`. The 14-step
+Release-build checklist (design §11.5) requires owner-driven manual actions —
+arming and firing reminders a minute ahead, recording 10 s and 4-minute
+clips, choosing a >200 MiB and a corrupt file, deleting a container file via
+devicectl, switching the device language, VoiceOver and one-handed checks,
+and a 60 fps screen recording for the NFR-RIE-008 timings. None of these can
+be executed or attested from this unattended session, and no step may be
+claimed passed from a simulator run. **All 14 steps are recorded as an
+outstanding gate with this reason; the NFR-RIE-008 tap→player (≤500 ms),
+player→first-frame (≤2 s) and failure→fallback (≤1 s) timings are likewise
+outstanding.** No step is claimed as passed.
+
+### Requirement coverage
+
+All 35 requirements in the plan matrix have a passing named test (the
+instruction suites above ran green in attempt 2) or an explicitly recorded
+device gate. NFR-RIE-008 and NFR-RIE-010 are COVERED + DEVICE, with the
+device recording outstanding as stated; NFR-RIE-009's full-suite clause is
+covered by the scoped suites and recorded inconclusive at full-suite level.

@@ -290,25 +290,133 @@ extension ReminderVisualAidScreen where Footer == EmptyView {
     }
 }
 
-/// What the app is presenting right now because a reminder fired with
-/// photos attached. `Identifiable` so it can drive a `fullScreenCover(item:)`.
+/// What the app is presenting right now because a routine reminder fired.
+/// `Identifiable` so it can drive a `fullScreenCover(item:)`.
+///
+/// [REMINDERS-INSTRUCTIONS] T-021 (design L2 §4.11): the presentation is a
+/// typed value, not a bag of fields. `.reminder` carries everything the
+/// shared fired screen renders — title, photos, the one instruction, the
+/// notification's `had_instruction` signal and the fire date. `.unavailable`
+/// is the deleted-owner notice: it deliberately carries no title and no
+/// date, so a race between arming and tapping can never claim either.
 struct FiredRoutineVisualAids: Identifiable, Equatable {
+    enum Content: Equatable {
+        /// A routine firing: title and delivery date, plus the instruction.
+        /// The time line renders only when the D6 gate holds (§4.10);
+        /// `instruction == nil && expectsInstruction == true` renders the
+        /// `instruction.removed` fallback and keeps the time.
+        case reminder(title: String,
+                      aids: [VisualAid],
+                      instruction: Instruction?,
+                      expectsInstruction: Bool,
+                      firedAt: Date)
+        /// The owner was deleted between arming and the tap (FR-RIE-019,
+        /// L1 D14, review-l1 B-2): the shared screen renders the notice
+        /// title `instruction.reminderUnavailable`, `aids: []`, an
+        /// `EmptyView` footer and a Close control. No title or time is
+        /// claimed, because none can be resolved.
+        case unavailable
+    }
+
     let entryId: UUID
-    let title: String
-    let aids: [VisualAid]
+    let content: Content
     var id: UUID { entryId }
+
+    init(entryId: UUID, content: Content) {
+        self.entryId = entryId
+        self.content = content
+    }
 }
 
 /// Host for the fired-reminder screen, mounted at the app root next to
 /// `TimerAlarmOverlay`. Transparent while nothing has fired; presents the
-/// screen the moment a routine reminder with photos is delivered in the
-/// foreground.
+/// screen the moment a routine reminder is delivered in the foreground.
+///
+/// [REMINDERS-INSTRUCTIONS] T-021 (design L2 §2.15.4, §4.10–§4.11, §10.3):
+/// the overlay switches on `FiredRoutineVisualAids.Content`. `.reminder`
+/// renders today's shared screen with the instruction card in its footer;
+/// `.unavailable` renders the same screen as a plain deleted-owner notice
+/// with Close. The card's fire-time line is gated exactly once, by the
+/// static `timeText` helper: non-nil only when an instruction is present
+/// or the notification said one was expected (N-5, D6).
+///
+/// The overlay is a view only. It holds no store, scheduler or coordinator:
+/// photos are read by `ReminderVisualAidScreen`, images by the injected
+/// `InstructionImageLoading` seam, and video playability by the host's
+/// `playbackURL` closure — resolved off the draw path in `.task(id:)`.
 struct RoutineVisualAidOverlay: View {
     @Environment(\.appAppearance) private var appearance
     let presentation: FiredRoutineVisualAids?
     let store: VisualAidStore
     let locale: Locale
     let onClose: () -> Void
+    /// The host's playback-availability seam: `(entryId, filename) -> URL?`.
+    /// Nil when the host cannot play videos; the card then shows its one
+    /// plain unavailable line, never a dead control.
+    let playbackURL: ((UUID, String) -> URL?)?
+    /// The host's playback factory: `(URL, title) -> controller`. Nil when
+    /// the host cannot play videos (the same honest fallback).
+    let makePlayback: ((URL, String?) -> InstructionPlaybackController)?
+
+    /// Playable video filenames, resolved off the draw path by `.task(id:)`.
+    @State private var playableVideos: Set<String> = []
+    /// The active playback cover, if the person tapped Play.
+    @State private var playback: PlaybackPresentation?
+
+    /// The deleted-owner notice's catalogue key. The overlay is a view, so
+    /// it resolves the copy itself; no service holds it (design §4.11).
+    static let reminderUnavailableKey = "instruction.reminderUnavailable"
+
+    init(presentation: FiredRoutineVisualAids?,
+         store: VisualAidStore,
+         locale: Locale,
+         onClose: @escaping () -> Void,
+         playbackURL: ((UUID, String) -> URL?)? = nil,
+         makePlayback: ((URL, String?) -> InstructionPlaybackController)? = nil) {
+        self.presentation = presentation
+        self.store = store
+        self.locale = locale
+        self.onClose = onClose
+        self.playbackURL = playbackURL
+        self.makePlayback = makePlayback
+    }
+
+    // MARK: - Pure seams (the surface suite pins these)
+
+    /// D6, stated once (design §4.10): the fire time renders only when an
+    /// instruction is present or the notification said one was expected.
+    /// `.unavailable` carries no `firedAt` at all, so it always answers nil.
+    static func timeText(for content: FiredRoutineVisualAids.Content,
+                         locale: Locale) -> String? {
+        guard case .reminder(_, _, let instruction, let expectsInstruction, let firedAt) = content,
+              instruction?.isPresent == true || expectsInstruction else {
+            return nil
+        }
+        return LocaleFormatters.shortTime(locale: locale).string(from: firedAt)
+    }
+
+    /// The card state for a presentation (design §4.10 table). `.unavailable`
+    /// is not a display state: it renders today's photo screen with no aids
+    /// and no card, i.e. `.none`.
+    static func cardState(for content: FiredRoutineVisualAids.Content) -> InstructionDisplayState {
+        switch content {
+        case .reminder(_, _, let instruction, let expectsInstruction, _):
+            return InstructionPresentation.state(for: instruction,
+                                                  isExpected: expectsInstruction)
+        case .unavailable:
+            return .none
+        }
+    }
+
+    /// True when the footer renders nothing at all: the photo-only
+    /// foreground firing (today's screen, byte-for-byte) and the
+    /// deleted-owner notice. `.none` is `EmptyView`, never a padded
+    /// container (P-9, NFR-RIE-010).
+    static func footerIsEmpty(for content: FiredRoutineVisualAids.Content) -> Bool {
+        cardState(for: content) == .none
+    }
+
+    // MARK: - Body
 
     var body: some View {
         Color.clear
@@ -317,15 +425,120 @@ struct RoutineVisualAidOverlay: View {
                 get: { presentation },
                 set: { newValue in if newValue == nil { onClose() } }
             )) { fired in
-                ReminderVisualAidScreen(
-                    entryId: fired.entryId,
-                    title: fired.title,
-                    aids: fired.aids,
-                    store: store,
-                    locale: locale,
-                    onClose: onClose
-                )
+                firedScreen(for: fired)
+                    // Availability is a file check: resolve it off the draw
+                    // path, keyed on the presentation, never in `body`.
+                    .task(id: fired) {
+                        resolvePlayableVideos(for: fired)
+                    }
+                    // The cover lives INSIDE the fired screen so it presents
+                    // above it; one tap creates exactly one controller.
+                    .fullScreenCover(item: $playback, onDismiss: {
+                        playback?.controller.close()
+                        playback = nil
+                    }) { item in
+                        InstructionCoverView(
+                            controller: item.controller,
+                            startsWhenPresented: true
+                        ) {
+                            item.controller.close()
+                            playback = nil
+                        }
+                    }
             }
+    }
+
+    /// One switch over the typed presentation. `.reminder` is today's shared
+    /// screen with the instruction card in the footer; `.unavailable` is the
+    /// same screen as a notice, with no title or time claimed.
+    @ViewBuilder
+    private func firedScreen(for fired: FiredRoutineVisualAids) -> some View {
+        switch fired.content {
+        case .reminder(let title, let aids, _, _, _):
+            ReminderVisualAidScreen(
+                entryId: fired.entryId,
+                title: title,
+                aids: aids,
+                store: store,
+                locale: locale,
+                onClose: onClose
+            ) {
+                instructionFooter(for: fired)
+            }
+
+        case .unavailable:
+            ReminderVisualAidScreen(
+                entryId: fired.entryId,
+                title: L10n.str(RoutineVisualAidOverlay.reminderUnavailableKey,
+                                locale: locale),
+                aids: [],
+                store: store,
+                locale: locale,
+                onClose: onClose
+            )
+        }
+    }
+
+    /// The instruction card (which owns the fire-time line above its
+    /// surface), or nothing at all. The D6 gate lives only in `timeText`, so
+    /// this composition cannot state it a second time.
+    @ViewBuilder
+    private func instructionFooter(for fired: FiredRoutineVisualAids) -> some View {
+        if RoutineVisualAidOverlay.footerIsEmpty(for: fired.content) {
+            // Photo-only or deleted owner: today's screen has no footer.
+            // `EmptyView`, never an empty container (P-9).
+            EmptyView()
+        } else {
+            InstructionCardView(
+                state: RoutineVisualAidOverlay.cardState(for: fired.content),
+                timeText: RoutineVisualAidOverlay.timeText(for: fired.content,
+                                                           locale: locale),
+                imageLoader: VisualAidInstructionImageLoader(store: store,
+                                                             entryId: fired.entryId),
+                onPlay: playbackAction(for: fired)
+            )
+        }
+    }
+
+    /// The card's Play action, offered only for a video the host's
+    /// `playbackURL` seam resolved as playable. With no seam (or no file)
+    /// the card shows its one plain unavailable line instead.
+    private func playbackAction(for fired: FiredRoutineVisualAids) -> ((String) -> Void)? {
+        guard let playbackURL, let makePlayback,
+              case .video(let filename, _) = RoutineVisualAidOverlay.cardState(for: fired.content),
+              playableVideos.contains(filename) else {
+            return nil
+        }
+        return { tappedFilename in
+            guard let url = playbackURL(fired.entryId, tappedFilename) else {
+                // The file vanished between resolution and the tap: drop the
+                // action so the card shows its one plain line, never a dead
+                // control.
+                playableVideos = []
+                return
+            }
+            playback = PlaybackPresentation(controller: makePlayback(url, nil))
+        }
+    }
+
+    /// Resolves playability off the draw path: `.task(id:)` calls this when
+    /// the presentation appears or changes. Only the one video instruction
+    /// can carry a Play control, so the set has at most one member.
+    private func resolvePlayableVideos(for fired: FiredRoutineVisualAids) {
+        guard let playbackURL,
+              case .video(let filename, _) = RoutineVisualAidOverlay.cardState(for: fired.content),
+              playbackURL(fired.entryId, filename) != nil else {
+            playableVideos = []
+            return
+        }
+        playableVideos = [filename]
+    }
+
+    /// `.fullScreenCover(item:)` needs an identity. One tap creates exactly
+    /// one controller, so the controller's own object identity is the id.
+    private struct PlaybackPresentation: Identifiable {
+        let controller: InstructionPlaybackController
+        var id: ObjectIdentifier { ObjectIdentifier(controller) }
     }
 }
 

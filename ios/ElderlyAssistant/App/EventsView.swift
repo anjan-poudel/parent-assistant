@@ -34,11 +34,18 @@ struct EventsView: View {
     /// behind.
     @State private var addingEvent = false
     @State private var editingEvent: FreeFormEvent?
+    /// [REMINDERS-INSTRUCTIONS] (T-024) One partial event save's plain line,
+    /// shown on the screen the closed form reveals (design §2.10.3). A later
+    /// successful save clears it; the row's edit path is the retry.
+    @State private var showingPartialSave = false
 
     var body: some View {
         LeafScreen(titleKey: "events.title") {
             VStack(spacing: 12) {
                 addButton
+                if showingPartialSave {
+                    partialSaveNotice
+                }
                 if events.isEmpty {
                     emptyState(key: "events.empty", appearance: appearance)
                 } else {
@@ -51,12 +58,34 @@ struct EventsView: View {
         .task(id: version) {
             events = coordinator.freeFormEvents()
         }
+        // [REMINDERS-INSTRUCTIONS] (T-024) The form ALWAYS closes on a
+        // non-nil outcome (design §2.10.2); `partial` only decides whether
+        // the one plain line is shown here. No modal, no error dialog.
         .sheet(isPresented: $addingEvent) {
-            EventFormView(event: nil) { version += 1 }
+            EventFormView(event: nil) { partial in
+                version += 1
+                showingPartialSave = partial
+            }
         }
         .sheet(item: $editingEvent) { event in
-            EventFormView(event: event) { version += 1 }
+            EventFormView(event: event) { partial in
+                version += 1
+                showingPartialSave = partial
+            }
         }
+    }
+
+    /// The one plain line a partial event save shows (design §2.10.3,
+    /// §6.1.2): no alert, no error colour, no code. The event and its photo
+    /// saved; only the instruction did not, and the existing edit row is
+    /// the retry.
+    private var partialSaveNotice: some View {
+        Text(LocalizedStringKey(EventFormView.partialSaveKey))
+            .font(.system(size: appearance.typography.captionPointSize))
+            .foregroundStyle(appearance.colors.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
     }
 
     /// The ＋ row: a full-width ≥44pt capsule rather than a bare glyph —
@@ -64,6 +93,7 @@ struct EventsView: View {
     /// the elder cannot miss.
     private var addButton: some View {
         Button {
+            showingPartialSave = false
             addingEvent = true
         } label: {
             Label("events.add", systemImage: "plus.circle.fill")
@@ -79,6 +109,7 @@ struct EventsView: View {
 
     private func eventRow(_ event: FreeFormEvent) -> some View {
         Button {
+            showingPartialSave = false
             editingEvent = event
         } label: {
             HStack(spacing: 12) {
@@ -189,10 +220,19 @@ struct EventFormView: View {
     @State private var storedPhoto: UIImage?
     @State private var removingStoredPhoto = false
 
-    /// Called after a successful save so the list re-reads.
-    private let onSaved: () -> Void
+    /// [REMINDERS-INSTRUCTIONS] (T-024) The instruction editor's session:
+    /// one capture coordinator per presentation (design L2 §2.18), created
+    /// on the tap and gone with the sheet. No system surface exists before
+    /// the person asks for one.
+    @State private var instructionEditorSession: EventInstructionEditorSession?
 
-    init(event: FreeFormEvent?, onSaved: @escaping () -> Void) {
+    /// Called after a non-nil save outcome so the host re-reads; `partial`
+    /// is true only when the event saved and its instruction did not
+    /// (design §4.8). The form itself renders no notice: it closes, and the
+    /// host's screen shows the one plain line (§2.10.2–3).
+    private let onSaved: (Bool) -> Void
+
+    init(event: FreeFormEvent?, onSaved: @escaping (Bool) -> Void) {
         self.event = event
         if let event {
             _form = State(initialValue: FreeFormEventForm(event: event))
@@ -210,6 +250,7 @@ struct EventFormView: View {
                 durationCard
                 recurrenceCard
                 photoCard
+                instructionCard
                 addressCard
                 notesCard
                 shareHintCard
@@ -219,6 +260,19 @@ struct EventFormView: View {
         .onAppear { loadStoredPhoto() }
         .onChange(of: photoPickerItem) { item in
             loadPickedPhoto(item)
+        }
+        // [REMINDERS-INSTRUCTIONS] (T-024) The shared editor, bound to a
+        // local copy: the event form's draft changes only when the editor's
+        // own Save accepts it, so Cancel/dismiss writes nothing.
+        .sheet(item: $instructionEditorSession) { session in
+            EventInstructionEditorSheet(
+                capture: session.capture,
+                initialDraft: form.instructionDraft,
+                onAccept: { edited in
+                    form.instructionDraft = edited
+                    instructionEditorSession = nil
+                },
+                onCancel: { instructionEditorSession = nil })
         }
     }
 
@@ -324,6 +378,79 @@ struct EventFormView: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
+    }
+
+    /// [REMINDERS-INSTRUCTIONS] (T-024) The event's one instruction
+    /// (design L2 §2.10.1, §4.8): a plain summary of what the event
+    /// currently carries and ONE Add/Change row that opens the shared
+    /// editor. The summary never prints a filename or path; an event
+    /// without an instruction shows no summary at all.
+    private var instructionCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            fieldLabel("instruction.title")
+            instructionSummary
+            Button {
+                openInstructionEditor()
+            } label: {
+                Text(LocalizedStringKey(
+                    EventFormView.instructionControlKey(for: form.instructionDraft)))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: DesignTokens.chipHeight)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .appSurface(role: .accent,
+                                cornerRadius: DesignTokens.bubbleCornerRadius)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(LocalizedStringKey(
+                EventFormView.instructionControlKey(for: form.instructionDraft))))
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
+    }
+
+    /// What the section says about the stored draft. `.text` is the words;
+    /// image/video show their caption or, when there is none, the plain
+    /// kind noun — never a filename. `.none` adds nothing at all.
+    @ViewBuilder
+    private var instructionSummary: some View {
+        switch EventFormView.formSummaryState(for: form.instructionDraft) {
+        case .none:
+            EmptyView()
+        case .text(let text):
+            Text(text)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .image(_, let caption):
+            instructionSummaryLine(caption ?? L10n.str(
+                InstructionEditorView.kindKey(for: .image),
+                locale: coordinator.activeLocale))
+        case .video(_, let caption):
+            instructionSummaryLine(caption ?? L10n.str(
+                InstructionEditorView.kindKey(for: .video),
+                locale: coordinator.activeLocale))
+        case .unsupported(let text):
+            if let text {
+                instructionSummaryLine(text)
+            }
+            instructionSummaryLine(L10n.str(InstructionSurfaceKeys.unsupported,
+                                            locale: coordinator.activeLocale))
+        case .removed:
+            instructionSummaryLine(L10n.str(InstructionSurfaceKeys.removed,
+                                            locale: coordinator.activeLocale))
+        }
+    }
+
+    private func instructionSummaryLine(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: appearance.typography.captionPointSize))
+            .foregroundStyle(appearance.colors.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var addressCard: some View {
@@ -522,15 +649,164 @@ struct EventFormView: View {
 
     // MARK: Saving
 
+    /// [REMINDERS-INSTRUCTIONS] (T-024) What the person's Save tap should
+    /// do with the service's typed outcome (design L2 §4.8 value table).
+    /// Pure and total so the surface suite can pin all three rows without
+    /// rendering or touching EventKit.
+    enum SaveAction: Equatable {
+        /// The event was not written: stay open with the draft, no claim.
+        case stayOpen
+        /// The event and its instruction were written: refresh and close.
+        case dismiss
+        /// The event WAS written but its instruction was not: close all the
+        /// same (§2.10.2) and let the host show ONE plain line on the screen
+        /// underneath (§2.10.3). Never a success claim for the instruction
+        /// and never an automatic re-submit.
+        case dismissReportingPartial
+    }
+
+    /// The §4.8 truth table as one total function. `nil` is the only "not
+    /// saved" answer; a non-nil outcome always closes the form — the partial
+    /// one included, because the event now exists.
+    static func saveAction(for outcome: FreeFormEventSaveOutcome?) -> SaveAction {
+        guard let outcome else { return .stayOpen }
+        return outcome.instructionSaved ? .dismiss : .dismissReportingPartial
+    }
+
+    /// The ONE plain line a partial outcome shows (§4.8 row 4). It says the
+    /// video could not be saved and asks the person to add it again; it
+    /// never claims the instruction saved and carries no error code.
+    static let partialSaveKey = "instruction.savePartial"
+
+    /// The form section's summary comes from the same IF-3 mapping every
+    /// other surface uses — the draft's original, not its uncommitted
+    /// edits. `.none` (a new event, or no instruction) adds no line.
+    static func formSummaryState(for draft: InstructionDraft) -> InstructionDisplayState {
+        InstructionPresentation.state(for: draft.original, isExpected: false)
+    }
+
+    /// Add vs Change, read from IF-1 (`original?.isPresent`), never from
+    /// pending edits: an added-but-not-yet-saved instruction is still the
+    /// add action for this form session.
+    static func instructionControlKey(for draft: InstructionDraft) -> String {
+        draft.original?.isPresent == true ? "instruction.change" : "instruction.add"
+    }
+
+    /// Opens the shared editor for ONE sheet session with its own capture
+    /// coordinator (design L2 §2.18). No system surface exists before this
+    /// tap, and the coordinator dies with the sheet.
+    private func openInstructionEditor() {
+        instructionEditorSession = EventInstructionEditorSession(
+            capture: coordinator.instructionCaptureCoordinator(draftSession: .events))
+    }
+
+    /// The event form's ONE persistence action (design L2 §4.8). The
+    /// instruction travels inside the same form and is written by the
+    /// service second; the view adds no second write, no retry and no
+    /// success claim. `nil` keeps every field so Save can be tried again;
+    /// every non-nil outcome closes the form (§2.10.2), with the partial
+    /// flag handed to the host for its one plain line.
     private func save() {
         guard form.isValid else { return }
-        guard coordinator.saveFreeFormEvent(form, editing: event?.id) != nil else {
+        let outcome = coordinator.saveFreeFormEvent(form, editing: event?.id)
+        switch EventFormView.saveAction(for: outcome) {
+        case .stayOpen:
             // Nothing was written — keep the draft so Save can be retried
             // (the appointment form's rule).
             return
+        case .dismiss:
+            onSaved(false)
+            dismiss()
+        case .dismissReportingPartial:
+            onSaved(true)
+            dismiss()
         }
-        onSaved()
-        dismiss()
+    }
+}
+
+// MARK: - Instruction editor sheet (T-024; design L2 §2.10, §4.2, §11.3)
+
+/// One instruction-editor session on the event form.
+///
+/// The coordinator is created by the Add/Change tap and owned here, so a
+/// re-render cannot build a second capture machine while the sheet is up
+/// (design §2.18). Identity is the session itself, not the event.
+private struct EventInstructionEditorSession: Identifiable {
+    let id = UUID()
+    let capture: InstructionVideoCaptureCoordinator
+}
+
+/// The event-specific half of the shared editor.
+///
+/// It owns a LOCAL draft seeded from the form's current draft. The shared
+/// `InstructionEditorView` mutates only this copy; its Save hands the copy
+/// back through `onAccept` and the sub-sheet closes. Nothing is written
+/// here — the event form's Save is the one persistence action, and §4.8
+/// requires the event to be saved before its instruction. Cancel (button
+/// or swipe) calls `onCancel` and writes nothing.
+///
+/// The only picker is the app's existing out-of-process, permission-free
+/// `VisualAidPhotoPicker` with one slot; no URL field, link playback,
+/// share sheet, transcode, trimming or Settings deep link exists here.
+private struct EventInstructionEditorSheet: View {
+    /// The ONE capture coordinator this sheet session owns.
+    let capture: InstructionVideoCaptureCoordinator
+    let onAccept: (InstructionDraft) -> Void
+    let onCancel: () -> Void
+
+    /// The editor's whole state, seeded once from the form's draft.
+    @State private var draft: InstructionDraft
+    /// The picker's pending completion (`UIImage?`; nil means cancelled).
+    /// At most one is held and it is cleared the moment it is used.
+    @State private var pendingImageCompletion: ((UIImage?) -> Void)?
+    @State private var isPickingImage = false
+
+    init(capture: InstructionVideoCaptureCoordinator,
+         initialDraft: InstructionDraft,
+         onAccept: @escaping (InstructionDraft) -> Void,
+         onCancel: @escaping () -> Void) {
+        self.capture = capture
+        self.onAccept = onAccept
+        self.onCancel = onCancel
+        _draft = State(initialValue: initialDraft)
+    }
+
+    var body: some View {
+        InstructionEditorView(
+            draft: $draft,
+            capture: capture,
+            // This sheet persists nothing, so there is no write failure to
+            // report here; a partial event save is surfaced by the form.
+            saveFailureKey: nil,
+            pickImage: pickImage,
+            onSave: { _ in onAccept(draft) },
+            onCancel: onCancel
+        )
+        // The shipping permission-free picker, presented exactly as the
+        // photo flow presents it (out of process, no permission prompt).
+        // One image only; the editor decides whether the bytes resolve the
+        // draft, and Save stays closed until they do.
+        .sheet(isPresented: $isPickingImage) {
+            VisualAidPhotoPicker(selectionLimit: 1) { picked in
+                finishPickedImage(picked)
+            }
+        }
+    }
+
+    /// Presents the shared picker and stores its one callback. The editor
+    /// calls this only for an image draft; picking bytes does not by itself
+    /// make the draft resolvable — `InstructionDraft` decides that.
+    private func pickImage(_ completion: @escaping (UIImage?) -> Void) {
+        pendingImageCompletion = completion
+        isPickingImage = true
+    }
+
+    /// The picker reports a selection with its images IN SELECTION ORDER;
+    /// one slot, so `first` is the picked photo.
+    private func finishPickedImage(_ picked: [UIImage]) {
+        let completion = pendingImageCompletion
+        pendingImageCompletion = nil
+        completion?(picked.first)
     }
 }
 
@@ -563,6 +839,21 @@ struct EventDetailView: View {
     @State private var version = 0
     @State private var editing = false
     @State private var confirmingDelete = false
+    /// [REMINDERS-INSTRUCTIONS] (T-024) The one plain line an edit's partial
+    /// outcome leaves behind (design §2.10.3): the event and photo saved,
+    /// the instruction did not. It is not a modal and not an error dialog;
+    /// Edit is the existing retry.
+    @State private var showingPartialSave = false
+
+    /// [REMINDERS-INSTRUCTIONS] (T-024) The detail card's seams, all
+    /// resolved in `load()` off the draw path: the app's existing
+    /// event-photo loader (IF-21), the store's availability answer for a
+    /// video (never a file read per body pass — design §11.3 D/F-12), and
+    /// the tap's playback controller. Empty state means the card shows no
+    /// control it cannot honour.
+    @State private var instructionImageLoader: EventPhotoInstructionImageLoader?
+    @State private var instructionVideoURL: URL?
+    @State private var instructionPlayback: EventInstructionPlayback?
 
     var body: some View {
         LeafScreen(titleKey: "events.detail.title") {
@@ -579,7 +870,8 @@ struct EventDetailView: View {
         .task(id: version) { load() }
         .sheet(isPresented: $editing) {
             if let event {
-                EventFormView(event: event) {
+                EventFormView(event: event) { partial in
+                    showingPartialSave = partial
                     version += 1
                     onChanged()
                 }
@@ -593,6 +885,20 @@ struct EventDetailView: View {
         } message: {
             Text("events.deleteConfirm")
         }
+        // [REMINDERS-INSTRUCTIONS] (T-024) Playback is tap-driven: the
+        // controller is built by `playInstructionVideo` and `start()`
+        // happens once the cover appears (design FR-RIE-018 — no autoplay).
+        // Closing pauses and releases the player; the cover's own teardown
+        // is still the backstop.
+        .fullScreenCover(item: $instructionPlayback) { playback in
+            InstructionCoverView(
+                controller: playback.controller,
+                startsWhenPresented: true,
+                onClose: {
+                    playback.controller.close()
+                    instructionPlayback = nil
+                })
+        }
     }
 
     @ViewBuilder
@@ -604,6 +910,15 @@ struct EventDetailView: View {
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
                 .accessibilityLabel(Text("events.field.photo"))
+        }
+
+        // [REMINDERS-INSTRUCTIONS] (T-024) Design §2.10.4: the instruction
+        // card sits under the photo and above the info card. `.none`
+        // renders nothing at all — no empty container (design §4.10, P-9)
+        // — so an instruction-less event's detail is exactly today's screen.
+        instructionCard(event)
+        if showingPartialSave {
+            partialSaveNotice
         }
 
         VStack(alignment: .leading, spacing: 8) {
@@ -657,8 +972,21 @@ struct EventDetailView: View {
         .buttonStyle(.plain)
     }
 
+    /// The one plain line a partial edit leaves on the detail (design
+    /// §2.10.3, §6.1.2): no alert, no error colour, no code. Edit — the
+    /// button right below — is the existing retry.
+    private var partialSaveNotice: some View {
+        Text(LocalizedStringKey(EventFormView.partialSaveKey))
+            .font(.system(size: appearance.typography.captionPointSize))
+            .foregroundStyle(appearance.colors.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+    }
+
     private var editButton: some View {
         Button {
+            showingPartialSave = false
             editing = true
         } label: {
             Text("events.edit")
@@ -696,16 +1024,103 @@ struct EventDetailView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: Loading / mutating
+    // MARK: Instruction (T-024; design §2.10, §4.10)
 
-    private func load() {
-        event = coordinator.freeFormEvent(id: eventId)
-        photo = coordinator.freeFormEventPhoto(forEventId: eventId)
+    /// The one card this screen adds. Its state is the shared IF-3 mapping,
+    /// its image seam the app's existing event-photo loader, and its play
+    /// action exists only when the coordinator's playability seam resolved
+    /// a playable video in `load()` — otherwise the card shows its plain
+    /// unavailable line and no control (no dead button, no autoplay).
+    @ViewBuilder
+    private func instructionCard(_ event: FreeFormEvent) -> some View {
+        let state = EventDetailView.detailState(for: event)
+        if state != .none {
+            InstructionCardView(
+                state: state,
+                timeText: nil,
+                imageLoader: instructionImageLoader,
+                onPlay: EventDetailView.playAction(
+                    for: state,
+                    playbackURL: instructionVideoURL,
+                    play: { url in
+                        playInstructionVideo(url: url, title: event.title)
+                    }))
+        }
     }
 
+    /// The person's Play tap is the only thing that builds a controller
+    /// (FR-RIE-018). The URL was resolved in `load()`, so no store read
+    /// happens here either.
+    private func playInstructionVideo(url: URL, title: String) {
+        instructionPlayback = EventInstructionPlayback(
+            controller: coordinator.makeInstructionPlayback(url: url, title: title))
+    }
+
+    /// The detail's display state — the same total mapping the fired
+    /// screen uses, with `isExpected: false`: an event with no instruction
+    /// has nothing to say, never a removed notice.
+    static func detailState(for event: FreeFormEvent) -> InstructionDisplayState {
+        InstructionPresentation.state(for: event.instruction, isExpected: false)
+    }
+
+    /// Resolve a video's URL through the IF-10 answer. `availability` is
+    /// injected so the rule is pure and the suite can pin all four answers
+    /// without constructing a store; production passes the coordinator's
+    /// playability seam (the view never reaches the store itself). Only
+    /// `.available` yields a URL.
+    static func playbackURL(for event: FreeFormEvent,
+                            availability: (String) -> InstructionPlaybackAvailability) -> URL? {
+        guard case .video(let filename, _) = detailState(for: event) else { return nil }
+        guard case .available(let url) = availability(filename) else { return nil }
+        return url
+    }
+
+    /// The action handed to `InstructionCardView`. Nil for every state but
+    /// a video with a resolved playable URL, so the card never composes a
+    /// play control that cannot work (design §4.10).
+    static func playAction(for state: InstructionDisplayState,
+                           playbackURL: URL?,
+                           play: @escaping (URL) -> Void) -> ((String) -> Void)? {
+        guard case .video = state, let playbackURL else { return nil }
+        return { _ in play(playbackURL) }
+    }
+
+    // MARK: Loading / mutating
+
+    /// Everything the screen draws is read here, once per `version`, never
+    /// in `body`: the event, its photo, the image loader and the video's
+    /// availability answer.
+    private func load() {
+        let loaded = coordinator.freeFormEvent(id: eventId)
+        event = loaded
+        photo = coordinator.freeFormEventPhoto(forEventId: eventId)
+        instructionImageLoader = coordinator.eventInstructionImageLoader
+        guard let loaded else {
+            instructionVideoURL = nil
+            return
+        }
+        instructionVideoURL = EventDetailView.playbackURL(
+            for: loaded,
+            availability: { filename in
+                coordinator.instructionPlaybackAvailability(
+                    filename: filename, owner: .event(loaded.id))
+            })
+    }
+
+    /// Deletion stays on the existing coordinator path: the service is the
+    /// single teardown owner (event, extras, photo, instruction media). The
+    /// view adds no second delete and no file work (design §11.3 M).
     private func deleteEvent() {
         coordinator.deleteFreeFormEvent(eventId: eventId)
         onChanged()
         onClose()
     }
+}
+
+/// One playback presentation on the event detail: the controller the Play
+/// tap built, boxed so `.fullScreenCover(item:)` can drive it. Identity is
+/// the presentation, so a second tap after closing builds a fresh one.
+private struct EventInstructionPlayback: Identifiable {
+    let id = UUID()
+    let controller: InstructionPlaybackController
 }

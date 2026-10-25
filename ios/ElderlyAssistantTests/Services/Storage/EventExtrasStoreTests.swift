@@ -156,4 +156,219 @@ final class EventExtrasStoreTests: XCTestCase {
         XCTAssertTrue(store.track(eventId: "evt-2"))
         XCTAssertEqual(store.eventIds, ["evt-1", "evt-2"])
     }
+
+    // MARK: - Instruction field (reminders/instructions, T-014)
+
+    /// A video instruction fixture — the kind the editor writes for an
+    /// instruction that carries media.
+    private func videoInstruction(filename: String = "clip.mov",
+                                  caption: String? = "After breakfast") -> Instruction {
+        Instruction(kind: InstructionKind.video.rawValue,
+                    caption: caption,
+                    filename: filename)
+    }
+
+    func testSetPhotoFilenamePreservesInstruction() {
+        XCTAssertTrue(store.setPhotoFilename("a.jpg", forEventId: "evt-1"))
+        let instruction = videoInstruction()
+        XCTAssertTrue(store.setInstruction(instruction, forEventId: "evt-1"))
+
+        // `track` re-saves the existing row, so it must preserve both
+        // fields too (design §4.5).
+        XCTAssertTrue(store.track(eventId: "evt-1"))
+        XCTAssertEqual(store.extras(forEventId: "evt-1")?.instruction, instruction)
+
+        // The gherkin's "setPhotoFilename nil is written": clearing the
+        // photo must leave the instruction exactly as it was. The shipped
+        // wholesale rebuild would have erased it here (P-4, R-11).
+        XCTAssertTrue(store.setPhotoFilename(nil, forEventId: "evt-1"))
+        XCTAssertEqual(store.extras(forEventId: "evt-1")?.instruction, instruction,
+                       "clearing the photo must not rebuild the row around one field")
+        XCTAssertNil(store.extras(forEventId: "evt-1")?.photoFilename)
+
+        // A new photo is the same in-place mutation, not a rebuild.
+        XCTAssertTrue(store.setPhotoFilename("a2.jpg", forEventId: "evt-1"))
+        XCTAssertEqual(store.extras(forEventId: "evt-1")?.instruction, instruction)
+        XCTAssertEqual(store.extras(forEventId: "evt-1")?.photoFilename, "a2.jpg")
+        XCTAssertEqual(store.count, 1, "a photo change must not duplicate the row")
+    }
+
+    func testSetInstructionPreservesPhoto() {
+        XCTAssertTrue(store.setPhotoFilename("b.jpg", forEventId: "evt-2"))
+
+        // Replace a text instruction with a new video one: the second
+        // write must leave the photo from the first path intact.
+        XCTAssertTrue(store.setInstruction(
+            Instruction(kind: InstructionKind.text.rawValue,
+                        text: "Take the blue pill"),
+            forEventId: "evt-2"))
+        let video = videoInstruction(filename: "lunch.mov", caption: "After lunch")
+        XCTAssertTrue(store.setInstruction(video, forEventId: "evt-2"))
+
+        XCTAssertEqual(store.extras(forEventId: "evt-2")?.photoFilename, "b.jpg",
+                       "an instruction write must never rebuild the row around one field")
+        XCTAssertEqual(store.extras(forEventId: "evt-2")?.instruction, video)
+        XCTAssertEqual(store.count, 1)
+    }
+
+    func testLegacyExtrasDecodesWithNilInstruction() {
+        // F-2: exactly what a pre-instruction build wrote — photo only.
+        storage.write(key: storageKey,
+                      value: ["evt-old": ["photoFilename": "a.jpg"]]
+                          as [String: [String: String]])
+
+        XCTAssertEqual(store.eventIds, ["evt-old"])
+        XCTAssertEqual(store.extras(forEventId: "evt-old")?.photoFilename, "a.jpg")
+        XCTAssertNil(store.extras(forEventId: "evt-old")?.instruction)
+
+        // F-7: a malformed nested instruction costs the instruction, not
+        // the row (design §4.6), which is exactly what `try?` buys.
+        storage.write(key: storageKey,
+                      value: ["evt-oops": ["instruction": "oops"]]
+                          as [String: [String: String]])
+        XCTAssertEqual(store.eventIds, ["evt-oops"])
+        XCTAssertNil(store.extras(forEventId: "evt-oops")?.instruction)
+
+        // F-10: an explicit null is an absent instruction, not a failure.
+        storage.write(key: storageKey,
+                      value: ["evt-null": ["instruction": nil]]
+                          as [String: [String: String?]])
+        XCTAssertEqual(store.eventIds, ["evt-null"])
+        XCTAssertNil(store.extras(forEventId: "evt-null")?.instruction)
+    }
+
+    func testExtrasRoundTripWithBothFields() {
+        let instruction = videoInstruction(filename: "round.mov",
+                                           caption: "Before the walk")
+        XCTAssertTrue(store.setPhotoFilename("round.jpg", forEventId: "evt-round"))
+        XCTAssertTrue(store.setInstruction(instruction, forEventId: "evt-round"))
+
+        // A second store over the same storage IS a relaunch: both fields
+        // travel in the one encrypted payload.
+        let reopened = EventExtrasStore(storage: storage)
+        XCTAssertEqual(reopened.extras(forEventId: "evt-round")?.photoFilename,
+                       "round.jpg")
+        XCTAssertEqual(reopened.extras(forEventId: "evt-round")?.instruction,
+                       instruction)
+        XCTAssertEqual(reopened.count, 1)
+    }
+
+    // MARK: - Strict snapshot (IF-27)
+
+    func testSnapshotReturnsEmptyWhenReadableEmpty() {
+        // The key exists and decodes to `{}`: readable, with no rows.
+        storage.write(key: storageKey, value: [String: EventExtras]())
+
+        guard let snapshot = store.snapshot() else {
+            return XCTFail("a readable empty index is an empty dictionary, not nil")
+        }
+        XCTAssertTrue(snapshot.isEmpty)
+        // The legacy accessor still collapses to empty, unchanged.
+        XCTAssertTrue(store.isEmpty)
+    }
+
+    func testSnapshotReturnsNilOnReadFailure() {
+        // No key at all: the encrypted store reports a missing key as a
+        // read failure, so the sweep must read "unknown", never "empty".
+        XCTAssertNil(store.snapshot(),
+                     "an absent key is a read failure — unknown, not an empty live set")
+
+        // A payload this build cannot decode gets the same answer.
+        storage.write(key: storageKey, value: "not an index at all")
+        XCTAssertNil(store.snapshot())
+        XCTAssertTrue(store.isEmpty,
+                      "the legacy accessor keeps its empty-on-failure convenience")
+    }
+
+    // MARK: - Bool write seam (OI-1)
+
+    func testSetInstructionReturnsFalseForMissingRow() {
+        XCTAssertTrue(store.track(eventId: "evt-1"))
+        let writesBefore = storage.writeCallCount
+
+        XCTAssertFalse(store.setInstruction(videoInstruction(),
+                                            forEventId: "evt-missing"),
+                       "no row means the event is not ours; the store cannot upsert")
+
+        XCTAssertEqual(storage.writeCallCount, writesBefore,
+                       "a missing row must write nothing")
+        XCTAssertNil(store.extras(forEventId: "evt-missing"),
+                     "no row may be created for a missing event")
+        XCTAssertEqual(store.eventIds, ["evt-1"],
+                       "an unrelated row must be untouched")
+    }
+
+    func testSetInstructionReturnsTrueOnSuccess() {
+        XCTAssertTrue(store.track(eventId: "evt-2"))
+        let instruction = videoInstruction()
+
+        XCTAssertTrue(store.setInstruction(instruction, forEventId: "evt-2"),
+                      "the Bool seam reports a landed write")
+        XCTAssertEqual(store.extras(forEventId: "evt-2")?.instruction, instruction)
+
+        // Clearing is also a successful write on an existing row.
+        XCTAssertTrue(store.setInstruction(nil, forEventId: "evt-2"))
+        XCTAssertNil(store.extras(forEventId: "evt-2")?.instruction)
+        XCTAssertEqual(store.count, 1)
+    }
+
+    // MARK: - Media ownership
+
+    func testNoInstructionMediaIsDeletedByTheStore() {
+        let deleteWatcher = DeleteWatchingEncryptedLocalStorage()
+        let watchedStore = EventExtrasStore(storage: deleteWatcher)
+
+        XCTAssertTrue(watchedStore.track(eventId: "evt-media"))
+        XCTAssertTrue(watchedStore.setPhotoFilename("keep.jpg", forEventId: "evt-media"))
+        XCTAssertTrue(watchedStore.setInstruction(videoInstruction(filename: "keep.mov"),
+                                                  forEventId: "evt-media"))
+        XCTAssertTrue(watchedStore.setInstruction(nil, forEventId: "evt-media"))
+
+        // The mutation path really ran, so the empty delete log is not
+        // vacuous: four writes landed, zero deletes occurred.
+        XCTAssertEqual(deleteWatcher.writeCount, 4)
+        XCTAssertTrue(deleteWatcher.deletedKeys.isEmpty,
+                      "the index owner deletes no key here, and media bytes belong elsewhere")
+        XCTAssertEqual(watchedStore.extras(forEventId: "evt-media")?.photoFilename,
+                       "keep.jpg",
+                       "an instruction change must not drop the photo row")
+
+        // The store has no media path at all: deleting the photo or the
+        // video needs the photo/video stores or the filesystem, and the
+        // source must reach neither (design §2.12 item 6, T-014).
+        let sourceURL = FeatureSourceScan.iosDirectory(file: #filePath)
+            .appendingPathComponent("ElderlyAssistant/Services/Storage/EventExtrasStore.swift")
+        let code = FeatureSourceScan.codeText(of: sourceURL)
+        for forbidden in ["FileManager", "removeItem", "ContactPhotoStore",
+                          "InstructionVideoStore", "EventPhotos"] {
+            XCTAssertFalse(code.contains(forbidden),
+                           "EventExtrasStore must not delete media; found \(forbidden)")
+        }
+    }
+}
+
+/// The stock encrypted-storage behaviour plus a delete/write witness.
+/// The extras store owns the index row; the photo and video stores own
+/// the bytes, so an instruction mutation has no business calling `delete`
+/// or touching the filesystem at all. `MockEncryptedLocalStorage` is
+/// `final`, so this composes one instead of subclassing it.
+private final class DeleteWatchingEncryptedLocalStorage: EncryptedLocalStorage {
+    private let base = MockEncryptedLocalStorage()
+
+    private(set) var deletedKeys: [String] = []
+    private(set) var writeCount = 0
+
+    func write<T: Encodable>(key: String, value: T) -> Result<Void, StorageError> {
+        writeCount += 1
+        return base.write(key: key, value: value)
+    }
+
+    func read<T: Decodable>(key: String, type: T.Type) -> Result<T, StorageError> {
+        base.read(key: key, type: type)
+    }
+
+    func delete(key: String) -> Result<Void, StorageError> {
+        deletedKeys.append(key)
+        return base.delete(key: key)
+    }
 }

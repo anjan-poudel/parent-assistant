@@ -19,7 +19,8 @@ final class FreeFormEventFireHandlerTests: XCTestCase {
     private func makeEvent(id: String = "native-event-1",
                            title: String = "Dr Sharma",
                            address: String? = "Tilganga, Kathmandu",
-                           photoFilename: String? = "a.jpg") -> FreeFormEvent {
+                           photoFilename: String? = "a.jpg",
+                           instruction: Instruction? = nil) -> FreeFormEvent {
         FreeFormEvent(id: id,
                       title: title,
                       startDate: Date(),
@@ -27,7 +28,8 @@ final class FreeFormEventFireHandlerTests: XCTestCase {
                       recurrence: nil,
                       notes: nil,
                       address: address,
-                      photoFilename: photoFilename)
+                      photoFilename: photoFilename,
+                      instruction: instruction)
     }
 
     /// The payload `UNExternalReminderScheduler` writes for an event
@@ -96,6 +98,56 @@ final class FreeFormEventFireHandlerTests: XCTestCase {
         await fulfillment(of: [noPresent], timeout: 0.3)
 
         XCTAssertFalse(claimed)
+    }
+
+    // MARK: - Instructions (T-016, design L2 §2.14.4)
+
+    /// The composite gate: a photo is not the only reason to show the
+    /// detail screen. An event with an instruction and no photo presents
+    /// too (FR-RIE-015) — and still declines, so the reader and the
+    /// caregiver alert behind this handler are never muted.
+    func testEventGateIncludesInstruction() async {
+        let fired = expectation(description: "detail presented for an instruction")
+        var opened: String?
+        let instruction = Instruction(kind: "text",
+                                      text: "Take the blue box with water")
+        let handler = FreeFormEventFireHandler(
+            eventLookup: { [self] id in
+                id == eventId
+                    ? makeEvent(photoFilename: nil, instruction: instruction)
+                    : nil
+            },
+            onFire: { id in opened = id; fired.fulfill() })
+
+        let claimed = handler.willPresent(
+            notification(userInfo: eventUserInfo(eventId)),
+            categoryIdentifier: NotificationCategories.eventReminder)
+
+        XCTAssertFalse(claimed, "presentation is a side effect, never a claim")
+        await fulfillment(of: [fired], timeout: 2)
+        XCTAssertEqual(opened, eventId)
+    }
+
+    /// The pre-instruction gate is preserved: a photo alone still presents
+    /// the same detail screen it always did (NFR-RIE-010).
+    func testEventGateStillIncludesPhoto() async {
+        let fired = expectation(description: "detail presented for a photo")
+        var opened: String?
+        let handler = FreeFormEventFireHandler(
+            eventLookup: { [self] id in
+                id == eventId
+                    ? makeEvent(photoFilename: "a.jpg", instruction: nil)
+                    : nil
+            },
+            onFire: { id in opened = id; fired.fulfill() })
+
+        let claimed = handler.willPresent(
+            notification(userInfo: eventUserInfo(eventId)),
+            categoryIdentifier: NotificationCategories.eventReminder)
+
+        XCTAssertFalse(claimed)
+        await fulfillment(of: [fired], timeout: 2)
+        XCTAssertEqual(opened, eventId)
     }
 
     // MARK: - Other producers' notifications

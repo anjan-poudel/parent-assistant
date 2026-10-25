@@ -1,4 +1,4 @@
-# Requirements lock — Medication Schedules and Reminders (v1)
+# Requirements lock — Reminders Instructions Enhancements (v1)
 #
 # Contract: requirements_lock (ai-sdd task define-requirements).
 # Snapshot of the feature requirements set produced from
@@ -8,405 +8,315 @@
 # in scope and to detect drift: if a requirement file's sha256 no longer
 # matches, the requirement set has changed since this lock.
 #
-# Status: HIL gate bedf72fc RESOLVED — approved from Slack by owner
-# U0C6DTHDMV0 on 2026-10-14T22:22:30Z. The T2 human gate sits at
-# final-sign-off. No owner-level decision is open (see open_decisions):
-# OD-1..OD-3 are settled in the feature constitution (2026-10-15) and are
-# carried as requirements (FR-MSR-002, FR-MSR-003, FR-MSR-015/016/017); the
-# five design-level Open Decisions (OD-4..OD-8) belong to design-l1/design-l2.
-# The DV-1..DV-7 device checklist and the release log gate are recorded at
-# final-sign-off (see traceability). Re-lock after any sign-off change; the
-# hashes below are the drift-detection baseline.
+# Source mandate: specs/reminders-instructions-enhancements/constitution.md.
+# OD-1 .. OD-8 are RESOLVED by the owner on 2026-10-25; no owner-level
+# decision is open. Design-level details (fired-screen ordering, exact event
+# instruction root name, concrete system-camera component) belong to
+# design-l1/design-l2 and are bounded by the requirements named in the index.
+# Safety delta: none — routines and free-form events stay non-safety-critical;
+# medication paths are untouched.
 #
 # Note on scope: the FR/ and NFR/ folders also still contain the previously
-# shipped features' files (call-dialer-primary-secondary FR-CDP-*/NFR-CDP-*,
-# conversational-nepali-replies FR-CNR-*/NFR-CNR-*, family-contacts-unify
-# FR-FCU-*, live-camera-translation FR-LCT-*, multi-turn-conversation
-# FR-MTC-*, profile-interview FR-PI-*, spotify-music-integration FR-SP-*);
-# they are left in place and are NOT part of this lock. This lock covers the
-# medication-schedules-reminders set only (FR-MSR-* / NFR-MSR-*).
+# shipped features' files (medication-schedules-reminders FR-MSR-*/NFR-MSR-*,
+# call-dialer-primary-secondary FR-CDP-*, conversational-nepali-replies
+# FR-CNR-*, family-contacts-unify FR-FCU-*, live-camera-translation FR-LCT-*,
+# multi-turn-conversation FR-MTC-*, profile-interview FR-PI-*,
+# spotify-music-integration FR-SP-*); they are left in place and are NOT part
+# of this lock. This lock covers the reminders-instructions-enhancements set
+# only (FR-RIE-* / NFR-RIE-*).
 
 version: "1"
 task: define-requirements
-feature: medication-schedules-reminders
+feature: reminders-instructions-enhancements
 agent: ba
 contract: requirements_lock
-locked_at: "2026-10-14T22:43:02Z"
+locked_at: "2026-10-25T06:17:29Z"
 snapshot_of: "specs/define-requirements.md"
-snapshot_sha256: 31a723dcab492b5af271ee86f114e73871d401a85b8f77df2b58d2f6f118dfc9
+snapshot_sha256: a02b9d4ee24a305ae396cf762304f1a13816f7bc1e81242e9f2adbaf0111bfb9
 index: "specs/define-requirements/index.md"
 counts:
-  functional_requirements: 22
+  functional_requirements: 25
   non_functional_requirements: 10
+  total_acceptance_scenarios: 107
 
 requirements:
-  - id: FR-MSR-001
-    title: "Slot-based entry model — quantity + time-of-day slot + before/after meal"
+  - id: FR-RIE-001
+    title: "Instruction model — one instruction of a single kind on routines and free-form events"
     kind: FR
-    area: "Entry Model"
+    area: "Instruction Model"
     priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-001-slot-based-entry-model.md
-    sha256: ca4c72902b2623f1c28eb3f46366eca41f87eb8e9ee59d07aa4b1e40d8b43fa8
+    file: specs/define-requirements/FR/FR-RIE-001-instruction-model-three-kinds.md
+    sha256: 5babc72779d810730cceb95b9f4192716c98241e83537c60ec6665bd5cf197df
     acceptance_scenarios: 3
-  - id: FR-MSR-002
-    title: "Deterministic slot-to-clock mapping — 08:00 / 13:00 / 19:00 defaults, family-configurable"
+  - id: FR-RIE-002
+    title: "Text instruction — written steps stored as text and readable at fire time"
     kind: FR
-    area: "Slot-to-Clock Mapping"
+    area: "Text Instruction"
     priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-002-deterministic-slot-to-clock-mapping.md
-    sha256: f450ec57f20186f1d1b4274ac4f10e12be804dd9980809f4570cb8ab176b1e65
+    file: specs/define-requirements/FR/FR-RIE-002-text-instruction.md
+    sha256: 5bf861b7b5e67485a08ed46b4db608fb62199e5502c2dc62ef1c06387dc1a05f
     acceptance_scenarios: 3
-  - id: FR-MSR-003
-    title: "Structured quantity — amount + unit composed into the rendered dose line"
+  - id: FR-RIE-003
+    title: "Image instruction — photo or diagram shown through the existing photo-aid path"
     kind: FR
-    area: "Quantity & Dose Line"
+    area: "Image Instruction"
     priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-003-structured-quantity-dose-line.md
-    sha256: 8187565297ab4ee31d4e74e79824df39b6f83a4acbb447ed3192c5771075d07d
-    acceptance_scenarios: 3
-  - id: FR-MSR-004
-    title: "Purpose at entry — a brief purpose description on every medication"
-    kind: FR
-    area: "Purpose"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-004-purpose-at-entry.md
-    sha256: 968a8e6c95eac49cae0143a6ce0a025f31c84b4e8ed68dacd1e9fae8ff001984
-    acceptance_scenarios: 3
-  - id: FR-MSR-005
-    title: "Scan-to-fill — additive beside manual entry, bounded extraction"
-    kind: FR
-    area: "Scan-to-Fill"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-005-scan-to-fill-additive.md
-    sha256: 9c34e3e86489da71a50f89821fd4146fa21d1b2dbf6ee50f60b2df12d709d8ab
-    acceptance_scenarios: 4
-  - id: FR-MSR-006
-    title: "OCR values require human confirmation before binding — never silent auto-apply"
-    kind: FR
-    area: "Scan-to-Fill / Safety"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-006-ocr-human-confirmation-before-binding.md
-    sha256: 09968ff8e1aeeb837841af200f48600166465cbf62400aefa38d2a91e373e1eb
-    acceptance_scenarios: 3
-  - id: FR-MSR-007
-    title: "Voice acknowledgement names the medication and slot — resolution by what was said"
-    kind: FR
-    area: "Voice Acknowledgement"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-007-voice-ack-names-medication-and-slot.md
-    sha256: 91bfae578dda41bb92b829a76c7a204f9f0c7ceaa5c158b3391f4e6e7a705bb2
-    acceptance_scenarios: 4
-  - id: FR-MSR-008
-    title: "Conservative disambiguation — \"did you mean X / X or Y\" copy rule, never the wrong medication"
-    kind: FR
-    area: "Voice Acknowledgement / Safety"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-008-conservative-disambiguation-copy-rule.md
-    sha256: 7604a2c5879c37652ff5806416a59b0de7eeeb1673b61d2986ee5fbfc5df5da6
-    acceptance_scenarios: 4
-  - id: FR-MSR-009
-    title: "Acknowledgement safety sequence preserved — challenge, then double-dose check, then record"
-    kind: FR
-    area: "Medication Safety Sequence"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-009-acknowledgement-safety-sequence.md
-    sha256: 8a597fbe73693bf9df6928ff088df9493b0dcde8166a98ede4ed1632030aba10
-    acceptance_scenarios: 4
-  - id: FR-MSR-010
-    title: "Intake recorded against the day's schedule — scheduled time and acknowledged time"
-    kind: FR
-    area: "Recording & Adherence"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-010-intake-recorded-against-schedule.md
-    sha256: 2c0e9c16c05020ff64599166b46a9b885bb83ccdad60955c05052848335772f0
-    acceptance_scenarios: 3
-  - id: FR-MSR-011
-    title: "Refusal-first denial guard preserved — a denial never falls through to an acknowledgement"
-    kind: FR
-    area: "Ack Vocabulary Guard"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-011-refusal-first-denial-guard.md
-    sha256: 350965700b983eacca050e3582ad654189e8b31faa5b4f62a7a30d361cfaaa26
-    acceptance_scenarios: 3
-  - id: FR-MSR-012
-    title: "Mic continuity around acknowledgements — no gap between acknowledgement and listening"
-    kind: FR
-    area: "Voice Pipeline / Ack Fast Lane"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-012-mic-continuity-around-acks.md
-    sha256: aba5e4db786f30cfde2e968c3a3f9ecdd74e51e13849fbe7edd78cf1169df88f
-    acceptance_scenarios: 3
-  - id: FR-MSR-013
-    title: "Photo of the medication as intake evidence — augments, never replaces, never creates a record"
-    kind: FR
-    area: "Photo Evidence / Safety"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-013-photo-evidence-augments-never-replaces.md
-    sha256: f15708b66b5422113d095892c74b604c1dfc4679a2f1298d2cebaa891aa55fa4
-    acceptance_scenarios: 3
-  - id: FR-MSR-014
-    title: "Photo evidence resolves the shared slot deterministically — never the wrong medication"
-    kind: FR
-    area: "Photo Evidence"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-014-photo-evidence-shared-slot-resolution.md
-    sha256: b551ff9c30d1e20ee476579f0ffdb5490a96305b3ce34216e27250a2cf9ef8bb
-    acceptance_scenarios: 3
-  - id: FR-MSR-015
-    title: "Significant-event notification set — missed dose, double-dose, intake recorded, escalation started"
-    kind: FR
-    area: "Caregiver Notification"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-015-significant-event-notification-set.md
-    sha256: aa8caa20858dd40f4e0c18530b53408f3ce6c0c2310142041a6b9b9dda5c671f
-    acceptance_scenarios: 4
-  - id: FR-MSR-016
-    title: "Caregiver notification channels and honest per-contact delivery"
-    kind: FR
-    area: "Caregiver Notification / Delivery Honesty"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-016-caregiver-channels-honest-delivery.md
-    sha256: ad777e0e88083c31698591c4fbaf1532b08d26514b934b2f4715ec67d9584fb9
-    acceptance_scenarios: 3
-  - id: FR-MSR-017
-    title: "PII-free wire — significant events extend the existing taxonomy with no new PII"
-    kind: FR
-    area: "Wire Discipline / Safety"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-017-pii-free-wire.md
-    sha256: dc03ab2bcf6fe3520b10e3cff6e757d5265910bf32a20ea2a9016d484641c86d
-    acceptance_scenarios: 3
-  - id: FR-MSR-018
-    title: "Honest degradation — deferred capabilities surfaced as themselves, never a false success"
-    kind: FR
-    area: "Honesty / Delivery Integrity"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-018-honest-degradation-deferred-capabilities.md
-    sha256: c4cf5d4f5e7a0e8467fa7e4ca5a6786d72722047af25042e8c2c951dfbb05ab6
-    acceptance_scenarios: 4
-  - id: FR-MSR-019
-    title: "Existing reminder and escalation semantics preserved — no weakening of medication safety invariants"
-    kind: FR
-    area: "Preserved Machinery"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-019-existing-reminder-escalation-preserved.md
-    sha256: 0a76ec69bdc819127d9a22313e793f9e9194f2b400f49d747d28afe93c074c5f
-    acceptance_scenarios: 3
-  - id: FR-MSR-020
-    title: "Dementia machinery preserved and integrated — never rebuilt, never removed"
-    kind: FR
-    area: "Preserved Machinery"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-020-dementia-machinery-preserved.md
-    sha256: ab652f22d834788697bac231d925e313bae91f503641f069b820878e941a9a7f
-    acceptance_scenarios: 3
-  - id: FR-MSR-021
-    title: "Elderly-fit UX of the new flows — voice-first completion, plain language, vocabulary limit"
-    kind: FR
-    area: "Elderly-Fit UX"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-021-elderly-fit-ux-new-flows.md
-    sha256: 6e6e0f243cfd9d840e10e3acfde84f189943651a362e1ce7795577fa6627c249
-    acceptance_scenarios: 4
-  - id: FR-MSR-022
-    title: "Persistence before alarm and process-kill re-arm — the FR-029 invariant holds on the revamped paths"
-    kind: FR
-    area: "Persistence & Recovery"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-MSR-022-persistence-before-alarm-and-rearm.md
-    sha256: 6c593ee4da993921214d74eff97188fc4cd1f24c9e15056ab31fb385adb5cc9a
-    acceptance_scenarios: 4
-  - id: NFR-MSR-001
-    title: "LLM independence — the medication scheduler unit stays free of LLM dependencies"
-    kind: NFR
-    area: "Reliability"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-MSR-001-llm-independence.md
-    sha256: 5a3798ff029e6333549d0394f38adefc2fc5b894b9e38857f13e474f4487160e
+    file: specs/define-requirements/FR/FR-RIE-003-image-instruction.md
+    sha256: 802a69b193eee19154c995d4ff7a7810297b0d28c758a9e7525b6976512fa4b5
     acceptance_scenarios: 2
-  - id: NFR-MSR-002
-    title: "PII-free observability — hash-only medication identifiers, sanitised logs, gate-covered paths"
-    kind: NFR
-    area: "Privacy / Security"
+  - id: FR-RIE-004
+    title: "Pick an existing video from the library — first-class, permission-free source"
+    kind: FR
+    area: "Video Capture"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-MSR-002-pii-free-observability.md
-    sha256: 3fa2c7bb3d281e2cffdc5d0f3b785f16906f73d6345ea6e0754d3228f9c0634b
+    file: specs/define-requirements/FR/FR-RIE-004-library-video-pick.md
+    sha256: df93e7651c75b55f11bed4cecfbda486d24f5ba41aafc23be81441e1b0a9d56f
     acceptance_scenarios: 2
-  - id: NFR-MSR-003
-    title: "On-device label and photo processing — no new cloud egress for medication content"
-    kind: NFR
-    area: "Privacy"
+  - id: FR-RIE-005
+    title: "Record a video in the app — system camera UI, ships in v1"
+    kind: FR
+    area: "Video Capture"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-MSR-003-on-device-no-new-egress.md
-    sha256: d7149af139e0912ff37199e64f0016720f0442ea88989369e2835d1c7d4b6232
+    file: specs/define-requirements/FR/FR-RIE-005-in-app-video-recording.md
+    sha256: 2350ac537077799ecc8b17c63f3dcde18ef5d5da3322da819c608622aabb68fd
     acceptance_scenarios: 2
-  - id: NFR-MSR-004
-    title: "Localisation and spoken times — every new string in Nepali and English, all spoken times through the formatter"
-    kind: NFR
-    area: "Localisation"
+  - id: FR-RIE-006
+    title: "Video acceptance limits — 3 minutes, ~200 MB, as provided, unsupported codecs rejected at pick time"
+    kind: FR
+    area: "Video Constraints"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-MSR-004-localisation-and-spoken-time.md
-    sha256: 88c4efc3fb15f9c598c75abdb0da8b9b9b18e5530d320af66aac283aa2a8d952
+    file: specs/define-requirements/FR/FR-RIE-006-video-acceptance-limits.md
+    sha256: f8e3af504b2c79c0ede95217e869d80391ba4399546993560176fe9e8beb5482
+    acceptance_scenarios: 4
+  - id: FR-RIE-007
+    title: "Optional caption for image and video — shown with the instruction, blank reserves no space"
+    kind: FR
+    area: "Captions"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-007-optional-caption.md
+    sha256: 6d3e8ace861ea769acf6b35f299e8494710825b15611bde19de861129f0bf461
     acceptance_scenarios: 3
-  - id: NFR-MSR-005
-    title: "Accessibility — 44pt targets, 18pt body text, contrast, voice-first acknowledgement"
+  - id: FR-RIE-008
+    title: "One instruction belongs to the entry — every firing, edits apply without re-creation"
+    kind: FR
+    area: "Instruction Lifetime"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-008-instruction-lifetime-and-edits.md
+    sha256: 6332eb294909b4426e43e59e18d0a7fd86b8d2e69d7af9fb6eee1f08b5905d71
+    acceptance_scenarios: 3
+  - id: FR-RIE-009
+    title: "Instruction management stays in the existing caregiver surfaces — no standalone media screen"
+    kind: FR
+    area: "Caregiver Editing"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-009-existing-caregiver-edit-surfaces.md
+    sha256: f0584cb9fd6eb7c37724552b778ffb6e7a95a7b15a00ef90880eb8470438fb54
+    acceptance_scenarios: 2
+  - id: FR-RIE-010
+    title: "Plain visible feedback — choose, record, save, replace, remove; cancellation and failure never silent"
+    kind: FR
+    area: "Caregiver Editing"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-010-plain-feedback-and-safe-failure.md
+    sha256: b3a7d4ccb84c97e7d9eab8cc78a4b7aa25b231a3c404dd0b9d3d79e5dfc4ab14
+    acceptance_scenarios: 4
+  - id: FR-RIE-011
+    title: "Video store — dedicated Application Support roots, bare filenames, complete file protection"
+    kind: FR
+    area: "Storage"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-011-video-storage-layout-and-protection.md
+    sha256: e593526735ab6e9abb277089f5895c39b658ef80bdf1779f073835572ac3074f
+    acceptance_scenarios: 3
+  - id: FR-RIE-012
+    title: "Filename hygiene — plain names only; a hand-edited payload cannot escape the store root"
+    kind: FR
+    area: "Storage Hardening"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-012-filename-hygiene-traversal-guard.md
+    sha256: 80ae0ce4e3f19dea6ec042113341e12917829b27e6a24d8212f22f10b0ea83b9
+    acceptance_scenarios: 3
+  - id: FR-RIE-013
+    title: "Transactional replace — write the new video before the index points at it"
+    kind: FR
+    area: "Storage Lifecycle"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-013-transactional-replace.md
+    sha256: 6767e66415f7a8fe86a30cae174ac84ab92c6c8a2398d1a25488eac501004173
+    acceptance_scenarios: 3
+  - id: FR-RIE-014
+    title: "Delete with the owner — routine deletion, event deletion and reconcile leave no orphan video"
+    kind: FR
+    area: "Storage Lifecycle"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-014-delete-with-owner.md
+    sha256: 195227c6edda94346c43f2353628cae26d83f2a67061e1efeffd5b9b78ac1411
+    acceptance_scenarios: 4
+  - id: FR-RIE-015
+    title: "The reminder always fires — instruction media never blocks, delays or mutes it"
+    kind: FR
+    area: "Fire-Time Reliability"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-015-reminder-always-fires.md
+    sha256: 3ef8f5d05ee84ce34f5617fcdfa7aa2b6c8ab63e4ee352b2bdcceb9c5e7cdf56
+    acceptance_scenarios: 4
+  - id: FR-RIE-016
+    title: "Presentation handlers always return false — notification outcomes unchanged"
+    kind: FR
+    area: "Notification Discipline"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-016-presentation-handlers-always-false.md
+    sha256: 468df0f20d2ebdb4fea89943075dae3d8bb8f020ebc04187f1115fdcdacc3898
+    acceptance_scenarios: 3
+  - id: FR-RIE-017
+    title: "Fired screen composition — reminder content plus instruction content per kind"
+    kind: FR
+    area: "Fire-Time Presentation"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-017-fire-time-composition.md
+    sha256: 9c707ec939343ada073311b8f22295e886b13b0f939a4d8641d32cdeb045c740
+    acceptance_scenarios: 4
+  - id: FR-RIE-018
+    title: "Playback UX — explicit large Play opens full-screen AVKit; no sound before a user action"
+    kind: FR
+    area: "Playback UX"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-018-playback-ux-no-autoplay.md
+    sha256: bea5357d91bb055f82123bbedcf256b695cd277f331bf41497eb679c553c7013
+    acceptance_scenarios: 4
+  - id: FR-RIE-019
+    title: "Tap/Open path in v1 — reach the instruction after unlock; no background video claim"
+    kind: FR
+    area: "Fire-Time Access"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-019-tap-open-path-foreground-honest.md
+    sha256: 56b9f71b879481b9cc61a5a81bee829a4597afa2ee7ceedd7e4ea192190faa81
+    acceptance_scenarios: 4
+  - id: FR-RIE-020
+    title: "Playback failure — plain localized message, reminder stays, always dismissible, PII-free log"
+    kind: FR
+    area: "Failure Handling"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-020-playback-failure-plain-fallback.md
+    sha256: 7d4ac734d1b12a8097b83faca0f96ffc79370d3e78aa9bcaa3f692e9eaa7b6d2
+    acceptance_scenarios: 4
+  - id: FR-RIE-021
+    title: "Notification taxonomy preserved — full-REPLACE builder, scoped cancels only"
+    kind: FR
+    area: "Notification Discipline"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-021-notification-taxonomy-preserved.md
+    sha256: 9d55569263b51bb223b56951f122114bd3fe128401d286eed5749fa9809e8d32
+    acceptance_scenarios: 3
+  - id: FR-RIE-022
+    title: "Instruction video never enters the notification attachment store"
+    kind: FR
+    area: "Notification Discipline"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-022-video-not-in-notification-attachments.md
+    sha256: f10cb21ce5608ac2bb8b6c68a55661c4c9b1c60b7229d6ca8c744fd4ab6ed799
+    acceptance_scenarios: 3
+  - id: FR-RIE-023
+    title: "No new acknowledgement, escalation, re-fire or missed-event machinery"
+    kind: FR
+    area: "Preserved Behaviour"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-023-no-new-ack-escalation-machinery.md
+    sha256: 5723e52895fe5f05e41617c18780a09e89035eb015731ca66ae8bf8a60ae60e5
+    acceptance_scenarios: 3
+  - id: FR-RIE-024
+    title: "Honest capability surface — YouTube link not shipped, no fake control, room left for a later link kind"
+    kind: FR
+    area: "Honesty / Capability Surface"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-024-honest-capability-surface.md
+    sha256: 13dc61e9b78bdbc99c068f3c4f89a0c4af13b44496c5b36958df6e6219ee66f3
+    acceptance_scenarios: 3
+  - id: FR-RIE-025
+    title: "Camera and microphone at point of use — plain disclosure, denial non-blocking"
+    kind: FR
+    area: "Capture Permissions"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-RIE-025-camera-microphone-permissions.md
+    sha256: dddf25ad44649940fd6acd016bb75689c7003cff3f93bce2b839f75c949278ab
+    acceptance_scenarios: 4
+  - id: NFR-RIE-001
+    title: "Accessibility — 44pt targets, 18pt body, VoiceOver, dynamic type, no fine-motor or swipe-only controls"
     kind: NFR
     area: "Accessibility"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-MSR-005-accessibility-elderly-fit.md
-    sha256: 16fa4fe964733fc925e0f5aaa98a61bb494866307c07b7b1d1a6ca127953980f
+    file: specs/define-requirements/NFR/NFR-RIE-001-accessibility-elderly-fit.md
+    sha256: 5d9a3c2eeb0516f8e3a54e19650ce054d963d7fd41895f68c3c9eadf54dd69d0
     acceptance_scenarios: 3
-  - id: NFR-MSR-006
-    title: "Migration compatibility — legacy payloads keep loading, schedules are never lost to a missing key"
+  - id: NFR-RIE-002
+    title: "Localisation — every new string in English and Nepali; no hardcoded user-visible text"
+    kind: NFR
+    area: "Localisation"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-RIE-002-localisation-en-ne.md
+    sha256: 20cfbb48982a570862c885c7610e83b5ce5b5eb3e63ecf69127e2ae06025e044
+    acceptance_scenarios: 2
+  - id: NFR-RIE-003
+    title: "No new network egress — instruction media never leaves the device"
+    kind: NFR
+    area: "Privacy"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-RIE-003-no-new-egress.md
+    sha256: d0fa6ad972eb7e351065c703665b3f9b841c5dee1db7d022e9b992d1aed052ea
+    acceptance_scenarios: 2
+  - id: NFR-RIE-004
+    title: "PII-free observability — event type + outcome only; release log gate green"
+    kind: NFR
+    area: "Privacy / Security"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-RIE-004-pii-free-logging-and-release-gate.md
+    sha256: 111a3cf89fa8dec51ac33e8e92f733badca6cca45b2f44a40dc6e1035081f738
+    acceptance_scenarios: 2
+  - id: NFR-RIE-005
+    title: "At-rest protection — complete file protection on every instruction video; no Photos/share exposure"
+    kind: NFR
+    area: "Security"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-RIE-005-at-rest-file-protection.md
+    sha256: 1984e5245339906fb5aa0811b9f5d30b32fdd9ebbeee6e1ab9f840bd44e9f56f
+    acceptance_scenarios: 3
+  - id: NFR-RIE-006
+    title: "Migration compatibility — pre-feature payloads load; unknown kinds degrade honestly"
     kind: NFR
     area: "Reliability / Compatibility"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-MSR-006-migration-compatibility.md
-    sha256: a3bf8a705f7b5ca5f9c85d9c84e93ca6420f5f845857d61fe245bf97d19381a2
+    file: specs/define-requirements/NFR/NFR-RIE-006-migration-compatibility.md
+    sha256: 1cc00f14b8511aaa607cb69778f653b0f113c9a457ae11fb30c8a6aa4b675ccc
     acceptance_scenarios: 3
-  - id: NFR-MSR-007
-    title: "Devanagari grapheme-cluster behaviour regression-pinned — do not \"fix\" it"
+  - id: NFR-RIE-007
+    title: "Storage footprint — one video per owner, ≤200 MiB, zero orphans after replace/delete"
     kind: NFR
-    area: "Localisation / Regression"
+    area: "Storage / Reliability"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-MSR-007-devanagari-grapheme-regression-pin.md
-    sha256: cae986d3cfc99cb218c596e44d0ac66cfe4619ed0bfe5c4873f1c3dd0a8a54ed
+    file: specs/define-requirements/NFR/NFR-RIE-007-storage-footprint-and-orphans.md
+    sha256: 9ac405338655e6bd2a3d1ef8397626bc56048df66831686b91529b80d8bd7e2d
+    acceptance_scenarios: 3
+  - id: NFR-RIE-008
+    title: "Playback responsiveness — player within 500 ms, first frame within 2 s, fallback within 1 s"
+    kind: NFR
+    area: "Performance"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-RIE-008-playback-responsiveness.md
+    sha256: 98144b0b07aad06c22078d68d3b9d2d5f32905f7755f8d46e45d593169a5193e
     acceptance_scenarios: 2
-  - id: NFR-MSR-008
-    title: "Safety-path test rigor — 100 per cent unit coverage, required integration tests, elevated confidence"
+  - id: NFR-RIE-009
+    title: "Testability and gate — injectable playback seam, scripted failure paths, one device smoke"
     kind: NFR
-    area: "Quality / Compliance"
+    area: "Quality / Reliability"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-MSR-008-safety-test-coverage-and-confidence.md
-    sha256: 6e7d04b9be2c0155a3894d8b613e7ff75d2dc57b61ce09314fc8b41a0f26e75e
+    file: specs/define-requirements/NFR/NFR-RIE-009-playback-seam-and-test-gates.md
+    sha256: 164322603a371a2c6a76731b7b5b2f8e921b9114819b33c57ff8dff38d4ac890
     acceptance_scenarios: 3
-  - id: NFR-MSR-009
-    title: "Compliance and release gates — log-safety gate green, health-policy posture unchanged, honest baseline"
+  - id: NFR-RIE-010
+    title: "Preserved baseline and release gates — medication paths, notification outcomes and no-instruction UI unchanged"
     kind: NFR
-    area: "Compliance"
+    area: "Compliance / Reliability"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-MSR-009-compliance-and-release-gates.md
-    sha256: ee3a6d0844b508e9c170105a464021cfaab5ffd7c118ac7b7b9ff7e099075242
-    acceptance_scenarios: 3
-  - id: NFR-MSR-010
-    title: "Reminder firing latency — the mapped clock time is the schedule of record"
-    kind: NFR
-    area: "Reliability / Performance"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-MSR-010-reminder-firing-latency.md
-    sha256: e05553eeec6e5c034422318d29ca5e1ba5e425eea3f4d41126bcf7d37d57253d
-    acceptance_scenarios: 3
-
-assumptions:
-  - id: A1
-    statement: "The integration surfaces exist as named in the feature constitution (the source mandate); the cited anchors were verified against master 261aa862 at requirements time (2026-10-15) for the entry model, scheduler, detector, OCR/editor, notifier and calendar surfaces listed in the constitution's Integration Surfaces table. Line numbers are orientation, not contracts. No capability claim in this set goes beyond those verified statements or the read-only source documents (root requirements.md; requirements-dementia-supplement.md; docs/medication-scheduler-implementation-plan.md)."
-  - id: A2
-    statement: "Numeric thresholds are inherited, not invented: the 30-second firing envelope is root NFR-005; the 44pt/18pt/contrast figures are the root elder-fit standards and the feature house rule; the photo-evidence size-cap and retention figures belong to the FR-D04b discipline referenced by FR-MSR-013. No new numeric target was fabricated."
-  - id: A3
-    statement: "Design-level choices are deliberately left open and are NOT requirements: OD-4 (scan confirm-step and partial-fill details), OD-5 (legacy rendering and any backfill), OD-6 (ack-with-slot resolution mechanics and interaction order), OD-7 (calendar-channel mechanism), OD-8 (photo-evidence mechanism and recipient). Each is bounded by the requirement(s) named in open_decisions and belongs to design-l1/design-l2."
-  - id: A4
-    statement: "The PhotoVerifier unwired state and the stub push transport are treated as verified facts; the set encodes honesty obligations around them (FR-MSR-013/016/018) rather than assuming delivery."
-  - id: A5
-    statement: "The project's known pre-existing full-bundle test failures remain the recorded baseline; the feature's own and touched suites are the honest gate (NFR-MSR-008/009)."
-  - id: A6
-    statement: "HIL: gate bedf72fc approved from Slack by owner U0C6DTHDMV0 on 2026-10-14T22:22:30Z; the T2 human gate sits at final-sign-off. Any sign-off change requires a re-lock."
-
-constraints:
-  - id: C1
-    statement: "Preserved invariants (a change here is a non-goal): the reminder and escalation semantics of root FR-026-FR-028, the LLM independence of the medication scheduler unit, persistence-before-alarm, process-kill re-arm (root FR-029), the refusal-first denial guard, and the FR-D01/FR-D02/FR-D03 sequence order. No weakening is permitted."
-    source: "feature constitution Out of scope and Safety & Compliance Delta; project constitution; requirements.md FR-026-FR-029"
-  - id: C2
-    statement: "The dementia machinery (confirmation challenge, double-dose detection, photo-verification components) is integrated and extended, never rebuilt or removed; decisions touching the FR-D01/FR-D03/FR-D04a-b machinery run under the elevated 0.90 confidence threshold."
-    source: "feature constitution Out of scope; requirements-dementia-supplement.md 4.4"
-  - id: C3
-    statement: "OCR values are candidates only: nothing writes a schedule store on scan; the family's explicit review-and-save is the bind; every scan entry point routes through the same confirmation gate (safety delta (a))."
-    source: "feature constitution Safety & Compliance Delta (a); Intake/Scan contracts"
-  - id: C4
-    statement: "The slot-to-clock mapping is deterministic and total; no reminder is armed without a determinate hour/minute; one resolved scheduled time drives the acknowledgement deadline, re-fire schedule, escalation deadline and missed-dose verdict (safety delta (b))."
-    source: "feature constitution Entry Model & Slot-to-Clock Mapping contract; Open Decision 1 (resolved)"
-  - id: C5
-    statement: "Photo evidence augments and never replaces the acknowledgement plus confirmation chain; a photo never creates a record; recording happens only through the acknowledgement path (safety delta (c))."
-    source: "feature constitution Safety & Compliance Delta (c); Photo-as-Evidence contract"
-  - id: C6
-    statement: "The caregiver wire stays PII-free: the versioned envelope carries alert type and timestamp, with the hashed entry identifier where correlation is needed; no names, doses or household content; the title-on-wire question stays an explicit owner-level decision, never smuggled in (safety delta (d))."
-    source: "feature constitution Safety & Compliance Delta (d); Open Decision 3 (resolved)"
-  - id: C7
-    statement: "Label scanning and medication-photo processing stay on-device; no new cloud egress for medication content; the recorded cloud exceptions (voice transcription; OCR'd-text translation) do not apply to this feature."
-    source: "feature constitution Feature Constraints (no new cloud egress); project constitution"
-  - id: C8
-    statement: "Honest degradation: no silent stubs; the unwired photo-verification machinery is surfaced as itself; an undelivered notification is never presented as success; a failed persistence write surfaces and blocks its dependent step."
-    source: "docs/medication-scheduler-implementation-plan.md safety invariants 4-5; feature constitution Feature Constraint 9; project constitution Agent Principles"
-  - id: C9
-    statement: "Correction and disambiguation copy follows the owner rule: \"did you mean X / X or Y\" ONLY — no leading questions, no numbered lists, ever."
-    source: "owner rule (correction copy); feature constitution voice-ack contract; FR-MSR-008"
-  - id: C10
-    statement: "Voice pipeline discipline: the refusal-first denial guard is preserved everywhere; acknowledgements play through the ack fast lane so the microphone never closes and listening resumes with no gap."
-    source: "feature constitution Integration Surfaces (CommandRouter, AckFastLane [ACK-MIC-CONTINUITY]); FR-MSR-011/012"
-  - id: C11
-    statement: "Elderly-fit measures: 44pt minimum targets, 18pt body text with system scaling, WCAG AA contrast, voice-first completion; all new strings exist in Nepali and English; all spoken times go through the mandated spoken-time formatter; the Devanagari substring/grapheme-cluster behaviour is regression-pinned and not 'fixed'."
-    source: "root NFR-020-NFR-022; project house rules; feature constitution Feature Constraints 7-8"
-  - id: C12
-    statement: "Release gate: ios/tools/check-release-log-safety.sh must exit 0 covering the feature's new paths; the scoped medication and notifier suites are the honest gate, with the pre-existing full-bundle baseline recorded rather than silently included or excluded."
-    source: "project constitution Release gates; feature constitution Success Criteria and Test Rigor"
-  - id: C13
-    statement: "Delivery (house rule, inherited): work ONLY in the sibling worktree elderly-ai-assistant-medication-schedules-reminders (branch feat/medication-schedules-reminders); integrate via PR against master; never the main checkout."
-    source: "project CLAUDE.md working rules; feature workflow"
-
-open_decisions:  # no owner-level decision open; OD-1..OD-3 are RESOLVED in the feature constitution (2026-10-15) and carried as requirements (FR-MSR-002, FR-MSR-003, FR-MSR-015/016/017); OD-4..OD-8 are design-level and belong to design-l1/design-l2
-  - id: OD-4
-    statement: "Scan-to-fill: extraction surface, confirm step, partial-fill behaviour. Confirm nothing auto-binds, strength→doseDescription stays, the parser's conservative partial-fill rules remain binding, and purpose stays manual/lookup. Bounded by FR-MSR-005 (additive, non-destructive, refuses to guess) and FR-MSR-006 (human confirmation before binding is fixed). Owner of the decision: design-l1/design-l2."
-  - id: OD-5
-    statement: "Legacy entries in the new model: how pre-revamp entries (raw scheduleTimes, e.g. 08:00 / 20:00, no slot/meal fields) render in the slot-based UI; whether any backfill (times→slot inference) is allowed at migration; whether .weekly/.custom frequency entries are representable. Recorded safe default to confirm: legacy scheduleTimes readable and representable, entries keep working exactly as today until the family edits them, no automatic slot inference. Bounded by NFR-MSR-006. Owner: design-l1/design-l2."
-  - id: OD-6
-    statement: "Voice ack with slot: resolution and interaction order — how the named-slot utterance resolves when multiple reminders are pending, that the FR-D01 challenge and FR-D03 double-dose sequence keeps its exact order for the new shapes, and the honest behaviour when the named medication does not match or is ambiguous (sanctioned clarification, never a guess; no path records without the challenge). Bounded by FR-MSR-007/008/009/011. Owner: design-l1/design-l2."
-  - id: OD-7
-    statement: "Caregiver calendar-events channel: (a) the existing consent-gated schedule mirror with caregivers following that calendar, (b) significant events written as calendar entries, or (c) another shape — and which events surface there. Bounded by FR-MSR-016 (consent gate, honest results) and FR-MSR-017 (no new PII on any channel). Owner: design-l1/design-l2."
-  - id: OD-8
-    statement: "Photo-as-evidence: mechanism and recipient — reuse the existing (unwired) PhotoVerifier E2E path once wired, an on-device-only variant, or an extension of the per-medication/per-time-of-day dementia mechanism; what the photo proves (identifying the medication at a shared slot vs the existing FR-D04a empty-hand presence check) and who judges it. Bounded by FR-MSR-013 (augments never replaces; never assumes the unwired machinery works; on-device; delivery discipline if it leaves the device), FR-MSR-014 (deterministic, conservative resolution) and FR-MSR-020 (removal of the dementia mechanism forbidden). Owner: design-l1/design-l2."
-
-out_of_scope:
-  - "Emergency-call and health-monitoring modules — untouched by this feature (FR-MSR-020)"
-  - "Android — deferred to v2; not reopened"
-  - "No weakening of any existing medication safety invariant — reminder/escalation semantics, LLM independence, persistence-before-alarm, process-kill re-arm (FR-MSR-019/022, NFR-MSR-001)"
-  - "No removal of the existing dementia machinery — challenge, double-dose detection, photo-verification components are integrated and extended only (FR-MSR-020)"
-  - "No new cloud egress for medication content — label/photo processing stays on-device (NFR-MSR-003)"
-  - "No new PII on the caregiver wire — the title/name-on-wire question stays an explicit owner-level decision (FR-MSR-017)"
-  - "The end-to-end push transport (inherited tracked work, docs/family-notifier-e2e-implementation-plan.md) — the feature's scope is the trigger paths, the calendar channel and honest reporting (FR-MSR-016)"
-  - "Devanagari substring/grapheme-cluster behaviour — regression-pinned; not 'fixed' (NFR-MSR-007)"
-  - "Partial-vs-full dose detection — out of scope; the double-dose detector's semantics are unchanged (FR-MSR-003)"
-
-security_surfaces:
-  - surface: "Scan-to-fill writes into a safety-critical schedule — OCR values require human confirmation before binding; an OCR misread must cost a correction, never a dose"
-    requirements: ["FR-MSR-005", "FR-MSR-006"]
-  - surface: "Slot-to-clock mapping feeding the escalation engine — deterministic and total; no armed reminder without a determinate time; one resolved scheduled time drives every derived instant"
-    requirements: ["FR-MSR-002", "FR-MSR-019", "NFR-MSR-010"]
-  - surface: "Photo-as-evidence — augments never replaces; a photo never creates a record; on-device processing; the unwired machinery surfaced honestly"
-    requirements: ["FR-MSR-013", "FR-MSR-014", "FR-MSR-018", "NFR-MSR-003"]
-  - surface: "Caregiver wire — PII-free taxonomy; hashed entry identifier only; no names, doses or household content; title-on-wire stays owner-level"
-    requirements: ["FR-MSR-015", "FR-MSR-016", "FR-MSR-017"]
-  - surface: "Persistence and process-kill — persistence before alarm; acknowledgement durable immediately on confirmation; re-arm within the unexpired window"
-    requirements: ["FR-MSR-022", "NFR-MSR-008"]
-  - surface: "Dementia safety machinery — challenge, double-dose detector and photo components preserved; refusal-first denial guard; no bypass of the acknowledgement sequence; elevated 0.90 on touched machinery"
-    requirements: ["FR-MSR-009", "FR-MSR-011", "FR-MSR-020", "NFR-MSR-008"]
-  - surface: "Voice pipeline integrity — mic continuity around acknowledgements; conservative disambiguation never records the wrong medication; sanctioned clarification copy only"
-    requirements: ["FR-MSR-007", "FR-MSR-008", "FR-MSR-012"]
-  - surface: "Observability — hash-only medication identifiers; sanitiser applied; release log gate covering the new paths"
-    requirements: ["NFR-MSR-002", "NFR-MSR-009"]
-
-traceability:
-  - gate: "define-requirements"
-    checks: "This artifact. HIL gate bedf72fc approved from Slack by owner U0C6DTHDMV0 on 2026-10-14T22:22:30Z; this lock is the downstream drift-detection baseline."
-  - gate: "design-l1"
-    checks: "Resolve OD-4..OD-8 inside this set's contracts: the entry model and slot-to-clock mapping with the determinism/totality property and the family-configurable control (FR-MSR-001/002); the quantity representation and dose-line composition (FR-MSR-003); scan-to-fill confirm step and partial-fill rules (FR-MSR-005/006); the ack-with-slot resolution mechanics with the by-what-was-said discipline (FR-MSR-007/008/011/012); the photo-evidence mechanism decision (FR-MSR-013/014, OD-8); the notification seams and honesty boundaries (FR-MSR-015/016/017/018); migration and legacy rendering (NFR-MSR-006, OD-5)."
-  - gate: "review-l1"
-    checks: "review.decision == GO against the level-1 design and this set."
-  - gate: "design-l2"
-    checks: "Component design against this set: interface contracts for the entry model and mapping control, the scan confirm step, the ack resolution seam, the photo-evidence path decision, the notification seams including the calendar channel (OD-7), and migration/legacy handling; sequencing such that no path records without the challenge (FR-MSR-009)."
-  - gate: "review-l2"
-    checks: "review.decision == GO against the component design and this set, including the safety-sequence no-bypass property (FR-MSR-009) and the preserved escalation semantics (FR-MSR-019)."
-  - gate: "plan-tasks / implement"
-    checks: "Units trace back to FR-MSR-* / NFR-MSR-* ids; paired review and the 0.85 confidence threshold on implementation output, elevated to 0.90 on FR-D01/D03/D04a-b-touching decisions; coverage and integration-test obligations (NFR-MSR-008); migration tests ride with the model change (NFR-MSR-006)."
-  - gate: "review-implementation"
-    checks: "review.decision == GO over the implementation against this set, including the honesty properties (FR-MSR-018) and the PII-free paths (FR-MSR-017, NFR-MSR-002)."
-  - gate: "final-sign-off"
-    checks: "T2 + HIL; the recorded DV-1..DV-7 device-validation checklist on the reference device (Anzaan): DV-1 slot entry and mapped fire (FR-MSR-001/002); DV-2 scan confirm, honest partial read (FR-MSR-005/006); DV-3 voice ack with slot resolving the shared slot, sequence order preserved (FR-MSR-007/008/009); DV-4 photo evidence attaching on-device, never creating a record (FR-MSR-013/014); DV-5 significant events firing with the consent-gated calendar channel and no PII on the wire (FR-MSR-015/016/017); DV-6 process-kill re-arm within the unexpired window (FR-MSR-022); DV-7 elderly-fit 44pt+/18pt+/voice-first and spoken times via the formatter only (FR-MSR-021, NFR-MSR-004/005). Release gate: ios/tools/check-release-log-safety.sh exits 0 (NFR-MSR-009)."
+    file: specs/define-requirements/NFR/NFR-RIE-010-preserved-baseline-and-release-gates.md
+    sha256: 4ca0d2e56a50fd536fbd7784aa2bbcce5ed143fb549dd3e1b3176d0a74a00146
+    acceptance_scenarios: 4

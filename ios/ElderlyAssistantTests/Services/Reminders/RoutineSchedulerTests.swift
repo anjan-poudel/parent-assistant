@@ -8,14 +8,19 @@ final class MockRoutineAlarmScheduler: RoutineAlarmScheduling {
     /// `visualAidURL` rides along (photo-visual-aids task, 2026-09-16) so
     /// the tests can assert the scheduler handed the reminder's photo to
     /// the notification, and that it passes nil when there is none.
-    var scheduled: [UUID: (entryId: UUID, title: String, visualAidURL: URL?, at: Date)] = [:]
+    /// `hadInstruction` is recorded too (T-013, FR-RIE-015) so the suite
+    /// can prove the arming call derives it from the CURRENT index.
+    var scheduled: [UUID: (entryId: UUID, title: String, visualAidURL: URL?,
+                            hadInstruction: Bool, at: Date)] = [:]
     var scheduleCalls: [UUID: Int] = [:]
     var cancelled: [UUID] = []
 
     func scheduleRoutineReminder(occurrenceId: UUID, entryId: UUID,
                                  title: String, visualAidURL: URL?,
+                                 hadInstruction: Bool,
                                  at scheduledTime: Date) {
-        scheduled[occurrenceId] = (entryId, title, visualAidURL, scheduledTime)
+        scheduled[occurrenceId] = (entryId, title, visualAidURL,
+                                   hadInstruction, scheduledTime)
         scheduleCalls[occurrenceId, default: 0] += 1
     }
 
@@ -29,6 +34,65 @@ final class MockRoutineAlarmScheduler: RoutineAlarmScheduling {
             cancelled.append(id)
             scheduled.removeValue(forKey: id)
         }
+    }
+}
+
+/// Records the routine write seam's video calls in one ordered log so the
+/// transaction's ORDER is assertable without touching real bytes (T-013).
+/// The storage write hook appends into the same log, which is what makes
+/// "commit before persist, persist before the old delete" one comparison.
+final class SpyInstructionVideoStore: RoutineInstructionVideoStoring {
+    var callLog: [String] = []
+    /// Bare filenames that "exist" for the owner, per the store's contract.
+    var files: Set<String> = []
+    var commitResult: Result<String, InstructionStorageError> =
+        .success("instruction-new.mov")
+    var deleteResult: Result<Void, InstructionStorageError> = .success(())
+    var deleteAllResult: Result<Void, InstructionStorageError> = .success(())
+    var discarded: [StagedInstructionVideo] = []
+    /// Overrides the availability answer when set — models a name the
+    /// store refuses or cannot read.
+    var availabilityOverride: InstructionPlaybackAvailability?
+
+    func commit(_ staged: StagedInstructionVideo,
+                for owner: InstructionOwner) -> Result<String, InstructionStorageError> {
+        callLog.append("commit")
+        if case .success(let filename) = commitResult {
+            files.insert(filename)
+        }
+        return commitResult
+    }
+
+    func discard(_ staged: StagedInstructionVideo) -> Result<Void, InstructionStorageError> {
+        callLog.append("discard")
+        discarded.append(staged)
+        return .success(())
+    }
+
+    func delete(_ filename: String,
+                for owner: InstructionOwner) -> Result<Void, InstructionStorageError> {
+        callLog.append("delete:\(filename)")
+        if case .success = deleteResult {
+            files.remove(filename)
+        }
+        return deleteResult
+    }
+
+    func deleteAll(for owner: InstructionOwner) -> Result<Void, InstructionStorageError> {
+        callLog.append("deleteAll")
+        if case .success = deleteAllResult {
+            files.removeAll()
+        }
+        return deleteAllResult
+    }
+
+    func availability(filename: String,
+                      owner: InstructionOwner) -> InstructionPlaybackAvailability {
+        if let availabilityOverride { return availabilityOverride }
+        if files.contains(filename) {
+            return .available(URL(fileURLWithPath: "/tmp/\(filename)"))
+        }
+        return .missingFile
     }
 }
 
@@ -47,6 +111,9 @@ final class RoutineSchedulerTests: XCTestCase {
     /// Isolated per test: the settings persist, so a shared instance
     /// would leak a flipped toggle into the next test.
     var caregiverNotifySettings: CaregiverNotifySettings!
+    /// The routine write seam's video spy (T-013) — records commit/delete
+    /// call ORDER so the ordered transaction is asserted, not assumed.
+    var videoStore: SpyInstructionVideoStore!
     var scheduler: RoutineScheduler!
     var fakeNow: Date!
 
@@ -70,10 +137,12 @@ final class RoutineSchedulerTests: XCTestCase {
         fakeNow = pinnedNow()
         notifier = MockFamilyNotifier()
         caregiverNotifySettings = CaregiverNotifySettings.isolated()
+        videoStore = SpyInstructionVideoStore()
         scheduler = RoutineScheduler(store: store, alarmScheduler: alarm,
                                      observabilityBus: bus,
                                      familyNotifier: notifier,
                                      caregiverNotifySettings: caregiverNotifySettings,
+                                     instructionVideoStore: videoStore,
                                      now: { [weak self] in
                                          self?.fakeNow ?? Date()
                                      })
@@ -621,5 +690,396 @@ final class RoutineSchedulerTests: XCTestCase {
 
         XCTAssertEqual(alarm.scheduled.count, 2)
         XCTAssertTrue(alarm.scheduled.values.allSatisfy { $0.visualAidURL == nil })
+    }
+
+    // MARK: - Instruction write seam (T-013; design §5.6, §3.4 IF-22/IF-23)
+
+    private func makeInstructionEntry(instruction: Instruction?,
+                                      hour: Int = 11) -> RoutineEntry {
+        RoutineEntry(category: .walk,
+                     scheduleTimes: [DateComponents(hour: hour, minute: 0)],
+                     isEnabled: true,
+                     instruction: instruction)
+    }
+
+    private func makeStagedVideo() -> StagedInstructionVideo {
+        StagedInstructionVideo(
+            draftId: UUID(),
+            root: .routines,
+            stagedURL: URL(fileURLWithPath: "/tmp/staged-\(UUID().uuidString).mov"),
+            byteCount: 1024,
+            metadata: InstructionVideoMetadata(durationSeconds: 12,
+                                               hasVideoTrack: true,
+                                               isPlayable: true),
+            sourceExtension: "mov",
+            stagedAt: fakeNow)
+    }
+
+    private func makeVideoCommit(
+        caption: String? = "Lunch routine"
+    ) -> InstructionCommit {
+        let staged = makeStagedVideo()
+        return InstructionCommit(
+            write: .set(InstructionPayload(kind: .video, caption: caption)),
+            pendingMedia: .video(AcceptedInstructionVideo(staged: staged,
+                                                          validatedAt: fakeNow)))
+    }
+
+    private func makeTextCommit(_ text: String) -> InstructionCommit {
+        InstructionCommit(write: .set(InstructionPayload(kind: .text, text: text)),
+                          pendingMedia: nil)
+    }
+
+    private var removeCommit: InstructionCommit {
+        InstructionCommit(write: .remove, pendingMedia: nil)
+    }
+
+    private func assertSuccess(_ result: Result<Void, InstructionWriteError>,
+                               file: StaticString = #filePath,
+                               line: UInt = #line) {
+        if case .failure(let error) = result {
+            XCTFail("expected success, got \(error)", file: file, line: line)
+        }
+    }
+
+    private func assertFailure(_ result: Result<Void, InstructionWriteError>,
+                               equals expected: InstructionWriteError,
+                               file: StaticString = #filePath,
+                               line: UInt = #line) {
+        switch result {
+        case .success:
+            XCTFail("expected \(expected), got success", file: file, line: line)
+        case .failure(let error):
+            XCTAssertEqual(error, expected, file: file, line: line)
+        }
+    }
+
+    private func instructionUpdatedEvents() -> [ObservabilityEvent] {
+        bus.emittedEvents.filter { $0.eventType == "entry_instruction_updated" }
+    }
+
+    /// Records the index write in the same ordered log as the video spy's
+    /// calls, so commit-before-persist is an array comparison. Entries are
+    /// written once per mutation; the second write in these logs is the
+    /// existing occurrence-persistence pass inside `scheduleAll()`.
+    private func witnessIndexWrites() {
+        storage.onWriteCompleted = { [weak videoStore = videoStore] in
+            videoStore?.callLog.append("persist")
+        }
+    }
+
+    func testSetTextUpdatesEntryAndReschedulesOnce() {
+        let entry = makeEntry(hour: 11)
+        scheduler.addEntry(entry)
+        XCTAssertEqual(alarm.scheduled.count, 2)
+        let firstArmCounts = alarm.scheduleCalls
+
+        assertSuccess(scheduler.setInstruction(makeTextCommit("  Take the blue pill  "),
+                                               entryId: entry.id))
+
+        let expected = Instruction(kind: "text", text: "Take the blue pill")
+        XCTAssertEqual(scheduler.entry(for: entry.id)?.instruction, expected)
+        XCTAssertEqual(RoutineStore(storage: storage).loadEntries().first?.instruction,
+                       expected,
+                       "the entry is durable, not just in memory")
+        XCTAssertEqual(alarm.scheduled.count, 2,
+                       "the window is regenerated once: same occurrences, same identity")
+        for (occurrenceId, count) in alarm.scheduleCalls {
+            XCTAssertEqual(count, (firstArmCounts[occurrenceId] ?? 0) + 1,
+                           "each armed occurrence is re-armed exactly once")
+        }
+    }
+
+    func testSetVideoCommitsBeforePersist() {
+        let previous = Instruction(kind: "video", caption: "Old",
+                                   filename: "instruction-old.mov")
+        let entry = makeInstructionEntry(instruction: previous)
+        scheduler.addEntry(entry)
+        videoStore.files = ["instruction-old.mov"]
+        videoStore.commitResult = .success("instruction-new.mov")
+        witnessIndexWrites()
+
+        assertSuccess(scheduler.setInstruction(makeVideoCommit(), entryId: entry.id))
+
+        XCTAssertEqual(Array(videoStore.callLog.prefix(2)), ["commit", "persist"],
+                       "bytes become durable before the index names them")
+        XCTAssertEqual(videoStore.callLog.filter { $0 == "persist" }.count, 2,
+                       "one entries write plus the existing occurrence write")
+
+        guard let firstPersistIndex = videoStore.callLog.firstIndex(of: "persist"),
+              let deleteIndex = videoStore.callLog.firstIndex(
+                of: "delete:instruction-old.mov") else {
+            return XCTFail("expected a persist and an old-media delete in \(videoStore.callLog)")
+        }
+        XCTAssertLessThan(firstPersistIndex, deleteIndex,
+                          "the old media is deleted only after the new index is durable")
+
+        XCTAssertEqual(scheduler.entry(for: entry.id)?.instruction?.filename,
+                       "instruction-new.mov")
+        XCTAssertEqual(
+            RoutineStore(storage: storage).loadEntries().first?.instruction?.filename,
+            "instruction-new.mov")
+        XCTAssertFalse(videoStore.files.contains("instruction-old.mov"))
+        XCTAssertTrue(videoStore.files.contains("instruction-new.mov"))
+        XCTAssertTrue(videoStore.discarded.isEmpty,
+                      "a successful commit leaves no staged draft to discard")
+        XCTAssertTrue(alarm.scheduled.values.allSatisfy { $0.hadInstruction },
+                      "the re-arm after a set carries hadInstruction=true")
+    }
+
+    func testPersistFailureLeavesPreviousInstruction() {
+        let previous = Instruction(kind: "video", caption: "Old",
+                                   filename: "instruction-old.mov")
+        let entry = makeInstructionEntry(instruction: previous)
+        scheduler.addEntry(entry)
+        videoStore.files = ["instruction-old.mov"]
+        videoStore.commitResult = .success("instruction-new.mov")
+        storage.shouldFailWrite = true
+
+        assertFailure(scheduler.setInstruction(makeVideoCommit(), entryId: entry.id),
+                      equals: .persistenceFailed)
+
+        XCTAssertEqual(scheduler.entry(for: entry.id)?.instruction, previous,
+                       "the previous instruction remains the index's value")
+        XCTAssertFalse(videoStore.files.contains("instruction-new.mov"),
+                       "the newly committed bytes are deleted, never orphaned")
+        XCTAssertTrue(videoStore.files.contains("instruction-old.mov"),
+                      "the previous file is untouched")
+        XCTAssertTrue(videoStore.callLog.contains("commit"))
+        XCTAssertTrue(videoStore.callLog.contains("delete:instruction-new.mov"))
+        XCTAssertTrue(instructionUpdatedEvents().isEmpty,
+                      "a failed save never emits entry_instruction_updated")
+        XCTAssertFalse(videoStore.callLog.contains("delete:instruction-old.mov"),
+                       "old media is not deleted when the index refused to move")
+    }
+
+    func testMediaCommitFailureLeavesPreviousInstruction() {
+        let previous = Instruction(kind: "video", caption: "Old",
+                                   filename: "instruction-old.mov")
+        let entry = makeInstructionEntry(instruction: previous)
+        scheduler.addEntry(entry)
+        videoStore.files = ["instruction-old.mov"]
+        videoStore.commitResult = .failure(.commitFailed)
+
+        assertFailure(scheduler.setInstruction(makeVideoCommit(), entryId: entry.id),
+                      equals: .mediaWriteFailed(.commitFailed))
+
+        XCTAssertEqual(scheduler.entry(for: entry.id)?.instruction, previous)
+        XCTAssertTrue(videoStore.files.contains("instruction-old.mov"))
+        XCTAssertEqual(videoStore.discarded.count, 1,
+                       "the staged draft is discarded on a failed commit")
+        XCTAssertEqual(videoStore.callLog, ["commit", "discard"])
+        XCTAssertTrue(instructionUpdatedEvents().isEmpty)
+    }
+
+    func testOwnerNotFoundWritesNothing() {
+        assertFailure(scheduler.setInstruction(makeTextCommit("orphan"), entryId: UUID()),
+                      equals: .ownerNotFound)
+
+        XCTAssertEqual(storage.writeCallCount, 0,
+                       "no entry, occurrence or media write happens for a missing owner")
+        XCTAssertTrue(videoStore.callLog.isEmpty)
+        XCTAssertTrue(alarm.scheduled.isEmpty, "no notification is armed")
+        XCTAssertTrue(scheduler.entries().isEmpty)
+    }
+
+    func testRemoveDeletesAfterPersist() {
+        let previous = Instruction(kind: "video", caption: "Old",
+                                   filename: "instruction-old.mov")
+        let entry = makeInstructionEntry(instruction: previous)
+        scheduler.addEntry(entry)
+        videoStore.files = ["instruction-old.mov"]
+        witnessIndexWrites()
+
+        assertSuccess(scheduler.setInstruction(removeCommit, entryId: entry.id))
+
+        XCTAssertNil(scheduler.entry(for: entry.id)?.instruction)
+        XCTAssertEqual(Array(videoStore.callLog.prefix(2)),
+                       ["persist", "delete:instruction-old.mov"],
+                       "removal persists the index first, then deletes the bytes")
+        XCTAssertFalse(videoStore.files.contains("instruction-old.mov"))
+        XCTAssertEqual(alarm.scheduled.count, 2,
+                       "the reminder still arms and fires after its instruction is removed")
+        let events = instructionUpdatedEvents()
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.outcome, "saved")
+        XCTAssertEqual(events.first?.metadata["kind"], "video")
+    }
+
+    func testDeleteFailureDoesNotResurrect() {
+        let previous = Instruction(kind: "video", caption: "Old",
+                                   filename: "instruction-old.mov")
+        let entry = makeInstructionEntry(instruction: previous)
+        scheduler.addEntry(entry)
+        videoStore.files = ["instruction-old.mov"]
+        videoStore.deleteResult = .failure(.deleteFailed)
+
+        assertSuccess(scheduler.setInstruction(removeCommit, entryId: entry.id))
+
+        XCTAssertNil(scheduler.entry(for: entry.id)?.instruction,
+                     "a delete failure must not resurrect the instruction")
+        XCTAssertTrue(videoStore.files.contains("instruction-old.mov"),
+                      "the failed delete leaves the bytes for the orphan sweep")
+        XCTAssertEqual(alarm.scheduled.count, 2,
+                       "the reminder still arms after the instruction is removed")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "instruction_media_delete"
+                && $0.component == "instruction_media"
+                && $0.outcome == "failed"
+        }, "the failed delete is reported, not returned")
+    }
+
+    func testEntryDeletingDeletesAllMedia() {
+        let entry = makeInstructionEntry(
+            instruction: Instruction(kind: "video", filename: "instruction-old.mov"))
+        scheduler.addEntry(entry)
+        videoStore.files = ["instruction-old.mov"]
+
+        scheduler.entry(deleting: entry.id)
+
+        XCTAssertTrue(scheduler.entries().isEmpty)
+        XCTAssertTrue(videoStore.callLog.contains("deleteAll"),
+                      "the routine's instruction video directory is torn down")
+        XCTAssertTrue(videoStore.files.isEmpty)
+        XCTAssertTrue(alarm.scheduled.isEmpty)
+    }
+
+    func testEntryDeletingSurvivesMediaFailure() {
+        let entry = makeInstructionEntry(
+            instruction: Instruction(kind: "video", filename: "instruction-old.mov"))
+        scheduler.addEntry(entry)
+        videoStore.files = ["instruction-old.mov"]
+        videoStore.deleteAllResult = .failure(.deleteFailed)
+
+        scheduler.entry(deleting: entry.id)
+
+        XCTAssertTrue(scheduler.entries().isEmpty,
+                      "a media delete failure cannot fail the entry deletion")
+        XCTAssertTrue(videoStore.files.contains("instruction-old.mov"),
+                      "the bytes remain only for the sweep, not for the entry")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "instruction_media_delete" && $0.outcome == "failed"
+        })
+    }
+
+    func testEntriesIfReadableDelegatesToStore() {
+        // The encrypted store reports a missing key as a read failure, so a
+        // first run is "unreadable", never "genuinely empty" (M-4).
+        XCTAssertNil(scheduler.entriesIfReadable(),
+                     "a read failure stays nil — never collapsed to []")
+        XCTAssertTrue(scheduler.entries().isEmpty,
+                      "the legacy read keeps its [] contract for existing callers")
+
+        store.saveEntries([])
+        let readableButEmpty = scheduler.entriesIfReadable()
+        XCTAssertNotNil(readableButEmpty, "a readable read is not nil, even when empty")
+        XCTAssertEqual(readableButEmpty?.count, 0,
+                       "a readable-but-empty collection is [], not nil")
+
+        let entry = makeEntry(hour: 11)
+        store.add(entry)
+        let readsBefore = storage.readCallCount
+        XCTAssertEqual(scheduler.entriesIfReadable(), Optional([entry]))
+        XCTAssertEqual(storage.readCallCount, readsBefore + 1,
+                       "one strict read — no strict read followed by a legacy read")
+
+        // The delegation is the contract (M-4): the accessor must call the
+        // store's strict read, never build a live set from `loadEntries()`.
+        let source = FeatureSourceScan.codeText(
+            of: FeatureSourceScan.iosDirectory()
+                .appendingPathComponent(
+                    "ElderlyAssistant/Services/Reminders/RoutineScheduler.swift"))
+        XCTAssertTrue(source.contains("store.loadEntriesIfReadable()"))
+    }
+
+    func testRegenerateWindowPassesHadInstructionTrue() {
+        let entry = makeInstructionEntry(
+            instruction: Instruction(kind: "text", text: "Take the blue pill"))
+        scheduler.addEntry(entry)
+
+        XCTAssertEqual(alarm.scheduled.count, 2)
+        XCTAssertTrue(alarm.scheduled.values.allSatisfy { $0.hadInstruction },
+                      "FR-RIE-015: every armed occurrence carries had_instruction=true")
+    }
+
+    func testRegenerateWindowPassesHadInstructionFalse() {
+        store.add(makeEntry(hour: 11))
+        store.add(makeInstructionEntry(instruction: Instruction(kind: "text",
+                                                                text: "   "),
+                                       hour: 12))
+        scheduler.scheduleAll()
+
+        XCTAssertEqual(alarm.scheduled.count, 4)
+        XCTAssertTrue(alarm.scheduled.values.allSatisfy { !$0.hadInstruction },
+                      "no instruction — or a blank one — arms with had_instruction=false")
+    }
+
+    func testScopedCancelsOnly() {
+        let first = makeEntry(category: .walk, hour: 11)
+        let second = makeEntry(category: .meal, hour: 12)
+        scheduler.addEntry(first)
+        scheduler.addEntry(second)
+        XCTAssertEqual(alarm.scheduled.count, 4)
+
+        let firstIds = Set(alarm.scheduled.filter { $0.value.entryId == first.id }.keys)
+        let secondIds = Set(alarm.scheduled.filter { $0.value.entryId == second.id }.keys)
+        XCTAssertEqual(firstIds.count, 2)
+        XCTAssertEqual(secondIds.count, 2)
+
+        scheduler.removeEntry(id: first.id)
+
+        XCTAssertEqual(Set(alarm.cancelled), firstIds,
+                       "only the removed routine's identifiers are cancelled")
+        XCTAssertTrue(secondIds.isSubset(of: Set(alarm.scheduled.keys)),
+                      "the other routine's alarms are untouched")
+
+        let source = FeatureSourceScan.codeText(
+            of: FeatureSourceScan.iosDirectory()
+                .appendingPathComponent(
+                    "ElderlyAssistant/Services/Reminders/RoutineAlarmScheduler.swift"))
+        XCTAssertTrue(source.contains("removePendingNotificationRequests("))
+        XCTAssertTrue(source.contains("withIdentifiers:"))
+        XCTAssertFalse(source.contains("removeAllPendingNotificationRequests"),
+                       "a routine scheduler must never wipe every pending notification")
+    }
+
+    func testRealChangeEmitsEntryInstructionUpdated() {
+        let entry = makeEntry(hour: 11)
+        scheduler.addEntry(entry)
+        let commit = makeTextCommit("Take the blue pill")
+
+        assertSuccess(scheduler.setInstruction(commit, entryId: entry.id))
+
+        let events = instructionUpdatedEvents()
+        XCTAssertEqual(events.count, 1)
+        guard let event = events.first else {
+            return XCTFail("expected entry_instruction_updated")
+        }
+        XCTAssertEqual(event.component, "routine_scheduler")
+        XCTAssertEqual(event.outcome, "saved")
+        XCTAssertNil(event.errorCode)
+        XCTAssertNil(event.durationMs)
+        XCTAssertEqual(event.metadata["entry_id_hash"], IdHashing.shortHash(of: entry.id))
+        XCTAssertEqual(event.metadata["kind"], "text")
+        XCTAssertEqual(event.metadata["count"], "1")
+        XCTAssertFalse(event.metadata.values.contains {
+            $0.contains("Take the blue pill")
+        }, "no instruction content enters the event")
+        let schedulesAfterFirst = alarm.scheduleCalls
+
+        // The same commit again is a successful no-op: no persist, no
+        // re-arm, no second event.
+        assertSuccess(scheduler.setInstruction(commit, entryId: entry.id))
+        XCTAssertEqual(instructionUpdatedEvents().count, 1,
+                       "a no-op never emits entry_instruction_updated")
+        XCTAssertEqual(alarm.scheduleCalls, schedulesAfterFirst,
+                       "a no-op does not regenerate the window")
+
+        // A failed write emits nothing either.
+        assertFailure(scheduler.setInstruction(makeTextCommit("orphan"),
+                                               entryId: UUID()),
+                      equals: .ownerNotFound)
+        XCTAssertEqual(instructionUpdatedEvents().count, 1,
+                       "a failure emits no update event")
     }
 }

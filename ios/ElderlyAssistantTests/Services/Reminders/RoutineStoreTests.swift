@@ -68,6 +68,86 @@ final class RoutineStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.loadEntries().count, 1)
     }
 
+    // MARK: - Strict read (IF-33 / M-4, NFR-RIE-007)
+
+    func testStrictReadReturnsEntries() {
+        let entries = [makeEntry(.walk), makeEntry(.meal)]
+        XCTAssertTrue(store.saveEntries(entries))
+
+        XCTAssertEqual(store.loadEntriesIfReadable(), entries)
+        XCTAssertEqual(store.loadEntries(), entries,
+                       "the legacy read agrees on a readable store")
+    }
+
+    func testStrictReadReturnsEmptyForReadableEmpty() {
+        XCTAssertTrue(store.saveEntries([]))
+
+        let readable = store.loadEntriesIfReadable()
+        XCTAssertNotNil(readable, "a readable empty collection is known, not unknown")
+        XCTAssertEqual(readable, [])
+        XCTAssertEqual(store.loadEntries(), [])
+    }
+
+    func testStrictReadReturnsNilOnReadFailure() {
+        let failingStore = RoutineStore(storage: FailingReadStorage())
+        XCTAssertTrue(failingStore.saveEntries([makeEntry()]),
+                      "the write side is not what this test exercises")
+
+        XCTAssertNil(failingStore.loadEntriesIfReadable(),
+                     "a failed read is unknown — never an empty collection")
+        XCTAssertEqual(failingStore.loadEntries(), [],
+                       "the legacy read still returns [] for the same failure")
+    }
+
+    func testStrictReadReturnsNilOnMissingKey() {
+        XCTAssertNil(store.loadEntriesIfReadable(),
+                     "a first-run absent key is a read failure, not an empty list")
+        XCTAssertTrue(store.loadEntries().isEmpty,
+                      "legacy loadEntries keeps [] for the same state")
+    }
+
+    func testLegacyLoadEntriesStillReturnsEmptyOnFailure() {
+        let failingStore = RoutineStore(storage: FailingReadStorage())
+        XCTAssertEqual(failingStore.loadEntries(), [],
+                       "every existing caller keeps the []-on-failure contract")
+    }
+
+    func testReadableButEmptyCollectionAfterGraceIsDistinctFromUnreadable() {
+        // §11.3 K / M-4: a readable-but-empty collection is a healthy empty
+        // live set — the sweep may collect videos older than its grace
+        // window. An unreadable store is "unknown", and the same sweep must
+        // skip the routines root. RoutineStore has no clock (the grace is a
+        // sweep parameter), so this pins the distinction the sweep consumes
+        // across the re-read it performs after that window: no caching, no
+        // expiry, no collapse of unknown into empty.
+        XCTAssertTrue(store.saveEntries([]))
+        let unreadableStore = RoutineStore(storage: FailingReadStorage())
+
+        XCTAssertEqual(store.loadEntriesIfReadable(), [])
+        XCTAssertNil(unreadableStore.loadEntriesIfReadable())
+
+        XCTAssertEqual(store.loadEntriesIfReadable(), [],
+                       "the later sweep read still says empty, not unknown")
+        XCTAssertNil(unreadableStore.loadEntriesIfReadable(),
+                     "the later sweep read still says unknown, not empty")
+        XCTAssertNotEqual(store.loadEntriesIfReadable(),
+                          unreadableStore.loadEntriesIfReadable())
+    }
+
+    func testFailingDoubleSurvival() {
+        let failing = FailingReadStorage()
+        let failingStore = RoutineStore(storage: failing)
+
+        for _ in 0..<3 {
+            XCTAssertNil(failingStore.loadEntriesIfReadable(),
+                         "unknown must stay unknown across reads")
+            XCTAssertEqual(failingStore.loadEntries(), [],
+                           "the legacy contract stays empty across reads")
+        }
+        XCTAssertEqual(failing.readCallCount, 6,
+                       "each call performs exactly one read — no hidden cache or retry")
+    }
+
     // MARK: - Occurrences
 
     func testOccurrenceRoundTrip() {
@@ -124,5 +204,34 @@ final class RoutineStoreTests: XCTestCase {
         let after = store.loadEntries()
         XCTAssertEqual(after.count, entries.count)
         XCTAssertFalse(after.first { $0.category == .walk }?.isEnabled ?? true)
+    }
+}
+
+// MARK: - Failing read double (M-4 / §11.3 K)
+
+/// A storage double whose READ path always fails — every key, whether it
+/// was written or never existed. Writes land normally, so a test can prove
+/// that a store which accepts writes is still unreadable and must never
+/// collapse to `[]` (the deletion hazard M-4 exists to prevent).
+private final class FailingReadStorage: EncryptedLocalStorage {
+    private var values: [String: Data] = [:]
+    var readCallCount = 0
+
+    func write<T: Encodable>(key: String, value: T) -> Result<Void, StorageError> {
+        guard let data = try? JSONEncoder().encode(value) else {
+            return .failure(.encryptedWriteFailed)
+        }
+        values[key] = data
+        return .success(())
+    }
+
+    func read<T: Decodable>(key: String, type: T.Type) -> Result<T, StorageError> {
+        readCallCount += 1
+        return .failure(.encryptedReadFailed)
+    }
+
+    func delete(key: String) -> Result<Void, StorageError> {
+        values.removeValue(forKey: key)
+        return .success(())
     }
 }

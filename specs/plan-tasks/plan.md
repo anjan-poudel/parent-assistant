@@ -1,135 +1,242 @@
-# Task Breakdown — Conversational Nepali Replies (CNR)
-
-Feature: `conversational-nepali-replies` — worktree `/Users/anjan/workspace/projects/elderly-ai-assistant-conversational-nepali-replies` (branch `feat/conversational-nepali-replies`).
-Decomposition source: `specs/design-l1.md` (combined L1+L2 design of record, 2026-10-14), read against `specs/define-requirements.md` (29 FR-CNR, 11 NFR-CNR) and the feature workflow `specs/conversational-nepali-replies/workflow.yaml` (2026-10-14 lean-chain directive).
+# Task Breakdown — Reminders Instructions Enhancements
 
 ## Summary
 
-- **Task groups (Jira epics):** 6 — TG-34 … TG-39.
-- **Total tasks:** 27 (leaf-task-only; 0 subtasks — the unit planner keys units on the leading `T-<digits>` token, so subtask files would collide).
-- **Estimated effort:** about **50.5 developer-days nominal** (P0 runtime ≈ 20.0, P1 training ≈ 16.0, release/acceptance/device ≈ 4.5, P2 polish + feasibility statement ≈ 10.0). Realistically about **4 to 5 weeks with two developers** working the waves, including unattended training-box time and one Anzaan device session.
-- **Execution mode:** `unit_based` with default wave parallelism (`implement.unit_execution.plan_task_id: plan-tasks`); the confidence overlay (threshold 0.85) and `max_rework_iterations: 5` are the only implement overlays. **No review or security-gate tasks exist in this plan** — the 2026-10-14 lean chain (design-l1 combined, review gates dropped, one advisory non-blocking security pass at the final sign-off) is the operating basis; the hard safety gates are enforced as code by T-181/T-182 and by the implementation tests.
-- **Test cadence (amendment-4, 2026-10-14 owner directive):** per-unit work is code + build/typecheck only (no per-unit test execution); each wave closes with ONE consolidated scoped (`-only-testing`) typecheck + focused-test pass over the wave's touched suites; unit evidence records and the commit are batched per wave; the single full-suite pass stays at the very end and the T-181/T-182 hard eval gates and the DV-1..DV-6 protocol are unchanged. See `amendments/amendment-4-wave-end-testing-and-batched-closure-2026-10-14.md`.
-- **Critical path:** T-166 → T-178 → T-179 → T-180 → T-182 → T-183 → T-184 → T-186 → T-187 → T-188 → T-192 — about 23 days, dominated by the P1 chain. With the P2 legs descoped, the path shortens to about 19 days (T-166 → … → T-187).
-- **Ordering note (OD-3 — RESOLVED 2026-10-14 as P0-first):** the P0 runtime slice (TG-34, TG-35, TG-36, the T-185 gate and the T-182 harness — waves 0–4) is independently landable and depends on no P1 or P2 artifact. The operator resolved the P0-versus-P1 sequencing question as **P0-first** (decision relayed via the main session, Slack question `q-ask-2f6a8883`; recorded with operator provenance in `amendments/amendment-5-od3-resolved-p0-first-and-p0-integration-2026-10-14.md`): when waves 0–4 are green and T-185 passes, the P0 integration PR is raised (push + PR against master; the PR's own review/merge stays a normal reviewed merge, not autonomous); P1 (T-183, T-184) continues in the same worktree on top of the PR head with the catalog swap still behind its green gates. The declared wave graph already matches the P0-first ordering — no re-layering was needed. (OD-3's former open status: `amendments/amendment-3-lean-review-gates-and-od3-2026-10-14.md`.)
-- **P2 descope (DECIDED 2026-10-15):** the four P2 legs (T-188 … T-191) are descoped from this run — P2 is separated as its own initiative (`docs/features/2026-10-15-p2-conversation-polish-initiative.md`, main checkout). Each leg completed with an explicit owner-descope record at its declared notes path (risk 10: descoping never silent), and T-192 stays in this run, accounting for all four legs. See `amendments/amendment-6-p2-descoped-2026-10-15.md`. The run's scope now closes the critical path at T-187; T-192 remains as the statement.
-- **Device-validation gate:** DV-1…DV-6 (T-187) is the feature's completion gate; without an Anzaan session every item is recorded BLOCKED with the reason and the feature stays outstanding.
+- **Task groups:** 7 navigation labels (TG-01 through TG-07); the executable layout is flat, one leaf unit per file.
+- **Units:** 27 (26 implementation units plus one closing integration unit, `final: true`).
+- **Waves:** 10 (wave 0 through wave 9), computed from `depends_on` and disjoint file ownership.
+- **Estimated effort:** about 42 developer-days nominal; about 10–12 elapsed days with three developers on the ready waves; about 42 days sequential.
+- **Critical path:** T-001 → T-002 → T-003 → T-007 → T-009 → T-010 → T-018 → T-021 → T-025 → T-027, about 19 sequential-equivalent days.
+- **Design inputs:** `specs/design-l2.md` (approved, sha256 `0bd1ee1a825d529b4313a9685060d1a542ed38a5c42e5c1d899cf1d085177eeb`) and `specs/review-l2.md` (GO).
+- **Review GO conditions pinned as must-carry:** B-3 (T-002), M-3 (T-020), M-4 (T-011 with T-013 and T-025), R-5 (T-002), OI-1 (T-013 with the T-014 exception). None is deferred to implementation discretion.
+- **Coverage:** all 25 FR-RIE and all 10 NFR-RIE requirements map to at least one unit and one falsifiable named test, or to an explicitly recorded device gate in T-027. There is no orphan requirement and no unit without a requirement trace.
+- **Scope discipline:** documentation only for this task. The plan adds no product scope beyond the approved design: no links, YouTube or URL playback, no transcode or trimming, no cloud or new egress, no instruction notification category, action or attachment, no medication-path change, no multi-instruction, no photo-library access, no Settings deep link, no audio captioning and no `SpokenTime`.
 
 ## Contents
 
-- [tasks/index.md](tasks/index.md) — the group table, ID numbering, dependency-line format and preconditions
-- [TG-34 — Style Spec, Chat Decode and Persona Seams](tasks/TG-34-style-spec-chat-decode-and-persona-seams/index.md) — T-166, T-167, T-168
-- [TG-35 — Grammar Guard, Prompt Mirrors and Localised Copy](tasks/TG-35-grammar-guard-prompt-mirrors-and-copy/index.md) — T-169, T-170, T-171
-- [TG-36 — Cloud Chat Consent, Routing and Elder Surfaces](tasks/TG-36-cloud-chat-consent-routing-and-elder-surfaces/index.md) — T-172 … T-177
-- [TG-37 — v17 Chat-Aware Training Suite](tasks/TG-37-v17-chat-aware-training-suite/index.md) — T-178 … T-184
-- [TG-38 — Release Gate, Acceptance and Device Validation](tasks/TG-38-release-gate-acceptance-and-device-validation/index.md) — T-185, T-186, T-187
-- [TG-39 — P2 Polish and Feasibility Honesty](tasks/TG-39-p2-polish-and-feasibility-honesty/index.md) — T-188 … T-192
-- [amendments/](amendments/) — plan amendments for this run (amendment 3 records the lean-chain directive and the OD-3 status)
-- Design and requirements inputs: `specs/design-l1.md`, `specs/define-requirements.md`, `specs/conversational-nepali-replies/workflow.yaml`
+- [tasks/index.md](tasks/index.md) — all 27 units, totals and group labels
+- [T-001](tasks/T-001.md) — model, configuration, filename guard and inspection seam
+- [T-002](tasks/T-002.md) — video store, create-before-bytes, protection and sweeps
+- [T-003](tasks/T-003.md) — draft algebra and display state
+- [T-004](tasks/T-004.md) — playback seam and AVKit adapter
+- [T-005](tasks/T-005.md) — image loaders and filename guard
+- [T-006](tasks/T-006.md) — camera and microphone permission seam
+- [T-007](tasks/T-007.md) — typed observability and plain-copy map
+- [T-008](tasks/T-008.md) — video importer, limits and timeout
+- [T-009](tasks/T-009.md) — capture coordinator and permission order
+- [T-010](tasks/T-010.md) — platform capture adapters
+- [T-011](tasks/T-011.md) — routine entry delta and strict store read
+- [T-012](tasks/T-012.md) — notification content builder and had_instruction
+- [T-013](tasks/T-013.md) — routine scheduler write seam and teardown
+- [T-014](tasks/T-014.md) — event extras field, snapshot and mutation repair
+- [T-015](tasks/T-015.md) — free-form event service and form seam
+- [T-016](tasks/T-016.md) — fire handlers and three tap cases
+- [T-017](tasks/T-017.md) — playback controller
+- [T-018](tasks/T-018.md) — instruction card, cover and editor views
+- [T-019](tasks/T-019.md) — 36-key copy catalogue
+- [T-020](tasks/T-020.md) — usage disclosure and built-bundle registration
+- [T-021](tasks/T-021.md) — fired-screen overlay and D6 gate
+- [T-022](tasks/T-022.md) — coordinator service seams and factories
+- [T-023](tasks/T-023.md) — routine settings integration
+- [T-024](tasks/T-024.md) — events view integration
+- [T-025](tasks/T-025.md) — coordinator presentation, tap routing and launch sweep
+- [T-026](tasks/T-026.md) — release-log gate and source hygiene
+- [T-027](tasks/T-027.md) — feature integration, release gates and the single full-suite run
 
-## Wave order
+## Inputs and plan hygiene
 
-Waves are the dependency-safe parallel groups, computed as longest-path layering over each unit's declared dependency line; units in the same wave own disjoint declared files and can run concurrently. The unit planner re-derives membership at implement time and may push a unit later when a same-file conflict appears (T-177 before T-184 on the coordinator file), never earlier than shown.
+Inputs read for this plan: `constitution.md`; the feature constitution; `specs/define-requirements.md` and its lock file; all 35 locked requirement files under `specs/define-requirements/FR/` and `specs/define-requirements/NFR/`; `specs/design-l1.md` and `specs/review-l1.md`; `specs/design-l2.md` in full; `specs/review-l2.md`; the feature workflow; and the real source and test tree in this worktree. Every file path, suite name, method name and filter in the units was checked against the tree. No build or test was run while planning.
 
-| Wave | Units | What the wave delivers |
-|------|-------|------------------------|
-| 0 | T-166, T-172 | The style spec (single source) and the fail-closed consent gate — the two foundations nothing else waits on |
-| 1 | T-167, T-168, T-169, T-171, T-173, T-178 | Both chat decode/persona seams, the guard core, the bilingual copy, the routing decision, the held-out chat set |
-| 2 | T-170, T-174, T-175, T-176, T-179, T-181 | Prompt mirrors, the guard flag at the dispatch seam, the router chat lane, the consent prompt, the four-layer corpus, the chat gate harness |
-| 3 | T-177, T-180 | Indicator/revocation/coordinator wiring, the provenance manifest |
-| 4 | T-182, T-185 | Chat-variant config + full harness over one candidate; release log-safety gate coverage |
-| 5 | T-183 | The v17 chat-aware QLoRA run and its gate evidence |
-| 6 | T-184 | The versioned, reversible catalog swap (promotion only behind green gates) |
-| 7 | T-186 | End-to-end acceptance, scoped sweep, the one full-suite run with the baseline named |
-| 8 | T-187 | The DV-1…DV-6 protocol and record (executed or BLOCKED) |
-| 9 | T-188, T-189, T-190, T-191 | The four owner-descopable P2 legs (each after the P1 swap is live and the DV protocol has run) — **DESCoped 2026-10-15** (amendment-6; each closed by an explicit owner-descope record). **T-190 re-opened by owner 2026-10-17 and executing in-run (amendment-7); T-188/T-189/T-191 remain descoped.** |
-| 10 | T-192 | The feasibility honesty statement for the sign-off package |
+**Discovery-safe layout.** The ai-sdd unit engine walks `specs/plan-tasks/tasks/` recursively and treats every `*.md` except `index.md` as a unit; unit ids come from the leading `T-<number>` filename token, and duplicate ids are a fatal wave-planner error. The previous feature plan occupied this directory with 198 unit files, including duplicate ids. Before writing this plan, that content was moved byte-for-byte (including its own `plan.md`) to `specs/plan-tasks/archive/pre-reminders-instructions-enhancements-2026-10-25/`, preserving its relative structure. The live `tasks/` directory now contains exactly this feature's 27 units plus the index. No file outside `specs/plan-tasks/` was modified.
 
-Phase view: P0 = the runtime units (TG-34 ... TG-36) with the release gate T-185 (wave 4) and the runtime half of T-186 (wave 7); P1 = the training suite TG-37 (waves 1-6, ending in the gated swap at wave 6); P2 = the four P2 legs and the honesty statement (waves 9-10).
+**Flat units only.** There are no task-group subdirectories and no subtask files. `group` in the frontmatter is a navigation label; waves are computed from `depends_on` and `files`. A subtask file would collide with its parent's id in discovery, so the hierarchy is intentionally flattened.
+
+## Unit and wave overview
+
+- 27 units: 26 implementation units and T-027, the only unit with `final: true`.
+- Ten waves. Wave 0 has three independent units (model foundations, notification content, copy catalogue). Waves 1–8 fan out and converge; wave 9 is the final barrier.
+- The closing unit T-027 owns the integration suite, the release-log gate run, the canonical build and the single full-suite comparison. It changes no product file.
 
 ## Critical path
 
-T-166 (1.5) → T-178 (3) → T-179 (4) → T-180 (1.5) → T-182 (1.5) → T-183 (2.5) → T-184 (1.5) → T-186 (2) → T-187 (1.5) → T-188 (3) → T-192 (1) = **23 developer-days**.
+The longest chain runs through the video acceptance path and the fired screen:
 
-The chain runs spec → held-out set → corpus → manifest → harness → run → swap → acceptance → device validation → first P2 leg → statement. It is dominated by the P1 training leg because the swap (T-184) is explicitly gated behind the run's evidence, and the P2 legs are gated behind the swap being live and the DV protocol having run (FR-CNR-026). The P0-only chain (T-166 → T-167 → T-170 → T-174 → T-177 ≈ 8.5 days to a landable runtime slice, plus T-185/T-186) is short — which is why the P0 slice can ship first under either OD-3 ordering. If the owner descopes P2, the tail closes at T-187 (about 19 days).
+T-001 model → T-002 store → T-003 draft/display → T-007 observability/copy → T-009 capture coordinator → T-010 adapters → T-018 views → T-021 fired overlay → T-025 coordinator presentation/sweep → T-027 final gates.
 
-## Key risks
+It is about 19 sequential-equivalent developer-days. The parallel branches through T-011/T-013/T-015 (routine and event writes) and T-022 (composition) are shorter and join at T-025. Wave parallelism can compress the elapsed time, but the critical chain cannot start the fired screen before the card exists (T-018) and cannot close before the sweep is wired (T-025).
 
-1. **Command-decode determinism regression on the shared model (T-167, CRITICAL).** The chat shape adds a per-turn temperature override on the same resident handle the command path uses; a chat turn leaking temperature into a command decode would break reminders, alarms and confirmations silently. Mitigation: per-turn re-assertion of every shape's parameters, byte-identical command decode pinned by test, DV-5 on device.
-2. **Cloud chat egress without consent (T-172, T-173, T-174, T-175, CRITICAL).** Two egress surfaces (the routing lane and the guard escalation) make it possible to leak chat content after a decline or revocation. Mitigation: one decision function, fail-closed on every non-granted state, egress-disabled local lane for chat turns, spy tests asserting zero cloud attempts on the declined paths.
-3. **Ship-mix contamination by a non-commercial source (T-180, CRITICAL).** A CC BY-NC research layer or a research-gated transcript reaching a shipped artifact is a compliance event. Mitigation: the manifest's ship/dev enforcement as code, the license registry as the assertion source, the manifest hash bound to the gate results.
-4. **A flagged reply spoken anyway, or a false success (T-174, CRITICAL).** The guard's whole purpose is to stop a flagged reply and degrade honestly. Mitigation: the verdict carries no text (no rewrite path), flagged text asserted absent from every spoken path, `unavailable` → degraded event rather than a claimed verification.
-5. **Safety-gate regression in the v17 variant (T-181, T-182, T-183, HIGH).** Emergency recall 1.00, abstention at or above 0.90 and closed-intent at or above 0.95 bind the swap. Mitigation: the full harness over one candidate behind one report, red gate = no swap, shortfalls reported rather than absorbed.
-6. **Jetsam on the reference tier (T-167, T-184, T-190, HIGH).** A second handle or a per-turn reload would kill the app mid-conversation on the 6 GB tier. Mitigation: one resident handle, no second instance, tier admission measured for the 4B candidate.
-7. **Held-out set leak (T-178, T-179, HIGH).** A golden turn in the training corpus invalidates the gate run. Mitigation: admission-time dedupe against the held-out file, exclusions reported, gate results voided on a proven leak.
-8. **Prompt or persona drift between the spec and its consumers (T-166, T-170, HIGH).** Four consumers of one spec is exactly where copies appear. Mitigation: byte-identity mirror checks in the build (chat template, both personas, guard lexicons) and the pinned intent prompt asserted untouched.
-9. **Device validation outstanding at sign-off (T-187, HIGH).** The completion gate cannot be satisfied by unit tests. Mitigation: the protocol is written and executable in one session; without a session every item is BLOCKED with a reason and the feature is reported outstanding.
-10. **A P2 leg quietly skipped (T-188 … T-191, MEDIUM).** Descoping must never be silent. Mitigation: each leg completes with an explicit owner-descope record if descoped, and T-192 must account for every leg.
-11. **A new content path outside the log gate's coverage (T-185, HIGH).** The gate only protects what it scans. Mitigation: coverage audit for every new content-rendering path, a seeded-violation demonstration, and event fields checked against the allowed-key set.
+## Wave table and file-ownership proof
 
-## Security-advisory mapping (advisory, non-blocking — final-sign-off pass)
+Each row lists the units in the wave and every file those units create or modify. No file appears twice in a wave. The consolidated filter is the exact scoped `xcodebuild test` pass the coordinator runs once after the wave lands; per-unit runs use the narrower filter in each unit file.
 
-The workflow's advisory security focus areas map to units as follows; findings are recorded with the sign-off, not treated as exit conditions, while each area's enforcement lives in the unit's own tests:
+| Wave | Units | Owned files (disjointness proof) | Consolidated scoped filter |
+|------|-------|----------------------------------|----------------------------|
+| 0 | T-001, T-012, T-019 | `Services/Instructions/Instruction.swift`, `InstructionConfiguration.swift`, `InstructionFilename.swift`, `InstructionVideoInspecting.swift`; `Tests/Services/Instructions/InstructionModelTests.swift`; `Services/Notifications/RoutineNotificationContent.swift`; `Services/Reminders/RoutineAlarmScheduler.swift`; `Tests/Services/Reminders/RoutineNotificationSchedulerTests.swift`; `Resources/Localizable.xcstrings`; `Tests/App/L10nCatalogCoverageTests.swift` | `-only-testing:ElderlyAssistantTests/InstructionModelTests -only-testing:ElderlyAssistantTests/RoutineNotificationSchedulerTests -only-testing:ElderlyAssistantTests/L10nCatalogCoverageTests` |
+| 1 | T-002, T-004, T-005, T-006, T-011, T-014, T-020 | `InstructionVideoStore.swift`; `InstructionVideoStoreTests.swift`; `NoIOInInitTests.swift`; `InstructionPlayback.swift`; `AVKitInstructionVideoPlayer.swift`; `InstructionPlaybackAdapterTests.swift`; `InstructionImageLoading.swift`; `InstructionImageLoadingTests.swift`; `VisualAidStoreTests.swift`; `InstructionPermissions.swift`; `InstructionPermissionTests.swift`; `RoutineEntry.swift`; `RoutineStore.swift`; `RoutineEntryTests.swift`; `RoutineStoreTests.swift`; `EventExtrasStore.swift`; `EventExtrasStoreTests.swift`; `Info.plist`; `Resources/en.lproj/InfoPlist.strings`; `Resources/ne.lproj/InfoPlist.strings`; `project.yml`; `L10nCatalogCoverageTests.swift` | `-only-testing:ElderlyAssistantTests/InstructionVideoStoreTests -only-testing:ElderlyAssistantTests/NoIOInInitTests -only-testing:ElderlyAssistantTests/InstructionPlaybackAdapterTests -only-testing:ElderlyAssistantTests/InstructionImageLoadingTests -only-testing:ElderlyAssistantTests/VisualAidStoreTests -only-testing:ElderlyAssistantTests/InstructionPermissionTests -only-testing:ElderlyAssistantTests/RoutineEntryTests -only-testing:ElderlyAssistantTests/RoutineStoreTests -only-testing:ElderlyAssistantTests/EventExtrasStoreTests -only-testing:ElderlyAssistantTests/L10nCatalogCoverageTests` |
+| 2 | T-003, T-008 | `Instruction.swift`; `InstructionDisplayState.swift`; `InstructionModelTests.swift`; `InstructionDisplayStateTests.swift`; `InstructionVideoImporter.swift`; `InstructionVideoImportTests.swift` | `-only-testing:ElderlyAssistantTests/InstructionModelTests -only-testing:ElderlyAssistantTests/InstructionDisplayStateTests -only-testing:ElderlyAssistantTests/InstructionVideoImportTests` |
+| 3 | T-007 | `InstructionObservability.swift`; `InstructionDisplayState.swift`; `InstructionObservabilityTests.swift`; `InstructionDisplayStateTests.swift` | `-only-testing:ElderlyAssistantTests/InstructionObservabilityTests -only-testing:ElderlyAssistantTests/InstructionDisplayStateTests` |
+| 4 | T-009, T-013, T-017 | `InstructionVideoCaptureCoordinator.swift`; `InstructionCaptureTests.swift`; `RoutineScheduler.swift`; `InstructionDisplayState.swift`; `RoutineSchedulerTests.swift`; `InstructionDisplayStateTests.swift`; `InstructionPlayback.swift`; `InstructionPlaybackControllerTests.swift` | `-only-testing:ElderlyAssistantTests/InstructionCaptureTests -only-testing:ElderlyAssistantTests/RoutineSchedulerTests -only-testing:ElderlyAssistantTests/InstructionDisplayStateTests -only-testing:ElderlyAssistantTests/InstructionPlaybackControllerTests` |
+| 5 | T-010, T-015 | `App/InstructionCapture.swift`; `InstructionCaptureTests.swift`; `FreeFormEventService.swift`; `FreeFormEventServiceTests.swift`; `FreeFormEventFormTests.swift` | `-only-testing:ElderlyAssistantTests/InstructionCaptureTests -only-testing:ElderlyAssistantTests/FreeFormEventServiceTests -only-testing:ElderlyAssistantTests/FreeFormEventFormTests` |
+| 6 | T-016, T-018, T-022 | `RoutineVisualAidFireHandler.swift`; `FreeFormEventFireHandler.swift`; `RoutineVisualAidFireHandlerTests.swift`; `FreeFormEventFireHandlerTests.swift`; `App/InstructionViews.swift`; `InstructionSurfaceTests.swift`; `AppCoordinator.swift`; `AppCoordinatorInstructionTests.swift` | `-only-testing:ElderlyAssistantTests/RoutineVisualAidFireHandlerTests -only-testing:ElderlyAssistantTests/FreeFormEventFireHandlerTests -only-testing:ElderlyAssistantTests/InstructionSurfaceTests -only-testing:ElderlyAssistantTests/AppCoordinatorInstructionTests` |
+| 7 | T-021, T-023, T-024 | `VisualAidViews.swift`; `ContentView.swift`; `InstructionSurfaceTests.swift`; `RoutineSettingsView.swift`; `RoutineSettingsInstructionTests.swift`; `EventsView.swift`; `FreeFormEventFormTests.swift` | `-only-testing:ElderlyAssistantTests/InstructionSurfaceTests -only-testing:ElderlyAssistantTests/RoutineSettingsInstructionTests -only-testing:ElderlyAssistantTests/FreeFormEventFormTests` |
+| 8 | T-025, T-026 | `AppCoordinator.swift`; `AppCoordinatorInstructionTests.swift`; `NoIOInInitTests.swift`; `ios/tools/check-release-log-safety.py`; `InstructionSourceHygieneTests.swift` | `-only-testing:ElderlyAssistantTests/AppCoordinatorInstructionTests -only-testing:ElderlyAssistantTests/NoIOInInitTests -only-testing:ElderlyAssistantTests/InstructionSourceHygieneTests` |
+| 9 | T-027 | `InstructionFeatureIntegrationTests.swift` | Full suite, one pass only (no scoped-only substitute); first `-only-testing:ElderlyAssistantTests/InstructionFeatureIntegrationTests`, then the documented full-suite command |
 
-| Advisory focus area | Enforced by |
-|---|---|
-| Safety-gate regression on the shared model; versioned reversible catalog swap | T-167 (command determinism pinned), T-182, T-183 (gates over one candidate), T-184 (versioned entry, catalog-level rollback), T-187 (DV-5) |
-| Cloud chat consent/disclosure (OD-12 shape); never blocks chat | T-172 (fail-closed gate), T-173 (single decision), T-175 (no-leak lane), T-176 (blocking prompt, local answer meanwhile), T-177 (indicator, revocation) |
-| Credential + content hygiene (B2/T-050 precedent; no user content in logs or the `reply_grammar_flag` event) | T-168 (header-only key, payload scope), T-174 (event field set), T-175 (fallback event), T-185 (release log gate coverage) |
-| Guard integrity: verify-never-rewrite; honest degradation | T-169 (verdict-only contract), T-170 (lexicon mirror), T-174 (escalate / safe template / degraded) |
-| Data provenance: no CC BY-NC in a shipped artifact | T-179 (layer separation), T-180 (ship-mix enforcement, manifest hash), T-191 (consent-based transcripts only) |
-| Prompt discipline: 1,024-token budget; seed byte-mirror | T-167 (budget unchanged, single handle), T-170 (byte-identity mirrors + budget check) |
+Disjointness holds by construction: a file may appear in several rows only when the rows are different waves, and no row repeats a file. The same rule applies to shared test suites; for example `InstructionSurfaceTests.swift` is T-018 in wave 6 and T-021 in wave 7, and `AppCoordinatorInstructionTests.swift` is T-022 in wave 6 and T-025 in wave 8. The frontmatter in every unit is the authoritative ownership set; this table is a recomputation of it.
 
-## Requirement coverage
+## Cross-wave hotspot ordering
 
-Functional requirements (FR-CNR-001 … 029), each satisfied by at least one unit:
+Every shared file has exactly one owner per wave. The ordered sequence below is the required landing order; reversing two units in one file's sequence would create a same-wave overlap or a forward reference.
 
-| Requirement | Units |
-|---|---|
-| FR-CNR-001 style spec, single source, four consumers | T-166, T-167, T-168, T-169, T-170 |
-| FR-CNR-002 persona upgrade, both seams | T-167, T-168, T-170 |
-| FR-CNR-003 chat sampling: fixed seed, temp ~0.3, chat only | T-167, T-192 |
-| FR-CNR-004 command decode determinism preserved | T-167, T-186, T-187 |
-| FR-CNR-005 guard verify-never-rewrite | T-169, T-170, T-174 |
-| FR-CNR-006 flag outcome, honest degradation | T-171, T-174 |
-| FR-CNR-007 reply-grammar-flag telemetry, no content | T-174, T-185 |
-| FR-CNR-008 cloud-first chat routing toggle | T-168, T-173, T-175, T-177 |
-| FR-CNR-009 consent, disclosure, indicator, revocation | T-172, T-173, T-175, T-176, T-177 |
-| FR-CNR-010 cloud chat egress scope | T-168, T-173, T-175 |
-| FR-CNR-011 explicit Gemini chat temperature | T-168 |
-| FR-CNR-012 credential and content hygiene | T-168, T-174, T-185 |
-| FR-CNR-013 single-decode schema unchanged | T-167, T-175, T-186 |
-| FR-CNR-014 router ladder and emergency gate unchanged | T-175, T-187 |
-| FR-CNR-015 STT, permissions, data collection unchanged | T-177, T-186, T-191 |
-| FR-CNR-016 v17 chat-aware QLoRA variant | T-179, T-182, T-183 |
-| FR-CNR-017 four-layer corpus construction | T-179 |
-| FR-CNR-018 ship-mix provenance manifest | T-180, T-191 |
-| FR-CNR-019 held-out chat evaluation set | T-178, T-179 |
-| FR-CNR-020 new chat gates | T-181, T-182 |
-| FR-CNR-021 full gate harness before the swap | T-182, T-183, T-184 |
-| FR-CNR-022 v17 catalog entry, versioned and reversible | T-184 |
-| FR-CNR-023 chat prompt template discipline | T-170 |
-| FR-CNR-024 feasibility honesty reporting | T-183, T-188 … T-191, T-192 |
-| FR-CNR-025 DV completion gate | T-186, T-187 |
-| FR-CNR-026 P2 DPO on judge preferences | T-188 |
-| FR-CNR-027 P2 romanized Nepali chat | T-189 |
-| FR-CNR-028 P2 4B tier via the per-device resolver | T-190 |
-| FR-CNR-029 P2 consent-based real transcripts | T-191 |
+| Shared file | Unit sequence (wave) |
+|-------------|----------------------|
+| `ios/ElderlyAssistant/Info.plist` | T-020 (1) |
+| `ios/project.yml` | T-020 (1) |
+| `ios/ElderlyAssistant/Resources/Localizable.xcstrings` | T-019 (0) |
+| `ios/ElderlyAssistant/Resources/en.lproj/InfoPlist.strings` | T-020 (1) |
+| `ios/ElderlyAssistant/Resources/ne.lproj/InfoPlist.strings` | T-020 (1) |
+| `ios/ElderlyAssistant/Services/Instructions/Instruction.swift` | T-001 (0) → T-003 (2) |
+| `ios/ElderlyAssistant/Services/Instructions/InstructionDisplayState.swift` | T-003 (2) → T-007 (3) → T-013 (4) |
+| `ios/ElderlyAssistant/Services/Instructions/InstructionPlayback.swift` | T-004 (1) → T-017 (4) |
+| `ios/ElderlyAssistant/Services/Instructions/InstructionVideoStore.swift` | T-002 (1) |
+| `ios/ElderlyAssistant/Services/Reminders/RoutineEntry.swift` | T-011 (1) |
+| `ios/ElderlyAssistant/Services/Reminders/RoutineStore.swift` | T-011 (1) |
+| `ios/ElderlyAssistant/Services/Reminders/RoutineScheduler.swift` | T-013 (4) |
+| `ios/ElderlyAssistant/Services/Reminders/RoutineAlarmScheduler.swift` | T-012 (0) |
+| `ios/ElderlyAssistant/Services/Notifications/RoutineNotificationContent.swift` | T-012 (0) |
+| `ios/ElderlyAssistant/Services/Storage/EventExtrasStore.swift` | T-014 (1) |
+| `ios/ElderlyAssistant/Services/Events/FreeFormEventService.swift` | T-015 (5) |
+| `ios/ElderlyAssistant/Services/Notifications/RoutineVisualAidFireHandler.swift` | T-016 (6) |
+| `ios/ElderlyAssistant/Services/Notifications/FreeFormEventFireHandler.swift` | T-016 (6) |
+| `ios/ElderlyAssistant/App/AppCoordinator.swift` | T-022 (6) → T-025 (8) |
+| `ios/ElderlyAssistant/App/ContentView.swift` | T-021 (7) |
+| `ios/ElderlyAssistant/App/VisualAidViews.swift` | T-021 (7) |
+| `ios/ElderlyAssistant/App/RoutineSettingsView.swift` | T-023 (7) |
+| `ios/ElderlyAssistant/App/EventsView.swift` | T-024 (7) |
+| `ios/ElderlyAssistant/App/InstructionViews.swift` | T-018 (6) |
+| `ios/ElderlyAssistant/App/InstructionCapture.swift` | T-010 (5) |
+| `ios/tools/check-release-log-safety.py` | T-026 (8) |
+| `ios/ElderlyAssistantTests/Services/Instructions/InstructionModelTests.swift` | T-001 (0) → T-003 (2) |
+| `ios/ElderlyAssistantTests/Services/Instructions/InstructionDisplayStateTests.swift` | T-003 (2) → T-007 (3) → T-013 (4) |
+| `ios/ElderlyAssistantTests/Services/Instructions/InstructionCaptureTests.swift` | T-009 (4) → T-010 (5) |
+| `ios/ElderlyAssistantTests/App/InstructionSurfaceTests.swift` | T-018 (6) → T-021 (7) |
+| `ios/ElderlyAssistantTests/App/AppCoordinatorInstructionTests.swift` | T-022 (6) → T-025 (8) |
+| `ios/ElderlyAssistantTests/Services/Readiness/NoIOInInitTests.swift` | T-002 (1) → T-025 (8) |
+| `ios/ElderlyAssistantTests/App/L10nCatalogCoverageTests.swift` | T-019 (0) → T-020 (1) |
+| `ios/ElderlyAssistantTests/Services/Events/FreeFormEventFormTests.swift` | T-015 (5) → T-024 (7) |
 
-Non-functional requirements (NFR-CNR-001 … 011):
+All other suites have a single owner unit. The `RoutineStoreTests`, `RoutineEntryTests`, `RoutineSchedulerTests`, `EventExtrasStoreTests`, `FreeFormEventServiceTests`, both fire-handler suites, `RoutineNotificationSchedulerTests`, `InstructionVideoStoreTests`, `InstructionVideoImportTests`, `InstructionObservabilityTests`, `InstructionPlaybackAdapterTests`, `InstructionPlaybackControllerTests`, `InstructionImageLoadingTests`, `InstructionPermissionTests`, `VisualAidStoreTests`, `RoutineSettingsInstructionTests`, `InstructionSourceHygieneTests` and `InstructionFeatureIntegrationTests` are single-wave files.
 
-| Requirement | Units |
-|---|---|
-| NFR-CNR-001 chat reply reproducibility | T-167, T-169 |
-| NFR-CNR-002 listening-turn latency envelope | T-173, T-175, T-190 |
-| NFR-CNR-003 memory and jetsam device tiers | T-167, T-184, T-187, T-190 |
-| NFR-CNR-004 chat prompt token budget | T-167, T-170 |
-| NFR-CNR-005 prompt template byte-mirror | T-166, T-170 |
-| NFR-CNR-006 log safety | T-168, T-172, T-174, T-185, T-186 |
-| NFR-CNR-007 telemetry content hygiene | T-174, T-177 |
-| NFR-CNR-008 gate thresholds | T-181, T-182 |
-| NFR-CNR-009 accessibility (voice-first, no internals) | T-171, T-176, T-177, T-187 |
-| NFR-CNR-010 localisation ne/en | T-171, T-177 |
-| NFR-CNR-011 compliance and release gates | T-172, T-180, T-185, T-186 |
+## Requirement traceability matrix
 
-Deferred items stayed deferred: the design's deferred list (catalog entry literal id, spec field-level schemas, final en/ne copy, voice revocation phrases, wave decomposition) has no standalone task; each is authored inside the unit that owns it (T-166, T-171, T-177, T-184). Post-MVP and out-of-scope items have no tasks.
+Status is `COVERED` when a named automated test exists for the requirement in the named unit. `COVERED + DEVICE` means the test exists and NFR-RIE-008's timing bounds also need the T-027 Release-build device recording.
+
+| Requirement | Unit(s) | Named evidence | Status |
+|-------------|---------|----------------|--------|
+| FR-RIE-001 instruction model three kinds | T-001, T-003, T-011, T-014 | `InstructionModelTests.testRawKindTextImageVideoRoundTrip`; `InstructionDisplayStateTests.testPresentationCollapsesEveryStoredShape`; `RoutineEntryTests.testLegacyEntryDecodesNilInstruction`; `EventExtrasStoreTests.testLegacyExtrasDecodesWithNilInstruction` | COVERED |
+| FR-RIE-002 text instruction | T-001, T-003, T-018, T-023 | `InstructionModelTests.testIsPresentRequiresNonBlankText`; `InstructionDisplayStateTests.testPresentationCollapsesEveryStoredShape`; `InstructionSurfaceTests.testCardRendersText`; `RoutineSettingsInstructionTests.testTextCommitGoesThroughCoordinator` | COVERED |
+| FR-RIE-003 image instruction | T-005, T-018, T-023, T-024 | `InstructionImageLoadingTests.testLoadsStoredJPEG`; `InstructionSurfaceTests.testCardRendersImageWithOptionalCaption`; `RoutineSettingsInstructionTests.testImageDraftRequiresPendingMedia`; `FreeFormEventFormTests.testEventDetailShowsInstructionCard` | COVERED |
+| FR-RIE-004 library video pick | T-008, T-009, T-010 | `InstructionVideoImportTests.testValidStagedFileAcceptedWithoutCopy`; `InstructionCaptureTests.testPickerTwiceIsSingleFlight`; `InstructionCaptureTests.testPickerUsesPHPickerVideoConfig` | COVERED |
+| FR-RIE-005 in-app video recording | T-006, T-009, T-010 | `InstructionPermissionTests.testCameraFirstOrderWithRecordingRequester`; `InstructionCaptureTests.testCameraRequestedBeforeMicrophone`; `InstructionCaptureTests.testRecorderUsesCameraAndMicrophone` | COVERED |
+| FR-RIE-006 video acceptance limits | T-001, T-002, T-008, T-009 | `InstructionModelTests.testDurationRoundsUpAtTheInclusiveBoundary`; `InstructionVideoStoreTests.testCumulativeCapAcrossChunks`; `InstructionVideoImportTests.testInclusive180SecondsAccepted`; `InstructionCaptureTests.testValidationSuccessBecomesReady` | COVERED |
+| FR-RIE-007 optional caption | T-001, T-003, T-018, T-023 | `InstructionModelTests.testCaptionIsOptional`; `InstructionDisplayStateTests.testPresentationCollapsesEveryStoredShape`; `InstructionSurfaceTests.testCardRendersImageWithOptionalCaption`; `RoutineSettingsInstructionTests.testTextCommitGoesThroughCoordinator` | COVERED |
+| FR-RIE-008 instruction lifetime and edits | T-003, T-013, T-015, T-023 | `InstructionDisplayStateTests.testRemoveDraftResolvesToRemove`; `RoutineSchedulerTests.testSetVideoCommitsBeforePersist`; `FreeFormEventServiceTests.testSetInstructionCommitsBeforePersist`; `RoutineSettingsInstructionTests.testCancelDoesNotCallSave` | COVERED |
+| FR-RIE-009 existing caregiver edit surfaces | T-018, T-022, T-023, T-024 | `InstructionSurfaceTests.testEditorTextDraft`; `AppCoordinatorInstructionTests.testSaveRoutineInstructionDelegatesCommit`; `RoutineSettingsInstructionTests.testExistingVisualAidFlowIsUnchanged`; `FreeFormEventFormTests.testEventSaveSendsFormViaCoordinator` | COVERED |
+| FR-RIE-010 plain feedback and safe failure | T-007, T-009, T-013, T-015, T-017, T-018 | `InstructionDisplayStateTests.testEveryFailureMapsToAKey`; `InstructionCaptureTests.testPermissionProblemCarriesCase`; `RoutineSchedulerTests.testPersistFailureLeavesPreviousInstruction`; `FreeFormEventServiceTests.testInstructionFailureReportsInstructionSaved`; `InstructionPlaybackControllerTests.testFailureLineIsSingle`; `InstructionSurfaceTests.testImageFailureShowsOnePlainLine` | COVERED |
+| FR-RIE-011 video storage layout and protection | T-001, T-002, T-005, T-026 | `InstructionModelTests.testOwnerRootsAreDisjoint`; `InstructionVideoStoreTests.testCreateProtectedFileRunsBeforeFirstWrite`; `InstructionImageLoadingTests.testLoadsStoredJPEG`; `InstructionSourceHygieneTests.testNoCopyItemInVideoStore` | COVERED |
+| FR-RIE-012 filename hygiene and traversal guard | T-001, T-002, T-005 | `InstructionModelTests.testFilenameGuardRejectsTraversalAndEmptyNames`; `InstructionVideoStoreTests.testInvalidOwnerNameIsRefusedBeforePathBuild`; `InstructionImageLoadingTests.testTraversalFilenameIsInvalid` | COVERED |
+| FR-RIE-013 transactional replace | T-002, T-013, T-015 | `InstructionVideoStoreTests.testCommitOrderRenameThenDelete`; `RoutineSchedulerTests.testPersistFailureLeavesPreviousInstruction`; `FreeFormEventServiceTests.testPersistFailureDoesNotOrphanNewBytes` | COVERED |
+| FR-RIE-014 delete with owner | T-002, T-013, T-015, T-025 | `InstructionVideoStoreTests.testDeleteFailureIsReported`; `RoutineSchedulerTests.testEntryDeletingDeletesAllMedia`; `FreeFormEventServiceTests.testDeleteEventDeletesAllMedia`; `AppCoordinatorInstructionTests.testSweepHonoursTenantGrace` | COVERED |
+| FR-RIE-015 reminder always fires | T-012, T-013, T-016, T-025 | `RoutineNotificationSchedulerTests.testHadInstructionRoundTripsBool`; `RoutineSchedulerTests.testRegenerateWindowPassesHadInstructionFalse`; `RoutineVisualAidFireHandlerTests.testForegroundNoAidsNoInstructionDoesNotPresent`; `AppCoordinatorInstructionTests.testPresentForegroundBuildsReminderContent` | COVERED |
+| FR-RIE-016 handlers always false | T-016 | `RoutineVisualAidFireHandlerTests.testWillPresentAlwaysReturnsFalse`; `FreeFormEventFireHandlerTests.testWillPresentAlwaysReturnsFalse` | COVERED |
+| FR-RIE-017 fire-time composition | T-003, T-018, T-021, T-025 | `InstructionDisplayStateTests.testPresentationCollapsesEveryStoredShape`; `InstructionSurfaceTests.testCardRendersVideoPlayAt44Points`; `InstructionSurfaceTests.testPresentInstructionRendersCardTime`; `AppCoordinatorInstructionTests.testExpectsInstructionMirrorsHadInstruction` | COVERED |
+| FR-RIE-018 playback UX without autoplay | T-004, T-017, T-018 | `InstructionPlaybackAdapterTests.testPresentationDoesNotAutoplay`; `InstructionPlaybackControllerTests.testStartIsRequiredForPlayback`; `InstructionSurfaceTests.testNoAutoplaySourcePin` | COVERED |
+| FR-RIE-019 tap open path and foreground honesty | T-012, T-016, T-021, T-025 | `RoutineNotificationSchedulerTests.testMissingHadInstructionReadsFalse`; `RoutineVisualAidFireHandlerTests.testTapDeletedOwnerCallsSinkWithNil`; `InstructionSurfaceTests.testUnavailableRendersNoticeWithClose`; `AppCoordinatorInstructionTests.testTapWithNilEntryPresentsUnavailable` | COVERED |
+| FR-RIE-020 playback failure plain fallback | T-004, T-007, T-017, T-018 | `InstructionPlaybackAdapterTests.testItemFailureEmitsPlayerFailed`; `InstructionDisplayStateTests.testEveryFailureMapsToAKey`; `InstructionPlaybackControllerTests.testReadyWatchdogAt10Seconds`; `InstructionSurfaceTests.testVideoFailureShowsOnePlainLine` | COVERED |
+| FR-RIE-021 notification taxonomy preserved | T-012, T-013 | `RoutineNotificationSchedulerTests.testNoCategoryOrActionIsSet`; `RoutineNotificationSchedulerTests.testScopedCancelsAreUnchanged`; `RoutineSchedulerTests.testScopedCancelsOnly`; `NotificationCategoriesTests` untouched | COVERED |
+| FR-RIE-022 video not in notification attachments | T-012 | `RoutineNotificationSchedulerTests.testNoInstructionTextCaptionFilenameOrURLInPayload`; `RoutineNotificationSchedulerTests.testFirstPhotoAttachmentIsPreserved` | COVERED |
+| FR-RIE-023 no new acknowledgement or escalation machinery | T-013, T-016, T-027 | `RoutineSchedulerTests.testScopedCancelsOnly`; `RoutineVisualAidFireHandlerTests.testDidReceiveAlwaysReturnsFalse`; `InstructionFeatureIntegrationTests.testMedicationFixturesUnchanged` | COVERED |
+| FR-RIE-024 honest capability surface | T-003, T-007, T-018, T-021, T-026 | `InstructionDisplayStateTests.testUnsupportedCarriesSavedText`; `InstructionDisplayStateTests.testMessageKeyHasNoCodeOrDiagnostic`; `InstructionSurfaceTests.testNoHardCodedElderFacingStrings`; `InstructionSurfaceTests.testUnavailableCarriesNoTitleOrTime`; `InstructionSourceHygieneTests.testFeatureRootsAreRegistered` | COVERED |
+| FR-RIE-025 camera and microphone permissions | T-006, T-009, T-010, T-020 | `InstructionPermissionTests.testStatusReadDoesNotRequest`; `InstructionCaptureTests.testDeniedCameraSkipsMicrophone`; `InstructionCaptureTests.testRecorderUsesCameraAndMicrophone`; `L10nCatalogCoverageTests.testPlistUsageTextMatchesDesignVerbatim` | COVERED |
+| NFR-RIE-001 accessibility for elderly fit | T-018, T-021, T-023, T-024 | `InstructionSurfaceTests.testCardRendersVideoPlayAt44Points`; `InstructionSurfaceTests.testAccessibilityLabelsMatchDesign`; `InstructionSurfaceTests.testPhotoOnlyFiringPassesNilTimeAndEmptyFooter`; `RoutineSettingsInstructionTests.testAccessibilityLabelOnInstructionRow`; `FreeFormEventFormTests.testEventDetailAccessibilityLabel` | COVERED |
+| NFR-RIE-002 localisation English and Nepali | T-007, T-018, T-019, T-020, T-021, T-023, T-024 | `InstructionDisplayStateTests.testEveryMappedKeyResolvesInBothLanguages`; `InstructionSurfaceTests.testNoHardCodedElderFacingStrings`; `L10nCatalogCoverageTests.testEveryInstructionKeyResolvesInBothLanguages`; `L10nCatalogCoverageTests.testNeInfoPlistStringsExistsAndParsesInBuiltBundle`; `InstructionSurfaceTests.testOverlayResolvesReminderUnavailableKeyInBothLanguages` | COVERED |
+| NFR-RIE-003 no new egress | T-002, T-004, T-026 | `InstructionVideoStoreTests.testStagingDoesNotUseCopyItem`; `InstructionPlaybackAdapterTests.testAdapterPerformsNoNetworkOrTranscode`; `InstructionSourceHygieneTests.testNoNetworkOrUploadInFeatureSources` | COVERED |
+| NFR-RIE-004 PII-free logging and release gate | T-007, T-026 | `InstructionObservabilityTests.testNoEmitterAcceptsFreeText`; `InstructionSourceHygieneTests.testPlantedFreeTextLogFailsGate`; `InstructionSourceHygieneTests.testSevenEventTypesRegistered` | COVERED |
+| NFR-RIE-005 at-rest file protection | T-002, T-026 | `InstructionVideoStoreTests.testWeakerClassAtCreationDeletes`; `InstructionVideoStoreTests.testUnreportedClassIsTolerated`; `InstructionSourceHygieneTests.testNoPhotoLibraryAccess` | COVERED |
+| NFR-RIE-006 migration compatibility | T-001, T-003, T-011, T-014 | `InstructionModelTests.testTolerantDecodeIgnoresUnknownFields`; `InstructionDisplayStateTests.testBlankTextIsNoneNotUnsupported`; `RoutineEntryTests.testLegacyEntryDecodesNilInstruction`; `EventExtrasStoreTests.testLegacyExtrasDecodesWithNilInstruction`; `InstructionFeatureIntegrationTests.testMigrationFixturesF1ThroughF12` | COVERED |
+| NFR-RIE-007 storage footprint and orphans | T-002, T-011, T-013, T-014, T-025 | `InstructionVideoStoreTests.testPurgePendingDraftsOnly`; `RoutineStoreTests.testStrictReadReturnsNilOnReadFailure`; `RoutineSchedulerTests.testEntryDeletingDeletesAllMedia`; `EventExtrasStoreTests.testSnapshotReturnsNilOnReadFailure`; `AppCoordinatorInstructionTests.testSweepKeepsBytesForUnreadableRoutineSource` | COVERED |
+| NFR-RIE-008 playback responsiveness | T-017, T-018, T-027 | `InstructionPlaybackControllerTests.testPreflightTimeoutAt600Milliseconds`; `InstructionPlaybackControllerTests.testReadyWatchdogAt10Seconds`; `InstructionSurfaceTests.testNoAutoplaySourcePin`; 14-step device recording in T-027 | COVERED + DEVICE |
+| NFR-RIE-009 playback seam and test gates | T-004, T-006, T-008, T-009, T-017, T-027 | `InstructionPlaybackAdapterTests.testLateObservationAfterDismissIgnored`; `InstructionPermissionTests.testRequesterIsSendableValue`; `InstructionVideoImportTests.testTimeoutReturnsValidationTimedOut`; `InstructionCaptureTests.testConsumeAcceptedIsExactlyOnce`; `InstructionPlaybackControllerTests.testLateReadyAfterCloseIgnored`; T-027 full suite | COVERED |
+| NFR-RIE-010 preserved baseline and release gates | T-016, T-021, T-025, T-027 | `RoutineVisualAidFireHandlerTests.testWillPresentAlwaysReturnsFalse`; `InstructionSurfaceTests.testPhotoOnlyFiringPassesNilTimeAndEmptyFooter`; `AppCoordinatorInstructionTests.testSweepNotRunFromInit`; `InstructionFeatureIntegrationTests.testMedicationFixturesUnchanged`; zero-new-failures comparison in T-027 | COVERED + DEVICE |
+
+No requirement row is empty; no unit is absent from this matrix. T-010 (FR-004/005/025), T-019 (NFR-002), T-020 (FR-025, NFR-002) and T-026 (NFR-003/004/005) are traceable even though they are mostly infrastructure or copy.
+
+## Must-carry obligations
+
+These are the review-l2 Conditions plus the review-l1 and design findings the implementer must not lose. Each is pinned in a unit's acceptance criteria, named tests and implementation notes.
+
+| Obligation | Origin | Pinned in | Required evidence |
+|------------|--------|-----------|-------------------|
+| B-3 create-before-bytes | review-l2 Condition | T-002 | Design §5.2 steps 5–7; ordered create-then-write test; no-`copyItem` source scan; weaker class at creation and after stream; mid-stream, truncation and cumulative-cap cases, and the kill-window cases E.1–E.9 |
+| M-3 built-bundle usage strings | review-l2 Condition | T-020 | `en.lproj` and `ne.lproj` `InfoPlist.strings` existence and parse assertions against the built bundle; direct file reads; never `Bundle.main.object(forInfoDictionaryKey:)` |
+| M-4 strict routine read | review-l2 Condition | T-011, T-013, T-025 | `loadEntriesIfReadable()` nil on every read failure including missing key; `entriesIfReadable()` delegates; failing-double survival; readable-but-empty after grace; legacy `[]` tests; never build the live set from `loadEntries()` |
+| R-5 conditional protection tolerance | review-l2 Condition | T-002 | Unreported attribute tolerated; a reported weaker class fails `protectionFailed` and deletes; exactly as written |
+| OI-1 typed write seam and IF-26 exception | review-l2 Condition | T-013, T-014 | `setInstruction` returns `Result<Void, InstructionWriteError>`; `EventExtrasStore.setInstruction` keeps `Bool` as the recorded exception and is translated at the service seam; IF-26 label retained |
+| B-1 optional-entry tap and unavailable notice | review-l1 | T-016, T-021, T-025 | Three tap cases; `onInstructionTap` takes an optional entry; deleted owner renders `instruction.reminderUnavailable` with Close; no dead tap |
+| B-2 raw `"text"` kind | review-l1 | T-001, T-011, T-014 | Stored text kind stays raw `"text"`; round-trip tests in model, routine entry and event extras |
+| M-1 camera before microphone | review-l1 | T-006, T-009 | Denial short-circuit; microphone request count zero after camera denial; order asserted with a recording requester |
+| M-2 FR-RIE-024/021/022 evidence | review-l1 | T-003, T-007, T-012, T-018, T-021 | Unsupported state honesty; no codes in copy; no category or action; no instruction content or attachment in the payload |
+| N-1 non-empty filename guard | design | T-002, T-005 | Empty, absolute, separator and traversal names refused before a URL is built |
+| N-4 filename guard at the image boundary | design | T-001, T-002, T-005 | Same guard reused; not weakened for images |
+| N-5 D6 time gate and photo-only firing | design | T-021 | `timeText` only when instruction present or expected; photo-only passes nil and renders `EmptyView`; `.unavailable` never renders a time |
+| N-6 real notification suite | design | T-012 | `RoutineNotificationSchedulerTests` is the suite; no `RoutineNotificationContentTests` phantom anywhere |
+| N-9 FR-RIE-015/009 evidence | design | T-012, T-013, T-016 | Reminder arms and fires with or without an instruction; `hadInstruction` passed at `regenerateWindow`; foreground and tap paths tested |
+| N-10 inclusive 180 seconds | design | T-001, T-008 | Rounded 180 accepted; 181 rejected; copy says "3 minutes or shorter" |
+
+## Implementation pins and assumptions
+
+These are the only places where the design leaves a file-level or ordering detail to the plan. No design change is proposed.
+
+1. **P-1 `FreeFormEventDraft.swift` does not exist.** Design C10 names it, but the worktree declares `FreeFormEventForm` inside `ios/ElderlyAssistant/Services/Events/FreeFormEventService.swift` (line 97 at plan time). T-015 extends that file in place. The phantom file is not created and is not cited in any ownership set.
+2. **P-2 `RoutineEntry.swift` is a design-implied shared file.** It is not in the §2.0 file table but the §4.4 delta requires it. T-011 owns it in wave 1.
+3. **P-3 `VisualAidViews.swift` is a design-implied shared file.** The §2.15.4 and §4.10/§4.11 fired-screen delta requires it. T-021 owns it in wave 7. `ContentView.swift` hosts the overlay and is owned by the same unit.
+4. **P-4 `InstructionWriteError` is declared in `RoutineScheduler.swift`.** The design groups the error under C11/C13 without naming a file. The C11 shared file is the declaration home; the event service consumes it after T-013's wave. The dependency is explicit in T-015.
+5. **P-5 same-file units are always in different waves.** `Instruction.swift` is T-001 then T-003; `InstructionDisplayState.swift` is T-003 then T-007 then T-013; `InstructionPlayback.swift` is T-004 then T-017. The hotspot table is the landing order.
+6. **P-6 the notification scheduler file is `RoutineAlarmScheduler.swift`.** There is no `RoutineAlarmSchedulerTests`; the new suite is `RoutineNotificationSchedulerTests`. The content builder is extracted to `Services/Notifications/RoutineNotificationContent.swift` (C17).
+7. **P-7 `ios/project.yml` needs explicit resource entries for both `InfoPlist.strings` files.** The existing `Localizable.xcstrings` entry documents why a single-file resource cannot rely on the source glob. New Swift files are picked up by the existing source globs; verify at implement time. Do not add strings files as sources.
+8. **P-8 there is no `RoutineNotificationContentTests`.** Design N-6 removed the phantom. The builder is tested by `RoutineNotificationSchedulerTests`.
+9. **P-9 `InstructionVideoStore.stageSynchronously` is nonisolated but main-thread-only by contract.** It does bounded 1 MiB chunks; do not move it to a background queue and do not replace the chunk loop with a whole-file read.
+10. **P-10 the built-bundle localisation assertions open `.strings` files directly.** `Bundle.main.object(forInfoDictionaryKey:)` proves only the merged result and is forbidden for the M-3 assertions. The test records which bundle it inspected.
+11. **P-11 wave assignment for T-026 is wave 8.** It depends on T-021 (wave 7) because the source-hygiene suite also covers the fired-screen honesty surface. It is disjoint from T-025 and shares the wave.
+12. **P-12 the previous plan is archived inside `specs/plan-tasks/`.** The move was required because the engine discovers every `.md` under `tasks/` and rejects duplicate ids. The archive is invisible to discovery because it is outside `tasks/`.
+
+## Test and build strategy
+
+**Per unit.** Focused tests plus typecheck, not the full suite. Each unit file names its suite and the exact scoped filter. The test action builds the app target, which is the typecheck. A unit is done when its own filter is green and its acceptance scenarios are covered.
+
+**Per wave.** After the wave lands, the coordinator runs one consolidated scoped `xcodebuild test` pass over the union in the wave table. This is still not the full suite. If a wave pass is red, fix the unit in that wave; do not start the next wave on a red seam.
+
+**At the end.** T-027 runs exactly one full-suite pass and compares the pass/fail set with the documented baseline recorded at implementation start. It also runs the build-blocking release-log gate and `./build.sh`, then records the 14-step Release-build device smoke as passed with evidence or as an outstanding gate with the reason. No other unit runs the full suite.
+
+**Environment.** Use `xcodebuild test`, not `xcodebuild build`; `./build.sh` is the canonical build. A fresh worktree needs the model symlinks (`whisper-medium-ne-q5_1.bin` and the kws assets) or the link phase fails. Prune stale worktree DerivedData before a long build; each worktree can hold about 4.5 GB and an ENOSPC failure can look like a silent test failure. The Android Gradle gate is not part of this feature and is not run locally.
+
+**Device-only evidence.** The 14-step smoke needs the owner's device. NFR-RIE-008's 500 ms player, 2 s first-frame and 1 s failure-fallback measurements cannot be proved in a simulator. T-027 records them or records the gate as outstanding; it never marks them passed without evidence.
+
+## Risks
+
+1. **B-3 protection and ordering (CRITICAL, T-002).** A create-before-bytes path is easy to "simplify" into a copy. The ordered spy test, the no-`copyItem` scan and the weaker-class cases are the defense. If any is missing, the review fails.
+2. **M-4 nil-as-empty sweep deletion (CRITICAL, T-011, T-025).** Treating an unreadable store as empty deletes a family's videos. The strict read, the nil-preserving delegation and the unreadable-source sweep tests are mandatory.
+3. **D6 baseline regression (CRITICAL, T-021).** A photo-only firing must render exactly today's screen. The nil `timeText`, `EmptyView` card and `EmptyView` footer tests are the baseline guard.
+4. **Transaction ordering across routine and event (CRITICAL, T-013, T-015).** Media durable before the index names it; index durable before old bytes go. Asymmetric failures must leave the previous instruction intact.
+5. **Permission order and device-only capture (HIGH, T-006, T-009, T-010).** The simulator cannot prove camera or microphone behaviour. The ordering tests use doubles; the device smoke is the real confirmation.
+6. **Built-bundle localisation (HIGH, T-020).** The strings files can exist in the tree but not in the bundle. Only the built-bundle assertions catch that.
+7. **Shared-file merge conflicts (HIGH, ordering table).** Most hotspots are large existing files. Same-wave overlap is forbidden and the landing order is explicit; keep diffs additive.
+8. **Worktree disk and build environment (MEDIUM, T-027).** Model symlinks and DerivedData must be handled before the final build.
+9. **Device smoke unavailable (HIGH, T-027).** If the device or owner time is unavailable, the feature records an outstanding gate. It is not silently downgraded to a simulator pass.
+10. **Observability PII leakage (HIGH, T-007, T-026).** Typed emitters and the release gate are the defense; a free-text escape hatch or an unregistered root defeats both.
+11. **Full-suite baseline unknown (HIGH, T-027).** The repository has had a non-green full suite. If the starting baseline is not recorded, the final comparison is inconclusive, not green.
+12. **Stale unit discovery (mitigated).** The prior plan's 198 unit files were archived inside `specs/plan-tasks/` before this plan was written. Without that, duplicate ids would fatal the wave planner.
+
+## Scope discipline
+
+This plan implements the approved design only. Explicit non-goals, checked in T-026 and T-027: no links, YouTube or URL playback; no transcode, compression or trimming; no cloud call or new egress; no instruction notification category, action or attachment; no medication-path change; no multi-instruction per owner; no photo-library access; no Settings deep link; no audio captioning; no `SpokenTime`. Shared-file edits are limited to the files tabled in design §2.0 plus the two design-implied files pinned in P-2 and P-3. No new product scope is invented.

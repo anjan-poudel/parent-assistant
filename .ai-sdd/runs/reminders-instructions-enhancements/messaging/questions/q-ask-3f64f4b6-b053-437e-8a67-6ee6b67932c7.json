@@ -1,0 +1,26 @@
+{
+  "schema_version": "1",
+  "question_id": "q-ask-3f64f4b6-b053-437e-8a67-6ee6b67932c7",
+  "kind": "open",
+  "channel_id": "C0C6CEVV8R4",
+  "message_ts": "C0C6CEVV8R4:1792906532.713349",
+  "thread_ts": "1792906532.713349",
+  "hil_id": null,
+  "status": "answered",
+  "asked_at": "2026-10-25T05:35:32.689Z",
+  "expires_at": "2026-11-19T02:06:56.336Z",
+  "consumed": [
+    {
+      "message_id": "C0C6CEVV8R4:1792907043.876899",
+      "event_id": null,
+      "from_user": "U0C6DTHDMV0",
+      "consumed_at": "2026-10-25T05:45:50.436Z",
+      "delivered_at": "2026-10-25T05:45:50.438Z"
+    }
+  ],
+  "answer": {
+    "choice_id": null,
+    "text": "to freeform calendar events too",
+    "from_user": "U0C6DTHDMV0"
+  }
+}

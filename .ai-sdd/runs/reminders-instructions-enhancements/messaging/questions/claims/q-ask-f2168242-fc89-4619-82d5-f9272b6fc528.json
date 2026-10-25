@@ -1,0 +1,15 @@
+{
+  "schema_version": "1",
+  "question_id": "q-ask-f2168242-fc89-4619-82d5-f9272b6fc528",
+  "claimant": "store-90939-1",
+  "message_id": "terminal:q-ask-f2168242-fc89-4619-82d5-f9272b6fc528",
+  "event_id": null,
+  "from_user": "U0C6DTHDMV0",
+  "consumed_at": "2026-10-25T08:54:15.082Z",
+  "answer": {
+    "choice_id": "yes",
+    "text": null,
+    "from_user": "U0C6DTHDMV0"
+  },
+  "claimed_at": "2026-10-25T08:54:15.082Z"
+}

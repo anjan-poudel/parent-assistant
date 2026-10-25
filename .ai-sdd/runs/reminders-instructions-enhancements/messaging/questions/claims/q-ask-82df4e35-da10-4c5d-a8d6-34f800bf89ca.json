@@ -1,0 +1,15 @@
+{
+  "schema_version": "1",
+  "question_id": "q-ask-82df4e35-da10-4c5d-a8d6-34f800bf89ca",
+  "claimant": "store-45861-1",
+  "message_id": "C0CBGQSNC79:1792925653.841039",
+  "event_id": null,
+  "from_user": "U0C6DTHDMV0",
+  "consumed_at": "2026-10-25T10:59:27.831Z",
+  "answer": {
+    "choice_id": "option-1",
+    "text": null,
+    "from_user": "U0C6DTHDMV0"
+  },
+  "claimed_at": "2026-10-25T10:59:27.832Z"
+}

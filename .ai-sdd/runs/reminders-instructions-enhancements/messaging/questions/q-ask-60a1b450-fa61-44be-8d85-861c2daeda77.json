@@ -1,0 +1,26 @@
+{
+  "schema_version": "1",
+  "question_id": "q-ask-60a1b450-fa61-44be-8d85-861c2daeda77",
+  "kind": "open",
+  "channel_id": "C0C6CEVV8R4",
+  "message_ts": "C0C6CEVV8R4:1792899559.220099",
+  "thread_ts": "1792899559.220099",
+  "hil_id": null,
+  "status": "answered",
+  "asked_at": "2026-10-25T03:39:19.184Z",
+  "expires_at": "2026-11-19T00:10:42.831Z",
+  "consumed": [
+    {
+      "message_id": "C0C6CEVV8R4:1792899634.083409",
+      "event_id": null,
+      "from_user": "U0C6DTHDMV0",
+      "consumed_at": "2026-10-25T03:49:44.773Z",
+      "delivered_at": "2026-10-25T03:49:44.776Z"
+    }
+  ],
+  "answer": {
+    "choice_id": null,
+    "text": "none",
+    "from_user": "U0C6DTHDMV0"
+  }
+}

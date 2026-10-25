@@ -1,0 +1,33 @@
+{
+  "id": "8a2b6131-5912-4d50-8998-4c25c59f524a",
+  "task_id": "define-requirements",
+  "workflow_id": "reminders-instructions-enhancements",
+  "status": "RESOLVED",
+  "reason": "T1 human sign-off — requirements for reminders-instructions-enhancements. 25 functional requirements (FR-RIE-001..025), 10 non-functional requirements (NFR-RIE-001..010), 107 Gherkin acceptance scenarios. Scope: attach a text, image, or video instruction to a daily-routine reminder or app-created free-form event and play it at fire time with large controls, honest failure fallbacks, on-device storage and no new egress. Medication reminders, imported events, Android, cloud processing, voice authoring, and YouTube-in-v1 are explicitly out of scope. OD-1..OD-8 are RESOLVED in the feature constitution (2026-10-25); no owner decision is open.",
+  "context": {
+    "task_description": "Business-analyst requirements pass for the reminders-instructions-enhancements feature: one file per requirement (FR/NFR), indexes at each level, consolidated requirements doc, and a locked snapshot as the drift baseline.",
+    "risk_tier": "T1",
+    "agent": "ba",
+    "artifacts": [
+      "specs/define-requirements.md",
+      "specs/define-requirements.lock.yaml",
+      "specs/define-requirements/index.md",
+      "specs/define-requirements/FR/index.md",
+      "specs/define-requirements/NFR/index.md"
+    ],
+    "artifact_counts": {
+      "functional_requirements": 25,
+      "non_functional_requirements": 10,
+      "acceptance_scenarios": 107
+    },
+    "lock_verified": "35/35 per-file sha256 verified against disk; snapshot_sha256 a02b9d4e… matches specs/define-requirements.md; lock parses (locked_at 2026-10-25T06:17:29Z).",
+    "branch": "feat/reminders-instructions-enhancements",
+    "branch_tip": "821f19c5",
+    "artifacts_uncommitted": true,
+    "open_decisions": [],
+    "note": "Item created by the dispatching session because the task was dispatched directly (not via the ai-sdd run command), which is the path that normally creates it. Owner decision is being taken on the session Slack channel."
+  },
+  "created_at": "2026-10-25T06:20:29.050Z",
+  "notes": "Owner approved requirements sign-off from the terminal (2026-10-25); Slack yes/no buttons unreachable due to broken socket delivery",
+  "resolved_at": "2026-10-25T07:25:09.523Z"
+}

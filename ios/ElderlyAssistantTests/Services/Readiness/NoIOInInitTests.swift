@@ -80,6 +80,103 @@ final class NoIOInInitTests: XCTestCase {
                        "RoutineStore.init performed a storage write")
     }
 
+    // MARK: - Instruction video store init (T-002) — zero FILE io
+
+    func testInitDoesNoFileIO() {
+        // Source pin (design §5.1): the init region resolves paths only —
+        // a pure path lookup, never a create, stat, enumerate, remove or
+        // move.
+        let storeURL = FeatureSourceScan.iosDirectory(file: #filePath)
+            .appendingPathComponent("ElderlyAssistant/Services/Instructions/InstructionVideoStore.swift")
+        let code = FeatureSourceScan.codeText(of: storeURL)
+        XCTAssertFalse(code.isEmpty, "the source scan must actually read the store file")
+        let lines = code.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard let start = lines.firstIndex(where: { $0.contains("init(fileManager:") }) else {
+            return XCTFail("InstructionVideoStore.swift has no init(fileManager:)")
+        }
+        let tail = Array(lines[(start + 1)...])
+        let endInTail = tail.firstIndex { line in
+            ["    func ", "    private ", "    static ", "    var ", "    let "]
+                .contains { line.hasPrefix($0) }
+        } ?? tail.count
+        let initRegion = lines[start..<(start + 1 + endInTail)].joined(separator: "\n")
+
+        for forbidden in ["createDirectory", "contentsOfDirectory", "fileExists",
+                          "attributesOfItem", "createFile", "removeItem", "moveItem",
+                          "copyItem", "data(", "contents("] {
+            XCTAssertFalse(initRegion.contains(forbidden),
+                           "InstructionVideoStore.init must not call \(forbidden)")
+        }
+        XCTAssertTrue(initRegion.contains("url(for:"), "init must resolve the base path")
+        XCTAssertTrue(initRegion.contains("applicationSupportDirectory"))
+        XCTAssertTrue(initRegion.contains("temporaryDirectory"))
+        XCTAssertTrue(initRegion.contains("create: false"),
+                      "the Application Support lookup must be a pure path lookup")
+
+        // Behavioural: constructing the store over a nonexistent base
+        // leaves that base nonexistent (no createDirectory in init).
+        let absentBase = FileManager.default.temporaryDirectory
+            .appendingPathComponent("instruction-store-init-\(UUID().uuidString)", isDirectory: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: absentBase.path))
+        _ = InstructionVideoStore(fileManager: .default, baseDirectory: absentBase)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: absentBase.path),
+                       "init must not create the base directory")
+
+        // The default-base construction performs the pure path lookup only:
+        // whatever exists under Application Support is left exactly as found.
+        guard let applicationSupport = try? FileManager.default.url(
+            for: .applicationSupportDirectory, in: .userDomainMask,
+            appropriateFor: nil, create: false) else {
+            return XCTFail("Application Support must resolve in the hosted test environment")
+        }
+        let routinesRoot = applicationSupport.appendingPathComponent("InstructionVideos", isDirectory: true)
+        let existedBefore = FileManager.default.fileExists(atPath: routinesRoot.path)
+        _ = InstructionVideoStore()
+        XCTAssertEqual(FileManager.default.fileExists(atPath: routinesRoot.path), existedBefore,
+                       "init must neither create nor remove the routines root")
+    }
+
+    // MARK: - Instruction launch sweep (T-025) — never part of init
+
+    func testSweepNotRunFromInit() {
+        let sourceURL = FeatureSourceScan.iosDirectory(file: #filePath)
+            .appendingPathComponent("ElderlyAssistant/App/AppCoordinator.swift")
+        let code = FeatureSourceScan.codeText(of: sourceURL)
+        XCTAssertFalse(code.isEmpty, "the source scan must actually read the coordinator")
+
+        // The init region: the initializer's first line through the end of
+        // the composition root. Constructing the coordinator must neither
+        // enqueue nor run the sweep — the sweep reads and removes files, so
+        // it belongs off the launch path (design-l2 §5.5, §7.4).
+        guard let initStart = code.range(of: "init(profileStorage:"),
+              let initEnd = code.range(of: "StartupSignposts.end(.bootstrapInit)",
+                                       range: initStart.upperBound..<code.endIndex) else {
+            return XCTFail("could not slice the coordinator's init region")
+        }
+        let initRegion = String(code[initStart.lowerBound..<initEnd.upperBound])
+        for forbidden in ["enqueueInstructionOrphanSweep",
+                          "performInstructionOrphanSweep",
+                          "purgePendingDrafts",
+                          "purgeOrphanedOwners"] {
+            XCTAssertFalse(initRegion.contains(forbidden),
+                           "init must not run or enqueue the orphan sweep (\(forbidden))")
+        }
+
+        // The launch path starts the ONE sweep, on the main actor, from the
+        // post-first-frame composition — not from `start()`'s synchronous
+        // section and not from a timer.
+        guard let launchStart = code.range(of: "private func composePostFirstFrame()"),
+              let launchEnd = code.range(of: "private func bootRestoreData()",
+                                         range: launchStart.upperBound..<code.endIndex) else {
+            return XCTFail("could not slice composePostFirstFrame")
+        }
+        let launchRegion = String(code[launchStart.lowerBound..<launchEnd.lowerBound])
+        XCTAssertEqual(occurrences(of: "enqueueInstructionOrphanSweep()", in: launchRegion), 1,
+                       "the launch path enqueues the sweep exactly once")
+        XCTAssertTrue(launchRegion.contains("MainActor.assumeIsolated"),
+                      "the enqueue is composed on the main actor")
+    }
+
     // MARK: - The deferred load restores what init used to (per store)
 
     func testGeminiDeferredLoadRestoresStoredValuesOffInit() {
@@ -133,6 +230,17 @@ final class NoIOInInitTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    private func occurrences(of needle: String, in haystack: String) -> Int {
+        guard !needle.isEmpty else { return 0 }
+        var count = 0
+        var searchStart = haystack.startIndex
+        while let found = haystack.range(of: needle, range: searchStart..<haystack.endIndex) {
+            count += 1
+            searchStart = found.upperBound
+        }
+        return count
+    }
 
     private func date(_ year: Int, _ month: Int, _ day: Int,
                       _ hour: Int, _ minute: Int) -> Date {

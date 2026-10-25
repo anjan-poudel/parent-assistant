@@ -8744,6 +8744,618 @@
         }
       }
     },
+    "instruction.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add instruction"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "निर्देशन थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "instruction.atTimeFormat": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "At %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ बजे"
+          }
+        }
+      }
+    },
+    "instruction.camera.denied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To record a video, allow the camera in Settings."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भिडियो रेकर्ड गर्न सेटिङमा क्यामेरा अनुमति दिनुहोस्।"
+          }
+        }
+      }
+    },
+    "instruction.camera.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The camera isn't available right now. You can choose a video instead."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्यामेरा अहिले उपलब्ध छैन। तपाईं भिडियो छान्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "instruction.change": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change instruction"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "निर्देशन बदल्नुहोस्"
+          }
+        }
+      }
+    },
+    "instruction.done": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Done"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भयो"
+          }
+        }
+      }
+    },
+    "instruction.foregroundNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This video plays only when the app is open."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो भिडियो एप खोलेर मात्र हेर्न सकिन्छ।"
+          }
+        }
+      }
+    },
+    "instruction.image.accessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Instruction photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "निर्देशनको फोटो"
+          }
+        }
+      }
+    },
+    "instruction.image.change": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो बदल्नुहोस्"
+          }
+        }
+      }
+    },
+    "instruction.image.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This photo can't be shown."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोटो देखाउन सकिएन।"
+          }
+        }
+      }
+    },
+    "instruction.kind.image": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो"
+          }
+        }
+      }
+    },
+    "instruction.kind.text": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Text"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पाठ"
+          }
+        }
+      }
+    },
+    "instruction.kind.video": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भिडियो"
+          }
+        }
+      }
+    },
+    "instruction.microphone.denied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To record a video, allow the microphone in Settings."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भिडियो रेकर्ड गर्न सेटिङमा माइक्रोफोन अनुमति दिनुहोस्।"
+          }
+        }
+      }
+    },
+    "instruction.reminderUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This reminder is no longer available."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो सम्झना अब उपलब्ध छैन।"
+          }
+        }
+      }
+    },
+    "instruction.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove instruction"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "निर्देशन हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "instruction.removed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This instruction is no longer available."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो निर्देशन अब उपलब्ध छैन।"
+          }
+        }
+      }
+    },
+    "instruction.saveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your changes weren't saved. Try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंका परिवर्तन बचत हुन सकेनन्। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "instruction.savePartial": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The video couldn't be saved. Add it again from the event."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भिडियो बचत हुन सकेन। कार्यक्रमबाट फेरि थप्नुहोस्।"
+          }
+        }
+      }
+    },
+    "instruction.textPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Write the instruction"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "निर्देशन लेख्नुहोस्"
+          }
+        }
+      }
+    },
+    "instruction.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Instruction"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "निर्देशन"
+          }
+        }
+      }
+    },
+    "instruction.unsupported": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This instruction may not show correctly."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो निर्देशन राम्ररी देखिन नसक्ने हुन सक्छ।"
+          }
+        }
+      }
+    },
+    "instruction.useVideo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use this video"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो भिडियो प्रयोग गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "instruction.video.accessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Instruction video. Play"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "निर्देशनको भिडियो। चलाउनुहोस्"
+          }
+        }
+      }
+    },
+    "instruction.video.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a video"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भिडियो छान्नुहोस्"
+          }
+        }
+      }
+    },
+    "instruction.video.change": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change video"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भिडियो बदल्नुहोस्"
+          }
+        }
+      }
+    },
+    "instruction.video.play": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चलाउनुहोस्"
+          }
+        }
+      }
+    },
+    "instruction.video.preparing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Getting the video ready…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भिडियो तयार हुँदैछ…"
+          }
+        }
+      }
+    },
+    "instruction.video.record": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Record a video"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भिडियो रेकर्ड गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "instruction.video.recordingLimit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording stops by itself after 3 minutes."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "रेकर्डिङ ३ मिनेटपछि आफै रोकिन्छ।"
+          }
+        }
+      }
+    },
+    "instruction.video.saveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The video couldn't be saved. Try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भिडियो बचत हुन सकेन। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "instruction.video.tooLarge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That video is too big for this phone. Choose a smaller one."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो भिडियो यो फोनका लागि धेरै ठूलो छ। सानो भिडियो छान्नुहोस्।"
+          }
+        }
+      }
+    },
+    "instruction.video.tooLong": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That video is too long. Choose one 3 minutes or shorter."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो भिडियो धेरै लामो छ। ३ मिनेटसम्मको भिडियो छान्नुहोस्।"
+          }
+        }
+      }
+    },
+    "instruction.video.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This video can't be played right now."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो भिडियो अहिले चलाउन सकिएन।"
+          }
+        }
+      }
+    },
+    "instruction.video.unreadable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That video can't be played on this phone. Choose a different one."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो भिडियो यो फोनमा चल्दैन। अर्को भिडियो छान्नुहोस्।"
+          }
+        }
+      }
+    },
+    "instruction.video.validating": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking the video…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भिडियो जाँच हुँदैछ…"
+          }
+        }
+      }
+    },
     "intentLog.clear": {
       "extractionState": "manual",
       "localizations": {

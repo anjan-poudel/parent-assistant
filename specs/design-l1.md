@@ -1,1069 +1,1611 @@
-# Design L1 — Medication Schedules and Reminders
+# Design L1 — Reminders Instructions Enhancements
 
-| | |
-|---|---|
-| Task | `design-l1` (agent: `system-architect`), contract `architecture_l1` |
-| Feature | `medication-schedules-reminders`, branch `feat/medication-schedules-reminders` |
-| Worktree | `/Users/anjan/workspace/projects/elderly-ai-assistant-medication-schedules-reminders` |
-| Base | `61e6bc32` (scaffold base master `261aa862`; every seam below re-verified in this worktree) |
-| Date | 2026-10-15 |
-| Inputs | project `constitution.md`; `specs/medication-schedules-reminders/constitution.md` (feature supplement: five binding contracts, safety delta (a)–(d), Feature Constraints 1–10, Integration Surfaces, Open Decisions); `specs/define-requirements.md` + `specs/define-requirements/` (22 FR-MSR, 10 NFR-MSR, locked; `define-requirements.lock.yaml`); read-only: `requirements.md` (FR-026–FR-030, NFR-027), `requirements-dementia-supplement.md` (FR-D01–FR-D04e), `docs/medication-scheduler-implementation-plan.md`, `docs/family-notifier-e2e-implementation-plan.md`, `docs/2026-09-16-calendar-family-sharing-implementation-plan.md`; workflow `specs/medication-schedules-reminders/workflow.yaml` |
-| OD status | OD-1…OD-3 settled as requirements (not reopened). **OD-4…OD-8 resolved in this document at L1** (§3, §6, §7, §8, §9, §11); the component-level internals each resolution leaves open are carried to `design-l2` with explicit boundaries (§24) |
-
-Line numbers cited below are orientation anchors into base `61e6bc32`, not contracts; symbol
-names are the contracts. Every seam claim was re-checked against the worktree code before being
-relied on. This document designs; it does not implement (no production code, no migrations, no
-seed content). Every interface below specifies its error paths (agent principle: explicit error
-return types), its isolation (agent principle: concurrency explicit), and treats windows and
-timeouts as configuration (§15) — no timeout literal is introduced. Scope is enforced by the
-requirements: every component named here traces to an FR-MSR/NFR-MSR id in §22, and nothing
-else is added.
+Feature: `reminders-instructions-enhancements`
+Worktree: `/Users/anjan/workspace/projects/elderly-ai-assistant-reminders-instructions-enhancements`
+Branch: `feat/reminders-instructions-enhancements`
+Scaffold base: master `821f19c5` (2026-10-25)
+Task: `design-l1` (agent: `sdd-architect`), rework iteration 2
+Rework authority: `specs/review-l1.md` — NO_GO review, preserved verbatim at
+`.ai-sdd/runs/reminders-instructions-enhancements/reviews/review-l1-iteration-1-NO_GO.md`.
+This revision resolves **B-1, B-2, M-1, M-2, m-1…m-8** in the design; the architecture,
+seams and the five accepted risks are retained unchanged.
+Inputs: `constitution.md`, `specs/reminders-instructions-enhancements/constitution.md`
+(OD-1…OD-8 resolved 2026-10-25), `specs/define-requirements.md`,
+`specs/define-requirements.lock.yaml` (35 requirements: 25 FR-RIE, 10 NFR-RIE).
+Verified against the checkout at the scaffold base; the codebase is unchanged by this rework.
+Line numbers are orientation, not contracts.
 
 ---
 
 ## Overview
 
-### 1. Scope and method
+### Purpose
 
-This document fixes the architecture for the owner's seven-point brief — the medication entry
-model becomes quantity + time-of-day slot + before/after meal; each medication carries a purpose;
-scan-to-fill works beside manual entry; the elder acknowledges intake in natural voice naming
-medication and slot; a photo of the medication serves as intake evidence; caregivers are always
-notified of significant events; and the whole is fit for forgetful elderly users — as bound by
-the feature constitution's five contracts and the 22+10 locked requirements. It translates the
-generic architect template to this codebase's idioms:
+A caregiver can attach **one instruction** — written text, an image, or a short video — to a
+daily-routine reminder (`RoutineEntry`) or an app-created free-form event (`EventExtras`). When the
+reminder or event fires, the elderly user sees the instruction in the app and can follow it
+unaided: text as readable text, an image like today's photo aids, a video behind a large, explicit
+Play control that opens full-screen AVKit playback. Nothing plays before that tap.
 
-- **"REST API surface" → the in-process seam surface.** This is a single-process native iOS app.
-  The interfaces that matter are the Swift seams another module may call — the scheduler's
-  resolution/arming feed, the pure slot-clock resolver, the pure ack resolver, the evidence
-  store, the notifier payload builder, the calendar-share write path — each with an explicit
-  outcome/error type (§21). There is no server of ours and no REST API.
-- **"OpenAPI" → the fixed schemas of those seams**: the `MedicationEntry` persisted schema
-  (§20), the family-alert wire envelope (§9.4), the household slot-clock record (§4.2), and the
-  significant-event calendar entry shape (§9.3) — each a named, versioned shape.
-- **"Data model" → persisted schemas**: the extended `MedicationEntry`, the extended
-  `MedicationAdherenceLog`, the new household slot-clock record, the new evidence file store
-  (§20). No database; `EncryptedLocalStorage` keys are the store (§20).
-- **"Infrastructure topology" → the process/component topology**: one iOS app process; the
-  platform alarm scheduler (UNUserNotificationCenter) as the firing surface; on-device Vision OCR
-  and camera capture; the caregiver app push path (transport stubbed — surfaced honestly); the
-  shared family Google Calendar (existing OAuth session, consent-gated). No container, no
-  Docker, no server of ours (§21.4).
-- **"Auth strategy" → the trust & consent model**: no accounts and no auth tokens are
-  introduced. The relevant authorization surfaces are (a) the existing family-calendar share
-  consent (reused, not re-invented), (b) the existing per-contact caregiver-notify settings
-  (opt-in kept for the daily first-fire only), and (c) the existing cloud voice-stack consent,
-  which this feature neither widens nor touches — label and photo processing stay on-device
-  (§12, §21.5).
+### Scope anchor (binding; not re-litigated here)
 
-### 2. Design summary and invariant ledger
+In scope: text, image and video instructions; video library pick and in-app recording using the
+system camera UI; one instruction of a single kind per owner; 3 minutes / 200 MiB, stored as
+provided (no transcode); optional caption for image/video; foreground-only presentation with the
+routine tap/Open path; plain localized fallback on media failure. Out of scope: medication
+reminders, imported events, YouTube/link instructions in v1 (a forward-compatible model slot only),
+audio-only instructions, multiple instructions, cloud upload/transcoding/AI processing, new
+acknowledgement/escalation machinery, a standalone media library, and any UI test requirement.
 
-The revamp relocates two things — where an entry's clock time comes from, and how an
-acknowledgement finds its medication — and extends three surfaces — scan-to-fill, photo
-evidence, caregiver notification — while every safety-shaped component between them keeps its
-contract. The load-bearing invariants that must not move:
+### Architecture at a glance
 
-| Invariant | Contract | Enforcement in this design |
+The feature is **local-only and layered on the existing photo-aid seams**:
+
+- A pure, string-tolerant `Instruction` value is embedded in the two existing encrypted payloads.
+- Video bytes live in dedicated Application Support roots; the encrypted payload holds a bare
+  filename. **The 3-minute duration, ~200 MiB size and playability/video-track limits are enforced
+  synchronously before any byte is copied into the instruction store** (FR-RIE-006, D17). The
+  off-main importer re-checks as a second line; only then is the copy committed synchronously on
+  the main actor in the data-safe order the shipped `setPhoto` path already uses. Staged files are
+  protected at creation, never after the fact (D18).
+- The fired screens are **extended, not replaced**. The routine fired screen gains the instruction
+  through its existing generic `footer` seam, so neither the shared screen nor the medication path
+  changes behaviour. Event instructions render in the existing `EventDetailView` card stack.
+- Notification behaviour is **behaviourally untouched**: the same handlers keep returning `false`,
+  the facade keeps completing `[.banner, .list, .sound]`, no category or action is added, and video
+  never enters `UNNotificationAttachment`. The only notification-layer changes are two
+  presentation gates, a bounded `had_instruction` `userInfo` flag written at arm time, and the
+  routine `didReceive` tap path, which the requirements explicitly put in v1 (FR-RIE-019).
+- Playback sits behind a thin injectable protocol in the `CameraCapturePresenting` style, so every
+  outcome — play, failure, missing file, timeout, dismissal — is scriptable in unit tests without
+  an `AVPlayer`.
+
+### Key design decisions taken at this level
+
+| # | Decision | Rationale / requirement |
 |---|---|---|
-| Acknowledgement safety sequence | acknowledgement → FR-D01 challenge → FR-D03 double-dose → record, order never bypassed | §7.4: resolution only replaces *which* entry the shipped sequence runs for; `acknowledgeWithConfirmation` (:241) and its first-call-issues-challenge behaviour are untouched; no new recording path exists |
-| Persistence before alarm; re-arm on relaunch | FR-029 / NFR-027, root constitution | §10: a reminder persists its resolved exact `scheduledAt` before arming (`createPendingReminders` :707 persists then arms :733–744); restore/re-arm paths unchanged |
-| Deterministic, total slot→clock mapping | safety delta (b), FR-MSR-002 | §4.3: pure exhaustive function over a three-value slot enum; failure is typed and fail-closed — no determinate time ⇒ no armed reminder, error surfaced |
-| OCR never auto-binds | safety delta (a), FR-MSR-006 | §6: candidates only; the sole bind remains the family's save through `MedicationEditorDraft` → `AppCoordinator.addMedication` (:11634); every new scan entry point routes through the same gate |
-| Photo never creates a record | safety delta (c), FR-MSR-013 | §8: evidence attaches only inside `finalizeAcknowledgement` (:453) or to an already-recorded log; no path from capture to record |
-| PII-free wire | safety delta (d), FR-MSR-017 | §9.4: envelope `{v, alert_type, timestamp, entry_id_hash}` — no names, doses, or titles; `FamilyAlertContext` titles stay in memory only |
-| Existing escalation semantics | FR-MSR-019, root FR-026–FR-028 | §10: `EscalationEngine` (:29) untouched — it still derives ack deadline, re-fire schedule, escalation deadline and missed verdict from the one resolved `scheduledTime`; a future dose stays future on restore (:191–198) |
-| Dementia machinery | FR-MSR-020 | §8.5, §7.4: `ConfirmationChallenge`, `DoubleDoseDetector`, `PhotoVerifier` preserved; extension only, removal forbidden |
-| LLM independence | NFR-MSR-001 | §7, §13: the resolver is pure Swift string/enum logic in the medication module; the ack path runs on the keyword safety net ahead of the LLM; the scheduler compilation unit gains no LLM symbol |
-| Migration without loss | NFR-MSR-006 | §11: optional fields with custom-decoder defaults (the `init(from:)` :114 precedent); legacy `scheduleTimes` readable and representable; no automatic backfill |
-| Devanagari grapheme behaviour | NFR-MSR-007 | §16.3: pinned behaviour untouched; new vocabulary reuses the shipped substring conventions without "fixing" them |
-| Mic continuity around acks | FR-MSR-012, [ACK-MIC-CONTINUITY] | §7.5: new ack shapes ride the existing speech/fast-lane seams; no new session teardown between acknowledgement and listening |
+| D1 | Event video root is `Application Support/EventInstructionVideos/` | FR-RIE-011 separates the event root from `InstructionVideos`; the name is design-level (OD-5) |
+| D2 | Event owner directory is `ev-` + the first 32 hex chars of SHA-256(eventId) | EventKit ids are opaque, not filesystem-safe, and must not appear in a path; the clear id stays in the encrypted index only |
+| D3 | Image instructions reuse the surface's existing photo store; no parallel image store | FR-RIE-003; routine = `VisualAidStore` (`VisualAid/fileURL`), event = `ContactPhotoStore(directoryName: "EventPhotos")` |
+| D4 | Video is staged under `<root>/_pending/<draftUUID>/` and committed by a same-volume rename. The size, duration and playability/video-track checks happen **before** the staged copy; the off-main importer re-checks. **Revised (review B-1).** | PHPicker and `UIImagePickerController` URLs are valid only inside their callback; one protected copy, no 200 MB second copy, no orphan on cancel; FR-RIE-006's "before the file is copied" ordering |
+| D5 | The routine fired screen shows the instruction through `ReminderVisualAidScreen`'s existing `footer` seam. The shared screen gains exactly one defaulted `timeText` parameter (`nil` at every other call site). **Revised (review m-4).** | FR-RIE-017 composition; medication and no-instruction call sites remain behaviourally identical to today (NFR-RIE-010's "byte-for-byte" is a behaviour claim, not a source-diff claim) |
+| D6 | The fired reminder's time is shown only when an instruction is present or expected | FR-RIE-017/020 require title **and time**; NFR-RIE-010 requires photo-only/no-instruction firings to be behaviourally identical |
+| D7 | In-app recording requires both camera and microphone; denial disables recording with a plain note | FR-RIE-025's own microphone scenario; library pick and the reminder stay fully usable |
+| D8 | An unknown/future instruction kind shows the reminder content plus a plain "newer version" note, no control | FR-RIE-024 / NFR-RIE-006 honest unsupported state, never a fake control |
+| D9 | Instruction video is included in the normal iOS device backup (no `isExcludedFromBackup`) | Parity with the shipped photo aids and encrypted payloads; no new app egress. Accepted risk, flagged for the owner report |
+| D10 | Permission usage descriptions are localized through new `en`/`ne` `InfoPlist.strings` | FR-RIE-025 disclosure + NFR-RIE-002 en/ne parity; the project has no localized `InfoPlist.strings` today |
+| D11 | Services receive an `InstructionWrite` value — `.set(payload)` or explicit `.remove` — never a half-built `Instruction`, and never "nil kind means remove". `nil` exists only at the form/save seam and means "leave the instruction untouched". **Revised (review M-1).** | The filename of a pending image/video is known only after the store writes it; the service owns the transactional ordering. A nil write can never silently erase an instruction |
+| D12 | Free-form event save returns `FreeFormEventSaveOutcome(eventId:instructionSaved:)` | Honest partial-save reporting (FR-RIE-010/013): the event may save before the instruction write. `instructionSaved == true` also when no instruction change was requested (nothing failed) |
+| D13 | The fired time comes from `UNNotification.date`, not from a scheduler change | **Partly superseded by D14 (review B-2):** the delivery-time choice stands and is accepted; the original "no edit to `RoutineAlarmScheduler`" rationale does not, because the routine notification now carries a bounded `had_instruction` flag |
+| D14 | The routine notification `userInfo` carries `had_instruction` (Bool) written at arm time from `entry.instruction?.isPresent`, and the tap path uses it to tell an instruction-bearing firing from a photo-only one | FR-RIE-019's unresolved-owner/content branch without changing today's photo-only tap (NFR-RIE-010). Bounded `RoutineAlarmScheduler` change: one argument, one pure builder, one `userInfo` key. Text/body, banner/list/sound, the first-photo attachment and scoped cancels are untouched |
+| D15 | `InstructionWrite?` semantics: `nil` = leave untouched; `.remove` = explicit removal; the form passes `InstructionDraft.resolvedWrite` (never a bare draft) and Save is disabled while the initial load is `.loading` | M-1: an unrelated edit on a form whose instruction load failed cannot erase the stored instruction. Regression-tested |
+| D16 | The playback resolution seam returns `InstructionPlaybackAvailability` (`.available(URL)`, `.rejectedFilename`, `.missingFile`, `.unreadableFile`) and the card emits `instruction_resolution` from that same classification | M-2 / FR-RIE-012: the three PII-free outcomes are expressible and testable; a bare `URL?` could not distinguish them |
+| D17 | The 3-minute duration (plus playability and video-track) limits are enforced synchronously inside the picker/recorder callback before the staged copy; the off-main importer is the second check | B-1 / FR-RIE-006's locked ordering. The source URL is valid only inside the callback; a metadata-only read is the only way to honour "before the file is copied" |
+| D18 | Instruction video files are created with `.completeFileProtection` (directory and file attributes at creation) and filled by a bounded chunked stream copy; any failure deletes the partial file (fail-closed) | NFR-RIE-005 / FR-RIE-011: no staging window with a weaker Data Protection class, unlike a post-copy attribute set |
 
-### 3. Decision register — OD-4 … OD-8 resolved at L1
+### Review-resolution map (rework iteration 2)
 
-| OD | Question | L1 decision (this document) | Carried to design-l2 (boundaries in §24) | Section |
-|---|---|---|---|---|
-| OD-1 | Slot defaults / configurability | Settled upstream (FR-MSR-002): 08:00 / 13:00 / 19:00, family-configurable. The control shape is designed here (§4.2, §16.1) | — | 4.2 |
-| OD-2 | Quantity representation | Settled upstream (FR-MSR-003): amount + unit composed into `doseDescription`; detector unchanged. Composition rule designed here (§4.6) | — | 4.6 |
-| OD-3 | Significant set / "always" | Settled upstream (FR-MSR-015/016/017): missed + double-dose + intake-recorded + escalation-started, unconditional; first-fire stays opt-in; transport scope honest | — | 9 |
-| OD-4 | Scan-to-fill confirm step / partial fill | **Resolved**: the human-confirm step IS the family's review-and-save through the draft (nothing writes a store on scan); extraction surface stays the conservative parser's; partial-fill rules = blank-only text, label schedule wins, empty read changes nothing; scanned schedule items map to slot selections through a fixed documented table (§6) | Exact scan UI affordance placement; spoken partial-read copy; parser table extensions if any (must keep "refuses to guess") | 6 |
-| OD-5 | Legacy entries / backfill | **Resolved**: no automatic slot inference, ever; legacy entries render and behave exactly as today; the only time→slot conversion is family-directed inside an explicit edit, with exact-equality preselection only; new-entry surface is slot-only; `.weekly`/`.custom` remain decodable and out of the slot model (§11) | Editor presentation details of the switch; list-row rendering layout | 11 |
-| OD-6 | Ack-with-slot resolution mechanics | **Resolved**: pure deterministic resolver over the pending set by what was said (name keys via `MedicationVoiceVocabulary`, then slot; meal is context only); ambiguity walks the sanctioned "did you mean X / X or Y" forms in a fixed order; simple acks resolve only when unambiguous; sequence order preserved (§7) | Probe-state representation, exact slot/meal word lists, exact copy strings, per-event observability field names | 7 |
-| OD-7 | Calendar channel mechanism | **Resolved**: the existing consent-gated schedule mirror stays as is, and the three at-risk significant events (missed, possible double dose, escalation started) additionally surface as one-off entries on the same shared family calendar through the same service and consent gate; intake-recorded does not write calendar entries; push wire stays PII-free (§9.3) | One-off entry bookkeeping/lifecycle, entry title copy, invitee-derivation helper shape | 9.3 |
-| OD-8 | Photo-evidence mechanism / recipient | **Resolved**: on-device-only evidence variant; capture context (the reminder/record surface the capture starts from) determines the entry deterministically — no image classification anywhere; the record always flows through the acknowledgement chain; the caregiver is the judge, the app only captures/attaches/retains and reports state honestly; the dementia mechanism is untouched (§8) | Evidence store internals, capture-surface placement, copy strings, compression implementation (reuse the FR-D04b cap) | 8 |
+| ID | Resolution | Where |
+|---|---|---|
+| B-1 | Duration/playability/video-track enforced synchronously before the staged copy; `stageSynchronously` takes `InstructionVideoLimits` + `InstructionVideoProbing`; importer re-checks; store test proves an over-long/unplayable source creates no staged file | D4, D17; §Capture · Video; C02, C03, C04; tests |
+| B-2 | Routine tap: `had_instruction` flag (D14); entry resolves → fired screen with title/time plus the plain fallback when the instruction was removed; entry deleted → plain localized unavailable notice; photo-only tap stays today's no-op. Three tap cases tested | D13, D14; §Fire-time; C01, C14, C15, C17; tests |
+| M-1 | `InstructionWrite` is `.set`/`.remove`; `nil` only at the save seam = untouched; `InstructionDraft.resolvedWrite` gates on a terminal load; Save disabled while loading; unrelated-edit / explicit-remove / failed-load tests | D11, D15; §Data model; C10–C13; tests |
+| M-2 | `availability(filename:for:) -> InstructionPlaybackAvailability`; card emits `instruction_resolution` from it; traversal/absent/unreadable tests and a no-filename assertion | D16; §Playback; C02, C08; tests |
+| m-1 | Event handler gains an `instructionPresent: (String) -> Bool` dependency; specified in C14/C15 with its fake | C14, C15; tests |
+| m-2 | `delete`/`deleteAll` return `Result<Void, InstructionStorageError>`; services emit the typed `instruction_media_delete` failure; `deleteFailed` is reachable | §Lifecycle, §Error taxonomy; C02, C11, C13 |
+| m-3 | Phantom `RoutineAlarmSchedulerTests` removed; new `RoutineNotificationSchedulerTests` (clearly labelled new) plus retargeted, real-suite evidence for FR-RIE-021/022 | C16, C17; Traceability |
+| m-4 | "Byte-identical" reworded to "behaviourally identical"; source-scan baseline allows and pins the defaulted `timeText` parameter and nil at no-instruction call sites | D5, D6; §Fire-time; C09; tests |
+| m-5 | Protection applied at file creation (directory + file), fail-closed; staged and committed attribute tests | D18; §Storage; C02; tests |
+| m-6 | `preflightTimeoutSeconds = 0.6` (sub-second default) with the 1 s bound as the outer acceptance target and an explicit measurement point | §Configuration, §Playback; C06; Risks |
+| m-7 | Device smoke named as a **Release build** installed on the reference device, recorded with build/commit | C16; Traceability |
+| m-8 | `InstructionImageLoading` returns `Result<UIImage, InstructionImageFailure>`; two adapters and a scripted fake specified | C01, C08; tests |
 
-The five resolutions are design-level choices inside the contracts the requirements fix — no
-owner-level decision is taken here. Each L2 hand-off in §24 names what design-l2 must decide and
-what it may not violate.
+### What the reviewer should scrutinise first
+
+1. **`EventExtrasStore.setPhotoFilename` erases a new `instruction` field** unless it is changed to
+   mutate existing extras (`EventExtrasStore.swift:111–114`). This remains the single most likely
+   silent-data-loss bug in the feature (see §Data model and C12).
+2. **Pre-copy limit enforcement** (B-1/D17): the staged copy must be unreachable for an over-long,
+   unplayable or video-less source, and the protection class must exist at file creation (m-5/D18).
+3. **The routine tap/Open path** (B-2): it must open for instruction-bearing firings, show the
+   fallback when the instruction was removed, show an honest notice when the entry is gone, and
+   remain a no-op for photo-only firings.
+4. **`InstructionWrite?` semantics** (M-1): nil means "leave untouched" everywhere; removal is an
+   explicit `.remove`; a failed initial load cannot produce a write (C10).
+5. **The resolution classification** (M-2): `.rejectedFilename` / `.missingFile` /
+   `.unreadableFile` must be distinguishable and emitted PII-free (C02/C08).
+6. **NFR-RIE-008's 1 s failure bound**: the cover appears synchronously on the Play tap; the
+   preflight default is 0.6 s, leaving margin under the 1 s acceptance bound; the 10 s ready
+   watchdog is only the no-endless-spinner backstop.
+7. **Event image instructions inherit `ContactPhotoStore`'s 512 px thumbnail pipeline** — accepted
+   because FR-RIE-003 binds event images to the existing event photo path. Flagged in §Risks.
 
 ---
 
 ## Architecture
 
-### 4. Entry model and the slot-to-clock mapping (FR-MSR-001, FR-MSR-002, FR-MSR-003)
+### System context
 
-#### 4.1 The entry model
-
-`MedicationEntry` (:26) grows three optional fields; `scheduleTimes` stays exactly as shipped:
-
-```swift
-enum MedicationSlot: String, Codable, CaseIterable { case morning, afternoon, evening }
-enum MealRelation: String, Codable { case beforeMeal, afterMeal }
-struct MedicationQuantity: Codable, Equatable {
-    let amount: Int    // positive integer, validated at the editor
-    let unit: String   // MedicationDoseUnit raw value, or the family's free text
-}
-enum MedicationDoseUnit: String, Codable, CaseIterable {
-    case tablet, capsule, milliliter, teaspoon, drop, puff, sachet
-}
+```
+┌──────────────────────────── Caregiver surfaces ────────────────────────────┐
+│ RoutineSettingsView sheet                     EventFormView / EventDetail │
+│  └ ReminderVisualAidEditorView                 └ InstructionCardView       │
+│      └ RoutineInstructionSection                   (fire-time card)       │
+│ EventInstructionSection ─────────┐                                          │
+└──────────────────────────────────┼──────────────────────────────────────────┘
+                                   │
+             InstructionVideoCaptureCoordinator (UI state machine)
+              ├ InstructionVideoPicking (PHPicker .videos, .current)
+              ├ InstructionVideoRecording (UIImagePickerController, video)
+              ├ InstructionPermissionRequesting (camera, microphone)
+              └ InstructionVideoImporter ── InstructionVideoInspecting (AVFoundation, async 2nd check)
+                                   │        └ staged copy is preceded by
+                                   │          InstructionVideoProbing (sync, in-callback limits)
+        ┌──────────────────────────┼──────────────────────────┐
+        ▼                          ▼                          ▼
+ InstructionVideoStore      VisualAidStore /           InstructionObservability
+ (file ops, protection)     ContactPhotoStore          (typed, PII-free events)
+        │                          │
+        └──────────────┬───────────┘
+                       ▼
+        RoutineScheduler.setInstruction     FreeFormEventService.setInstruction
+        (encrypted RoutineEntry)            (encrypted EventExtras + EventKit event)
+                       │
+                       ▼
+        RoutineAlarmScheduler (only change: had_instruction userInfo flag)
+                       │
+                       ▼
+        NotificationFacade ── handlers (always return false)
+          ├ RoutineVisualAidFireHandler  → AppCoordinator → RoutineVisualAidOverlay
+          │        willPresent: ReminderVisualAidScreen(footer: InstructionCardView)
+          │        didReceive:  fired screen (removed instruction → fallback)
+          │                     or plain localized unavailable notice
+          └ FreeFormEventFireHandler      → EventDetailView → InstructionCardView
+                       │
+                       ▼
+        InstructionCardView ── Play ── InstructionPlaybackController
+                                     └ InstructionVideoPlaying (AVKit adapter)
 ```
 
-`MedicationEntry` additions (all optional, all `decodeIfPresent` with defaults, CodingKeys
-extended — the shipped migration shape at :114–131):
-`quantity: MedicationQuantity?`, `slot: MedicationSlot?`, `mealRelation: MealRelation?`.
+### Layering and module boundaries
 
-The family-facing editor (`MedicationEditorDraft` :19, `SettingsView` `addForm` :4640) gains
-three controls and keeps every shipped draft rule:
+| Layer | Responsibility | New / changed files |
+|---|---|---|
+| Model (pure) | `Instruction`, `InstructionKind`, `InstructionWrite`, `InstructionPayload`, `InstructionDraft`, `InstructionOwner`, `InstructionFilename`, display state | **new** `Services/Instructions/Instruction.swift`, `Services/Instructions/InstructionDisplayState.swift` |
+| Storage (file ops only) | pre-copy limit gate, protected staging, commit, bare-name guard, availability classification, per-owner lifecycle | **new** `Services/Instructions/InstructionVideoStore.swift` |
+| Import / validation | synchronous probe before copy; size + duration + playability second check; plain error mapping; discard on failure | **new** `Services/Instructions/InstructionVideoImporter.swift`, `Services/Instructions/InstructionVideoInspecting.swift` |
+| Playback seam | scriptable outcomes, bounded configurable timeouts, no autoplay | **new** `Services/Instructions/InstructionPlayback.swift`; production adapter `Services/Instructions/AVKitInstructionVideoPlayer.swift` |
+| Permissions | point-of-use camera/mic, plain explanation, denial non-blocking | **new** `Services/Instructions/InstructionPermissions.swift` |
+| Observability | one typed emitter, closed vocabulary, existing sanitiser keys | **new** `Services/Instructions/InstructionObservability.swift` |
+| Service integration | transactional set/replace/remove, delete with owner, re-arm | changed `RoutineScheduler.swift`, `FreeFormEventService.swift`, `EventExtrasStore.swift`, `RoutineEntry.swift` |
+| Notification scheduling | one additional `hasInstruction` argument and a pure `userInfo` builder; no text/banner/attachment/cancel change | changed `RoutineAlarmScheduler.swift` (bounded; C17) |
+| Fire handlers | extend gates, implement routine `didReceive`, always `false` | changed `RoutineVisualAidFireHandler.swift`, `FreeFormEventFireHandler.swift` |
+| UI | instruction card, editor sections, pickers/recorder/permission sheets, player cover | **new** `App/InstructionViews.swift`, `App/InstructionCapture.swift`; changed `VisualAidViews.swift` (overlay/composition + one defaulted `timeText` parameter), `RoutineSettingsView.swift`, `EventsView.swift` |
+| Composition | stores, seams, presentation state, event accessors | changed `AppCoordinator.swift` |
 
-- **Quantity**: a positive-integer amount control plus a unit picker (the seven units above,
-  plus a custom free-text option modelled on the purpose chips — a unit string that matches no
-  enum case is stored verbatim, exactly the shipped `purpose` chip-or-free-text precedent).
-- **Slot**: three large slot options (morning / afternoon / evening), each rendered with the
-  household-mapped clock time as read-only context (e.g. "Morning · 8:00 am"). The family never
-  types or computes a clock time.
-- **Meal relation**: before meal / after meal, attached to the slot as context.
+**Non-goals at this layer:** no new network client, no new notification category/action, no new
+audio-session code (the feed player at `FeedsView.swift:649–716` is the playback precedent), no
+medication-file edits.
 
-The draft rules bound by constitution Entry-Model property 7 are unchanged: text pre-fill into
-blank fields only, the label's stated schedule wins, an empty read changes nothing,
-`storedTimes` stays `[.hour, .minute]` (:143), and `canSave` still requires a name (:149). The
-save gate produces a slot-model entry; a legacy entry keeps loading and behaving (§11).
+### Data model
 
-The voice `set_reminder` path (`addVoiceReminder` :12939) keeps constructing the legacy shape
-(raw `scheduleTimes`, no slot): the elder's one-off voice reminder is not the family-facing
-entry surface, and the model keeps that shape first-class. Recorded, not silently changed.
-
-#### 4.2 The household mapping and its store
-
-NEW persisted record `MedicationSlotClock` — the household's slot→clock mapping, one per
-installation/profile, stored through the existing `EncryptedLocalStorage` seam under a new key
-(the scheduler's own store keys :60–62 are the precedent):
+#### `Instruction` — one optional value on each owner
 
 ```swift
-struct TimeOfDay: Codable, Equatable { let hour: Int; let minute: Int }
-
-struct MedicationSlotClock: Codable, Equatable {
-    let morning: TimeOfDay     // default 08:00
-    let afternoon: TimeOfDay   // default 13:00
-    let evening: TimeOfDay     // default 19:00
-
-    static let `default` = ... // 08:00 / 13:00 / 19:00 (OD-1)
+enum InstructionKind: String, CaseIterable, Codable {
+    case text, image, video          // no `link` case in v1 (OD-3)
 }
-enum SlotClockError: Error, Equatable { case indeterminate(slot: MedicationSlot) }
-```
 
-- **Custom decode, defaults not failures** (the house migration rule): a record with a missing
-  key decodes that slot as the default; the record's absence decodes as `.default`. Never lose a
-  household's schedule to a missing key.
-- **Present-but-invalid values are indeterminate, not repaired**: a stored hour/minute outside
-  0–23 / 0–59 is a corrupt value and must NOT be silently clamped into a guessed time — that
-  slot resolves as `.indeterminate` and the failure path below applies. Determinism means "the
-  same inputs always produce the same times", never "anything produces some time".
-- **One writer**: the medication settings surface (settings leaf, §16.1). Writes validate
-  ranges before persisting; a failed write surfaces and does not take effect (§14).
-- **Control shape (design-l1 owns this per OD-1)**: a "Medicine times" section in the medication
-  settings leaf — three rows (Morning / Afternoon / Evening), each with a large tappable
-  time control at 44pt+/18pt+, plus a "reset to default times" action. Changes persist through
-  the store and immediately trigger the guarded re-arm (§4.5).
+struct Instruction: Codable, Equatable {
+    let kind: String                 // RAW persisted kind; known values come from InstructionKind
+    var text: String?                // kind == text
+    var filename: String?            // kind == image|video: BARE file name, never a path/bytes
+    var caption: String?             // image|video only; trimmed at write, blank -> nil
+    var url: String?                 // RESERVED for the future link kind; v1 never sets/renders it
 
-The meal relation is context, not a clock (OD-1): it renders in spoken copy and on the dose
-screen and never produces a second firing.
-
-#### 4.3 Determinism and totality
-
-The mapping is a pure function of `(entry.slot, householdMapping)`:
-
-- **Total over the creatable entry space.** The creatable space is {morning, afternoon,
-  evening} — an exhaustive three-case enum resolved by a function with no default case — so
-  every creatable entry resolves under every valid household mapping. There is no input for
-  which the function "has no answer" by omission.
-- **The one failure is typed and fail-closed.** `.indeterminate(slot:)` arises only from a
-  corrupt stored mapping value (§4.2). On failure: **no reminder is armed for the affected
-  entries**, an observability event (`medication_slot_unresolved`, entry_id_hash only) is
-  emitted, and the condition surfaces on the settings surface as an error. No implicit or
-  guessed clock time is ever used — this is FR-MSR-002's failure scenario by construction.
-- **No hidden state.** The resolver reads only the entry's slot and the persisted mapping;
-  identical inputs always produce identical `TimeOfDay` outputs. Nothing is cached that could
-  drift (the mapping is read at arming time through the injected store).
-- **Exact-time scheduling preserved.** Resolution produces hour/minute `DateComponents`, the
-  same shape `createPendingReminders` (:707) and `nextOccurrence` (:747) already consume;
-  `UNCalendarNotificationTrigger`-based exact-time arming (`UNNotificationScheduler` :37) is
-  untouched, so the resolved time is the schedule of record and NFR-MSR-010's 30-second firing
-  envelope is unaffected (no fire-time resolution step is introduced).
-
-#### 4.4 The resolved-time feed into arming
-
-`MedicationScheduler` gains one seam:
-
-```swift
-func resolvedScheduleTimes(for entry: MedicationEntry) -> Result<[DateComponents], SlotClockError>
-```
-
-- `entry.slot == nil` (legacy shape) → `.success(entry.scheduleTimes)` verbatim — bit-for-bit
-  today's behaviour.
-- `entry.slot != nil` → the mapping's `TimeOfDay` for that slot, as `[DateComponents]` with
-  `.hour`/`.minute` only (the model's local-time convention).
-
-`createPendingReminders` (:707) consumes this seam in place of reading `entry.scheduleTimes`
-directly. On `.failure`, the entry is skipped with the surfaced error (§4.3); on `.success` the
-existing pipeline runs byte-identically: reminder constructed with the resolved `scheduledAt`,
-escalation deadline derived from it, engines made per reminder, `persistReminders()` before the
-first `alarmScheduler.scheduleReminder` call. Everything downstream — `EscalationEngine`
-(:29), `PlatformAlarmScheduler` (:5), `DoubleDoseDetector` (:21), the adherence log — keeps
-reading one concrete `Date` and is untouched.
-
-Because slots map to exactly one time and there is no second firing for the meal relation, a
-slot entry produces one pending reminder per day per slot — the same cardinality the shipped
-editor produced for one `DatePicker` row, so `activeReminderId(for:)` (:773) and the per-reminder
-engine keying are unchanged.
-
-#### 4.5 Mapping changes and the guarded re-arm
-
-When the family saves a changed mapping, reminders must re-resolve deterministically (FR-MSR-002
-scenario: re-armed ⇒ 07:30). The shipped `loadSchedule` (:180) cannot be reused for this:
-it clears `pendingRemindersList` and `engines` wholesale, which would reset a live escalation
-(refire counts, deadlines) and could re-create an already-fired dose as "next occurrence"
-(tomorrow). The design therefore requires a dedicated pass:
-
-**`rearmForSlotClockChange()` (new scheduler API), semantics:**
-1. For each entry, re-resolve times under the new mapping (§4.4).
-2. Pending reminders with `lastFiredAt != nil` (the dose rang; escalation has begun) keep their
-   persisted `scheduledAt`, engine and state — a mapping change never moves a live escalation.
-3. Un-fired pending reminders whose resolution changed are replaced, using the standard creation
-   rules (`nextOccurrence` from now), engines re-made, persistence before arming.
-4. Entries whose resolution fails arm nothing and surface the error (§4.3).
-5. The pass runs through `persistReminders()` before any `alarmScheduler` call — persistence
-   before alarm holds on this path too (FR-MSR-022).
-
-Callers: the mapping-save action (§4.2) and nothing else. App launch keeps the shipped
-`scheduleAll()` → `restoreState`/`rearmAllPendingReminders` path, which restores persisted
-resolved times verbatim.
-
-#### 4.6 Quantity and the composed dose line (FR-MSR-003, OD-2)
-
-`doseDescription` remains the one rendered dose line — the field the fired-dose screen, the
-briefing and the editor's scanned strength already consume (:30; `MedicationEditorDraft`
-`storedStrength` :132). Composition happens at save through one pure function:
-
-```swift
-enum DoseLine {
-    static func compose(quantity: MedicationQuantity?, doseText: String, locale: Locale) -> String
+    var knownKind: InstructionKind? { InstructionKind(rawValue: kind) }
+    var isPresent: Bool { /* text: non-blank; image/video: true even if bytes are missing;
+                             unknown non-empty kind: true (shown as unsupported) */ }
 }
 ```
 
-Rules (single, documented, deterministic):
-1. `quantity` set, dose text blank → `"<amount> <localized unit>"` (e.g. "1 tablet";
-   unit label resolved through the catalog when `unit` matches a `MedicationDoseUnit`, the
-   family's words verbatim otherwise).
-2. `quantity` set, dose text non-blank (e.g. a scanned strength "500 mg") → the composed line
-   gains the text after a fixed separator (`"1 tablet, 500 mg"`); exact separator and copy at
-   implementation. Nothing the family saw in the form is dropped.
-3. `quantity` nil → the dose text verbatim (today's path; "half tablet" and every legacy entry).
-4. Both empty → empty string (today's behaviour for a dose-less entry).
+Rules:
 
-Downstream consumers change not at all — they keep reading `doseDescription`. The editor keeps
-its strength/free-text input (the scan target per FR-MSR-005) and adds the structured controls;
-the two together follow the purpose-draft shape (structured selection pre-fills, typed text
-overrides the structured rendering only through rule 2/3 in this subsection — the exact interaction is a
-component detail for design-l2, §24).
+1. **One instruction per owner** is structural: `RoutineEntry.instruction: Instruction?` and
+   `EventExtras.instruction: Instruction?` — no arrays, no per-occurrence copy.
+2. **Never bytes, never a path.** Text lives in the encrypted payload; image/video store a bare
+   filename only.
+3. **Unknown kinds decode.** `kind` is a raw string, so `{"kind":"link"}` (or any future value)
+   decodes without throwing. `url` round-trips the OD-3 slot even though v1 has no UI for it.
+   Unknown extra fields are not preserved (honest limit; the OD-3 field is).
+4. **Tolerant decode is fail-soft at the owner.** Both owners decode the instruction with
+   `(try? container.decodeIfPresent(Instruction.self, forKey: .instruction)) ?? nil`, so one
+   malformed instruction object can never cost the household its reminder list or event index.
+   Every pre-existing key stays strict.
+5. **Write normalization.** `Instruction.normalized()` trims `text` and `caption`; a blank text is
+   not an instruction (`nil`), and a blank caption becomes `nil`. Services normalize before
+   persisting; the defensive path means whitespace-only input behaves exactly like no instruction
+   (FR-RIE-002).
+6. **`url` is inert.** No control, no URL field, no parser, no playback path in v1 (FR-RIE-024).
 
-`DoubleDoseDetector.check(medicationEntryId:windowHours:adherenceLog:now:)` (:21) is untouched:
-entry-scoped and window-scoped, no dose or quantity input. Partial-vs-full dose detection stays
-out of scope (FR-MSR-003) — a recorded dose blocks a second attempt for the window regardless of
-quantity, exactly as shipped.
+#### Embedding and coding keys
 
-### 5. Purpose at entry (FR-MSR-004)
+- `RoutineEntry` (`Services/Reminders/RoutineEntry.swift:62–145`): add
+  `var instruction: Instruction?` after `visualAids` (`:100`), add `.instruction` to the explicit
+  `CodingKeys` (`:126–129`), initialize it to `nil` in the memberwise init, and decode it fail-soft
+  in the hand-written `init(from:)` (`:135–145`) while leaving every other key strict. Synthesized
+  `encode(to:)` omits nil optionals, so pre-feature payloads and instruction-free entries are
+  payload-compatible.
+- `EventExtras` (`Services/Storage/EventExtrasStore.swift:25–45`): add
+  `var instruction: Instruction?`, include it in the memberwise init with a default of `nil`, and
+  decode it fail-soft alongside `photoFilename` (`:41–45`). The struct stays `Codable, Equatable`.
+- **Hazard — fix required:** `setPhotoFilename` (`EventExtrasStore.swift:111–114`) currently
+  constructs a fresh `EventExtras(photoFilename:)`. Once the model has an `instruction`, saving an
+  event photo would erase the instruction. It must mutate the existing extras
+  (`extras(forEventId:) ?? EventExtras()`) and write the whole value back. `storeInstruction` must
+  mutate symmetrically and preserve `photoFilename`. `track` (`:103`) already preserves existing
+  extras and needs no change.
 
-Purpose builds on the shipped machinery — `MedicationEntry.purpose` (:50), the ten chips and
-`MedicationPurposeDraft`, `MedicationVoiceVocabulary.voiceKeys(for:)` (:114),
-`MedicationPurposeLookupService` — and adds nothing new. The one design-level question the
-requirement leaves open is decided here:
+#### Payload examples
 
-**Purpose remains OPTIONAL at entry.** Rationale: no behaviour may depend on purpose text being
-present (FR-MSR-004); pre-purpose payloads keep loading (they do, via the shipped
-`decodeIfPresent` :129); requiring it would add friction to a hurried caregiver editing flow and
-risks junk values that then enter the voice vocabulary. The chip step, the lookup and the
-pre-fill-into-free-text rule (`applyPurposeLookup` :103) are unchanged. Purpose is not scannable
-from a label (FR-MSR-005) — the lookup stays the separate, gated suggestion path.
+```json
+{"kind":"text","text":"Lift your toes up and down ten times."}
+{"kind":"image","filename":"A1B2C3D4-….jpg","caption":"The blue box"}
+{"kind":"video","filename":"instruction-5E6F….mp4","caption":"Do it slowly"}
+{"kind":"link","url":"https://…"}        // decodes; unknown kind; no control in v1
+```
 
-### 6. Scan-to-fill (FR-MSR-005, FR-MSR-006, OD-4)
-
-**Resolution of OD-4 — the confirm step is fixed as the family's review-and-save, and nothing
-else.**
-
-- **Additive path.** The scan button, `MedicationLabelScanner` (`start`/`finish`, spoken
-  outcomes, metadata-free `medication_label_scan` events) and `MedicationEditorDraft.applyScan`
-  (:69) remain the scanner surface. A household that never scans keeps today's exact manual
-  path.
-- **Bounded extraction surface (unchanged).** Name, strength, schedule (time words; the
-  `1-0-1` day pattern; count-based defaults), frequency guess — all from the conservative
-  `MedicationLabelParser` (:86), which refuses to guess. Purpose is not scannable.
-- **Human confirmation before binding (safety delta (a)).** Nothing writes a store on scan: the
-  parser's output is a `MedicationLabelCandidate` (:41), `applyScan` mutates only the in-memory
-  draft, and the entry is created solely by the family's save
-  (`SettingsView` :4673 → `AppCoordinator.addMedication` :11634 → `loadSchedule`). **Any new scan
-  entry point must route through the same draft-and-save gate; a scan path that writes an entry
-  or arms a reminder directly is a defect of this design, not a feature.**
-- **Partial-fill rules (unchanged).** Text fills blank fields only; the label's stated schedule
-  replaces the form's (including family-set values — the rule and its rationale stand); an empty
-  read changes nothing and is spoken ("could not read it"); the photo is never discarded
-  (`.scanned` carries the image even when text did not come).
-- **Scanned schedule → slot selections (new, bounded).** With the entry surface now slot-based,
-  the parser's schedule output must land in slot selections. The parser's schedule values are
-  already slot-shaped conventions — time words (बिहान / सकाळ / morning → 8:00; दिउँसो /
-  afternoon → 13:00; बेलुका / evening → 19:00; other table entries) and the `1-0-1` day-pattern
-  slots (morning / midday / night), see `timeWordHours` :203 and `slotHours` :213. A new pure
-  conversion (`ScannedSchedule.slots(from:)`) maps each parsed item to a slot through a fixed,
-  documented table (morning → morning; midday/noon/afternoon → afternoon; evening/night →
-  evening), applied as **candidate selections the family sees and can change before Save**,
-  under the existing "the label's stated schedule wins" rule. The conversion uses the parser's
-  own convention hours, never the household mapping (the label says "morning", not "07:30");
-  an item with no slot counterpart (possible only if the parser's tables change) fills nothing —
-  if no item converts, the schedule is left unchanged, mirroring "a candidate that stated no
-  schedule changes nothing". Meal relation is not scannable and stays family-set. The conversion
-  is deterministic and testable; it does not extend the parser's extraction surface.
-- **Outcomes stay observable and metadata-free** (no image, no recognized text).
-
-### 7. Voice acknowledgement with slot (FR-MSR-007 … FR-MSR-012, OD-6)
-
-#### 7.1 Gate order and vocabulary
-
-The shipped gate order is preserved exactly, and the new utterance shapes slot into it:
-
-1. Emergency phrases (`routeSafetyNet` :2478 first check) — untouched.
-2. **Refusal-first denial guard** (`medicationDenialPhrases` :2425, checked everywhere the ack
-   list is used, :2464, :2491) — untouched and still first: a denial never falls through to an
-   acknowledgement (FR-MSR-011), including mixed denial-with-ack-token utterances, clarification
-   answers and challenge answers.
-3. **Acknowledgement gate** — `isExplicitMedicationAcknowledgement` (:2460) unchanged as the
-   entry condition into the ack flow. The owner's utterance shape ("I have taken X for morning
-   before meal" / "औषधि खाएँ … बिहान") already matches via the shipped phrase/token lists
-   ("taken", "औषधि खाएँ"…); the lists may only be extended **additively** (a phrase list
-   addition), never reordered around the denial guard.
-4. Resolution and the safety sequence (§7.2–7.4) — replacing only the `oldestPendingReminderEntryId()`
-   (:12929) selection step inside `handleMedicationAcknowledgement` (:5381).
-5. Correction rescue (`attemptCorrectionRescue` :2519) — untouchable order: it runs on the
-   unrecognised path only, after the ack vocabulary; a medication acknowledgement is never
-   captured by it, and a general correction utterance is never captured as an ack (FR-MSR-008
-   coexistence scenario). Within an open confirmation/clarification window the existing
-   "follow-up block asks `isExplicitMedicationAcknowledgement` first" rule (:1191) continues to
-   hold.
-
-#### 7.2 The candidate seam and the resolver
-
-`AppCoordinator` exposes one read seam (the `oldestPendingReminderEntryId` precedent, :12929):
+#### `InstructionWrite` — the service mutation, and `InstructionDraft` — the form state
 
 ```swift
-struct MedicationAckCandidate {
+/// The durable mutation the caregiver asked for. A value, never a half-built
+/// `Instruction`: a pending medium's filename exists only after the store writes
+/// it, so the service owns the transaction (D11).
+enum InstructionWrite: Equatable {
+    case set(InstructionPayload)
+    case remove                              // explicit removal — never a nil kind
+}
+
+struct InstructionPayload: Equatable {
+    var kind: InstructionKind                // exactly one kind
+    var text: String?                        // kind == .text
+    var caption: String?                     // image/video only
+    var existingFilename: String?            // keep an already-saved image/video file
+    var pendingImage: UIImage?               // saved at commit (surface photo store)
+    var pendingVideo: StagedInstructionVideo? // committed at save (video store)
+}
+
+/// The caregiver's unsaved edit. `nil` write = no user change.
+struct InstructionDraft: Equatable {
+    enum LoadState: Equatable { case loading, loaded, failed }
+    var write: InstructionWrite?
+    var hasChanges: Bool
+    var loadState: LoadState
+
+    /// What the form may pass to a save. A loading or failed initial read can
+    /// never produce a write, so an unrelated edit cannot remove the stored
+    /// instruction (M-1). The section's controls are read-only unless `.loaded`.
+    var resolvedWrite: InstructionWrite? {
+        loadState == .loaded && hasChanges ? write : nil
+    }
+}
+```
+
+- **Semantics are pinned (M-1, D15):** at the save seam, `InstructionWrite? == nil` means "leave the
+  instruction untouched". At the durable service seam, `InstructionWrite` is **non-optional** — the
+  only way to remove is `.remove`, the only way to write is `.set(payload)`. There is no encoding
+  in which "nil" or "nil kind" means removal.
+- The editor owns the draft; the service owns the durable work. Pending media is always written
+  **before** the index is updated; the old file is deleted **after** a successful index write
+  (FR-RIE-013).
+- The event form disables Save while `loadState == .loading`. On `.failed` the instruction section
+  is read-only with a plain message and Retry; the form can still save the event's unrelated fields
+  with `resolvedWrite == nil` (leave untouched) — it can never erase the stored instruction.
+
+#### Filename predicate
+
+```swift
+enum InstructionFilename {
+    /// non-empty, not "."/"..", no "/" and no "\" — the VisualAidStore discipline.
+    static func isPlain(_ name: String) -> Bool
+}
+```
+
+One table-driven predicate shared by the video store and both image loaders; `VisualAidStore`
+itself is unchanged.
+
+### Storage layout and protection
+
+```
+Application Support/
+├── VisualAids/<routineUUID>/…jpg          existing; also holds a routine image instruction
+├── EventPhotos/…jpg                       existing; also holds an event image instruction
+├── InstructionVideos/
+│   ├── _pending/<draftUUID>/instruction-<uuid>.<ext>
+│   └── <routineUUID>/instruction-<uuid>.<ext>
+└── EventInstructionVideos/
+    ├── _pending/<draftUUID>/instruction-<uuid>.<ext>
+    └── ev-<sha256(eventId) first 32 hex>/instruction-<uuid>.<ext>
+```
+
+- **Owner key:** routines use the entry UUID string (matching the existing `VisualAids/<entryId>/`
+  layout); events use a deterministic digest because EventKit identifiers are opaque and not
+  filesystem-safe (D2). The clear event id remains only in the encrypted `EventExtras` index.
+- **Bare filenames only.** `InstructionVideoStore` uses `InstructionFilename.isPlain` (the
+  `VisualAidStore.isPlainFilename` discipline, `VisualAidStore.swift:243–249`). A hand-edited
+  `../EventPhotos/secret.jpg` or an absolute path resolves to no file, classifies as
+  `.rejectedFilename`, is logged PII-free, and renders the plain fallback (FR-RIE-012).
+- **Protection at creation (D18, m-5).** Directories are created with
+  `[.protectionKey: FileProtectionType.complete]`. The staging destination file is **created with
+  the complete-protection attribute before any bytes are written**, then filled by a bounded
+  chunked stream copy (no whole-file buffering, no `copyItem`-then-set window). The attribute is
+  verified after creation and again after the commit rename. Any failure at creation, copy or
+  verify deletes the partial file and returns a write failure (fail-closed): a staged or committed
+  instruction file never exists with a weaker class. `.completeFileProtection` is the shipped
+  photo-aid class (`VisualAidStore.swift:123`). Enforcement is a device property; the simulator
+  asserts the recorded attribute and the real-device smoke records the claim (NFR-RIE-005).
+- **Backup.** No `isExcludedFromBackup` is set — parity with photo aids and the encrypted payloads
+  (D9). No app network path is introduced.
+- **Format.** Bytes are copied as provided; the sanitized source extension is preserved; no
+  transcode, re-encode, or format conversion. `.current` picker representation mode prevents the
+  system from transcoding a library asset on our behalf.
+- **Staging cleanup.** `_pending` exists only for drafts. It is purged at launch on the existing
+  utility housekeeping queue (`AppCoordinator.modelHousekeepingQueue`, `AppCoordinator.swift:571`)
+  and every cancel/discard deletes its own draft directory. `_pending` is never a valid owner key.
+
+#### Lifecycle matrix
+
+| Operation | Ordering | Failure result |
+|---|---|---|
+| Add/replace text | persist `RoutineEntry`/`EventExtras` → delete nothing | previous instruction intact; plain failure |
+| Add/replace image | save new image to the surface photo store → persist index → delete old image file (Result) | new image deleted; previous intact |
+| Add/replace video | **pre-copy size/duration/playability gate** → protected staged write → commit rename → persist index → delete old video file (Result) | staged draft deleted; previous intact; no committed file on a failed index write |
+| Remove instruction (`.remove`) | persist instruction `nil` → delete the old image/video file | index unchanged on a failed persist; previous intact. A media-delete refusal returns `.deleteFailed`, is logged, and leaves the index authoritative (orphan noted in §Risks) |
+| Delete routine | `store.remove` → `visualAidStore.deleteAll` (photos + image instruction) → `instructionVideoStore.deleteAll(.routine(id))` → Result | index row gone; a `.deleteFailed` is logged PII-free, never silently swallowed |
+| Delete event / vanished reconcile | `extras.remove` returns dropped extras → delete event photo → delete instruction image → delete event video directory (Result) | same |
+| Re-arm / time edit | no media write; notification content unchanged (text/banner/photo attachment only); `had_instruction` refreshed from the entry | n/a |
+
+### Capture, import and permissions
+
+#### Text
+
+Pure UI: a `TextEditor` (body size ≥ 18 pt) with Save. Save normalizes (trim); blank input is not
+saveable ("Write the steps first."), so clearing the field can never silently remove an existing
+instruction — removal is the explicit Remove control. No file, no permission.
+
+#### Image
+
+Reuses the existing out-of-process photo picker (`VisualAidPhotoPicker`, `VisualAidViews.swift:20`;
+`PhotosPicker`, `EventsView.swift:295`) — permission-free. The picked `UIImage` is held in the
+editor draft and saved only at commit:
+- routine: `VisualAidStore.save(image, for: entryId)` → filename
+- event: `ContactPhotoStore(directoryName: "EventPhotos").save(image)` → filename
+
+Existing image limits apply (routine 1600 px / 0.8; event 512 px / 0.8). Event image instructions
+therefore inherit the shipped event-photo resolution; FR-RIE-003 explicitly binds them to that path
+(flagged in §Risks).
+
+#### Video from the library
+
+1. `PHPickerViewController` with `filter = .videos`, `selectionLimit = 1`,
+   `preferredAssetRepresentationMode = .current` (no system transcode).
+2. In `loadFileRepresentation(forTypeIdentifier: UTType.movie.identifier)`, **inside the callback**
+   (the URL is valid only there), in this exact order (FR-RIE-006, B-1/D17):
+   a. stat the source; if `> maxBytes` reject `.tooLarge` **before any copy**;
+   b. **synchronously probe** the source with `InstructionVideoProbing` (metadata only: duration,
+      playability, video track). Reject `.tooLong` (duration rounded to the nearest second),
+      `.unsupportedFormat` (not playable / no video track) or `.unreadableSource` **before any
+      copy**;
+   c. only then create the staged destination with complete protection and stream-copy into
+      `<root>/_pending/<draftUUID>/instruction-<uuid>.<ext>`; verify the attribute; on any error
+      delete the partial file;
+   d. return `StagedInstructionVideo { url, filename, byteCount, probed }`.
+3. The capture coordinator then runs `InstructionVideoImporter.validate(staged, limits:)`
+   **off-main** as the second check: a full async inspection (duration, playability, video track)
+   under `validationTimeoutSeconds`, plus a defensive byte-cap re-check. Failure discards the
+   staged bytes and shows a plain message; the previous instruction is untouched.
+4. Success hands `AcceptedInstructionVideo { staged, durationSeconds }` to the editor for preview
+   and commit.
+5. Cancellation (picker dismissed, no selection) discards nothing and shows no error.
+
+The synchronous probe reads local metadata only — it does not decode frames, does not copy, and
+runs once per pick. It is the only place the FR-RIE-006 ordering can be honoured, because the
+source URL is invalid outside the callback. Its cost and the accepted trade-off are recorded in
+§Risks (new item 13).
+
+#### In-app recording
+
+1. The caregiver taps Record. The permission flow runs at that point:
+   - camera `authorized` → continue; `notDetermined` → plain pre-permission explanation → system
+     request; `denied`/`restricted` → plain "camera is off" note, recording unavailable, library
+     path intact;
+   - microphone the same, because a recorded instruction includes sound; a denied microphone
+     disables recording with a plain note (FR-RIE-025's own scenario);
+   - no camera hardware (`isSourceTypeAvailable(.camera) == false`) → plain unavailable note.
+   No prompt at launch, no prompt loop, no crash.
+2. `UIImagePickerController` with `sourceType = .camera`, `mediaTypes = [UTType.movie.identifier]`,
+   `cameraCaptureMode = .video`, `videoMaximumDuration` from configuration (180 s), quality mapped
+   from the configuration enum.
+3. In `didFinishPickingMediaWithInfo`, the `mediaURL` is valid only inside the callback: stat →
+   synchronous probe → reject before copy → protected stage copy, by the same `stageSynchronously`
+   call (same `limits` and `prober`) used by the library path.
+4. The same importer second check, preview, commit and cancel semantics apply. Cancelling the
+   system camera returns to the editor with no change and no error.
+5. The system UI handles the recording itself; no custom capture UI is added.
+
+#### Capture state machine (single-flight)
+
+```
+idle ──pick──▶ picking ──in-callback limits ok + staged──▶ validating ──✓──▶ ready
+  │                │                                            │
+  └──record────▶ recording ─────────────────────────────────────┘
+                   │
+                   └──cancel──▶ idle (previous instruction untouched)
+  any failure (pre-copy or validation) ──▶ failed(InstructionImportError) ──retry/close──▶ idle
+```
+
+- One operation at a time; a second tap while `isBusy` is ignored (the `CameraCaptureFlow.isRunning`
+  precedent, `CameraCapture.swift:109,153`).
+- `.ready` survives until commit or discard; leaving the editor discards it.
+
+### Fire-time presentation and playback
+
+#### Handler changes (notification layer)
+
+| Handler | `willPresent` gate | `didReceive` |
+|---|---|---|
+| `RoutineVisualAidFireHandler` | present when `!entry.visualAids.isEmpty \|\| entry.instruction?.isPresent == true` (was photos-only, `:55`); still always `false` (`:15–18`) | **new (B-2):** for the default action on a routine reminder whose `had_instruction == true`, resolve the entry and call the tap sink on the main queue: `onInstructionTap(entryId, entry?, notification.date)`. `had_instruction == false` (photo-only or no instruction at arm time) remains a no-op — today's behaviour. A missing `had_instruction` key (notification armed before this release) reads as `false` |
+| `FreeFormEventFireHandler` | present when `event.photoFilename != nil \|\| instructionPresent(eventId)` (was photo-only, `:69`); still always `false` (`:21–24`) | unchanged: `.default`/`OPEN_EVENT` already opens the detail (`:87–96`), which now includes the instruction card. The event path never no-ops: a deleted event shows the detail's own honest "no longer in the calendar" message; a removed instruction leaves the event content showing. No event-scheduler change is needed |
+
+- **Bounded scheduler change (D14, C17).** `RoutineAlarmScheduling.scheduleRoutineReminder` gains
+  `hasInstruction: Bool`; `UNRoutineNotificationScheduler` writes it as `"had_instruction"` through
+  the pure `RoutineNotificationContent.userInfo(occurrenceId:entryId:hasInstruction:)`. The
+  notification title, body, sound, banner/list outcome, first-photo attachment and scoped-cancel
+  identifiers are untouched. `RoutineScheduler.regenerateWindow` passes
+  `entry.instruction?.isPresent == true` at its existing schedule call (`RoutineScheduler.swift:366–372`),
+  so every re-arm (launch, edit, instruction set/remove) refreshes the flag.
+- **Routine tap resolution (D14):**
+  - `had_instruction == true`, entry resolves, instruction present → fired screen with title,
+    delivery time and the playable instruction card.
+  - `had_instruction == true`, entry resolves, instruction now absent (removed after arming) →
+    fired screen with title and delivery time plus the plain fallback line
+    (`instruction.removed`); no Play, no blank screen (FR-RIE-019/020).
+  - `had_instruction == true`, entry gone (deleted after arming) → plain localized
+    "This reminder is no longer available." surface (`instruction.reminderUnavailable`) with a Close
+    control; no title/time is claimed because none can be resolved.
+  - `had_instruction == false` → no-op, exactly today's photo-only behaviour (NFR-RIE-010).
+  - Dedupe by entry id: if the fired screen for the same entry is already presented (foreground
+    `willPresent` followed by a tap), `didReceive` does not reset it.
+- `NotificationFacade` (`:81–91`, `:96–100`) is unchanged: it still completes
+  `[.banner, .list, .sound]` and still stops at the first claim. Because every instruction handler
+  returns `false`, delivery, read-aloud, and the caregiver handlers are untouched (FR-RIE-015/016).
+- A routine notification has no category or custom action today (`RoutineAlarmScheduler.swift:75–79`
+  comment: no category actions). "Open" on such a notification is the system default action and
+  arrives as `.default`; the tap path therefore needs no taxonomy change.
+- The handler gains two sinks: `onFire: (RoutineEntry, Date) -> Void` (foreground) and
+  `onInstructionTap: (UUID, RoutineEntry?, Date) -> Void` (tap). `AppCoordinator` wires them to
+  `presentRoutineVisualAids(for:at:)` and `presentRoutineInstructionTap(entryId:entry:at:)`. The
+  time formats with `LocaleFormatters.shortTime(locale: activeLocale)` (the shipped
+  `scheduleSummary` formatter, `RoutineSettingsView.swift:142`). Using `UNNotification.date` (D13)
+  keeps the time honest without changing the scheduler's trigger logic.
+
+#### Routine fired screen composition
+
+`FiredRoutineVisualAids` (`VisualAidViews.swift:295–301`) becomes:
+
+```swift
+struct FiredRoutineVisualAids: Identifiable, Equatable {
+    enum Content: Equatable {
+        /// A routine firing: title and time from delivery, plus the instruction.
+        /// `instruction == nil && expectsInstruction == true` renders the plain
+        /// "instruction no longer available" fallback (instruction removed after
+        /// arming) instead of nothing.
+        case reminder(title: String, aids: [VisualAid],
+                      instruction: Instruction?, expectsInstruction: Bool,
+                      timeText: String?)
+        /// The owner was deleted between arming and the tap: plain localized
+        /// "no longer available" notice, no title/time, no Play.
+        case unavailable
+    }
+    /// Entry id from the notification payload — the presentation identity.
     let entryId: UUID
-    let scheduledAt: Date          // the reminder's resolved time — the ordering key
-    let fired: Bool                // lastFiredAt != nil (the reminder has rung)
-    let slot: MedicationSlot?      // nil for legacy-shape entries
-    let voiceKeys: [String]        // MedicationVoiceVocabulary.voiceKeys(for: entry), canonical
-    let medicationName: String     // for the sanctioned copy only
+    let content: Content
+    var id: UUID { entryId }
 }
-func medicationAckCandidates() -> [MedicationAckCandidate]  // one per pending reminder
 ```
 
-NEW pure type `MedicationAckResolver` in the medication module (no LLM dependency — NFR-MSR-001;
-deterministic; no clock reads beyond the inputs):
+`RoutineVisualAidOverlay` (`:306–329`) maps `.reminder` to the existing generic
+`ReminderVisualAidScreen` **footer** slot and `.unavailable` to the same screen with
+`aids: []`, `title: instruction.reminderUnavailable` and an `EmptyView` footer:
+
+```
+Close
+[photo pager]            // today's pager, unchanged; absent for an instruction-only entry
+Title
+Time (instruction-bearing firings; nil otherwise)
+Photo caption / "Photo 2 of 3"   // unchanged
+footer: InstructionCardView
+```
+
+- **Shared-screen source change (m-4).** `ReminderVisualAidScreen` gains exactly one parameter,
+  `timeText: String?` with a default of `nil`, and one conditional `Text` rendered only when it is
+  non-nil. Medication call sites and every no-instruction routine call site pass `nil` and render
+  the same view tree as today: **behaviourally identical**, which is what NFR-RIE-010's
+  "byte-for-byte today's behaviour" means (a behaviour claim, not a source-diff claim). The
+  source-scan baseline (`InstructionSurfaceTests`) records this addition as the only allowed edit
+  to `VisualAidViews.swift` and pins that no-instruction call sites pass `nil`.
+- An instruction-only entry passes `aids: []`: `showsImage` is false, the pager is absent, the
+  title renders, and the footer carries the instruction. Nothing suppresses presentation any more.
+- The time is rendered at caption size. Showing it only when an instruction exists or is expected
+  is the requirement-driven compromise between FR-RIE-017/020 (title and time) and NFR-RIE-010
+  (behavioural baseline for photo-only firings) (D6).
+
+#### Event detail composition
+
+`EventDetailView.detailCards` (`EventsView.swift:598–641`) gains an `InstructionCardView` after the
+event-info card and before Navigate. Its `.task(id: version)` (`:580`) also loads the instruction and
+instruction image through new coordinator accessors. The form's inset sheet and the fired
+notification both reach the same screen, so the elder meets one event face, as today.
+
+#### `InstructionCardView` (shared by both surfaces)
+
+Render rules (pure display state + one card):
+
+| State | Render | Missing media |
+|---|---|---|
+| text | card, body typography (≥ 18 pt), full-width, wrapping, no truncation | not reachable |
+| image | image `scaledToFit`, optional caption below | plain "This picture is not available right now." |
+| video | large full-width Play button (min height `DesignTokens.chipHeight`, ≥ 44 pt), optional caption below | plain "This video is not available right now."; no Play if availability is already known missing |
+| removed instruction (`expectsInstruction == true`, `instruction == nil`) | plain "This instruction is no longer available." line; no control | n/a |
+| unknown | reminder content plus a plain "made with a newer version" note, **no control** | n/a |
+| none (`expectsInstruction == false`, no instruction) | nothing (no block, no space) | n/a |
+
+- The pure state is:
+  ```swift
+  struct InstructionDisplayState: Equatable {
+      let instruction: Instruction?
+      let expectsInstruction: Bool
+      var presentation: InstructionPresentation { get }   // no IO
+      var caption: String? { get }
+      var isPresent: Bool { get }
+  }
+  enum InstructionPresentation: Equatable {
+      case none
+      case missingInstruction        // expectsInstruction && instruction == nil
+      case text(String)
+      case media(kind: InstructionKind, filename: String?)
+      case unsupportedKind(String)
+  }
+  ```
+- The card resolves video availability in `.task` (no disk work in `body`, the house rule); image
+  loading happens in `.task` like the existing pager (`VisualAidViews.swift:271–279`).
+- Play is always the user's explicit action. No `AVPlayer` is constructed on appearance; no audio
+  session is activated. The card is the only place a player is created (FR-RIE-018).
+- Caption trimming is the `VisualAidDisplayState.currentCaption` rule
+  (`VisualAidDisplayState.swift:61–65`): trimmed, blank → nil, and a nil caption reserves no space.
+- VoiceOver: the Play button is labelled "Play the video instruction" (localized), the image is
+  labelled "Instruction picture" with the caption as value/hint, the fallback text is read
+  naturally, the unavailable notice is read as its text, and the Close control reuses
+  `common.close`. No unlabelled new control.
+
+#### Video resolution classification (M-2)
 
 ```swift
-enum AckResolution: Equatable {
-    case resolved(entryId: UUID)
-    case ambiguous(ordered: [UUID])       // ≥2 candidates; walk order fixed here
-    case noMatch(orderedPending: [UUID])  // something was said that matches no pending entry
-    case nothingPending
+enum InstructionPlaybackAvailability: Equatable {
+    case available(URL)
+    case rejectedFilename
+    case missingFile
+    case unreadableFile
 }
-enum MedicationAckResolver {
-    static func resolve(transcript: String, candidates: [MedicationAckCandidate]) -> AckResolution
+
+enum InstructionResolutionOutcome: String, Equatable {
+    case rejectedName = "rejected_name"
+    case missing
+    case unreadable
 }
 ```
 
-**Resolution algorithm (deterministic, conservative, by what was said):**
+`InstructionVideoStore.availability(filename:for:)` returns the classification:
+non-plain name → `.rejectedFilename`; absent → `.missingFile`; present but not a readable regular
+file (directory at the path, or `isReadableFile` false) → `.unreadableFile`; otherwise
+`.available(url)`. The card maps `.rejectedFilename → rejected_name`, `.missingFile → missing`,
+`.unreadableFile → unreadable`, emits one `instruction_resolution` event with `kind` and `outcome`
+only, and renders the plain fallback. `.available` emits nothing. The event's typed API accepts
+only those two fields, so a filename cannot reach it structurally; a test additionally asserts the
+emitted metadata.
 
-1. **Parse the utterance**: name-key matches = candidate entries whose canonical `voiceKeys`
-   appear in the canonical transcript (substring containment — the shipped vocabulary convention
-   `MedicationVoiceVocabulary.canonical` :104 and the parser's Devanagari-fusion convention);
-   optional slot word from a closed two-language list (morning/afternoon/evening in the elder's
-   languages); optional meal word (before/after meal). The meal relation is **context only — it
-   never filters and never discriminates** (OD-1: meal is not a clock; the named medication and
-   slot are the strong signals).
-2. **Name first.** If ≥1 name-key match:
-   - if a slot was named and any name-match has that slot → keep the name-matches carrying that
-     slot; if a slot was named and none of the name-matches carries it → this is a conflict
-     (one of the two statements is wrong) → **ambiguous** walk over the name-matches;
-   - exactly one → `resolved`; several → `ambiguous`.
-   Resolution is by what the elder said — never by firing order or `scheduledAt` preference — so
-   naming a medication resolves to that medication's entry even when another medication's
-   reminder rang first (FR-MSR-007's stated motivation).
-3. **Then slot.** No name match, slot named: candidates = pending entries whose slot equals the
-   named slot. 0 → `noMatch` (honest: nothing pending at that slot — never a fall-through to
-   other slots); 1 → `resolved`; ≥2 → `ambiguous`. Legacy entries (slot nil) never match a slot
-   word — no inference over their raw times.
-4. **Then a simple acknowledgement.** No name, no slot: candidates = the **fired** pending
-   reminders if any (`fired == true` — "taken" with no further information refers to what rang),
-   else all pending (early acknowledgement of a not-yet-rung reminder — the shipped
-   single-pending behaviour). 1 → `resolved`; ≥2 → `ambiguous`; 0 → `nothingPending`.
-5. `noMatch` carries the full ordered pending set so the router can run the sanctioned fallback
-   question below.
+Images use `InstructionImageLoading` (m-8):
 
-**Behaviour change recorded (conservative, per FR-MSR-007):** today a simple run of "taken" with
-several pending reminders silently picks the oldest. Under this design, several pending
-reminders make a simple acknowledgement **ambiguous** (clarification) unless exactly one has
-rung. The requirement's own failure scenario demands this ("no medication is chosen by firing
-order"); the single-pending case (the scenario where today's behaviour was correct) is
-byte-identical.
+```swift
+enum InstructionImageFailure: Equatable { case rejectedFilename, unavailable }
 
-#### 7.3 The clarification walk — sanctioned copy only
+@MainActor protocol InstructionImageLoading {
+    func loadImage(filename: String, for owner: InstructionOwner)
+        -> Result<UIImage, InstructionImageFailure>
+}
+```
 
-`AckResolution.ambiguous` and `noMatch` enter the clarification walk: coordinator state
-`pendingAckClarification` (the `pendingNavigationWalk` precedent — a small ordered candidate
-list plus a cursor), reflected in `isAwaitingConfirmation` (:12916) so the router's yes/no
-parsing stays in force while it is open. The walk:
+Two adapters: `RoutineInstructionImageLoader` over `VisualAidStore` + entryId
+(`load(VisualAid(filename: filename), for:)`) and `EventInstructionImageLoader` over
+`ContactPhotoStore` (`load(named:)`), each guarded first by `InstructionFilename.isPlain`. The image
+stores collapse "absent" and "present but undecodable" into a nil read and this design deliberately
+does not widen them, so images classify as `rejected_name` or `missing` (the umbrella outcome for an
+unreadable image); `unreadable` is emitted only where the seam can distinguish it (video, above).
+A `FakeInstructionImageLoader` with scripted results is the unit-test double.
 
-- **Order**: fixed at entry — by `scheduledAt`, then canonical name, then id. Same input ⇒ same
-  order ⇒ same question (FR-MSR-008 determinism scenario).
-- **Two candidates**: first question uses the pair form — "did you mean X or Y?" (the sanctioned
-  copy). A response naming one of the pair (name containment) resolves to it; a plain "yes"
-  stays ambiguous and the walk falls to the single-candidate form below at cursor 0; a plain
-  "no" ends the walk with nothing recorded.
-- **One candidate (and `noMatch` with a single pending)**: "did you mean X?" — the sanctioned
-  single form. "Yes" resolves to X and proceeds to the safety sequence; "no" ends with nothing
-  recorded.
-- **Three or more candidates**: single-candidate form from cursor 0 onward, one candidate per
-  question — **never a numbered list, never a leading question** (owner copy rule; the forms
-  permitted are exactly "did you mean X" and "X or Y").
-- **Barge-in**: a response that is itself an explicit acknowledgement re-enters resolution from
-  scratch (the existing precedence: an ack is never consumed as a yes/no answer, :1191).
-- **Expiry**: the walk is open for a configurable response window (§15), default equal to the
-  existing challenge timeout (30 s, `ConfirmationChallenge.challengeTimeoutSeconds` :21);
-  on expiry the walk ends, nothing is recorded, and the reminders stay pending untouched —
-  escalation continues on its own clock.
-- **Outcome**: every ending other than a resolved "yes" records nothing and says so honestly.
-  The copy strings are L10n keys in both languages; the sanctioned forms are the only shapes.
+#### Playback UX and the injectable seam
 
-The same conservative discipline governs the photo path (§8.3) — one clarification mechanism,
-not two.
+```swift
+enum InstructionPlaybackFailure: Error, Equatable {
+    case rejectedFilename, missingFile, unreadableFile,
+         unsupportedFormat, playerFailed, interrupted, timedOut
+}
+enum InstructionPlaybackEvent: Equatable { case ready, failed(InstructionPlaybackFailure),
+                                                  finished, dismissed }
 
-#### 7.4 The preserved safety sequence and recording (FR-MSR-009, FR-MSR-010)
+@MainActor protocol InstructionVideoPlaying: AnyObject {
+    var renderablePlayer: AVPlayer? { get }          // nil in fakes; the cover renders when non-nil
+    func present(url: URL, title: String?,
+                 completion: @escaping (InstructionPlaybackEvent) -> Void)
+    func dismiss()
+}
 
-On `.resolved(entryId)`, the router calls the shipped flow for that entry:
-`coordinator.startVoiceAckConfirmation(for: entryId)` (:12657) → challenge prompt spoken →
-next-transcript handling (`handleMedicationConfirmation` :12647) → `acknowledgeWithConfirmation`
-(:241) → `ConfirmationChallenge.userResponds` → `.recordTaken` → `checkDoubleDoseAndRecord`
-(:499, `DoubleDoseDetector`) → `finalizeAcknowledgement` (:453). Nothing in this chain is
-modified — resolution only decides **which** entry the chain runs for. The first-call-issues-
-challenge behaviour (:254) is untouched, so no path — resolved directly, clarified, or
-photo-initiated — can record without the challenge; a "No" or a timeout re-enters escalation
-with FR-D02 semantics (:272, `reEnterEscalation` :589), locale-aware prompts preserved.
+@MainActor final class InstructionPlaybackController: ObservableObject {
+    enum State: Equatable { case preparing, playing, failed(InstructionPlaybackFailure) }
+    init(player: InstructionVideoPlaying, url: URL, title: String?,
+         configuration: InstructionPlaybackConfiguration)
+    func start()
+    func close()                                     // idempotent; pauses and releases
+}
+```
 
-**Recording (FR-MSR-010):** unchanged shape — `MedicationAdherenceLog` carrying the reminder's
-`scheduledAt` (the slot-mapped exact time) and `acknowledgedAt` (:460–471), persisted before
-runtime cleanup (:476–489). Only a fully confirmed dose records as taken.
+Play sequence:
 
-#### 7.5 Mic continuity, refusal-first, correction coexistence (FR-MSR-011, FR-MSR-012)
+1. Tap Play → the full-screen cover appears immediately (dismissible from its first frame) with a
+   neutral preparing state; no audio. This synchronous presentation is what makes the 500 ms target
+   credible.
+2. Synchronous availability: the card already resolved plain-name/exists/readable in `.task`; a
+   known-missing file renders the fallback instead of Play.
+3. Asynchronous preflight: `AVURLAsset.load(.isPlayable)` (local file only) under
+   `preflightTimeoutSeconds` (default **0.6 s**, configuration). Failure → inline plain fallback in
+   the cover. **Measurement point (m-6):** failure latency is measured from the Play tap, with the
+   cover presented synchronously in the same tap handler; 0.6 s preflight plus cover update leaves
+   margin under NFR-RIE-008's 1 s outer acceptance bound (`:12`).
+4. Ready → create the `AVPlayer`, attach it to the cover's SwiftUI `VideoPlayer`, start playback
+   (the Play tap was the explicit action), and set `.playing`. The standard AVKit transport is
+   available; a custom Close button (≥ 44 pt) sits outside the video area.
+5. A ready watchdog (`playerReadyTimeoutSeconds`, default 10 s, configuration) converts a
+   never-ready player into `.failed(.timedOut)` — the no-endless-spinner backstop.
+6. Pause/close stops audio: `close()` calls `player.pause()`, detaches the item, and releases the
+   player; `.onDisappear` calls `close()` too, so a dismissed fired screen cannot leave audio
+   running. `.finished` and `.dismissed` also close.
+7. No autoplay, no background playback, no notification "Watch video" action (OD-6). Copy states
+   the foreground-only limitation honestly in the caregiver editor helper text; the elder-facing
+   card claims nothing about background playback.
 
-- **Mic continuity**: the new ack-with-slot and clarification utterances enter the same turn
-  pipeline and the same speech seams as today's acks; the [ACK-MIC-CONTINUITY] property
-  (`AckFastLane.swift` header; pre-acks play outside the listening seam, `speakPreAck` :5529)
-  is preserved — no new synthesis-and-teardown step is introduced between the acknowledgement
-  and listening, and the fast-lane suite (`AckFastLaneTests`) extends to the new shapes. The
-  challenge and clarification prompts are spoken through the same `speak` seam that already
-  speaks the shipped challenge prompt (confirmation challenges deliberately never use the
-  pre-ack, :5512).
-- **Refusal-first**: §7.1 step 2.
-- **Correction coexistence**: §7.1 step 5.
+Production adapter `AVKitInstructionVideoPlayer`: AVFoundation preflight + `AVPlayer` +
+`VideoPlayer` render source, with item-status observation mapped to the seam events. It adds no
+network call, no audio-session change, and no custom transport.
 
-#### 7.6 Honest outcomes summary
+#### Failure behaviour (plain, localized, non-blocking)
 
-| Situation | Outcome | Recorded? |
+- Media failure never blocks the reminder: the notification is already delivered; the fired screen
+  shows the reminder title/time plus the instruction fallback, and is always dismissible.
+- No raw error, OSStatus, codec name, file name, or path reaches the caregiver or elder. Each
+  error type maps to one localized plain message (see §Error taxonomy).
+- Missing/unreadable/rejected file: immediate inline fallback.
+- Corrupt/unsupported stored file: preflight failure within `preflightTimeoutSeconds`, or the
+  ready watchdog as the last resort.
+- Traversal/absolute filename: resolution returns `.rejectedFilename`, the instruction is treated
+  as missing, and a PII-free `instruction_resolution` event records the refusal (FR-RIE-012).
+- A tap whose instruction was removed or whose owner was deleted never shows a blank screen and
+  never claims success (B-2, above).
+
+### Notification integration (preserved contracts)
+
+| Contract | Design |
+|---|---|
+| `NotificationCategories` is a full-REPLACE builder | **no new category or action**; the file is untouched, so the pre-feature set is registered by construction (FR-RIE-021) |
+| Scoped cancels only | `UNRoutineNotificationScheduler`'s identifiers and scoped cancels are untouched; no `removeAllPendingNotificationRequests` (FR-RIE-021) |
+| Handlers always return `false` | both instruction handlers keep that contract; the facade's handler loop and completion are untouched (FR-RIE-016) |
+| No video in attachments | only the shipped first-photo attachment path exists; `RoutineAlarmScheduling` has no instruction/video URL parameter at all; no code path passes an instruction file to `UNNotificationAttachment`; re-arming copies nothing (FR-RIE-022) |
+| Existing notification text | unchanged: routine body = entry title; event content unchanged; instruction media never enters content. The only `userInfo` addition is the producer constant `had_instruction` (D14) |
+| Foreground presentation | `willPresent` is the only foreground trigger; `didReceive` is the tap/Open path after unlock, and it now resolves all three instruction tap cases honestly (B-2). No background/cold-launch playback claim (FR-RIE-019) |
+| Medication path | no source change; the shared fired screen and facade are behaviourally untouched (NFR-RIE-010) |
+
+### Concurrency, isolation and single-flight
+
+- **UI and presentation state:** all new view models, coordinators and playback controllers are
+  `@MainActor`. The fired presentation state dedupes by entry id; `dismiss` is idempotent.
+- **Service writes:** `RoutineScheduler.setInstruction` and `FreeFormEventService.setInstruction`
+  are synchronous and run on the main actor. There is no `await` between writing the new file and
+  persisting the index, so no second write can interleave on the main actor (the `setPhoto`
+  transactional shape). The only async steps are *before* commit (the off-main importer) and
+  *after* commit (playback).
+- **Store isolation:** `InstructionVideoStore` has only immutable stored properties (`FileManager`,
+  resolved base URL) and performs `FileManager` operations; it holds no mutable state, so it is safe
+  to call from the system picker/recorder callbacks and from the main actor. There is no shared
+  cache to lock. The synchronous probe is a pure function of the source URL supplied by the caller;
+  the store itself owns no AVFoundation state.
+- **Single-flight capture:** one pick/record/validation at a time (`isBusy`); the editor disables
+  kind controls while validating or saving.
+- **Single playback:** one cover per card; Play is disabled while a cover is presented. Closing the
+  cover releases the player.
+- **Purge:** `_pending` cleanup runs on the utility housekeeping queue at launch; it removes only
+  draft directories and never touches an owner directory.
+- **No new locks, no background queues of our own:** the feature uses the existing coordinator
+  housekeeping queue and the system callbacks only.
+
+### Error taxonomy and failure behaviour
+
+| Type | Cases | Raised by | User-facing result | Retry |
+|---|---|---|---|---|
+| `InstructionImportError` | `unreadableSource`, `tooLarge(byteCount)`, `tooLong(seconds)`, `unsupportedFormat`, `validationTimedOut`, `writeFailed`, `cancelled` | synchronous probe/stage (pre-copy cases), inspector, importer | one plain localized message; previous instruction unchanged; `.cancelled` is not an error | yes, pick again |
+| `InstructionPlaybackFailure` | `rejectedFilename`, `missingFile`, `unreadableFile`, `unsupportedFormat`, `playerFailed`, `interrupted`, `timedOut` | card resolution, preflight, player, watchdog | plain "not available" text with title/time; cover dismissible | Play again after a transient interruption |
+| `InstructionImageFailure` | `rejectedFilename`, `unavailable` | image loader | plain "picture not available" text with the reminder content | on the next fire/detail load |
+| `InstructionStorageError` | `notPlainFilename`, `writeFailed`, `moveFailed`, `deleteFailed` | store, returned as `Result` (m-2) | service returns false → plain "didn't save"; previous instruction intact. `deleteFailed` is logged PII-free (cleanup, not the visible save) | yes |
+| `InstructionPermissionStatus` | `granted`, `denied`, `undetermined`, `unavailable` | permission seam | plain explanation; recording unavailable; library/reminder unaffected | after changing system settings, on a later attempt |
+| Unknown-kind state | — | display state | plain "newer version" note; **no control**; entry otherwise usable | not in v1 |
+| Removed / unavailable tap state | — | tap resolution (B-2) | title/time + plain fallback, or plain "no longer available" notice; always dismissible | n/a |
+| Blank text | — | normalization | behaves exactly like no instruction (no block) | n/a |
+
+- No raw error text is ever surfaced. Every case has a localized key (§Localisation).
+- Logged failures use only `outcome` and a closed `error_code`; no titles, captions, filenames,
+  paths or ids.
+- `InstructionStorageError.deleteFailed` is reachable because `delete`/`deleteAll` return
+  `Result<Void, InstructionStorageError>` (m-2); the services catch it, emit
+  `instruction_media_delete` with `outcome=failed`, and never swallow it.
+
+### Configuration (no hardcoded timeouts)
+
+```swift
+struct InstructionVideoLimits: Equatable {
+    let maxDurationSeconds: TimeInterval
+    let maxBytes: Int64
+}
+
+struct InstructionVideoConfiguration: Equatable {
+    var maxDurationSeconds: TimeInterval = 180
+    var maxBytes: Int64 = 200 * 1024 * 1024        // 209,715,200
+    var validationTimeoutSeconds: TimeInterval = 20
+    var recordingQuality: InstructionRecordingQuality = .high
+    var limits: InstructionVideoLimits {
+        InstructionVideoLimits(maxDurationSeconds: maxDurationSeconds, maxBytes: maxBytes)
+    }
+    static let `default` = InstructionVideoConfiguration()
+}
+
+struct InstructionPlaybackConfiguration: Equatable {
+    /// Sub-second by design: NFR-RIE-008's 1 s is the OUTER acceptance bound for
+    /// the fallback, measured from the Play tap with the cover already presented.
+    /// 0.6 s leaves margin for cover render/update (review m-6).
+    var preflightTimeoutSeconds: TimeInterval = 0.6
+    var playerReadyTimeoutSeconds: TimeInterval = 10  // no-endless-spinner backstop
+    static let `default` = InstructionPlaybackConfiguration()
+}
+```
+
+- Limits, timeouts and recording quality are injected at composition (`AppCoordinator`) and in
+  tests; no call site spells a numeric timeout.
+- Duration comparison rounds the asset duration to the nearest second before comparing to
+  `maxDurationSeconds`, so a nominal 3:00 clip whose container timescale reports 180.2 s is not
+  rejected as "4 minutes"; 181 s is. The same rounding rule applies to the synchronous probe and
+  the importer's second check. Size comparison is exact against 209,715,200 bytes (FR-RIE-006).
+- The recording maximum duration passed to the system UI is derived from the same configuration.
+
+### Observability and the release log gate
+
+All instruction events are emitted through one typed emitter in a listed source root; shared files
+call typed methods and never build metadata themselves.
+
+| Event type | When | Metadata (all already allowed by `LogSanitiser.allowedKeys`, `LogSanitiser.swift:56+`) |
 |---|---|---|
-| Name (+ slot) matches one entry | resolved → challenge → detector → record | yes, on confirmation |
-| Name matches several / pair form | sanctioned clarification walk; nothing until a resolution | no |
-| Simple ack, exactly one fired (or only one pending) | resolved (shipped single-pending behaviour) | yes, on confirmation |
-| Simple ack, several pending | clarification walk over the sanctioned forms | no |
-| Slot named, nothing pending there | honest "nothing to acknowledge" line | no |
-| Name matches nothing, ≥1 pending | clarification walk over the pending set | no |
-| Nothing pending at all | shipped `router.noPendingReminder` line (:5384) | no |
-| Challenge answer "No" / timeout | FR-D02: not recorded, escalation re-entered | no |
+| `instruction_saved` | after a successful/failed index write | `kind` ∈ text/image/video/none; `outcome` |
+| `instruction_removed` | after a successful/failed removal | `kind`; `outcome` |
+| `instruction_video_import` | pre-copy gate and importer outcome | `kind`=video; `outcome` ∈ accepted/rejected_too_long/rejected_too_large/rejected_unsupported/rejected_unreadable/timed_out/write_failed; top-level `durationMs` |
+| `instruction_video_playback` | cover resolves | `kind`=video; `outcome` ∈ started/ready/failed/finished/dismissed; `error_code` ∈ missing/unsupported/timeout/player; top-level `durationMs` (time to ready) |
+| `instruction_media_delete` | file cleanup, from the `Result` | `count`; `outcome` ∈ success/failed |
+| `instruction_permission` | permission decision | `kind` ∈ camera/microphone; `outcome` ∈ granted/denied/unavailable |
+| `instruction_resolution` | media resolution, from `InstructionPlaybackAvailability` / `InstructionImageFailure` | `kind` ∈ image/video; `outcome` ∈ rejected_name/missing/unreadable (images emit rejected_name/missing, §Playback) |
 
-**LLM independence (NFR-MSR-001):** the resolver and the vocabulary lists are pure Swift in the
-medication module; the ack path runs on the keyword safety net ahead of the model (`routeSafetyNet`
-precedes the interpreter), and no medication compilation unit gains an `LlamaInferenceEngine`
-symbol.
+- **No new `LogSanitiser` keys** are required: `kind`, `count`, `outcome`, `state`, `error_code`
+  and the event's own `durationMs`/`duration_ms` cover every field. No title, caption, filename,
+  path, clear entry/event id, video content or raw OS error can reach an event. The typed emitter
+  for resolution accepts only `kind` + `outcome`; a test asserts the emitted metadata for all three
+  outcomes and that no filename appears (M-2).
+- **Release gate:** add `Services/Instructions`, `App/InstructionViews.swift` and
+  `App/InstructionCapture.swift` to `FEATURE_ROOTS` in `ios/tools/check-release-log-safety.py:184`.
+  No `FEATURE_EVENT_TYPES` entry is needed because every emitter lives in a listed root; the
+  coverage self-test's "listed root matches a Swift file / event type is emitted" legs stay green.
+  The gate still runs from `ios/build.sh:431` before every scoped test run.
+- No `print`/console writes in the new roots; the gate enforces it.
 
-### 8. Photo-as-evidence (FR-MSR-013, FR-MSR-014, OD-8)
+### Localisation and accessibility
 
-**Resolution of OD-8 — the on-device-only evidence variant, judged by the caregiver, bound by
-capture context.**
+#### Localisation
 
-#### 8.1 Mechanism
+- Every new user-visible string is in `Localizable.xcstrings` with `en` and `ne`, referenced through
+  `L10n` (views use `LocalizedStringKey`/`Text("instruction.…")`). Proposed new family:
+  `instruction.title`, `.kind.text/.image/.video`, `.kind.choose`, `.text.placeholder`,
+  `.text.blank`, `.image.choose`, `.image.unavailable`, `.video.choose`, `.video.record`,
+  `.video.validating`, `.video.ready`, `.video.play`, `.video.playVoiceOver`, `.video.unavailable`,
+  `.video.tooLong`, `.video.tooLarge`, `.video.unsupported`, `.video.unreadable`,
+  `.video.saveFailed`, `.saveFailed`, `.savePartial`, `.remove`, `.replace`, `.empty`,
+  `.caption`, `.saved`, `.unsupportedKind`, `.foregroundNote`, `.removed`,
+  `.reminderUnavailable`, `.loadFailed`, `.retry`, `.permission.title`,
+  `.permission.cameraWhy`, `.permission.microphoneWhy`, `.permission.cameraDenied`,
+  `.permission.microphoneDenied`, `.permission.cameraUnavailable`, `.permission.continue`, plus
+  `routine.manageAidsAndInstruction` for the routine manage row's accessibility label.
+  Existing `common.close`, `common.cancel`, `common.save` and `visualAid.title` are reused.
+- `InfoPlist.strings` for `en` and `ne` supplies the amended camera/microphone usage descriptions
+  (D10). The `Info.plist` English text remains the fallback. Both descriptions disclose video
+  recording **and** that the recording stays on the device, and retain the existing disclosures
+  (medication/appliance photos, live translation, voice commands).
+- Any spoken time on a new path goes through `SpokenTime`; this feature speaks no new times. The
+  fired time is visual, formatted with the shipped `LocaleFormatters.shortTime`.
+- Coverage: extend `L10nCatalogCoverageTests` (`ios/ElderlyAssistantTests/App/`) with the
+  `instruction.*` family: every key resolves in en and ne to something other than the key, and the
+  two resolutions differ. A companion test reads both `InfoPlist.strings` files and pins the two
+  usage keys in both languages.
 
-- **Capture context determines the entry — never image content.** The capture affordances live
-  on surfaces that already carry a determinate entry: the fired-dose screen
-  (`MedicationVisualAidFireHandler`/`MedicationVisualAidsPresentation`) for the entry whose
-  reminder rang, and the intake-record surface for an already-recorded dose. The photo itself is
-  never classified — no CV, no matching against visual aids, no claim about what the image
-  shows. When no determinate context exists, the design **declines to bind** (honest line) —
-  there is no generic evidence camera, so FR-MSR-014's ambiguity case is handled by not creating
-  the ambiguous capture surface at all, and any future surface must route ambiguity through the
-  §7.3 clarification discipline ("asks … or declines to bind; never guesses").
-- **Evidence attaches, never creates (safety delta (c)).** Two attach moments, both inside the
-  acknowledgement machinery: (i) a capture taken while a reminder is pending is held as pending
-  evidence for that entry and attached only when `finalizeAcknowledgement` records the dose —
-  on a denied or timed-out challenge the held photo is discarded and nothing is recorded
-  (the intake still required the chain); (ii) a capture on a record surface attaches to that
-  existing `MedicationAdherenceLog`. No code path leads from capture to record creation.
-- **The record still flows through the chain.** Ruling from §7.4 applies verbatim: the
-  acknowledgement → challenge → double-dose → record sequence runs for the context's entry, and
-  the challenge's medication-naming prompt is also the elder's chance to catch a wrong context
-  ("Is that the small white tablet…?" → "No" → nothing recorded). The photo path is a second
-  way to *start* the chain, never a way around it (FR-MSR-009's photo-flow clause).
-- **On-device only (NFR-MSR-003).** Photos are captured, compressed (reusing the FR-D04b 200 KB
-  cap precedent — `PhotoVerifier` :27) and stored in a new on-device file store keyed by the
-  adherence-log id. The model carries a bare file name only (the `visualAids` precedent, :55–61:
-  never a path, never bytes in the model). Nothing is transmitted; the recorded cloud
-  exceptions do not apply.
-- **Camera availability**: capture reuses the shipped camera-presenting component and its
-  availability handling (`MedicationLabelScanner`/`CameraCapturePresenting` — no device, no
-  permission, cannot present all have honest spoken guidance). A camera that cannot present
-  never blocks the intake loop — the voice path is the floor (the FR-D04d graceful-degradation
-  philosophy).
-- **Recipient and judge**: the caregiver. The app's claim is exactly "a photo was captured at
-  acknowledgment time and attached to this record" — never "intake verified". Delivery: there
-  is no medication-photo transport in this feature. The photo stays on the primary device
-  (compressed, retained until delivered — which, with no channel, is honestly "not yet
-  delivered", surfaced as such, FR-MSR-018). When the inherited E2E channel
-  (`docs/family-notifier-e2e-implementation-plan.md`) lands, the FR-D04b discipline applies to
-  this store unchanged: deliver to the companion app, then delete from the primary device
-  within 1 hour; never stored on the relay; delivery failure never silent. This is the OD-3
-  transport-scope logic applied to evidence (§9.5), and it is the honest boundary under which
-  the requirement's "where evidence leaves the device" clause stays satisfiable without
-  falsifying anything today.
+#### Accessibility
 
-#### 8.2 Data shape
+- **Targets:** every new interactive control (Play, Close, kind buttons, choose/record/save,
+  replace/remove, Continue on the permission sheet) uses `DesignTokens.minTapTargetSize` (44,
+  `DesignTokens.swift:127`) as its floor; the Play and kind buttons also use
+  `DesignTokens.chipHeight` (60, `:156`). No drag, scrub, or swipe-only action is added.
+- **Text:** body text uses `AppTypography.bodyPointSize` (scaled 21, floor 18,
+  `AppTypography.swift:28,35–37`); captions use `captionPointSize` (18, `:29`). Instruction text
+  wraps without truncation. The routine fired screen's existing accessibility-size ScrollView
+  (`VisualAidViews.swift:170–174`) contains the instruction footer and the unavailable notice, so
+  nothing clips at the largest text size. The event detail already scrolls.
+- **VoiceOver:** the video Play control, the instruction image (caption as value), the caption text,
+  the fallback text, the removed/unavailable notice and the player Close are labelled; no new
+  control is unlabelled. The player's standard AVKit transport keeps its system labels.
+- **Reduce Motion:** no instruction-specific animation is introduced; the system manages the cover
+  transitions (which honour Reduce Motion). If a custom transition is added later, it must check
+  `accessibilityReduceMotion`.
+- **One-handed:** the Play button spans the card width; Close sits top-leading at 44 pt; neither
+  requires a precise drag.
+- **Coverage:** `InstructionSurfaceTests` uses the house source-scan idiom
+  (`FeatureSourceScan.codeText` + region slicing, as `MedicationEditorSurfaceTests` does) to pin the
+  token floor per new control, the presence of accessibility labels, and the allowed `timeText`
+  baseline edit (m-4); pure draft/display rules are tested directly. Device accessibility is part of
+  the recorded smoke check.
 
-- `MedicationAdherenceLog` gains `evidencePhotoFileName: String?` (optional, custom-decoder
-  default nil, migration-safe). The dementia-side `photoVerification: PhotoVerificationStatus`
-  (:196) is **not** reused — keeping the two mechanisms separable keeps the unwired dementia
-  state honestly reported (§8.5).
-- NEW `MedicationEvidenceStore`: file-per-record storage under Application Support (the
-  `VisualAidStore` pattern), one photo per record (re-capture replaces), deleted with its
-  entry (the `removeMedication` cascade :11683 precedent) and deleted when a record's evidence
-  is discarded pre-record.
+### Template sections not applicable
 
-#### 8.3 Determinism (FR-MSR-014)
-
-Resolution is a function of the capture context, not the image: the same capture context and
-pending set resolve identically every time. Ambiguity cannot be attributed to a neighbouring
-medication by construction (no cross-entry binding exists); declined binding is the honest
-failure branch.
-
-#### 8.4 UX
-
-The capture affordance is a large touch target on the fired-dose screen (and the record
-surface), announced by voice when the surface appears (the FR-D04e audio-cue philosophy). The
-elder may complete the whole intake by voice alone — the photo is the provided alternative, not
-a requirement (FR-MSR-021: "or the provided photo capture").
-
-#### 8.5 Dementia machinery — preserved, not repurposed (FR-MSR-020)
-
-`PhotoVerifier` (FR-D04a–e) stays exactly as shipped — components present, not wired
-(`photoVerificationEnabled` still `false` at every entry-construction site), no tests invented
-for it, its state surfaced honestly. The new evidence path is a sibling, not a wiring of that
-machinery; nothing in this feature removes, bypasses or silently enables the per-medication
-dementia mechanism.
-
-### 9. Caregiver notification (FR-MSR-015, FR-MSR-016, FR-MSR-017, FR-MSR-018, OD-7)
-
-#### 9.1 The significant set and its trigger sites
-
-The resolved set (OD-3) fires **unconditionally** — not gated by `CaregiverNotifySettings`
-(whose opt-in remains for the daily first-fire `eventReminder` only, resolved at fire time
-:353):
-
-| Event | Wire type | Trigger site (medication path) |
-|---|---|---|
-| Missed dose | `missedMedication` (shipped) | `recordMissedDose` :551 — unchanged |
-| Possible double dose | `possibleDoubleDose` (shipped) | `checkDoubleDoseAndRecord` blocked branch :530–536 — unchanged |
-| **Intake recorded** | `intakeRecorded` (**new taxonomy case**) | `finalizeAcknowledgement` :453 — after the adherence log is durably persisted, before/independent of runtime cleanup; every recorded intake, whichever path recorded it |
-| **Escalation started** | `escalationStarted` (**new taxonomy case**) | `handleAckDeadlineExpired` :378, the reminder's **first re-fire decision** (the ack window elapsed and the re-fire escalation begins — FR-MSR-015's scenario), once per reminder, state-derived (the engine's re-fire count), never a per-event stored flag |
-
-Both new triggers live on the medication notification path, never on
-`CaregiverEventFireHandler` (medication alarms carry no `userInfo["type"]` — its own guard
-:70–76). Send decisions resolve at fire time, nothing is stored per event.
-
-#### 9.2 Channels and honest per-contact results
-
-- **Push/text path**: the shipped `notifyAll` per-contact loop (`FamilyNotifier` :112–151), with
-  `NotificationResult` carrying success/errorCode/channel (:230). Significant-event calls now
-  pass a `FamilyAlertContext` (kind `.medicationReminder`, hashed event id, title in memory
-  only) so the channel the push rode and the `family_event_alerted` observability event are
-  recorded for significant events too — the mechanism exists and is reused, not rebuilt.
-- **Transport honesty (FR-MSR-016, FR-MSR-018)**: the shipped provider is a stub that returns
-  success (`APNsProvider.sendPush` :222–227) — that is precisely the false success the
-  requirements forbid. The design makes it honest: `sendPush` returns an explicit outcome
-  (delivered / not-delivered with a reason code, e.g. `transport_unimplemented`), the notifier
-  maps it to `success: false` + errorCode, partial delivery is reported as partial, and no
-  surface describes a caregiver as notified when the transport did not deliver. When the E2E
-  transport lands (inherited tracked work), the provider is swapped and the honesty contract
-  stays.
-- **Text channels**: `NotifyChannel.resolve(preferred:defaultApp:…)` (:58) keeps deriving the
-  channel per contact; they remain available paths with the same honest-result rule.
-- **Delivery claims**: made only for what actually fires. Transport-dependent statements are
-  labelled inherited tracked work (`docs/family-notifier-e2e-implementation-plan.md`).
-
-#### 9.3 The calendar channel — OD-7 resolved
-
-**Decision: the consent-gated schedule mirror stays exactly as shipped, and the three at-risk
-significant events additionally surface as one-off entries on the same shared family calendar.**
-
-- **Mechanism.** `CalendarShareService` (consent gate at :124–162, status :224) already mirrors
-  the schedule into shared twins on every schedule write (`MedicationScheduler.onScheduleChanged`,
-  wired at `AppCoordinator` :3523 → `reconcileMedication` :437 → `CalendarShareMapper.medicationDrafts`
-  :214). Significant events (missed medication, possible double dose, escalation started) are
-  written through the same service and gate as **one-off** entries — the key grammar already has
-  `CalendarShareKey.oneOff` (:32) — at the event time, non-recurring, keyed by a stable
-  non-PII event identifier. The schedule mirror is untouched by this addition.
-- **Which events.** Exactly the three at-risk events; **intake-recorded does not write calendar
-  entries** — a calendar entry per taken dose would flood the family calendar and defeat the
-  channel's attention purpose; the push notification still fires for it, and the caregiver's
-  adherence view is its record surface. (OD-7 explicitly leaves "which events surface there" to
-  the design; recorded here for review.)
-- **Consent gate respected.** No calendar-share consent (or not signed in) ⇒ no writes, exactly
-  as shipped (`canShare(isSignedIn:hasConsented:)` :196). The household's consent text covers
-  sharing medication schedule content on that calendar; the event entries stay in that content
-  class (medication name + time, to the same invitees) — **no new PII category on that channel,
-  and none on the push wire.**
-- **Invitee rule (deviation recorded).** The shipped `inviteeEmails` (:155) suppresses
-  non-emergency contacts for medication-kind twins unless the first-fire opt-in is on. Because
-  the significant set is unconditional, significant-event entries use the family-notification
-  contact set (contacts with an email, de-duplicated, emergency-first — the same
-  de-dup/ordering helpers) without consulting the first-fire opt-in. The opt-in keeps governing
-  the daily reminder twins (noise control).
-- **Honest results.** Each write's outcome is tracked per item through the service's existing
-  pending-queue/status surface; a failed or pending write is reported as itself (the Settings
-  status card already shows the pending count honestly), never as delivered.
-
-#### 9.4 The wire (FR-MSR-017)
-
-- Envelope stays versioned and PII-free: `{v:1, alert_type, timestamp}` **plus an optional
-  `entry_id_hash`** (`IdHashing.shortHash`, a truncated SHA-256 — one-way) where
-  medication-level correlation is needed (`FamilyNotifier.buildPayload` :153 extended). No
-  medication name, dose, label text, household content, or title on the wire, on any of the
-  four significant types. The additive key keeps v:1 (no deployed consumer exists — the
-  transport is unimplemented); this is recorded as the honest state, to be revisited at
-  transport landing.
-- The `FamilyAlertContext` in-memory-title rule stands: titles (the medication name) are never
-  serialized; putting names/titles on the wire remains an explicit owner-level decision, not
-  smuggled in here.
-
-#### 9.5 Honest degradation (FR-MSR-018)
-
-No silent stubs, stated affirmatively: the unwired photo-verification machinery is surfaced as
-itself (§8.5); the push transport reports not-delivered (§9.2); a calendar write failure
-surfaces as pending/failed (§9.3); a failed persistence write blocks its dependent step — a
-reminder is not armed (:733 persist-then-arm) and a dose is not reported as recorded (:476); and
-every delivery-dependent claim in this document is labelled inherited tracked work.
-
-### 10. Preservation and persistence (FR-MSR-019, FR-MSR-022)
-
-- **Reminder/escalation semantics preserved.** The only change to the chain is that all derived
-  instants come from the one resolved `scheduledAt` (§4.4): the reminder names the medication;
-  re-fires follow the shipped interval/count within the escalation window (defaults 5 min ack /
-  5 refires / 60 min window / 12 min interval — `EscalationEngine` :31–34, untouched); a fully
-  escalated miss is marked, logged and alerted; a future dose stays future on restore (:191–198).
-  One `Date` remains the sole derivation basis (FR-MSR-019's rejection of any other basis holds
-  by construction).
-- **Persistence before alarm.** `createPendingReminders` persists the reminder (with its
-  resolved exact `scheduledAt`) before the first `alarmScheduler.scheduleReminder` call
-  (:733–744); a failed write skips arming and surfaces (`reminder_persistence_failed` :789).
-  The mapping-change pass obeys the same order (§4.5).
-- **Acknowledgement durability.** `finalizeAcknowledgement` writes the adherence log before
-  runtime cleanup and before returning success (:473–496) — a crash after confirmation loses
-  nothing.
-- **Process-kill re-arm.** `scheduleAll()` on launch (`restoreState` :611 → `rearmAllPendingReminders`
-  :646) restores the persisted reminders — now carrying slot-model resolved times — and re-arms
-  within the unexpired escalation window; escalation resumes from the remaining window time.
-  This path is unchanged.
-- **Future-stays-future.** Restore never converts a not-yet-due dose into "fire now"
-  (the shipped recovery rule).
-
-### 11. Migration and legacy compatibility (NFR-MSR-006, OD-5)
-
-**Resolution of OD-5 — no automatic backfill inference; legacy entries keep working exactly as
-today; every re-interpretation is deterministic, visible and family-directed.**
-
-- **Decode.** `quantity`, `slot`, `mealRelation` (entry) and `evidencePhotoFileName` (log) are
-  optional with custom-decoder defaults — the `init(from:)` :114 and `decodeIfPresent` :129–130
-  precedent. A pre-revamp payload (raw `scheduleTimes`, no new fields) loads successfully; no
-  key is required that the payload does not contain. **Implementation trap, called out for
-  design-l2/implement: `withScheduleTimes` (:144) rebuilds the entry memberwise — it must carry
-  the new fields (or be replaced) or a slot-model entry loses its slot on a copy.**
-- **Legacy representation.** `scheduleTimes` remains required-decodable and representable; a
-  legacy entry (`slot == nil`) resolves and schedules byte-identically (`.success(entry.scheduleTimes)`,
-  §4.4), and the slot model never consults `scheduleTimes` for slot entries.
-- **Migration time.** Nothing is rewritten at migration. No slot is inferred, ever. A migration
-  that drops, alters or silently reinterprets a legacy schedule element is a defect (the
-  requirement's failure scenario).
-- **Rendering.** Legacy entries render in the family list with their raw clock times (display
-  formatting as today; any spoken line through the `SpokenTime` formatter per NFR-MSR-004) and
-  behave exactly as today until the family edits them.
-- **Family-directed conversion (the only time→slot path).** Inside an explicit edit of a legacy
-  entry, the editor offers the slot model; the family assigns each legacy time to a slot. The
-  only assistance permitted is **exact-equality preselection**: a legacy time whose hour:minute
-  equals the household mapping's time for a slot may preselect that slot — visible in the chips,
-  deterministic, family-confirmed on save. Any legacy time with no exact match requires the
-  family to pick a slot or remove the row; the slot-model save is gated on every row being
-  assigned. The family may also leave the entry in times mode — legacy stays a first-class shape.
-- **Native-calendar retime interaction (decision).** `setScheduleTimes` / the
-  `onMedicationNativeChanges` relay (`applyMedicationCalendarMutations` :12067) can retime an
-  entry from the iPhone Calendar app. For a slot-model entry the times are derived, so a raw
-  retime would create two sources of truth; the design **refuses the retime for slot entries**
-  (returns `false`; an honest observability event is emitted; the family edits the slot in the
-  app instead). Refusal is the non-interpretation: deterministic, visible, never a silent
-  re-interpretation. Legacy entries are unaffected. (Recorded for review — the alternative,
-  clearing the slot silently, was rejected as family-intent loss.)
-- **Frequency.** The slot model is daily; the shipping editor already constructs `.daily`
-  everywhere. `.weekly`/`.custom` stay decodable; legacy entries of any frequency keep working
-  exactly as today (the shipped scheduler treats `scheduleTimes` as daily wall-clock times —
-  `CalendarShareMapper.medicationDrafts` :205 records the same fact). Representing non-daily
-  frequencies in the slot model is out of scope for this feature (recorded, not silently
-  dropped).
-
-### 12. Privacy, observability, on-device (NFR-MSR-002, NFR-MSR-003)
-
-- **No new egress.** Label scanning (Vision, on-device), medication-photo evidence (on-device
-  store), the ack resolver, and the slot mapping are all device-local. The recorded cloud
-  exceptions (voice transcription; OCR'd-text translation) do not apply. The shipped
-  purpose-lookup medicine-name search-stack egress is unchanged and is the stack's, under its
-  existing disclosure. **Honest note for review:** the family-calendar channel is an existing
-  consent-gated egress of medication schedule content (Google Calendar); §9.3 extends its
-  content with significant-event entries inside the same content class and consent — this is
-  not a new channel or a new data category, and it is stated rather than implied.
-- **Observability.** Every new event is PII-free (`entry_id_hash` = `IdHashing.shortHash` only,
-  categorical fields, `LogSanitiser` discipline). New event vocabulary (classification only):
-  `medication_slot_clock_changed`, `medication_slot_unresolved`, `medication_ack_resolved` /
-  `medication_ack_ambiguous` / `medication_ack_unmatched` / `medication_ack_clarify_ended`
-  (outcome enum only), `medication_evidence_captured` / `_discarded` / `_attached` (no image,
-  no text), plus the extended family-alert events (`family_alerted` with the new alert_type
-  values). No medication name, dose text, label text, photo content or utterance content ever
-  reaches an event or log.
-- **Release log gate.** `ios/tools/check-release-log-safety.sh` (wired into `ios/build.sh`)
-  must exit 0 with the new source paths inside its coverage (NFR-MSR-009).
-
-### 13. Concurrency and isolation (explicit)
-
-| Component | Isolation | Concurrent access |
-|---|---|---|
-| `MedicationAckResolver` (NEW) | pure static function — no state, no IO, no clock | trivially thread-safe; callable from the router path |
-| `MedicationSlotClock` / slot resolver (NEW) | pure value + store read; mapping read once per arming pass | reads are per-arming; the record is written by ONE writer (the settings surface), validated before persist; no partial states observable |
-| `MedicationScheduler` (CHANGED) | shipped confinement unchanged — mutations (`loadSchedule`, `scheduleAll`, ack/record paths, the new `rearmForSlotClockChange`) run on the main thread; alarm callbacks arrive on the main queue | the new resolution feed adds no shared mutable state; mapping reads are point-in-time |
-| Clarification walk state | coordinator `@Published`/main-thread state (the `pendingNavigationWalk` pattern) | one active walk; a new ack re-enters resolution (single logical flow) |
-| `MedicationEvidenceStore` (NEW) | file IO off the main thread (the scanner's `offload` discipline :82); one photo per record (replace-on-recapture) | per-record writes are serialized by record identity; no cross-record state |
-| `FamilyNotifier` / `APNsProvider` (CHANGED) | async per-contact loop, per-call payloads | unchanged shape; the honest outcome type adds no shared state |
-| `CalendarShareService` (CHANGED) | shipped reconcile/queue discipline; consent read at act time | one-off event writes ride the same single reconcile path |
-| Camera capture (evidence) | the shipped `CameraCapturePresenting` main-queue discipline, one session at a time | the scanner's `isRunning` guard pattern prevents overlapping sessions |
-
-### 14. Error-path catalogue
-
-| Interface / flow | Failure | Returned outcome | Consumer behaviour |
-|---|---|---|---|
-| Slot→clock resolution (§4.4) | corrupt mapping value | `SlotClockError.indeterminate(slot:)` | no reminder armed for that entry; `medication_slot_unresolved` event; settings error surfaced; never a guessed time |
-| Mapping save (§4.2) | store write fails / out-of-range input | write result surfaced; no take-effect | mapping unchanged; re-arm not triggered; honest error line |
-| Mapping-change re-arm (§4.5) | persist fails | `persistReminders` false | arming skipped for the affected reminders; surfaced (shipped `reminder_persistence_failed` shape) |
-| Scan (`MedicationLabelScanner`) | camera unavailable / recognition or read failure / empty candidate | existing honest outcomes: unavailable-with-reason, spoken "could not read it", `.scanned(nil/empty)` | form unchanged; photo retained; nothing bound |
-| Ack resolution (§7.2) | ambiguous / unmatched / nothing pending | `AckResolution` enum cases | sanctioned clarification, or honest "nothing to acknowledge" line; nothing recorded; reminders untouched |
-| Clarification walk (§7.3) | no response within the window | walk ends (configurable timeout) | nothing recorded; reminders and escalation continue; classification event |
-| Challenge | "No" / timeout | `reEnterEscalation` (shipped) | not recorded; FR-D02 re-enter; locale-aware copy |
-| Recording (§7.4) | adherence-log persist fails | `SafetyError.reminderPersistenceFailed` (shipped) | failure surfaced; not reported as recorded; intake-recorded notification NOT fired (it follows successful persistence) |
-| Evidence capture (§8) | camera unavailable / store write fails / pre-record challenge denied | `CameraAvailability` reasons / store error (explicit) / discard | voice path continues; photo not presented as evidence; honest lines |
-| Notification delivery (§9.2) | transport not implemented / partial failure | `NotificationResult` per contact (`success:false`, errorCode, channel) | partial reported as partial; never described as notified |
-| Calendar significant-event write (§9.3) | no consent / not signed in / write failure | consent gate blocks; per-item result / pending queue | no writes without consent; failures surfaced as themselves |
-| Notify at fire time (§9.1) | settings resolve at fire time only | — | no per-event stored decision can silently suppress a significant event |
-
-### 15. Configuration and timeouts (timeouts are configuration)
-
-| Parameter | Value | Status |
-|---|---|---|
-| `MedicationSlotClock` defaults | morning 08:00 / afternoon 13:00 / evening 19:00 | NEW named defaults (OD-1; household-configurable) |
-| `ConfirmationChallenge.challengeTimeoutSeconds` | existing (default 30 per FR-D02) | untouched, still injected config (:28) |
-| Clarification response window | NEW configurable parameter; default equal to the challenge timeout | configuration, single named constant — no literal at the call site |
-| Ack window / refire count / escalation window / refire interval | existing entry-level fields (5 / 5 / 60 / 12 defaults) | untouched (FR-MSR-019 binding) |
-| Evidence photo size cap | FR-D04b-existing 200 KB precedent (`PhotoVerifier` :27) | reused as the compression cap; not a timeout |
-| Notification / calendar calls | existing async paths; no new timeouts | unchanged |
-| Mapping resolution | pure function — no timeout possible | none |
-
-### 16. Elderly-fit UX, localisation, accessibility (FR-MSR-021, NFR-MSR-004, NFR-MSR-005, NFR-MSR-007)
-
-#### 16.1 Fit for the forgetful elder
-
-- The intake loop completes entirely by voice (acknowledge → challenge answer → recorded) with
-  zero touch; the photo capture is the provided alternative (§8.4); the clarification answers
-  (yes/no, or naming a medication) are voice-reachable.
-- The unambiguous case adds no step: a simple "taken" with one pending reminder resolves
-  exactly as today.
-- No new command vocabulary beyond the established set: the slot and meal words are part of the
-  acknowledgement sentence grammar the owner specified, not new commands; the only new
-  interactions are variants of the sanctioned clarification forms and yes/no.
-- One idea per utterance: the challenge, each clarification question and every outcome line is
-  a single, short spoken sentence.
-- Family-facing editor surfaces use plain language (no "slot", no "mapping" jargon in copy),
-  ≥44 pt controls, ≥18 pt body text, contrast per the shipped appearance tokens; the
-  mapping section shows the mapped times as read-only context so nobody computes clock times.
-
-#### 16.2 Localisation and spoken time
-
-- Every new user-visible string exists in Nepali and English in
-  `Resources/Localizable.xcstrings` (no hard-coded strings): slot labels, meal labels, unit
-  labels, the quantity control, the mapping section (+ reset + error lines), the sanctioned
-  clarification forms ("did you mean X" / "X or Y"), clarification/outcome lines, the
-  significant-event alert bodies (`family.alertIntakeRecorded`, `family.alertEscalationStarted`),
-  evidence capture/state lines, calendar event entry titles. `L10nCatalogCoverageTests` extends.
-- **All spoken times go through the `SpokenTime` formatter** (`Services/Voice/SpokenTime.swift`
-  :28; the `formattedTime` :5375 and `todayMedicationSummaryLines` :12625 precedents). Any new
-  spoken line that names a time — mapped reminder times, schedule renderings, notification
-  copy, error lines — uses the formatter; raw hour/minute interpolation into speech is a defect
-  (NFR-MSR-004).
-
-#### 16.3 Devanagari regression pin (NFR-MSR-007)
-
-The resolver's matching reuses the shipped substring/vocabulary conventions
-(`MedicationVoiceVocabulary.canonical`, the parser's Devanagari-fusion substring matching) and
-does not change, "fix" or route around the pinned grapheme-cluster behaviour. The pinned
-regression tests pass unchanged; the matching implementation is untouched; a proposed "fix" is
-rejected (owner decision required, outside this feature).
-
-### 17. Quality, compliance and latency (NFR-MSR-008, NFR-MSR-009, NFR-MSR-010)
-
-- **Test rigor.** Scoped suites are the honest gate (the constitution's Feature Constraint 4
-  names them): the ten medication suites and four notifier suites extend with the new
-  contracts, plus NEW suites for `MedicationSlotClock` (determinism, totality, corrupt-value
-  fail-closed, decode defaults), `MedicationAckResolver` (the §7.2 truth table, the §7.3 walk,
-  determinism, denial interactions), `MedicationEvidence` (attach-never-create, on-device,
-  context determinism, discard-on-denial), quantity/dose-line composition, migration decoding,
-  and notifier honesty (stub reports not-delivered). The four required integration tests ride
-  along and are release-blocking: persistence-before-alarm ordering, process-kill re-arm,
-  LLM independence (symbol inspection), and the legacy-payload migration round trip.
-  Zero-touch (100 %) unit coverage on every touched medication safety path; pre-existing
-  baseline failures recorded separately, never mixed in.
-- **Compliance/release.** The release log-surface gate passes over the new paths; the App Store
-  health-data posture is unchanged (no new data collection, no new permission — camera is
-  already used at point of use with plain-language copy); PII-free telemetry keeps the standing
-  log-volume posture (NFR-MSR-009).
-- **Elevated bar.** Decisions touching FR-D01/D03/D04a–b machinery (the challenge, the
-  detector, the photo machinery) run at the dementia supplement's 0.90 threshold; this design
-  touches them only by routing around them (§7.4, §8.5) — the challenge/detector contracts are
-  byte-preserved.
-- **Firing latency (NFR-MSR-010).** The mapping resolves at arming time (pure O(1)); no
-  fire-time resolution step exists, so a reminder fires within 30 s of its resolved scheduled
-  time, including for entries created or edited shortly before the slot and reminders re-armed
-  after a relaunch (the persisted `scheduledAt` is the schedule of record). DV-1/DV-6 exercise
-  this on the reference device.
-
-### 18. Safety delta (a)–(d) as enforced invariants
-
-| Delta | Enforced invariant | Mechanism | Verification |
-|---|---|---|---|
-| (a) OCR never auto-binds | no scan path writes a store or arms a reminder; only the family's save through the draft binds | §6: candidate → draft → `addMedication`; any new scan entry point must route through the same gate | `MedicationEditorDraftTests`/`MedicationLabelOCRTests` extended; a silent-auto-apply path is a test-level rejection |
-| (b) deterministic, total slot→clock mapping | every creatable entry resolves to one determinate hour/minute; failure is typed and fail-closed; all derived instants come from the one resolved time | §4.3–4.5: exhaustive enum function; `.indeterminate` → no arm + surfaced; `EscalationEngine` untouched and fed the resolved `Date` | `MedicationSlotClockTests`; escalation/persistence integration tests; DV-1 |
-| (c) photo never creates a record | capture leads only to evidence attachment inside the acknowledgement machinery; denied/expired challenge ⇒ no record, evidence discarded | §8.1: context-bound captures; attach inside `finalizeAcknowledgement` or on an existing record; no capture→record edge exists | `MedicationEvidenceTests` (photo-alone ⇒ no record); DV-4 |
-| (d) PII-free wire | envelope carries type + timestamp (+ one-way `entry_id_hash`); no names/doses/titles on any wire; titles stay in memory | §9.4: `buildPayload` extension; `FamilyAlertContext` rule preserved | `FamilyNotifierTests` (payload shape; no name); DV-5 |
+| Generic template section | Why it does not apply |
+|---|---|
+| **REST API surface / OpenAPI paths** | This is a single on-device iOS app. The feature's interfaces are in-process Swift protocols (`InstructionVideoProbing`, `InstructionVideoInspecting`, `InstructionVideoImporting`, `InstructionVideoPlaying`, `InstructionVideoPicking`, `InstructionVideoRecording`, `InstructionPermissionRequesting`, `InstructionImageLoading`) plus the service methods in C11–C13. Their error types are explicit and specified in §Error taxonomy (`InstructionImportError`, `InstructionStorageError`, `InstructionImageFailure`, `InstructionPlaybackFailure`). No HTTP endpoint, request/response schema, or OpenAPI document exists or is needed. |
+| **Infrastructure topology / Docker services** | There is no service to deploy. The deliverable is the app binary plus its Application Support data; the only "topology" is the two on-device roots and the existing notification scheduler, diagrammed above. No container, database, queue, or cloud component is added (NFR-RIE-003). |
+| **Auth strategy** | The feature adds no sensitive action, account, or remote surface. Access is already gated by the device passcode and iOS Data Protection: instruction media is `.completeFileProtection`, readable only while unlocked, and the app presents it only in the foreground after unlock. No new biometric/PIN gate, token, session, or permission beyond the point-of-use camera/microphone prompts is introduced. |
 
 ---
 
 ## Components
 
-### 19. Module boundaries and responsibilities
+Each component lists its file, responsibility, interface, invariants and the tests that pin it.
+"New" means a new file; "changed" means the smallest edit that satisfies the requirement.
 
-| File / artifact | Status | Responsibility | Requirements |
-|---|---|---|---|
-| `Services/MedicationScheduler/Models.swift` | CHANGED | `MedicationEntry` grows `quantity`/`slot`/`mealRelation` (optional, custom-decode defaults); `MedicationAdherenceLog` grows `evidencePhotoFileName`; `FamilyAlertType` grows `intakeRecorded` + `escalationStarted`; `withScheduleTimes` carries the new fields | FR-MSR-001/003/004/015/017; NFR-MSR-006 |
-| `Services/MedicationScheduler/MedicationSlotClock.swift` | NEW | `MedicationSlot`, `MealRelation`, `TimeOfDay`, `MedicationSlotClock` (defaults, custom decode, validation, one writer), `SlotClockError`; the pure deterministic mapping (§4) | FR-MSR-001/002; NFR-MSR-006 |
-| `Services/MedicationScheduler/DoseLine.swift` | NEW (small) | Quantity composition into `doseDescription` (single rule, localized units) | FR-MSR-003 |
-| `Services/MedicationScheduler/MedicationAckResolver.swift` | NEW (pure) | Ack resolution over candidates by what was said: name keys → slot → fired preference; `AckResolution`; the clarification walk order — never a guess (§7) | FR-MSR-007/008; NFR-MSR-001 |
-| `Services/MedicationScheduler/MedicationEvidenceStore.swift` | NEW | On-device evidence file store (bare file names in the model; JPEGs under Application Support; one per record; delete-with-entry) | FR-MSR-013/014; NFR-MSR-003 |
-| `Services/MedicationScheduler/MedicationScheduler.swift` | CHANGED | `resolvedScheduleTimes(for:)` feed at arming; `rearmForSlotClockChange()`; significant-event triggers (`intakeRecorded` in `finalizeAcknowledgement`, `escalationStarted` on the first re-fire decision); slot-entry retime refusal in `setScheduleTimes` | FR-MSR-002/015/019/022 |
-| `Services/MedicationScheduler/MedicationEditorDraft.swift` | CHANGED | Quantity + slot + meal controls in the draft; scanned-schedule→slot candidates; all shipped draft rules bound unchanged | FR-MSR-001/005/006; NFR-MSR-006 |
-| `Services/MedicationScheduler/MedicationLabelOCR.swift` + `ScannedSchedule` (pure helper) | CHANGED (bounded) | No parser-surface change; a fixed documented conversion of parser outputs to slot candidates (§6) | FR-MSR-005/006 |
-| `Services/Voice/CommandRouter.swift` | CHANGED | Ack gate additions (additive phrases only; denial guard first); resolution call replacing `oldestPendingReminderEntryId()`; clarification-walk interception + copy; correction-rescue ordering preserved | FR-MSR-007–012; NFR-MSR-001 |
-| `App/AppCoordinator.swift` | CHANGED | `medicationAckCandidates()` seam; clarification-walk state (navigation-walk precedent); editor save plumbing (`addMedication` gains quantity/slot/meal); mapping-save action + re-arm call; evidence capture plumbing | FR-MSR-001/007/008/013/014 |
-| `App/SettingsView.swift` | CHANGED | Editor: quantity + slot + before/after-meal controls; "Medicine times" mapping section (3 rows + reset); legacy edit-switch flow; evidence capture affordance on the dose/record surfaces | FR-MSR-001/002/011; NFR-MSR-005 |
-| `Services/FamilyNotifier/FamilyNotifier.swift` | CHANGED | `FamilyAlertType` cases wired; payload gains optional `entry_id_hash`; honest provider outcome (`transport_unimplemented`) replacing the silent-success stub; context passed for significant events (channel reporting) | FR-MSR-015/016/017/018 |
-| `Services/CalendarSync/CalendarShareService.swift` + `CalendarShareMapper.swift` | CHANGED | One-off significant-event calendar entries (3 at-risk events), consent gate reused, invitee rule for significant events, honest per-item results | FR-MSR-016/017; OD-7 |
-| `Resources/Localizable.xcstrings` (+ `L10n.swift`, `L10nCatalogCoverageTests`) | CHANGED | All new strings ne/en; spoken times only via `SpokenTime` | NFR-MSR-004/005 |
-| `ios/tools/check-release-log-safety.sh` fixtures | CHANGED (coverage) | New paths inside the gate's coverage; gate exits 0 | NFR-MSR-002/009 |
-| `Services/MedicationScheduler/EscalationEngine.swift`, `ConfirmationChallenge.swift`, `DoubleDoseDetector.swift`, `PlatformAlarmScheduler.swift`, `PhotoVerifier.swift` | UNCHANGED (bound) | The escalation machinery, challenge, detector, alarm arming and the dementia photo machinery are preserved contracts — fed the same one `Date` | FR-MSR-003/009/019/020; NFR-MSR-001 |
-| `Services/Voice/AckFastLane.swift` | UNCHANGED (property extended by tests) | The ack fast lane and its mic-continuity property hold for the new shapes | FR-MSR-012 |
-| Tests: `ios/ElderlyAssistantTests/Services/MedicationScheduler/` (10 suites), `…/Services/FamilyNotifier/` (4 suites), `…/Services/Voice/` | CHANGED + NEW suites | Coverage of every new contract + the four required integration tests | NFR-MSR-008/009 |
+### C01 — Instruction model, write semantics and display state (new)
 
-### 20. Data model outline
+**Files:** `Services/Instructions/Instruction.swift`, `Services/Instructions/InstructionDisplayState.swift`
 
-| Datum | Shape | Store / notes |
-|---|---|---|
-| `MedicationEntry` | + `quantity: MedicationQuantity?`, `slot: MedicationSlot?`, `mealRelation: MealRelation?`; `scheduleTimes` retained | `EncryptedLocalStorage` key `medication.entries` (shipped); optional fields, custom decode |
-| `MedicationSlotClock` | `morning/afternoon/evening: TimeOfDay` | NEW key (e.g. `medication.slot_clock`); per-slot decode defaults; present-but-invalid ⇒ indeterminate; one writer |
-| `MedicationAdherenceLog` | + `evidencePhotoFileName: String?` | shipped key `medication.adherence_log`; bare file name only |
-| `ScheduledReminder` | unchanged (`scheduledAt` = the resolved exact time) | shipped key `medication.pending_reminders` |
-| Evidence files | JPEG ≤ 200 KB cap, one per record | `Application Support` on-device store (VisualAidStore pattern); deleted with the entry or on pre-record discard |
-| Family-alert wire | `{v:1, alert_type, timestamp, entry_id_hash?}` | `FamilyNotifier.buildPayload`; no names/doses/titles |
-| Calendar significant-event entry | one-off, non-recurring, at the event time, keyed by a stable non-PII identifier; title plain-language + medication name (same content class as the existing mirror) | `CalendarShareService` one-off key space; consent-gated |
+**Responsibility:** the pure value model (`InstructionKind`, `Instruction`, `InstructionWrite`,
+`InstructionPayload`, `InstructionDraft`, `InstructionOwner`, `InstructionRoot`, `StagedInstructionVideo`,
+`AcceptedInstructionVideo`, `InstructionFilename`) and the pure mapping from an instruction (plus
+"was one expected?") to what a fired card should render.
 
-### 21. Interface surface (seams, payload schemas, topology, auth)
-
-#### 21.1 New/changed seamed signatures (explicit error types)
-
+**Interface (in addition to §Data model):**
 ```swift
-// Slot→clock resolution (pure value; MedicationSlotClock.swift)
-func resolve(slot: MedicationSlot) -> Result<TimeOfDay, SlotClockError>
+struct InstructionDisplayState: Equatable {
+    let instruction: Instruction?
+    let expectsInstruction: Bool            // true when the firing was armed with an instruction
+    init(instruction: Instruction?, expectsInstruction: Bool = false)
+    var presentation: InstructionPresentation { get }
+    var caption: String? { get }            // trimmed; image/video only
+    var isPresent: Bool { get }
+}
+enum InstructionPresentation: Equatable {
+    case none
+    case missingInstruction                // expectsInstruction && instruction == nil
+    case text(String)
+    case media(kind: InstructionKind, filename: String?)
+    case unsupportedKind(String)
+}
+```
+`InstructionOwner` is `.routine(UUID)` / `.event(String)`; `InstructionRoot` is `.routines` /
+`.events`. `StagedInstructionVideo { url, filename, byteCount, probed: InstructionVideoMetadata }`;
+`AcceptedInstructionVideo { staged, durationSeconds }`.
 
-// Scheduler arming feed (MedicationScheduler)
-func resolvedScheduleTimes(for entry: MedicationEntry) -> Result<[DateComponents], SlotClockError>
-func rearmForSlotClockChange()
+**Invariants:** no IO; `expectsInstruction == false` + nil → `.none`; `expectsInstruction == true` +
+nil → `.missingInstruction` (the B-2 removed-instruction fallback); blank text → `.none`; unknown
+kind → `.unsupportedKind(raw)`; image/video with nil filename → `.media` with nil (the card renders
+the fallback); caption trimming is the `VisualAidDisplayState.currentCaption` rule.
+`InstructionFilename.isPlain` is the single traversal predicate.
 
-// Ack candidate seam (AppCoordinator, read-only; the oldestPendingReminderEntryId precedent)
-func medicationAckCandidates() -> [MedicationAckCandidate]
+**Tests:** new `InstructionDisplayStateTests` — text/image/video/unknown/blank/removed-expected/none,
+caption rules, and the availability→outcome mapping (`.available` nil, the three failures to
+`rejected_name`/`missing`/`unreadable`); new `InstructionModelTests` (encode/decode, unknown kind,
+reserved `url` round-trip, blank text, fail-soft malformed object, `InstructionDraft.resolvedWrite`
+truth table: loading/loaded/failed × hasChanges).
 
-// Ack resolution (pure; MedicationAckResolver.swift)
-static func resolve(transcript: String, candidates: [MedicationAckCandidate]) -> AckResolution
+### C02 — `InstructionVideoStore` (new)
 
-// Evidence store (MedicationEvidenceStore.swift)
-func store(image: UIImage, for logId: UUID) -> Result<String, EvidenceStoreError>   // returns the bare file name
-func delete(fileName: String) -> Result<Void, EvidenceStoreError>
+**File:** `Services/Instructions/InstructionVideoStore.swift`
 
-// Notifier honesty (FamilyNotifier / APNsProvider)
-enum PushOutcome: Equatable { case delivered; case notDelivered(reason: String) }
-func sendPush(payload: [String: Any], deviceToken: String) async -> PushOutcome
+**Responsibility:** the only component that touches instruction video bytes.
 
-// Calendar significant-event write (CalendarShareService)
-func writeSignificantEvent(_ event: SignificantMedicationEvent, entry: MedicationEntry?) -> CalendarShareWriteResult
+**Interface:**
+```swift
+final class InstructionVideoStore {
+    init(fileManager: FileManager = .default, baseDirectory: URL? = nil)  // path lookup only, no IO
+
+    /// Stat + synchronous probe + reject BEFORE any copy; then a protected
+    /// staged write. Fail-closed: a rejected or failed stage leaves no file.
+    func stageSynchronously(from sourceURL: URL, in root: InstructionRoot,
+                            limits: InstructionVideoLimits,
+                            prober: InstructionVideoProbing)
+        -> Result<StagedInstructionVideo, InstructionImportError>
+
+    func commit(_ staged: StagedInstructionVideo,
+                for owner: InstructionOwner) -> Result<String, InstructionStorageError>
+    func discard(_ staged: StagedInstructionVideo)          // best-effort; purge is the backstop
+
+    /// The M-2 classification — never a bare URL?.
+    func availability(filename: String, for owner: InstructionOwner)
+        -> InstructionPlaybackAvailability
+
+    @discardableResult
+    func delete(filename: String, for owner: InstructionOwner)
+        -> Result<Void, InstructionStorageError>
+    @discardableResult
+    func deleteAll(for owner: InstructionOwner) -> Result<Void, InstructionStorageError>
+    func purgePendingDrafts()
+}
 ```
 
-#### 21.2 Outcome/error types
+**Invariants:**
+- `init` resolves `Application Support` with `create: false` and creates nothing (the
+  `VisualAidStore` no-IO-init doctrine; `NoIOInInitTests` extended with a FileManager spy).
+- `stageSynchronously` order is fixed (B-1/D17): (1) stat the source; reject `> maxBytes`; (2)
+  `prober.probe(sourceURL)` synchronously — reject `.tooLong`, `.unsupportedFormat`,
+  `.unreadableSource`; (3) only now create the draft directory and destination file **with
+  complete protection**, stream-copy, verify; (4) return a staged handle whose filename is already
+  plain. A rejection at (1) or (2) creates no directory and no file. A failure at (3) deletes the
+  partial file and returns `.writeFailed`.
+- `commit` validates the filename, creates the owner directory with complete protection, renames
+  (same volume) the already-protected staged file, verifies protection, removes the now-empty draft
+  directory, and returns the bare filename. Any failure deletes the committed copy and returns a
+  typed error.
+- `availability` classifies: non-plain → `.rejectedFilename`; absent → `.missingFile`; present but
+  not a readable regular file (directory at the path or `isReadableFile` false) → `.unreadableFile`;
+  else `.available(url)`. Never throws, never logs a filename.
+- `delete`/`deleteAll` return `.success` when the item is absent after the call, `.deleteFailed`
+  when `removeItem` refuses. `deleteAll` removes the owner directory with one `removeItem`;
+  `purgePendingDrafts` removes both `_pending` roots and nothing else.
+- No console output; no network API; no mutable state (safe from system callbacks); no AVFoundation
+  dependency (the prober is the caller's seam).
 
-`SlotClockError.indeterminate(slot:)`; `AckResolution.{resolved, ambiguous, noMatch, nothingPending}`;
-`EvidenceStoreError` (explicit cases: writeRequested, storageUnavailable, removeFailed);
-`PushOutcome`; per-contact `NotificationResult` (existing: success/errorCode/channel);
-per-item calendar results.
+**Tests:** new `InstructionVideoStoreTests` —
+- **pre-copy limits (B-1):** a scripted prober returning a 4-minute duration, an unplayable asset or
+  no video track → `.tooLong`/`.unsupportedFormat`; a FileManager spy records **zero copies** and a
+  directory listing shows no `_pending` file. Over-size → `.tooLarge`, also no copy.
+- size boundary (209,715,200 accepted / +1 rejected); duration boundary 179/180/181 s; protection
+  attribute asserted on the **staged** file and on the committed file (m-5); fail-closed partial
+  deletion when the copy fails.
+- availability table: traversal (`../…`, absolute), absent, unreadable (directory at the expected
+  path and a `chmod 000` file), available — the three failures distinct.
+- commit rename + single file; replace leaves exactly one file; `delete`/`deleteAll` success and
+  `.deleteFailed` through a FileManager spy that throws from `removeItem` (m-2); event-key digest
+  stability and no clear id in the path; pending purge; no IO in init.
 
-#### 21.3 Persisted schema versioning
+### C03 — Probe, import and validation (new)
 
-`MedicationEntry` and the wire envelope keep their current version fields; the new keys are
-optional/additive (custom decode; `decodeIfPresent`). No migration step runs at upgrade — the
-absence of a key IS the default (§11).
+**Files:** `Services/Instructions/InstructionVideoImporter.swift`,
+`Services/Instructions/InstructionVideoInspecting.swift`
 
-#### 21.4 Infrastructure topology
+**Interface:**
+```swift
+/// Synchronous, local-file, metadata-only read — safe inside the system callback
+/// and the mechanism that honours FR-RIE-006's pre-copy ordering (D17).
+protocol InstructionVideoProbing {
+    func probe(url: URL) -> Result<InstructionVideoMetadata, InstructionImportError>
+}
 
-One iOS app process: main-thread-confined coordinator/scheduler state; `UNUserNotificationCenter`
-as the firing surface; on-device camera + Vision; `EncryptedLocalStorage` + Application Support
-stores; the family Google Calendar via the existing OAuth session (consent-gated); the APNs
-push path (transport stubbed, honestly reported). No server, no container, no Docker.
+/// Asynchronous second check, off-main, under validationTimeoutSeconds.
+protocol InstructionVideoInspecting {
+    func inspect(url: URL) async -> Result<InstructionVideoMetadata, InstructionImportError>
+}
+struct InstructionVideoMetadata: Equatable {
+    let durationSeconds: Double
+    let hasVideoTrack: Bool
+    let isPlayable: Bool
+}
 
-#### 21.5 Auth strategy
+protocol InstructionVideoImporting {
+    func validate(_ staged: StagedInstructionVideo,
+                  limits: InstructionVideoLimits) async
+        -> Result<AcceptedInstructionVideo, InstructionImportError>
+    func discard(_ staged: StagedInstructionVideo)
+}
+```
 
-No accounts or tokens introduced. Authorization surfaces as they ship: the family-calendar
-share consent (reused for §9.3 writes), the per-contact caregiver-notify settings (opt-in kept
-for the daily first-fire only), the cloud voice-stack consent (untouched — no new egress), and
-camera permission requested at point of use with plain-language copy (shipped behavior for the
-scanner, reused for evidence capture).
+**Production adapters:** `AVInstructionVideoProber` (synchronous `AVURLAsset` metadata reads:
+duration, video tracks, playability; local file only; no frame decode) and
+`AVInstructionVideoInspector` (async `load(.isPlayable)`, `.duration`, video tracks). Neither makes
+a network call and neither generates thumbnails.
+
+**Importer invariants:**
+- Second check only: a defensive byte-cap re-check, then the async inspector under
+  `validationTimeoutSeconds` (task race; cancellation discards); reject `isPlayable == false`, no
+  video track, non-finite duration, and duration over `limits.maxDurationSeconds`.
+- Duration rounds to the nearest second before comparison (configuration rule above).
+- On any failure the staged bytes are deleted by the importer; on success the caller owns the
+  accepted handle and must commit or discard.
+- Errors map to one plain localized message at the view layer; the importer never formats copy.
+
+**Tests:** new `InstructionVideoImporterTests` with a scripted inspector — 179/180/181 s, 200 MiB
+boundary, unsupported codec, audio-only, timeout, unreadable source, discard-on-failure, no
+inspector call for an over-cap staged file, and the second-check cases where the synchronous probe
+passed but the async inspection rejects (staged bytes deleted). The production prober is exercised
+by the simulator's generated invalid-file case and the device smoke; its contract is scripted in
+the store tests.
+
+### C04 — Capture adapters (new)
+
+**File:** `App/InstructionCapture.swift` (UIKit/PhotosUI adapters; UI-layer, not in the log-gate
+logic roots)
+
+**Components:**
+- `InstructionVideoLibraryPicker: InstructionVideoPicking` — `PHPickerViewController`, `.videos`,
+  `selectionLimit = 1`, `.current` representation mode; inside `loadFileRepresentation` it calls
+  `stageSynchronously(from:in:limits:prober:)` **once** (which runs the pre-copy limit gate and the
+  protected copy); maps no-movie-representation to `.unreadableSource`.
+- `SystemInstructionVideoRecorder: InstructionVideoRecording` —
+  `UIImagePickerController` camera/video with configured `videoMaximumDuration`/quality; the same
+  single `stageSynchronously` call inside the delegate callback; cancel → `.cancelled`; no-camera
+  probe.
+- `InstructionVideoCaptureCoordinator` (`@MainActor ObservableObject`) — the state machine in
+  §Capture; owns permission sequencing, picker/recorder presentation, the second-check validation,
+  discard and single-flight. It emits `instruction_video_import` for both pre-copy rejections and
+  importer outcomes through the typed emitter. It does **not** commit or persist.
+
+**Invariants:** no copy outside the system callback; the limits/prober are passed to every staging
+call (no adapter can bypass the pre-copy gate); no permission request at construction; no prompt
+loop; cancellation is not an error; every accepted file is either committed by the surface or
+discarded.
+
+**Tests:** new `InstructionCaptureCoordinatorTests` with fake picker/recorder/permissions/prober —
+library success, recording success, camera denied, microphone denied, unavailable hardware,
+over-long/unplayable selection (plain message, nothing promoted to `.ready`), validation failure,
+cancellation, single-flight, discard on leave, and the emitted import outcomes. The UIKit adapters
+are exercised by the device smoke only (system UI cannot run in unit tests — the
+`CameraCapturePresenting` precedent).
+
+### C05 — Permissions (new)
+
+**File:** `Services/Instructions/InstructionPermissions.swift`
+
+```swift
+enum InstructionPermission { case camera, microphone }
+enum InstructionPermissionStatus { case granted, denied, undetermined, unavailable }
+@MainActor protocol InstructionPermissionRequesting {
+    func status(for: InstructionPermission) -> InstructionPermissionStatus
+    func request(_ permission: InstructionPermission) async -> InstructionPermissionStatus
+}
+```
+
+Production adapter uses `AVCaptureDevice.authorizationStatus(for:)` and async `requestAccess`
+continuations, plus `.camera` source availability. The pre-permission explanation is a small
+localized sheet presented by the capture coordinator **before** the system prompt (first attempt
+only). Denial is non-blocking: the editor shows the plain note, library pick and the reminder stay
+fully usable.
+
+`Info.plist` (`:113–114`, `:121–122`) is amended in English; `en`/`ne` `InfoPlist.strings` carry the
+localized copy (D10). The existing disclosures are retained.
+
+**Tests:** pinned by `InstructionCaptureCoordinatorTests` through the fake seam; the `Info.plist`
+and `InfoPlist.strings` text is pinned by `InstructionLocalisationTests`. Real prompts are device
+smoke only.
+
+### C06 — Playback seam and controller (new)
+
+**File:** `Services/Instructions/InstructionPlayback.swift`
+
+Implements the protocol/controller from §Playback. `InstructionPlaybackController` owns the
+timeouts and the state machine; `InstructionVideoPlaying` owns AVKit. The cover never constructs a
+player itself. `close()` is idempotent and pauses/releases.
+
+**Tests:** new `InstructionPlaybackControllerTests` with a fake player — no `present` call before
+`start` (no autoplay), `.ready` → `.playing`, `.failed` → fallback, watchdog → `.timedOut` (short
+injected timeout), `.finished`/`.dismissed` → closed, `close()` idempotence, renderable player nil
+in fakes, and a failure resolved within an injected sub-second preflight timeout (the default 0.6 s
+is asserted by the configuration test, not a wall-clock test). Covers the NFR-RIE-009 required four
+scripted outcomes (play, pause/close, failure, missing file — the last at the card/availability
+seam).
+
+### C07 — AVKit adapter (new)
+
+**File:** `Services/Instructions/AVKitInstructionVideoPlayer.swift`
+
+Production `InstructionVideoPlaying`: local-file preflight (`load(.isPlayable)` under
+`preflightTimeoutSeconds`, default 0.6 s), `AVPlayer` creation, item-status observation, playback
+start on ready, `pause` + release on dismiss. Exposes `renderablePlayer` for the cover's SwiftUI
+`VideoPlayer` (the `FeedMediaPlayerSheet` precedent, `FeedsView.swift:686–695`). No network, no
+audio-session changes, no custom transport. Device smoke covers rendering and audio; unit tests
+never instantiate it.
+
+### C08 — `InstructionCardView`, image loading and player cover (new)
+
+**File:** `App/InstructionViews.swift`
+
+`InstructionCardView` implements the render table in §Fire-time presentation and owns its
+`InstructionPlaybackController` + full-screen cover. Inputs: `instruction`, `expectsInstruction`,
+`owner`, `videoStore`, `imageLoader`, `events` (typed emitter), `playbackFactory`,
+`playbackConfiguration`, `locale`.
+
+- Video: resolves `videoStore.availability` in `.task`, renders the fallback or Play, emits one
+  `instruction_resolution` from the classification (M-2).
+- Image: `imageLoader.loadImage(...)` in `.task`; `.rejectedFilename` emits `rejected_name`,
+  `.unavailable` emits `missing`; both render the plain picture fallback (m-8).
+- `InstructionImageLoading` is the explicit success/failure protocol from §Playback; the two
+  production adapters are `RoutineInstructionImageLoader` (over `VisualAidStore` + entryId) and
+  `EventInstructionImageLoader` (over `ContactPhotoStore`). `FakeInstructionImageLoader` scripts
+  results in tests.
+- The cover (`InstructionPlaybackCover`) shows the preparing state, `VideoPlayer` when a renderable
+  player exists, the inline plain fallback on failure, and a ≥44 pt Close. It presents from the card
+  (nested presentation: card inside the fired `fullScreenCover` or the event `sheet`). The fallback
+  plan if nested presentation misbehaves on an OS version is to hoist the cover to `ContentView`
+  through coordinator state; the device smoke checks the nested path first.
+
+**Tests:** `InstructionSurfaceTests` pins the source for Play/Close token floors, labels, the
+fallback texts, the removed-instruction branch, the no-control unknown-kind branch, and the allowed
+`VisualAidViews.swift` baseline (`timeText` default + conditional render; nil at no-instruction call
+sites) (m-4). Card resolution/failure logic is tested with scripted store/loader/emitter doubles,
+including the no-filename assertion for all three outcomes.
+
+### C09 — Routine instruction editor (new + changed)
+
+**Files:** `App/InstructionViews.swift` (new section), `App/RoutineSettingsView.swift` (changed),
+`App/VisualAidViews.swift` (overlay composition + the defaulted `timeText` parameter)
+
+- `RoutineSettingsView`'s existing manage-row sheet (`:71–89`) gains the instruction section. The
+  row button (`:107–116`) keeps its photo icon but gains the new accessibility label
+  `routine.manageAidsAndInstruction` ("Instructions and photos"); medication rows keep
+  `visualAid.add`.
+- `RoutineInstructionSection` shows the current instruction or an empty state, a three-way kind
+  picker, the kind-specific editor, Replace/Remove, and the capture coordinator's states. On
+  `.onAppear` it loads the existing instruction into an `InstructionDraft`; the controls are
+  read-only until the load is `.loaded`; a `.failed` load shows a plain message and Retry. Its Save
+  calls the coordinator only when `draft.resolvedWrite` is non-nil, and removal is the explicit
+  Remove control producing `.remove`. The coordinator calls
+  `routineScheduler.setInstruction(write, entryId:)` immediately (the photo-aid editing rhythm).
+  A failure keeps the draft and shows the plain message; success clears it and shows the saved
+  preview. There is no unrelated-edit path on this surface, so the M-1 hazard does not arise here,
+  but the same load gating is used for consistency.
+- `ReminderVisualAidEditorView` remains medication-neutral: the instruction section is opt-in
+  (nil/default for medication call sites); the photo editor's existing behaviour is unchanged.
+- `FiredRoutineVisualAids`/`RoutineVisualAidOverlay` gain the `Content` shape and pass
+  `InstructionCardView` in the existing footer slot (D5); the shared `ReminderVisualAidScreen`
+  gains only the defaulted `timeText` parameter (m-4).
+
+**Tests:** `RoutineSchedulerTests` (set/replace/remove, re-arm, delete-with-owner, video-only entry,
+failure keeps previous, media-delete Result logged), `RoutineVisualAidFireHandlerTests` (gates,
+always false, the three tap cases), `InstructionSurfaceTests` (editor controls, labels, load-failure
+read-only state).
+
+### C10 — Free-form event editor and detail (changed + new)
+
+**Files:** `App/EventsView.swift` (changed), `App/InstructionViews.swift` (new section)
+
+- `EventFormView` gains `EventInstructionSection` between the photo card (`:284–327`) and the
+  address card. The section binds an `InstructionDraft` in `@State`; on `.onAppear` it loads the
+  existing instruction through the coordinator. **Form Save is disabled while
+  `draft.loadState == .loading`.** On `.failed` the section is read-only with a plain message and
+  Retry; unrelated event edits remain saveable with `resolvedWrite == nil` (M-1).
+- The form's Save calls
+  `coordinator.saveFreeFormEvent(form, instruction: draft.resolvedWrite, editing: event?.id)`:
+  - `instruction == nil` → leave the stored instruction untouched (no service instruction call);
+  - `.set(payload)` → write/replace after the event id exists;
+  - `.remove` → explicit removal;
+  - success → dismiss;
+  - instruction failure → stay open with the plain partial-save message and adopt the returned
+    event id so a retry edits the created event (D12).
+- `EventDetailView.detailCards` (`:598–641`) adds the instruction card after the info card; `load()`
+  reads the instruction and instruction image through new coordinator accessors.
+- `FreeFormEventService` gains:
+  ```swift
+  func instruction(forEventId: String) -> Instruction?
+  func instructionImage(forEventId: String) -> UIImage?
+  @discardableResult
+  func setInstruction(_ write: InstructionWrite, forEventId: String) -> Bool
+  func save(_ form: FreeFormEventForm, instruction: InstructionWrite?,
+            editing eventId: String? = nil) -> FreeFormEventSaveOutcome?
+  ```
+  `setInstruction` is **non-optional**: `.remove` is the only removal path; the save seam's `nil`
+  means "leave untouched" and performs no instruction work. `save` applies `.set`/`.remove` **after**
+  the event id exists, via the same transactional `setInstruction`; it returns
+  `FreeFormEventSaveOutcome(eventId:instructionSaved:)` where `instructionSaved` is false only when
+  a requested instruction write failed (`true` when nothing was requested).
+- `AppCoordinator.saveFreeFormEvent` takes the resolved write, returns the outcome, and keeps its
+  Google share notification for the saved event. Its callers (`EventFormView`) read the outcome.
+
+**Tests:** `FreeFormEventServiceTests` (draft save, partial outcome, set/replace/remove, the
+`nil`-write leave-untouched case, delete/reconcile cleanup, photo/instruction mutual preservation,
+pre-feature payload), `FreeFormEventFormTests` (form validity untouched; draft semantics:
+loading/loaded/failed × hasChanges; failed load passes `nil` and the instruction survives),
+`FreeFormEventFireHandlerTests` (gate and tap), `InstructionSurfaceTests`.
+
+### C11 — `RoutineScheduler` changes (changed)
+
+**File:** `Services/Reminders/RoutineScheduler.swift`
+
+- Add `instructionVideoStore: InstructionVideoStore? = nil` to the initializer (default nil keeps
+  every existing test harness constructing unchanged).
+- Add:
+  ```swift
+  @discardableResult
+  func setInstruction(_ write: InstructionWrite, entryId: UUID) -> Bool
+  ```
+  It resolves the entry and switches on the write:
+  - `.set(payload)`: apply pending image (via `visualAidStore.save`), then pending video (via
+    `instructionVideoStore.commit`), build the final normalized `Instruction`, persist through
+    `persistAndReschedule(entry, eventType: "entry_instruction_updated", metadata: ["kind": …,
+    "count": …])` (the existing `setVisualAids` path, `:131–137` / `:202–213`), then delete the
+    previous instruction's media if the new instruction no longer references it.
+  - `.remove`: persist `instruction = nil` through the same `persistAndReschedule`, then delete the
+    old media (`delete`/`deleteAll` `Result`; a `.deleteFailed` is logged, the index stays
+    authoritative).
+  On a persistence failure it deletes the pending writes and returns false, leaving the previous
+  instruction intact.
+- `removeEntry` (`:111–117`) additionally calls `instructionVideoStore?.deleteAll(for: .routine(id))`
+  and logs a `.deleteFailed`; the existing `visualAidStore.deleteAll` already removes a routine
+  image instruction.
+- Scheduling passes `hasInstruction: entry.instruction?.isPresent == true` at its existing
+  `scheduleRoutineReminder` call (`:366–372`); `visualAidURL` (`:391`) is unchanged — notifications
+  still attach only the first photo. No video path is added to scheduling.
+
+**Tests:** `RoutineSchedulerTests` extensions — set/replace/remove, explicit `.remove`, re-arm,
+delete-with-owner, video-only entry, failure keeps previous, the fake alarm scheduler receives
+`hasInstruction` matching the entry's instruction presence and only a photo URL, and scoped cancels
+only (no remove-all). The protocol change means existing fake schedulers gain the parameter.
+
+### C12 — `EventExtrasStore` changes (changed)
+
+**File:** `Services/Storage/EventExtrasStore.swift`
+
+- Add `instruction: Instruction?` to `EventExtras`, tolerant decode, default nil.
+- Fix `setPhotoFilename` to mutate the existing extras (critical; see §Data model).
+- Add:
+  ```swift
+  @discardableResult
+  func storeInstruction(_ instruction: Instruction?, forEventId: String) -> Bool
+  ```
+  which mutates `extras(forEventId:) ?? EventExtras()`, preserving `photoFilename`, and writes the
+  whole index back. The optional here is the **payload** (nil = no instruction stored), reached only
+  after the service resolved an explicit `.remove`; it is not the `InstructionWrite?` save seam.
+- `remove` (`:131–136`) already returns the dropped extras; the service now uses
+  `dropped.instruction` for file cleanup.
+
+**Tests:** `EventExtrasStoreTests` — pre-feature fixture, photo save preserves instruction,
+instruction save preserves photo, `storeInstruction(nil)` clears only the instruction, remove
+returns both, unknown kind decodes, malformed instruction object does not take the index down.
+
+### C13 — `FreeFormEventService` lifecycle (changed)
+
+**File:** `Services/Events/FreeFormEventService.swift`
+
+- Inject `instructionVideoStore: InstructionVideoStore?` (default production instance for parity
+  with `photoStore`; the coordinator passes its shared instance).
+- `setInstruction(_ write: InstructionWrite, forEventId:)` mirrors C11 using `photoStore` for image
+  instructions and the video store for video instructions. Ordering: pending writes → index → old-
+  file deletion. A failed index write deletes the pending writes and returns false. A media-delete
+  `.deleteFailed` is logged (never surfaced as a save failure of the index state).
+- `save(form, instruction: InstructionWrite?, editing:)`: `nil` skips instruction work; a non-nil
+  write is applied only after the event id exists; the outcome reports `instructionSaved`.
+- `upcoming`'s vanish branch (`:293–315`) and `delete` (`:424–431`) delete the instruction image and
+  the event video directory alongside the event photo (`deleteInstructionMedia(in:eventId:)`), via
+  the `Result`-returning store methods and typed logging.
+- Accessors `instruction(forEventId:)` and `instructionImage(forEventId:)`.
+
+**Tests:** `FreeFormEventServiceTests` extensions (save outcome, partial save, nil-write leaves
+instruction, explicit remove, replace/remove, delete/reconcile, photo preservation, no orphans after
+replace/delete, delete-failure logging).
+
+### C14 — Fire handlers (changed)
+
+**Files:** `Services/Notifications/RoutineVisualAidFireHandler.swift`,
+`Services/Notifications/FreeFormEventFireHandler.swift`
+
+- **Routine:**
+  ```swift
+  init(entryLookup: @escaping (UUID) -> RoutineEntry?,
+       onFire: @escaping (RoutineEntry, Date) -> Void,
+       onInstructionTap: @escaping (UUID, RoutineEntry?, Date) -> Void)
+  ```
+  `willPresent` gate becomes `visualAids.isEmpty && !(entry.instruction?.isPresent ?? false)`, and
+  the main-queue `onFire(entry, notification.date)` fires for instruction-bearing entries. New
+  `didReceive`: only the default action; only when `userInfo["had_instruction"] as? Bool == true`;
+  resolve the entry (may be nil), then main-queue `onInstructionTap(entryId, entry, notification.date)`.
+  A missing key or `false` is a no-op (today's photo-only behaviour). Always returns `false`.
+- **Event:** gate `photoFilename != nil` → `photoFilename != nil || instructionPresent(eventId)`
+  (m-1). The new dependency is `instructionPresent: (String) -> Bool`; C15 wires it to
+  `freeFormEventService.instruction(forEventId:)?.isPresent == true`. The test fake supplies a
+  dictionary-backed predicate. `didReceive` unchanged (always opens the detail for a deleted event
+  too, which shows its own honest message). Always returns `false`.
+- No category, action, attachment, cancel-scope, or facade change.
+
+**Tests:** both handler suites extended. `RoutineVisualAidFireHandlerTests` covers the **three
+instruction tap cases** — (1) instruction present → `onInstructionTap(entryId, entry, date)`;
+(2) instruction removed after arming (`had_instruction == true`, entry resolves, `instruction ==
+nil`) → same callback, and `InstructionDisplayStateTests` proves the presentation is
+`.missingInstruction`; (3) entry deleted (`had_instruction == true`, `entryLookup` nil) → callback
+with `entry == nil`, which the coordinator maps to `.unavailable`. Plus the photo-only
+(`had_instruction == false`) no-op baseline and always-`false` for every path.
+`FreeFormEventFireHandlerTests` covers the new instruction-present gate and its fake.
+`NotificationFacadeTests` and `NotificationCategoriesTests` run unchanged as the preserved-baseline
+gate.
+
+### C15 — Composition and presentation state (changed)
+
+**File:** `App/AppCoordinator.swift`
+
+- Owned properties (all no-IO init): `instructionVideoStore = InstructionVideoStore()`,
+  `instructionVideoImporter`, `instructionVideoProber`, `instructionPermissions`,
+  `instructionPlaybackConfiguration`, and the capture adapters/factory as needed by the views. Pass
+  the shared stores into `RoutineScheduler` (wiring at `:3583`) and the lazy
+  `freeFormEventService` (`:12862`).
+- Fired routine state (`:13395`) uses the `FiredRoutineVisualAids.Content` shape;
+  `presentRoutineVisualAids(for:at:)` (`:13441`) builds `.reminder` with
+  `timeText = instructionPresent ? LocaleFormatters.shortTime(date, locale: activeLocale) : nil`
+  (D6) and dedupes by entry id. New `presentRoutineInstructionTap(entryId:entry:at:)` builds
+  `.reminder` (title/time, `expectsInstruction: true`, instruction possibly nil → fallback) or
+  `.unavailable` when the entry is nil (B-2).
+- Handler wiring (`:4591–4598`): the routine handler gains `onInstructionTap` in addition to the
+  `(entry, date)` sink; the event handler is constructed with the `instructionPresent` lookup
+  through the lazy service (`:4626–4633`).
+- New accessors: `routineInstruction`/`saveRoutineInstruction`; `eventInstruction(forEventId:)` and
+  `eventInstructionImage(forEventId:)`; the updated `saveFreeFormEvent(_:instruction:editing:)`
+  signature (resolved write, `nil` = leave untouched).
+- Launch: call `instructionVideoStore.purgePendingDrafts()` on the existing utility housekeeping
+  queue (`:571`), not on `init` or the boot-critical path.
+- `ContentView` (`:65–72`, `:107–110`) needs no new mount: instructions ride the existing routine
+  overlay and event detail. The card's playback cover is nested inside those presentations.
+
+**Tests:** covered through the service/handler/controller suites; `NoIOInInitTests` extended with
+the store's FileManager-spy init; the handler wiring is pinned by the handler suites.
+
+### C16 — Tests and gates (new/extended)
+
+**New suites**
+
+| Suite | Covers |
+|---|---|
+| `InstructionVideoStoreTests` | pre-copy limits (no staged file), size/duration boundaries, protection on staged + committed files, availability classification (traversal/absent/unreadable/available), commit/replace/delete Result, digest key, pending purge, no IO in init |
+| `InstructionVideoImporterTests` | second-check duration/size/codec/timeout/discard, no transcode, boundaries |
+| `InstructionDisplayStateTests` | text/image/video/unknown/blank/none, removed-instruction fallback, caption rules, availability→outcome mapping, draft truth table |
+| `InstructionPlaybackControllerTests` | no autoplay, ready/failure/timeout/finish/dismiss/close, injected sub-second preflight |
+| `InstructionCaptureCoordinatorTests` | library/record/permission denial/unavailable/over-long/validation/cancel/single-flight |
+| `InstructionSurfaceTests` | source-pin editor/card controls (44 pt, tokens, VoiceOver labels, no link control, no unknown-kind control), removed-instruction branch, the allowed `VisualAidViews.swift` baseline (m-4) |
+| `InstructionLocalisationTests` | `instruction.*` en/ne parity + `InfoPlist.strings` en/ne usage keys |
+| `InstructionReleaseSafetyTests` | static scan of the new roots for network/upload/transcription APIs, forbidden content in log statements, and the FR-RIE-022 pin (no instruction/video reference or attachment path in `RoutineAlarmScheduler.swift`) |
+| `RoutineNotificationSchedulerTests` | **new** (replaces the phantom `RoutineAlarmSchedulerTests`, m-3): the pure `RoutineNotificationContent.userInfo` keys (`had_instruction` Bool included), notification identifier namespace, scoped-cancel identifier mapping, and no instruction/video attachment input |
+
+**Extended suites:** `RoutineEntryTests`, `RoutineStoreTests`, `RoutineSchedulerTests`,
+`VisualAidStoreTests` (instruction image coexistence/deletion), `VisualAidDisplayStateTests`,
+`RoutineVisualAidFireHandlerTests` (three tap cases + photo-only no-op), `EventExtrasStoreTests`,
+`FreeFormEventServiceTests` (nil-write, explicit remove, failed-load safety), `FreeFormEventFormTests`
+(draft semantics), `FreeFormEventFireHandlerTests` (instructionPresent gate),
+`NotificationFacadeTests`, `NotificationCategoriesTests`, `NoIOInInitTests`,
+`L10nCatalogCoverageTests`.
+
+**Gates:** `./build.sh` is canonical (`ios/build.sh`; release log gate at `:431`, scoped
+`-only-testing` runs at `:458`); `xcodebuild test`, not `build`, per the build-environment rule.
+Focused suites green, typecheck/build clean, recorded full-suite baseline unchanged. **One recorded
+real-device smoke check on a Release build** (m-7) installed on the reference device, recorded with
+the build number and commit, covers: library pick, recording with permissions, a fired routine Play
+with audio, event detail Play, close stops audio, the routine tap path for all three tap cases,
+largest accessibility text size, VoiceOver labels, camera denial, microphone denial, and the
+foreground-only copy. Simulator covers every failure path: missing file, corrupt file, unsupported
+codec (fake inspector plus a generated invalid file), traversal filename, replace failure, playback
+failure, timeout, and an over-long/unplayable source never reaching the staged copy. No UI test is
+required (OD-7).
+
+### C17 — Routine notification content (changed, bounded; review B-2)
+
+**File:** `Services/Reminders/RoutineAlarmScheduler.swift`
+
+**Responsibility:** carry one extra producer-constant fact — whether the firing was armed with an
+instruction — so the routine tap path can distinguish an instruction-bearing firing from a
+photo-only/no-instruction one without changing any shipped behaviour.
+
+**Interface:**
+```swift
+// Pure, testable builder (no UNUserNotificationCenter at construction).
+enum RoutineNotificationContent {
+    static let hadInstructionKey = "had_instruction"
+    static func userInfo(occurrenceId: UUID, entryId: UUID,
+                         hasInstruction: Bool) -> [String: Any]
+}
+
+protocol RoutineAlarmScheduling {
+    func scheduleRoutineReminder(
+        occurrenceId: UUID, entryId: UUID, title: String,
+        visualAidURL: URL?, hasInstruction: Bool, at scheduledTime: Date
+    )
+    // cancels unchanged
+}
+```
+
+**Invariants:**
+- `userInfo` is exactly today's three keys plus `had_instruction` (a Bool); no user data is added.
+- Notification title/body/sound, banner/list outcome, the first-photo attachment and its throwaway
+  copy, and the scoped-cancel identifiers are **unchanged**. No instruction/video URL is ever a
+  parameter, so no video can reach `UNNotificationAttachment` (FR-RIE-022).
+- A pending request armed before this release has no key; the handler treats that as `false` (the
+  pre-feature no-op). Re-arming on launch/upgrade writes the key for future firings.
+- `RoutineScheduler` passes `entry.instruction?.isPresent == true` at the existing call site.
+
+**Tests:** new `RoutineNotificationSchedulerTests` (pure builder + identifiers); `RoutineSchedulerTests`
+asserts the flag passed by the scheduler and the scoped-cancel contract; `InstructionReleaseSafetyTests`
+pins the source for no instruction/video attachment path.
 
 ---
 
 ## Traceability
 
-### 22. Requirement-to-architecture mapping
-
-| Requirement | Design sections |
-|---|---|
-| FR-MSR-001 slot-based entry model (quantity + slot + meal) | 4.1, 4.2, 4.4, 19 (draft/settings rows) |
-| FR-MSR-002 deterministic total slot→clock mapping, defaults, family-configurable | 4.2, 4.3, 4.5, 15, 18 (b), 21.1–21.2 |
-| FR-MSR-003 structured quantity, composed dose line, detector unchanged | 4.6, 19 (DoseLine), 2 (invariant ledger) |
-| FR-MSR-004 purpose at entry (optional; no dependency) | 5 |
-| FR-MSR-005 scan-to-fill additive, bounded, partial-fill honest | 6, 19 (draft + ScannedSchedule) |
-| FR-MSR-006 OCR confirmation before binding, no silent auto-apply | 6, 18 (a), 14 |
-| FR-MSR-007 voice ack names medication and slot; resolution by what was said | 7.1, 7.2, 7.6 |
-| FR-MSR-008 conservative disambiguation, sanctioned copy only | 7.2, 7.3, 14 |
-| FR-MSR-009 safety sequence preserved, no bypass | 7.4, 8.1, 2, 17 |
-| FR-MSR-010 intake recorded against the schedule | 7.4, 10 |
-| FR-MSR-011 refusal-first denial guard preserved | 7.1, 7.5 |
-| FR-MSR-012 mic continuity around acks | 7.5, 13, 19 (AckFastLane row) |
-| FR-MSR-013 photo evidence augments never replaces, never creates | 8.1, 8.2, 8.5, 18 (c) |
-| FR-MSR-014 photo evidence shared-slot resolution deterministic | 8.1, 8.3 |
-| FR-MSR-015 significant-event set + triggers on the medication path | 9.1, 9.5, 14 |
-| FR-MSR-016 channels + honest per-contact delivery; consent gate | 9.2, 9.3, 14 |
-| FR-MSR-017 PII-free wire | 9.4, 18 (d), 20 |
-| FR-MSR-018 honest degradation, no silent stubs | 9.2, 9.3, 8.1, 9.5, 14 |
-| FR-MSR-019 reminder/escalation semantics preserved | 10, 2, 4.4 |
-| FR-MSR-020 dementia machinery preserved and integrated | 7.4, 8.5, 17 |
-| FR-MSR-021 elderly-fit UX of the new flows | 16.1, 7.3, 8.4 |
-| FR-MSR-022 persistence before alarm + process-kill re-arm | 10, 4.5, 14 |
-| NFR-MSR-001 LLM independence | 7.6, 13, 17 |
-| NFR-MSR-002 PII-free observability + release log gate | 12, 17, 19 |
-| NFR-MSR-003 on-device label/photo processing, no new egress | 6, 8.1, 12 |
-| NFR-MSR-004 localisation + spoken time via the formatter | 16.2, 11 (legacy rendering) |
-| NFR-MSR-005 accessibility (44pt/18pt/contrast, voice-first) | 16.1, §4.2 control shape |
-| NFR-MSR-006 migration compatibility, no loss, no inference | 11, 4.2, 20, 21.3 |
-| NFR-MSR-007 Devanagari grapheme regression pin | 16.3 |
-| NFR-MSR-008 test coverage, integration tests, confidence bars | 17, 19 (tests row) |
-| NFR-MSR-009 compliance and release gates | 12, 17, 19 |
-| NFR-MSR-010 reminder firing latency | 4.3, 10, 17 |
-
-Every locked requirement is bound by the design above. No requirement is left unbound.
+| Requirement | Design sections / components | Primary tests |
+|---|---|---|
+| FR-RIE-001 model, one kind, media-only valid | Data model; C01, C11, C12 | InstructionDisplayStateTests, RoutineEntryTests, EventExtrasStoreTests |
+| FR-RIE-002 text | Capture · Text; C01, C08, C09/C10 | InstructionDisplayStateTests, InstructionSurfaceTests |
+| FR-RIE-003 image via existing stores | Capture · Image; D3; C09/C10/C13 | VisualAidStoreTests, FreeFormEventServiceTests, InstructionSurfaceTests |
+| FR-RIE-004 library pick | Capture · Library; C04 | InstructionCaptureCoordinatorTests; device smoke |
+| FR-RIE-005 in-app recording | Capture · Recording; C04, C05 | InstructionCaptureCoordinatorTests; device smoke |
+| FR-RIE-006 limits, as provided, codec reject | Configuration; D17; C02, C03, C04 | InstructionVideoStoreTests (pre-copy rejections, no staged file), InstructionVideoImporterTests (second check), InstructionCaptureCoordinatorTests |
+| FR-RIE-007 optional caption, blank no space | Data model; C01, C08 | InstructionDisplayStateTests, InstructionSurfaceTests |
+| FR-RIE-008 lifetime, edits re-arm | C11, C13; D14/D15 | RoutineSchedulerTests, FreeFormEventServiceTests |
+| FR-RIE-009 existing edit surfaces | C09, C10 | InstructionSurfaceTests |
+| FR-RIE-010 plain feedback, safe failure | Error taxonomy; C04, C09, C10 | InstructionCaptureCoordinatorTests, InstructionSurfaceTests, FreeFormEventServiceTests |
+| FR-RIE-011 roots, bare names, protection | Storage; C02; D18 | InstructionVideoStoreTests (staged + committed protection, bare names) |
+| FR-RIE-012 filename hygiene | Storage; C01, C02, C08; D16 (M-2) | InstructionVideoStoreTests (three distinct outcomes), InstructionDisplayStateTests (mapping), InstructionSurfaceTests (no filename in event) |
+| FR-RIE-013 transactional replace | Storage lifecycle; C11, C13 | RoutineSchedulerTests, FreeFormEventServiceTests |
+| FR-RIE-014 delete with owner | Storage lifecycle; C11, C13; m-2 | RoutineSchedulerTests, FreeFormEventServiceTests, InstructionVideoStoreTests (delete Result) |
+| FR-RIE-015 always fires | Fire-time; C14 | RoutineVisualAidFireHandlerTests, FreeFormEventFireHandlerTests |
+| FR-RIE-016 handlers always false | C14 | both handler suites, NotificationFacadeTests |
+| FR-RIE-017 composition per kind | Fire-time; D5/D6; C08, C09, C10 | handler suites, InstructionSurfaceTests, InstructionDisplayStateTests |
+| FR-RIE-018 explicit Play, no autoplay | Playback; C06, C07, C08 | InstructionPlaybackControllerTests, InstructionSurfaceTests |
+| FR-RIE-019 tap/Open path, foreground-honest | Fire-time; D13/D14; C14, C15, C17 (B-2) | RoutineVisualAidFireHandlerTests (instruction present / removed / entry deleted / photo-only no-op), InstructionDisplayStateTests (.missingInstruction), InstructionSurfaceTests (.unavailable) |
+| FR-RIE-020 plain fallback, PII-free | Error taxonomy; C06, C08, C14 | InstructionPlaybackControllerTests, InstructionSurfaceTests, RoutineVisualAidFireHandlerTests |
+| FR-RIE-021 taxonomy preserved | Notification integration; C17 | NotificationCategoriesTests, RoutineSchedulerTests (scoped cancels), RoutineNotificationSchedulerTests (m-3) |
+| FR-RIE-022 no video attachments/copies | Notification integration; C11, C17 | RoutineNotificationSchedulerTests (no video/instruction path), RoutineSchedulerTests (protocol has no instruction URL), InstructionReleaseSafetyTests (source pin) |
+| FR-RIE-023 no new machinery | Notification integration; C14 | handler suites, facade tests |
+| FR-RIE-024 honest capability surface | Data model (`url` inert), D8; C08 | InstructionDisplayStateTests, InstructionSurfaceTests |
+| FR-RIE-025 permissions, denial non-blocking | Capture · Permissions; C05 | InstructionCaptureCoordinatorTests, InstructionLocalisationTests; device smoke |
+| NFR-RIE-001 accessibility | Accessibility; C08, C09, C10 | InstructionSurfaceTests; device accessibility smoke |
+| NFR-RIE-002 en/ne, no hardcoded copy | Localisation; C16 | InstructionLocalisationTests, L10nCatalogCoverageTests, source scan |
+| NFR-RIE-003 no egress | Layering; C03, C06, C07 | InstructionReleaseSafetyTests |
+| NFR-RIE-004 PII-free logs, release gate | Observability; C04, C08 | InstructionReleaseSafetyTests, InstructionSurfaceTests (no filename), build gate |
+| NFR-RIE-005 at-rest protection | Storage; C02; D18 (m-5) | InstructionVideoStoreTests (staged + committed attribute); device smoke |
+| NFR-RIE-006 migration | Data model; C01, C11, C12 | RoutineEntryTests, EventExtrasStoreTests (pre-feature fixtures) |
+| NFR-RIE-007 footprint, zero orphans | Storage lifecycle; C02, C11, C13 | InstructionVideoStoreTests, service tests |
+| NFR-RIE-008 playback responsiveness | Playback; Configuration; C06 | InstructionPlaybackControllerTests (injected sub-second preflight); simulator failure matrix; Release-build device smoke (timings) |
+| NFR-RIE-009 playback seam + gates | Playback seam; C06, C16; m-7 | InstructionPlaybackControllerTests; recorded Release-build device smoke |
+| NFR-RIE-010 preserved baseline | Notification integration; D5/D6/D14; C14, C17 | facade/category/medication suites, RoutineVisualAidFireHandlerTests (photo-only tap no-op), source-scan baseline (behaviourally identical) |
 
 ---
 
 ## Risks and open questions
 
-### 23. Risks and review focus for `review-l1`
+### Owner-level open questions
 
-1. **Calendar-channel content extension (§9.3, OD-7).** Significant-event entries put
-   medication-name + event-time content on the shared Google Calendar. This is the same content
-   class the shipped schedule mirror already shares under the same consent, and FR-MSR-016 names
-   the calendar channel in scope — but the disclosure copy (`calendarShare.consent.*`) should be
-   reviewed to confirm it covers event entries, not just schedule items. Recorded as the top
-   review focus.
-2. **Simple-ack behaviour change (§7.2).** Several pending reminders now yield clarification
-   instead of the silent oldest-pending pick. Required by FR-MSR-007's failure scenario; the
-   single-pending case is byte-identical. Review should confirm the due-set preference
-   ("fired == true") is the right reading of "unambiguous".
-3. **Retime refusal for slot entries (§11).** The Calendar-app retime path is refused for
-   slot-model entries (honest event, no silent conversion). The alternative (clearing the slot)
-   was rejected; review should confirm the refusal is acceptable to the family's edit paths.
-4. **Honest-stub change (§9.2).** Making `APNsProvider` report not-delivered changes shipped
-   behaviour (and its tests) — required by FR-MSR-016/018, but it makes delivery gaps visible on
-   every existing alert. Review should confirm this is the intended honesty posture.
-5. **Evidence delivery boundary (§8.1, OD-8).** On-device-only evidence is honest but means the
-   caregiver cannot see the photo remotely until the inherited E2E transport lands. Review
-   should confirm the retention/forward-contract statement satisfies FR-MSR-013's
-   "where evidence leaves the device" clause.
-6. **Dose-line composition rule 2 (§4.6).** Composing quantity + scanned strength into one line
-   ("1 tablet, 500 mg") preserves data but adds content; the alternative (quantity wins,
-   strength dropped) loses the scanned value. Review should confirm the composed form.
-7. **`withScheduleTimes` copy trap (§11).** A memberwise rebuild that drops the new fields is a
-   silent slot-loss defect; called out for implement-time attention and a migration test.
-8. **Legacy entries in the ack slot filter (§7.2 rule 3).** Legacy (slot-nil) entries never
-   match a slot word; a household mid-upgrade gets the honest clarification instead of an
-   inferred match. Deterministic and conservative; review should confirm no inference is wanted
-   there either.
+**None.** OD-1 … OD-8 are resolved in the feature constitution (2026-10-25). The design-level
+choices above (D1–D18) are recorded for `review-l1` ratification; none changes scope, storage
+policy, playback UX, or safety posture.
 
-## Deferred work (design-l2 / implementation — nothing below weakens a binding above)
+### Risks and mitigations
 
-| Item | Disposition |
-|---|---|
-| Clarification-walk state representation; response-window plumbing | DEFERRED to design-l2 — mechanics fixed in §7.3; the state object and its timeout wiring are component details |
-| Slot/meal word lists (exact strings, both languages); additive ack-phrase additions | DEFERRED to design-l2/implement — closed lists, no LLM, tested; boundary: denial guard first, no reordering, Devanagari pin untouched |
-| Exact L10n copy strings (units, slots, meals, mapping section, clarification forms, outcome lines, alert bodies, evidence lines, calendar entry titles) | DEFERRED to implementation — key sets and semantics fixed (§16.2); both languages; catalog coverage test |
-| Evidence store internals (file naming, compression implementation, replace/delete ordering) | DEFERRED to design-l2 — shape fixed in §8.2/§20 (bare file names, one per record, 200 KB cap) |
-| Capture-surface placement/details (dose screen affordance, record-surface affordance) | DEFERRED to design-l2 — context-bound determinism and no-generic-camera rule fixed in §8.1 |
-| Calendar one-off bookkeeping (key lifecycle, reconcile interplay, entry title format) | DEFERRED to design-l2 — mechanism, consent gate, invitee rule and event subset fixed in §9.3 |
-| Editor interaction details (quantity/strength coexistence rendering; mapping control layout) | DEFERRED to design-l2 — rules fixed in §4.1/§4.6 |
-| Wave decomposition and unit boundaries | DEFERRED to plan-tasks (the plan owns unit decomposition) |
+1. **`EventExtrasStore.setPhotoFilename` erasure (critical).** Saving an event photo would clear the
+   instruction unless the method mutates existing extras. Mitigated by C12 and a dedicated
+   `EventExtrasStoreTests` case (save photo → instruction survives; save instruction → photo
+   survives). This is the first thing the implementer must change.
+2. **Nested presentation (medium; accepted iteration 1).** The playback cover presents from inside
+   an already-presented routine `fullScreenCover` or event `sheet`. Supported on the deployment
+   target, but SwiftUI presentation can regress at OS edges. Mitigation: check on the simulator and
+   the device smoke; fallback plan is hoisting the cover to `ContentView` through coordinator state
+   without changing the seam.
+3. **Ephemeral system URLs (medium; accepted iteration 1).** PHPicker's `loadFileRepresentation`
+   URL and `UIImagePickerController`'s `mediaURL` are valid only inside their callbacks. The
+   synchronous pre-copy probe + stage copy are load-bearing (B-1/D4). Unit tests cannot run the
+   system callbacks; the device smoke covers library pick and recording. Both callbacks use one
+   store call so the rule is enforced in one place.
+4. **`UIImagePickerController` video capture on the current OS (medium).** Permission ordering,
+   silent-audio behaviour, and cancellation need device confirmation; the simulator cannot cover
+   them. No custom capture UI is designed, which keeps the risk bounded.
+5. **File-protection enforcement (low).** Protection is now applied at file creation, so there is no
+   weaker-class staging window (D18/m-5); the simulator reports the attribute but does not enforce
+   Data Protection. The device smoke records that a saved instruction plays and that the store
+   reports complete protection on both the staged and committed file; enforcement is an iOS
+   property, not app code.
+6. **NFR-RIE-008 timing targets (medium).** 500 ms presentation / 2 s first frame / 1 s failure are
+   device acceptance targets measured on a **Release build**. The cover is presented synchronously
+   on the Play tap; the preflight default is 0.6 s (sub-second, leaving margin under the 1 s outer
+   bound), and readiness is watched at a configurable 10 s. The recorded Release-build smoke is the
+   only honest evidence for the first two.
+7. **Event image resolution (low, accepted iteration 1).** `ContactPhotoStore` stores 512 px
+   thumbnails; an event instruction diagram inherits that. FR-RIE-003 binds event images to the
+   existing path and forbids a parallel image store, so this is a requirements consequence, not an
+   implementation choice. Routine image instructions use the 1600 px `VisualAidStore` pipeline.
+8. **Backup inclusion (low, accepted iteration 1).** Instruction video is included in the normal iOS
+   backup (D9). This is not app egress and matches the shipped photo aids; if the owner wants
+   backup-excluded media, that is a scope change to raise at review, not a design defect.
+9. **Time shown only for instruction-bearing firings (low, accepted iteration 1).** D6 is the only
+   way to satisfy both FR-RIE-017/020 and NFR-RIE-010's baseline. A photo-only firing is
+   behaviourally identical to today; an instruction-bearing or instruction-expected firing shows
+   the title and the delivery time.
+10. **Delivery-time vs scheduled-time (low).** `UNNotification.date` is the delivery date. A
+    system-delayed notification would display the later time; that is arguably the honest "when
+    this fired". The scheduled-time alternative is a `scheduled_at` userInfo key (a further
+    scheduler change), not chosen here.
+11. **Source-scan tests are heuristic (low).** The hardcoded-copy and network-API scans pin tokens,
+    not semantics. They are backed by the release gate and by reviewer inspection of the new roots;
+    the design states the limit rather than overclaiming instrumentation.
+12. **Unknown-kind note (low).** A future `link` instruction will show a plain "newer version" note
+    rather than nothing. This is honest and contains no control; a future release replaces the note
+    with the link renderer using the preserved `kind`/`url` fields.
+13. **Synchronous metadata probe inside the system callback (medium; accepted for B-1).** Honouring
+    FR-RIE-006's pre-copy ordering requires reading the local file's metadata on the callback's
+    thread (the main thread for `UIImagePickerController`'s delegate). The probe is metadata-only
+    (duration, playability, video track), does not decode frames, does not copy, and runs once per
+    pick; the heavyweight inspection stays off-main. A pathological file can delay the picker's
+    dismissal, never the reminder or its delivery. The alternative — keeping a post-copy check —
+    violates a locked MUST; an owner amendment would be the only other route, and it is not
+    proposed.
+14. **Notifications armed before this release lack `had_instruction` (low).** The handler reads a
+    missing key as `false`, so an old pending notification's tap is today's no-op; the next launch
+    re-arms and writes the flag. No migration is needed, and no false claim is shown.
+15. **Failed initial instruction load on the event form (low; mitigated).** Save is disabled while
+    loading; a failed load makes the instruction section read-only with Retry and passes `nil`
+    (leave untouched) to the save seam. The regression test proves an unrelated edit and a failed
+    load cannot erase the stored instruction (M-1).
+16. **Media-delete refusal after a successful index write (low).** `delete`/`deleteAll` return
+    `.deleteFailed`, which is logged PII-free and never claimed as success (m-2). The index is
+    authoritative, so the instruction no longer resolves; a protected orphan can remain on disk
+    until a later successful cleanup. This is an OS-level refusal, not an app path; no user-facing
+    copy claims the file was removed.
+
+### Deliberate non-changes
+
+- `NotificationFacade`, `NotificationCategories`, `VisualAidStore` (except reuse),
+  `ContactPhotoStore` (except reuse), `LogSanitiser`, and every medication source file are
+  unchanged.
+- `RoutineAlarmScheduler` changes only by the bounded `hasInstruction` argument and the pure
+  `RoutineNotificationContent.userInfo` builder (D14/C17): notification title/body, banner/list/
+  sound, the first-photo attachment and its throwaway copy, and the scoped-cancel identifiers are
+  untouched.
+- `ReminderVisualAidScreen` gains exactly one defaulted `timeText` parameter and its conditional
+  render; medication and no-instruction routine call sites pass `nil` and are **behaviourally
+  identical** to today (the source-scan baseline pins this; m-4).
+- No new notification category, action, attachment, audio session, network client, container,
+  database, or auth mechanism.
+
+---
+
+## Deferred work
+
+- **YouTube/link instructions (OD-3):** model slot preserved (`kind` raw string + `url`), no UI,
+  no playback path. A later release adds the `.link` case, the renderer, the YouTube integration
+  and its offline/failure handling.
+- **Background or cold-launch video playback (OD-6):** v1 is foreground-only with the tap/Open
+  path. Any future background playback needs an explicit product/safety decision; the current UI
+  makes no such claim.
+- **Multiple instructions or mixed kinds per owner:** v1 stores one optional instruction; the
+  model would need a list and a composition decision.
+- **Transcoding, cloud upload, transcription, AI processing of instruction media:** out of scope
+  by NFR-RIE-003; nothing in the design forecloses it, but nothing implements it.
+- **Android (v2):** not a surface in this repo.
+- **A standalone media gallery or top-level tab:** explicitly out of scope; instructions live in
+  the existing routine sheet and event form/detail.
+- **A UI test:** not required (OD-7); the seam, simulator failure tests and one recorded Release-
+  build device smoke are the agreed evidence.

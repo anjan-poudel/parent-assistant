@@ -98,6 +98,13 @@ struct RoutineEntry: Codable, Identifiable, Equatable {
     /// Photos shown with this reminder — empty for the vast majority of
     /// entries, which carry no image at all.
     var visualAids: [VisualAid]
+    /// The entry's one instruction, if the caregiver attached one (design
+    /// L2 §3.4, §4.4; FR-RIE-001, FR-RIE-008). Nil is the pre-feature shape
+    /// and the vast majority of entries. The model never consults the
+    /// store: a stored filename may name a file that is gone; `isPresent`
+    /// answers "is there something to render", availability is the store's
+    /// answer at display time.
+    var instruction: Instruction? = nil
 
     init(
         id: UUID = UUID(),
@@ -107,7 +114,8 @@ struct RoutineEntry: Codable, Identifiable, Equatable {
         frequency: RoutineFrequency = .daily,
         weekdays: [Int] = [],
         isEnabled: Bool,
-        visualAids: [VisualAid] = []
+        visualAids: [VisualAid] = [],
+        instruction: Instruction? = nil
     ) {
         self.id = id
         self.category = category
@@ -117,6 +125,7 @@ struct RoutineEntry: Codable, Identifiable, Equatable {
         self.weekdays = weekdays
         self.isEnabled = isEnabled
         self.visualAids = visualAids
+        self.instruction = instruction
     }
 
     /// Explicit keys because `init(from:)` is hand-written (see below) —
@@ -125,13 +134,20 @@ struct RoutineEntry: Codable, Identifiable, Equatable {
     /// yielding a defaulted entry.
     private enum CodingKeys: String, CodingKey {
         case id, category, titleOverride, scheduleTimes, frequency,
-             weekdays, isEnabled, visualAids
+             weekdays, isEnabled, visualAids, instruction
     }
 
     /// Migration-safe decode: `visualAids` was added after the first
     /// installs shipped, so every payload persisted before it MUST decode
     /// as an empty list rather than throwing `keyNotFound` and losing the
     /// user's whole reminder list. All other keys stay required.
+    ///
+    /// `instruction` follows the same tolerance rule (design L2 §4.4,
+    /// §4.6): a payload written before the field existed reads as nil, and
+    /// a malformed nested value (`"instruction": "oops"`, an array, a
+    /// number) costs the instruction — never the routine entry. The double
+    /// optional is deliberate: `decodeIfPresent` throws for a wrong-typed
+    /// value, and `try?` flattens that to nil.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -142,6 +158,7 @@ struct RoutineEntry: Codable, Identifiable, Equatable {
         weekdays = try container.decode([Int].self, forKey: .weekdays)
         isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
         visualAids = try container.decodeIfPresent([VisualAid].self, forKey: .visualAids) ?? []
+        instruction = try? container.decodeIfPresent(Instruction.self, forKey: .instruction)
     }
 
     /// What the user sees/hears: the verbatim override when present,

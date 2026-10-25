@@ -1,0 +1,60 @@
+{
+  "id": "90a80812-1078-4cbc-8cdc-eeaf149c3add",
+  "task_id": "design-l1",
+  "workflow_id": "reminders-instructions-enhancements",
+  "status": "RESOLVED",
+  "reason": "T1 human sign-off — L1 architecture for reminders-instructions-enhancements. The design is a local-only instruction layer over the existing photo-aid seams: one text, image, or video instruction on routine reminders and app-created free-form events; video staged then committed under protected Application Support roots; fired-screen composition with an explicit Play control (no autoplay); injectable playback seam. 13 design decisions (D1–D13) are recorded; no owner decision remains open. Key risk surfaced for review: EventExtrasStore.setPhotoFilename currently replaces the extras row, which would erase a stored instruction — the design fixes it (C12) and pins it with tests.",
+  "context": {
+    "task_description": "L1 architecture for the reminders-instructions-enhancements feature: module boundaries, data model and storage, capture/permissions, fire-time presentation and playback, integration points, failure behaviour, NFR coverage, and component responsibilities.",
+    "risk_tier": "T1",
+    "agent": "architect",
+    "artifacts": [
+      "specs/design-l1.md"
+    ],
+    "artifact_stats": {
+      "lines": 1199,
+      "bytes": 78738,
+      "required_sections_present": [
+        "Overview",
+        "Architecture",
+        "Components"
+      ]
+    },
+    "requirements_basis": {
+      "functional": 25,
+      "non_functional": 10,
+      "lock_snapshot_sha256": "a02b9d4ee24a305ae396cf762304f1a13816f7bc1e81242e9f2adbaf0111bfb9"
+    },
+    "key_decisions": [
+      "D1 event video root EventInstructionVideos",
+      "D2 event owner key ev-<sha256 prefix>",
+      "D3 reuse existing photo stores for images",
+      "D4 _pending staging + same-volume rename commit",
+      "D5 routine fired screen uses existing footer seam",
+      "D6 fired time shown only when an instruction is present",
+      "D7 recording requires camera+microphone",
+      "D8 unknown kind shows a plain newer-version note",
+      "D9 instruction video included in normal device backup",
+      "D10 localized InfoPlist.strings for permissions",
+      "D11 services take InstructionWrite, not a half-built Instruction",
+      "D12 FreeFormEventSaveOutcome for honest partial saves",
+      "D13 fired time from UNNotification.date"
+    ],
+    "review_focus": [
+      "EventExtrasStore.setPhotoFilename erasure of an existing instruction",
+      "callback-scoped picker URL staging (device-only validation)",
+      "nested fullScreenCover presentation from the fired screen/event sheet",
+      "NFR-RIE-008 one-second failure bound vs the 10-second ready watchdog",
+      "event image instructions inherit the 512 px event-photo pipeline",
+      "backup inclusion and time-shown-only-with-instruction asymmetry"
+    ],
+    "open_decisions": [],
+    "branch": "feat/reminders-instructions-enhancements",
+    "branch_tip": "821f19c5",
+    "artifacts_uncommitted": true,
+    "note": "Item created by the dispatching session because the task was dispatched directly (not via the ai-sdd run command), which is the path that normally creates it. Owner decision is being taken on the session Slack channel."
+  },
+  "created_at": "2026-10-25T07:46:02.000Z",
+  "notes": "Owner approved L1 design sign-off from the terminal (2026-10-25); Slack yes/no buttons unreachable due to broken socket delivery",
+  "resolved_at": "2026-10-25T08:21:01.490Z"
+}

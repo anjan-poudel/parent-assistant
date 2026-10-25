@@ -1,0 +1,15 @@
+{
+  "schema_version": "1",
+  "question_id": "q-ask-559928cf-fb88-4642-8bd5-67e66cd9147f",
+  "claimant": "store-31355-1",
+  "message_id": "C0C6CEVV8R4:1792897212.681429",
+  "event_id": null,
+  "from_user": "U0C6DTHDMV0",
+  "consumed_at": "2026-10-25T03:00:17.385Z",
+  "answer": {
+    "choice_id": null,
+    "text": "The reminders area in Settings (daily-routine reminders tab) and the app’s notification/reminder pipeline. The medication feature’s reminder code is separate and in-flight, so mostly untouched.",
+    "from_user": "U0C6DTHDMV0"
+  },
+  "claimed_at": "2026-10-25T03:00:17.385Z"
+}

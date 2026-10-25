@@ -29,6 +29,21 @@ final class RoutineStore {
         return entries
     }
 
+    /// IF-33 / M-4. The strict read the orphan sweep needs (design L2
+    /// §5.9): `nil` on ANY `storage.read` failure — the encrypted store
+    /// reports a missing key as a read failure, so a first-run/absent key
+    /// also yields `nil`. An empty array therefore means "the read
+    /// succeeded and there are genuinely no entries", the only state the
+    /// sweep may treat as an empty live set. The legacy `loadEntries()`
+    /// keeps its `[]`-on-every-failure contract for existing callers and
+    /// is never used to build a live set. No caching, no second key.
+    func loadEntriesIfReadable() -> [RoutineEntry]? {
+        guard case .success(let entries) = storage.read(
+            key: Self.entriesKey, type: [RoutineEntry].self
+        ) else { return nil }
+        return entries
+    }
+
     @discardableResult
     func saveEntries(_ entries: [RoutineEntry]) -> Bool {
         switch storage.write(key: Self.entriesKey, value: entries) {
